@@ -1,0 +1,2357 @@
+{
+  "artifact_version": 1,
+  "inputs": [],
+  "limits": {
+    "acceleration_mps2": 2.0,
+    "braking_mps2": 4.0,
+    "collision_margin_m": 0.02,
+    "cruise_mps": 4.0,
+    "max_work_per_tick": 4096,
+    "revision": "road-controller-r1",
+    "search_iterations": 12,
+    "stopping_gap_m": 0.1
+  },
+  "replay_matches": true,
+  "samples": [
+    {
+      "diagnostics": {
+        "shuttle-01": {
+          "blockers": [],
+          "result": "CLEAR"
+        },
+        "shuttle-02": {
+          "blockers": [],
+          "result": "CLEAR"
+        },
+        "shuttle-03": {
+          "blockers": [],
+          "result": "CLEAR"
+        },
+        "shuttle-04": {
+          "blockers": [],
+          "result": "CLEAR"
+        },
+        "shuttle-05": {
+          "blockers": [],
+          "result": "CLEAR"
+        }
+      },
+      "state_hash": "fe3e01dfe18b72e70f698fc6c6b4681932bcc8b8eb8e00a098abb00971db5a3b",
+      "tick": 0,
+      "vehicles": [
+        {
+          "battery_kwh": 40.0,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-01",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            2.0,
+            0.0,
+            1.3
+          ],
+          "progress_m": 2.0,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 36.0,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-02",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            9.0,
+            0.0,
+            1.3
+          ],
+          "progress_m": 9.0,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 32.0,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-03",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            16.0,
+            0.0,
+            1.3
+          ],
+          "progress_m": 16.0,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 28.0,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-04",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            23.0,
+            0.0,
+            1.3
+          ],
+          "progress_m": 23.0,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 24.0,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-05",
+          "orientation_xyzw": [
+            -0.0,
+            -0.09853761796664216,
+            0.0,
+            0.9951333266680702
+          ],
+          "position_m": [
+            49.74504902432036,
+            0.0,
+            3.274754878398197
+          ],
+          "progress_m": 50.19803902718557,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-ramp"
+        }
+      ],
+      "work": 0
+    },
+    {
+      "diagnostics": {
+        "shuttle-01": {
+          "blockers": [],
+          "result": "CLEAR"
+        },
+        "shuttle-02": {
+          "blockers": [],
+          "result": "CLEAR"
+        },
+        "shuttle-03": {
+          "blockers": [],
+          "result": "CLEAR"
+        },
+        "shuttle-04": {
+          "blockers": [],
+          "result": "CLEAR"
+        },
+        "shuttle-05": {
+          "blockers": [],
+          "result": "CLEAR"
+        }
+      },
+      "state_hash": "8f889fb6625d5041a6a36388119a1f293d8691ef051d16f77cb0da61d25844bc",
+      "tick": 1,
+      "vehicles": [
+        {
+          "battery_kwh": 39.999977916666666,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-01",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            2.005,
+            0.0,
+            1.3
+          ],
+          "progress_m": 2.005,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 35.999977916666666,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-02",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            9.005,
+            0.0,
+            1.3
+          ],
+          "progress_m": 9.005,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 31.999977916666666,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-03",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            16.005,
+            0.0,
+            1.3
+          ],
+          "progress_m": 16.005,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 27.999977916666666,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-04",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            23.005,
+            0.0,
+            1.3
+          ],
+          "progress_m": 23.005,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 23.999977916666666,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-05",
+          "orientation_xyzw": [
+            -0.0,
+            -0.09853761796664216,
+            0.0,
+            0.9951333266680702
+          ],
+          "position_m": [
+            49.749951927698824,
+            0.0,
+            3.2757354590738883
+          ],
+          "progress_m": 50.203039027185575,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-ramp"
+        }
+      ],
+      "work": 123
+    },
+    {
+      "diagnostics": {
+        "shuttle-01": {
+          "blockers": [],
+          "result": "CLEAR"
+        },
+        "shuttle-02": {
+          "blockers": [],
+          "result": "CLEAR"
+        },
+        "shuttle-03": {
+          "blockers": [],
+          "result": "CLEAR"
+        },
+        "shuttle-04": {
+          "blockers": [],
+          "result": "CLEAR"
+        },
+        "shuttle-05": {
+          "blockers": [],
+          "result": "CLEAR"
+        }
+      },
+      "state_hash": "b0ceeaf4ec3c4d8a33d910f597e95f76f758a66461d8bc639e6528915a239a83",
+      "tick": 10,
+      "vehicles": [
+        {
+          "battery_kwh": 39.99972291666667,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-01",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            2.2749999999999986,
+            0.0,
+            1.3
+          ],
+          "progress_m": 2.2749999999999986,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 35.99972291666667,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-02",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            9.274999999999997,
+            0.0,
+            1.3
+          ],
+          "progress_m": 9.274999999999997,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 31.99972291666667,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-03",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            16.27499999999999,
+            0.0,
+            1.3
+          ],
+          "progress_m": 16.27499999999999,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 27.99972291666667,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-04",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            23.27499999999999,
+            0.0,
+            1.3
+          ],
+          "progress_m": 23.27499999999999,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 23.999722916666666,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-05",
+          "orientation_xyzw": [
+            -0.0,
+            -0.09853761796664216,
+            0.0,
+            0.9951333266680702
+          ],
+          "position_m": [
+            50.01470871013535,
+            0.0,
+            3.3286868155611944
+          ],
+          "progress_m": 50.47303902718556,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-ramp"
+        }
+      ],
+      "work": 123
+    },
+    {
+      "diagnostics": {
+        "shuttle-01": {
+          "blockers": [],
+          "result": "CLEAR"
+        },
+        "shuttle-02": {
+          "blockers": [],
+          "result": "CLEAR"
+        },
+        "shuttle-03": {
+          "blockers": [],
+          "result": "CLEAR"
+        },
+        "shuttle-04": {
+          "blockers": [],
+          "result": "CLEAR"
+        },
+        "shuttle-05": {
+          "blockers": [],
+          "result": "CLEAR"
+        }
+      },
+      "state_hash": "d6f82fab86ebb801dbb023be00ec07c4b08370065e9a884e8e6dfb513ad4aef0",
+      "tick": 20,
+      "vehicles": [
+        {
+          "battery_kwh": 39.999320833333336,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-01",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            3.0499999999999963,
+            0.0,
+            1.3
+          ],
+          "progress_m": 3.0499999999999963,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 35.999320833333336,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-02",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            10.049999999999986,
+            0.0,
+            1.3
+          ],
+          "progress_m": 10.049999999999985,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 31.99932083333333,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-03",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            17.04999999999998,
+            0.0,
+            1.3
+          ],
+          "progress_m": 17.04999999999998,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 27.99932083333333,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-04",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            24.04999999999998,
+            0.0,
+            1.3
+          ],
+          "progress_m": 24.04999999999998,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 23.99932083333333,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-05",
+          "orientation_xyzw": [
+            -0.0,
+            -0.09853761796664216,
+            0.0,
+            0.9951333266680702
+          ],
+          "position_m": [
+            50.77465873379578,
+            0.0,
+            3.480676820293281
+          ],
+          "progress_m": 51.24803902718553,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-ramp"
+        }
+      ],
+      "work": 123
+    },
+    {
+      "diagnostics": {
+        "shuttle-01": {
+          "blockers": [
+            "shuttle-02"
+          ],
+          "result": "BRAKING"
+        },
+        "shuttle-02": {
+          "blockers": [
+            "shuttle-03"
+          ],
+          "result": "BRAKING"
+        },
+        "shuttle-03": {
+          "blockers": [
+            "shuttle-04"
+          ],
+          "result": "BRAKING"
+        },
+        "shuttle-04": {
+          "blockers": [
+            "obstruction-01"
+          ],
+          "result": "BRAKING"
+        },
+        "shuttle-05": {
+          "blockers": [],
+          "result": "CLEAR"
+        }
+      },
+      "state_hash": "76e0c0337a784d3b1fdee89cf0ceceb19401530ac3b3ad1ba3ab0174256c8b2b",
+      "tick": 40,
+      "vehicles": [
+        {
+          "battery_kwh": 39.99814382209878,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-01",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            6.091378271515115,
+            0.0,
+            1.3
+          ],
+          "progress_m": 6.091378271515116,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 35.99814469623899,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-02",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            13.087881710675845,
+            0.0,
+            1.3
+          ],
+          "progress_m": 13.087881710675845,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 31.99816397392059,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-03",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            20.010770984337178,
+            0.0,
+            1.3
+          ],
+          "progress_m": 20.010770984337178,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 27.998337146947733,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-04",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            26.318078875702078,
+            0.0,
+            1.3
+          ],
+          "progress_m": 26.318078875702078,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 23.99814166666667,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-05",
+          "orientation_xyzw": [
+            -0.0,
+            -0.09853761796664216,
+            0.0,
+            0.9951333266680702
+          ],
+          "position_m": [
+            53.76542979465304,
+            0.0,
+            4.0788310324647306
+          ],
+          "progress_m": 54.29803902718547,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-ramp"
+        }
+      ],
+      "work": 779
+    },
+    {
+      "diagnostics": {
+        "shuttle-01": {
+          "blockers": [
+            "shuttle-02"
+          ],
+          "result": "BRAKING"
+        },
+        "shuttle-02": {
+          "blockers": [
+            "shuttle-03"
+          ],
+          "result": "BRAKING"
+        },
+        "shuttle-03": {
+          "blockers": [
+            "shuttle-04"
+          ],
+          "result": "BRAKING"
+        },
+        "shuttle-04": {
+          "blockers": [
+            "obstruction-01"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-05": {
+          "blockers": [],
+          "result": "CLEAR"
+        }
+      },
+      "state_hash": "5978c56dc78b7c72a3a7842ec3ba97a41a8270bd80e23f5fba7b08e816e50ad4",
+      "tick": 60,
+      "vehicles": [
+        {
+          "battery_kwh": 39.99680666240161,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-01",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            9.773350393490079,
+            0.0,
+            1.3
+          ],
+          "progress_m": 9.773350393490079,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 35.99696060316846,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-02",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            16.157587326163764,
+            0.0,
+            1.3
+          ],
+          "progress_m": 16.157587326163764,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 31.997365021368168,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-03",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            21.53991452732449,
+            0.0,
+            1.3
+          ],
+          "progress_m": 21.539914527324495,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 27.997880002240166,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-04",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            26.479991039198183,
+            0.0,
+            1.3
+          ],
+          "progress_m": 26.47999103919818,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 23.99672500000004,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-05",
+          "orientation_xyzw": [
+            -0.0,
+            -0.09853761796664216,
+            0.0,
+            0.9951333266680702
+          ],
+          "position_m": [
+            57.687752497416774,
+            0.0,
+            4.863295573017478
+          ],
+          "progress_m": 58.298039027185524,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-ramp"
+        }
+      ],
+      "work": 777
+    },
+    {
+      "diagnostics": {
+        "shuttle-01": {
+          "blockers": [
+            "shuttle-02"
+          ],
+          "result": "BRAKING"
+        },
+        "shuttle-02": {
+          "blockers": [
+            "shuttle-03"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-03": {
+          "blockers": [
+            "shuttle-04"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-04": {
+          "blockers": [
+            "obstruction-01"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-05": {
+          "blockers": [],
+          "result": "CLEAR"
+        }
+      },
+      "state_hash": "70f9c60f0b0a94a69157672000e496443f5d2911af2398a0658b0669d76ddb24",
+      "tick": 80,
+      "vehicles": [
+        {
+          "battery_kwh": 39.99592080385812,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-01",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            11.650117900730624,
+            0.0,
+            1.3
+          ],
+          "progress_m": 11.650117900730624,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 35.996433342682494,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-02",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            16.599962603151496,
+            0.0,
+            1.3
+          ],
+          "progress_m": 16.599962603151496,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 31.996948341153555,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-03",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            21.539968718813558,
+            0.0,
+            1.3
+          ],
+          "progress_m": 21.539968718813558,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 27.997463335573414,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-04",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            26.479991039198183,
+            0.0,
+            1.3
+          ],
+          "progress_m": 26.47999103919818,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 23.99578751546855,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-05",
+          "orientation_xyzw": [
+            -0.0,
+            -0.09853761796664216,
+            0.0,
+            0.9951333266680702
+          ],
+          "position_m": [
+            59.730568232613216,
+            0.0,
+            5.271858720056768
+          ],
+          "progress_m": 60.381310486473744,
+          "state": "IN_SERVICE",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-ramp"
+        }
+      ],
+      "work": 799
+    },
+    {
+      "diagnostics": {
+        "shuttle-01": {
+          "blockers": [
+            "shuttle-02"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-02": {
+          "blockers": [
+            "shuttle-03"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-03": {
+          "blockers": [
+            "shuttle-04"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-04": {
+          "blockers": [
+            "obstruction-01"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-05": {
+          "blockers": [],
+          "result": "CLEAR"
+        }
+      },
+      "state_hash": "de2947e89fa5359ad22e3d0e8616a543316bef9b457aaf34233cc0e49bca3f96",
+      "tick": 100,
+      "vehicles": [
+        {
+          "battery_kwh": 39.995501676683496,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-01",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            11.659959932405675,
+            0.0,
+            1.3
+          ],
+          "progress_m": 11.659959932405675,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 35.99601667601574,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-02",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            16.599962603151496,
+            0.0,
+            1.3
+          ],
+          "progress_m": 16.599962603151496,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 31.996531674486803,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-03",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            21.539968718813558,
+            0.0,
+            1.3
+          ],
+          "progress_m": 21.539968718813558,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 27.997046668906663,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-04",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            26.479991039198183,
+            0.0,
+            1.3
+          ],
+          "progress_m": 26.47999103919818,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 23.995367156909868,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-05",
+          "orientation_xyzw": [
+            -0.0,
+            -0.09853761796664216,
+            0.0,
+            0.9951333266680702
+          ],
+          "position_m": [
+            59.74504902432036,
+            0.0,
+            5.274754878398197
+          ],
+          "progress_m": 60.39607805437114,
+          "state": "DWELLING",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-ramp"
+        }
+      ],
+      "work": 790
+    },
+    {
+      "diagnostics": {
+        "shuttle-01": {
+          "blockers": [
+            "shuttle-02"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-02": {
+          "blockers": [
+            "shuttle-03"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-03": {
+          "blockers": [
+            "shuttle-04"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-04": {
+          "blockers": [
+            "obstruction-01"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-05": {
+          "blockers": [],
+          "result": "CLEAR"
+        }
+      },
+      "state_hash": "d04d723420258b28d40f8b498b6dfc7279c11bf526b22b5b2caf39b3e63d6e19",
+      "tick": 120,
+      "vehicles": [
+        {
+          "battery_kwh": 39.995085010016744,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-01",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            11.659959932405675,
+            0.0,
+            1.3
+          ],
+          "progress_m": 11.659959932405675,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 35.99560000934899,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-02",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            16.599962603151496,
+            0.0,
+            1.3
+          ],
+          "progress_m": 16.599962603151496,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 31.996115007820052,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-03",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            21.539968718813558,
+            0.0,
+            1.3
+          ],
+          "progress_m": 21.539968718813558,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 27.99663000223991,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-04",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            26.479991039198183,
+            0.0,
+            1.3
+          ],
+          "progress_m": 26.47999103919818,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 23.994950490243117,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-05",
+          "orientation_xyzw": [
+            -0.0,
+            -0.09853761796664216,
+            0.0,
+            0.9951333266680702
+          ],
+          "position_m": [
+            59.74504902432036,
+            0.0,
+            5.274754878398197
+          ],
+          "progress_m": 60.39607805437114,
+          "state": "DWELLING",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-ramp"
+        }
+      ],
+      "work": 790
+    },
+    {
+      "diagnostics": {
+        "shuttle-01": {
+          "blockers": [
+            "shuttle-02"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-02": {
+          "blockers": [
+            "shuttle-03"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-03": {
+          "blockers": [
+            "shuttle-04"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-04": {
+          "blockers": [
+            "obstruction-01"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-05": {
+          "blockers": [],
+          "result": "CLEAR"
+        }
+      },
+      "state_hash": "137ffd0c7e3aa310bcc15a58fd5686d332dff0a13aa78f019f5286ecef959270",
+      "tick": 160,
+      "vehicles": [
+        {
+          "battery_kwh": 39.99425167668324,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-01",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            11.659959932405675,
+            0.0,
+            1.3
+          ],
+          "progress_m": 11.659959932405675,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 35.99476667601549,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-02",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            16.599962603151496,
+            0.0,
+            1.3
+          ],
+          "progress_m": 16.599962603151496,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 31.99528167448655,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-03",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            21.539968718813558,
+            0.0,
+            1.3
+          ],
+          "progress_m": 21.539968718813558,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 27.995796668906408,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-04",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            26.479991039198183,
+            0.0,
+            1.3
+          ],
+          "progress_m": 26.47999103919818,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 23.994117156909613,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-05",
+          "orientation_xyzw": [
+            -0.0,
+            -0.09853761796664216,
+            0.0,
+            0.9951333266680702
+          ],
+          "position_m": [
+            59.74504902432036,
+            0.0,
+            5.274754878398197
+          ],
+          "progress_m": 60.39607805437114,
+          "state": "STANDBY",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-ramp"
+        }
+      ],
+      "work": 790
+    },
+    {
+      "diagnostics": {
+        "shuttle-01": {
+          "blockers": [
+            "shuttle-02"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-02": {
+          "blockers": [
+            "shuttle-03"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-03": {
+          "blockers": [
+            "shuttle-04"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-04": {
+          "blockers": [
+            "obstruction-01"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-05": {
+          "blockers": [],
+          "result": "CLEAR"
+        }
+      },
+      "state_hash": "5c51817e920c73b4cf38b7af4c124cb31f60d00d2522da10d056c721c723dac9",
+      "tick": 200,
+      "vehicles": [
+        {
+          "battery_kwh": 39.99341834334974,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-01",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            11.659959932405675,
+            0.0,
+            1.3
+          ],
+          "progress_m": 11.659959932405675,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 35.993933342681984,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-02",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            16.599962603151496,
+            0.0,
+            1.3
+          ],
+          "progress_m": 16.599962603151496,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 31.994448341153046,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-03",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            21.539968718813558,
+            0.0,
+            1.3
+          ],
+          "progress_m": 21.539968718813558,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 27.994963335572905,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-04",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            26.479991039198183,
+            0.0,
+            1.3
+          ],
+          "progress_m": 26.47999103919818,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 23.99328382357611,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-05",
+          "orientation_xyzw": [
+            -0.0,
+            -0.09853761796664216,
+            0.0,
+            0.9951333266680702
+          ],
+          "position_m": [
+            59.74504902432036,
+            0.0,
+            5.274754878398197
+          ],
+          "progress_m": 60.39607805437114,
+          "state": "STANDBY",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-ramp"
+        }
+      ],
+      "work": 790
+    },
+    {
+      "diagnostics": {
+        "shuttle-01": {
+          "blockers": [
+            "shuttle-02"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-02": {
+          "blockers": [
+            "shuttle-03"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-03": {
+          "blockers": [
+            "shuttle-04"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-04": {
+          "blockers": [
+            "obstruction-01"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-05": {
+          "blockers": [],
+          "result": "CLEAR"
+        }
+      },
+      "state_hash": "837861cb8ab4740372193e73ef375f0203264bda35054e55016f8da696cff988",
+      "tick": 240,
+      "vehicles": [
+        {
+          "battery_kwh": 39.992585010016235,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-01",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            11.659959932405675,
+            0.0,
+            1.3
+          ],
+          "progress_m": 11.659959932405675,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 35.99310000934848,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-02",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            16.599962603151496,
+            0.0,
+            1.3
+          ],
+          "progress_m": 16.599962603151496,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 31.993615007819542,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-03",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            21.539968718813558,
+            0.0,
+            1.3
+          ],
+          "progress_m": 21.539968718813558,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 27.9941300022394,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-04",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            26.479991039198183,
+            0.0,
+            1.3
+          ],
+          "progress_m": 26.47999103919818,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 23.992450490242607,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-05",
+          "orientation_xyzw": [
+            -0.0,
+            -0.09853761796664216,
+            0.0,
+            0.9951333266680702
+          ],
+          "position_m": [
+            59.74504902432036,
+            0.0,
+            5.274754878398197
+          ],
+          "progress_m": 60.39607805437114,
+          "state": "STANDBY",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-ramp"
+        }
+      ],
+      "work": 790
+    },
+    {
+      "diagnostics": {
+        "shuttle-01": {
+          "blockers": [
+            "shuttle-02"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-02": {
+          "blockers": [
+            "shuttle-03"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-03": {
+          "blockers": [
+            "shuttle-04"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-04": {
+          "blockers": [
+            "obstruction-01"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-05": {
+          "blockers": [],
+          "result": "CLEAR"
+        }
+      },
+      "state_hash": "b4bd04cbc6c031a18646da5661047487d5bbcee1e50f427a9ae03c9992e0fdef",
+      "tick": 300,
+      "vehicles": [
+        {
+          "battery_kwh": 39.99133501001598,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-01",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            11.659959932405675,
+            0.0,
+            1.3
+          ],
+          "progress_m": 11.659959932405675,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 35.99185000934823,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-02",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            16.599962603151496,
+            0.0,
+            1.3
+          ],
+          "progress_m": 16.599962603151496,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 31.992365007819288,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-03",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            21.539968718813558,
+            0.0,
+            1.3
+          ],
+          "progress_m": 21.539968718813558,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 27.992880002239147,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-04",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            26.479991039198183,
+            0.0,
+            1.3
+          ],
+          "progress_m": 26.47999103919818,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 23.991200490242353,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-05",
+          "orientation_xyzw": [
+            -0.0,
+            -0.09853761796664216,
+            0.0,
+            0.9951333266680702
+          ],
+          "position_m": [
+            59.74504902432036,
+            0.0,
+            5.274754878398197
+          ],
+          "progress_m": 60.39607805437114,
+          "state": "STANDBY",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-ramp"
+        }
+      ],
+      "work": 790
+    },
+    {
+      "diagnostics": {
+        "shuttle-01": {
+          "blockers": [
+            "shuttle-02"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-02": {
+          "blockers": [
+            "shuttle-03"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-03": {
+          "blockers": [
+            "shuttle-04"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-04": {
+          "blockers": [
+            "obstruction-01"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-05": {
+          "blockers": [],
+          "result": "CLEAR"
+        }
+      },
+      "state_hash": "437489defe59712023813404e5a4d75da0828c3b708a74c85a23a3f40f3f7fd6",
+      "tick": 400,
+      "vehicles": [
+        {
+          "battery_kwh": 39.98925167668222,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-01",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            11.659959932405675,
+            0.0,
+            1.3
+          ],
+          "progress_m": 11.659959932405675,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 35.98976667601447,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-02",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            16.599962603151496,
+            0.0,
+            1.3
+          ],
+          "progress_m": 16.599962603151496,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 31.99028167448553,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-03",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            21.539968718813558,
+            0.0,
+            1.3
+          ],
+          "progress_m": 21.539968718813558,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 27.99079666890539,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-04",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            26.479991039198183,
+            0.0,
+            1.3
+          ],
+          "progress_m": 26.47999103919818,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 23.989117156908595,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-05",
+          "orientation_xyzw": [
+            -0.0,
+            -0.09853761796664216,
+            0.0,
+            0.9951333266680702
+          ],
+          "position_m": [
+            59.74504902432036,
+            0.0,
+            5.274754878398197
+          ],
+          "progress_m": 60.39607805437114,
+          "state": "STANDBY",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-ramp"
+        }
+      ],
+      "work": 790
+    },
+    {
+      "diagnostics": {
+        "shuttle-01": {
+          "blockers": [
+            "shuttle-02"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-02": {
+          "blockers": [
+            "shuttle-03"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-03": {
+          "blockers": [
+            "shuttle-04"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-04": {
+          "blockers": [
+            "obstruction-01"
+          ],
+          "result": "HELD"
+        },
+        "shuttle-05": {
+          "blockers": [],
+          "result": "CLEAR"
+        }
+      },
+      "state_hash": "934e22e976a7479d2c48ecd64bfeb6b2e2547f60cbba2e59a13750e7bc3b75bf",
+      "tick": 600,
+      "vehicles": [
+        {
+          "battery_kwh": 39.98508501001471,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-01",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            11.659959932405675,
+            0.0,
+            1.3
+          ],
+          "progress_m": 11.659959932405675,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 35.98560000934695,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-02",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            16.599962603151496,
+            0.0,
+            1.3
+          ],
+          "progress_m": 16.599962603151496,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 31.986115007818015,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-03",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            21.539968718813558,
+            0.0,
+            1.3
+          ],
+          "progress_m": 21.539968718813558,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 27.986630002237874,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-04",
+          "orientation_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position_m": [
+            26.479991039198183,
+            0.0,
+            1.3
+          ],
+          "progress_m": 26.47999103919818,
+          "state": "BLOCKED",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-flat"
+        },
+        {
+          "battery_kwh": 23.98495049024108,
+          "dimensions_m": [
+            4.8,
+            2.0,
+            2.6
+          ],
+          "id": "shuttle-05",
+          "orientation_xyzw": [
+            -0.0,
+            -0.09853761796664216,
+            0.0,
+            0.9951333266680702
+          ],
+          "position_m": [
+            59.74504902432036,
+            0.0,
+            5.274754878398197
+          ],
+          "progress_m": 60.39607805437114,
+          "state": "STANDBY",
+          "support_offset_m": 1.3,
+          "support_surface_id": "surface-ramp"
+        }
+      ],
+      "work": 790
+    }
+  ],
+  "scenario_revision": "road-scenario-53aa0eb294d21d140a92abe8",
+  "seed": 1000,
+  "source": "AUTHORED_TRAINING_SIMULATION",
+  "spatial": {
+    "manifest_sha256": "f03c7ddb81a7a420075d450d92294b22cc2907c8d746864414652ff0e4b5ccef",
+    "required_capabilities": [
+      "world_3d"
+    ],
+    "scene_id": "m2-blockout",
+    "scene_revision": "scene-05090d14627653e854482814",
+    "spatial_revision": "spatial-05090d14627653e854482814",
+    "spatial_schema_version": "1.0",
+    "transform_revision": "canonical-enu-r1"
+  },
+  "step_s": 0.05,
+  "task": "BE-M2-08",
+  "verified_steps": 600
+}

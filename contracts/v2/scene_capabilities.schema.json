@@ -1,0 +1,130 @@
+{
+  "$id": "https://formula9.local/contracts/v2/scene_capabilities.schema.json",
+  "additionalProperties": true,
+  "properties": {
+    "asset_profile": {
+      "const": "formula9-gltf2-r1",
+      "title": "Asset Profile",
+      "type": "string"
+    },
+    "authoritative_3d_motion": {
+      "title": "Authoritative 3D Motion",
+      "type": "boolean"
+    },
+    "contract_version": {
+      "const": "2.1",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "local_manoeuvre": {
+      "const": false,
+      "title": "Local Manoeuvre",
+      "type": "boolean"
+    },
+    "manifest_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Manifest Sha256",
+      "type": "string"
+    },
+    "max_asset_bytes": {
+      "const": 2097152,
+      "default": 2097152,
+      "title": "Max Asset Bytes",
+      "type": "integer"
+    },
+    "max_decode_jobs": {
+      "const": 2,
+      "default": 2,
+      "title": "Max Decode Jobs",
+      "type": "integer"
+    },
+    "max_decoded_bytes": {
+      "const": 8388608,
+      "default": 8388608,
+      "title": "Max Decoded Bytes",
+      "type": "integer"
+    },
+    "max_queued_decode_jobs": {
+      "const": 4,
+      "default": 4,
+      "title": "Max Queued Decode Jobs",
+      "type": "integer"
+    },
+    "max_texture_dimension": {
+      "const": 1024,
+      "default": 1024,
+      "title": "Max Texture Dimension",
+      "type": "integer"
+    },
+    "recorded_perception": {
+      "const": false,
+      "title": "Recorded Perception",
+      "type": "boolean"
+    },
+    "required_capabilities": {
+      "items": {
+        "const": "world_3d",
+        "type": "string"
+      },
+      "maxItems": 1,
+      "minItems": 1,
+      "title": "Required Capabilities",
+      "type": "array"
+    },
+    "scene_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Scene Id",
+      "type": "string"
+    },
+    "scene_revision": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Scene Revision",
+      "type": "string"
+    },
+    "spatial_revision": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Spatial Revision",
+      "type": "string"
+    },
+    "spatial_schema_version": {
+      "const": "1.0",
+      "title": "Spatial Schema Version",
+      "type": "string"
+    },
+    "transform_revision": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Transform Revision",
+      "type": "string"
+    },
+    "world_3d": {
+      "const": true,
+      "title": "World 3D",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "spatial_schema_version",
+    "scene_id",
+    "scene_revision",
+    "spatial_revision",
+    "transform_revision",
+    "manifest_sha256",
+    "required_capabilities",
+    "contract_version",
+    "asset_profile",
+    "world_3d",
+    "authoritative_3d_motion",
+    "local_manoeuvre",
+    "recorded_perception"
+  ],
+  "title": "SceneCapabilities",
+  "type": "object"
+}

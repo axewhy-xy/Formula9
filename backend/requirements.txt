@@ -1,0 +1,12 @@
+# Direct application, build, and test dependencies. The automated setup installs
+# requirements.lock.txt, which also pins every transitive dependency.
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+osmnx==2.1.1
+httpx==0.28.1
+pytest==9.1.1
+nanobind==2.10.2
+pymongo==4.19.0
+python-dotenv==1.2.3
+# CPU-only bounded validation of bundled scene PNG/JPEG textures.
+Pillow==12.2.0

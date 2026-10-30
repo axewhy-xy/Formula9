@@ -1,0 +1,61 @@
+{
+  "$id": "https://formula9.local/contracts/v2/route_edit_request.schema.json",
+  "additionalProperties": true,
+  "properties": {
+    "contract_version": {
+      "default": "2.0",
+      "pattern": "^2\\.[0-9]+$",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "directed_edge_ids": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Directed Edge Ids"
+    },
+    "draft_revision": {
+      "minimum": 0,
+      "title": "Draft Revision",
+      "type": "integer"
+    },
+    "expected_route_revision": {
+      "minimum": 0,
+      "title": "Expected Route Revision",
+      "type": "integer"
+    },
+    "route_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Route Id",
+      "type": "string"
+    },
+    "via_node_ids": {
+      "items": {
+        "type": "integer"
+      },
+      "maxItems": 16,
+      "title": "Via Node Ids",
+      "type": "array"
+    }
+  },
+  "required": [
+    "route_id",
+    "expected_route_revision",
+    "draft_revision"
+  ],
+  "title": "RouteEditRequest",
+  "type": "object"
+}

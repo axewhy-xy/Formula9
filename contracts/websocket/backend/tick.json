@@ -1,0 +1,62 @@
+{
+  "message_type": "TICK",
+  "contract_version": "1.0",
+  "simulation_id": "sim_123",
+  "timestamp": "2026-09-14T10:00:00.000Z",
+  "tick": 12,
+  "simulation_time": 1.2,
+  "simulation_time_unit": "s",
+  "coordinates": {
+    "version": "1.0",
+    "system": "local_cartesian",
+    "x_unit": "m",
+    "y_unit": "m",
+    "z_unit": "m",
+    "heading_unit": "deg",
+    "geographic_crs": "EPSG:4326",
+    "x_axis": "east",
+    "y_axis": "north",
+    "z_axis": "up",
+    "heading_zero_axis": "positive_x",
+    "heading_positive_direction": "counter_clockwise",
+    "origin": {
+      "latitude": 1.2998,
+      "longitude": 103.7874
+    }
+  },
+  "ego": {
+    "position": { "x": 14.2, "y": 3.7, "z": 0.0 },
+    "orientation": { "heading": 91.4, "pitch": 0.0, "roll": 0.0 },
+    "speed": 7.8,
+    "speed_unit": "m/s",
+    "source_frame": 12,
+    "source_timestamp": "2026-09-14T10:00:00.000Z"
+  },
+  "trajectory": {
+    "current_index": 12,
+    "points": [
+      {
+        "index": 12,
+        "simulation_time": 1.2,
+        "position": { "x": 14.2, "y": 3.7, "z": 0.0 },
+        "orientation": { "heading": 91.4, "pitch": 0.0, "roll": 0.0 },
+        "speed": 7.8,
+        "speed_unit": "m/s",
+        "source_frame": 12,
+        "source_timestamp": "2026-09-14T10:00:00.000Z"
+      },
+      {
+        "index": 22,
+        "simulation_time": 1.25,
+        "position": { "x": 14.23, "y": 3.76, "z": 0.07 },
+        "orientation": { "heading": 91.47, "pitch": 0.07, "roll": 0.07 },
+        "speed": 7.81,
+        "speed_unit": "m/s",
+        "source_frame": 122,
+        "source_timestamp": "2026-10-14T10:00:00.000Z"
+      }
+    ]
+  },
+  "obstacles": [],
+  "decision": null
+}

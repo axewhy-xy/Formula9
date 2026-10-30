@@ -1,0 +1,10 @@
+{
+  "contract_version": "2.0",
+  "directed_edge_ids": null,
+  "draft_revision": 3,
+  "expected_route_revision": 1,
+  "route_id": "route-m2-detour",
+  "via_node_ids": [
+    26970886
+  ]
+}

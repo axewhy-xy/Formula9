@@ -1,0 +1,107 @@
+{
+  "assumptions": [
+    "Simulation estimates; configuration-dependent training rules.",
+    "Cruise speed cap: 20 km/h; dwell per served required stop: 15 s",
+    "Travel energy: 0.8 kWh/km; auxiliary load: 1.5 kW"
+  ],
+  "contract_version": "2.0",
+  "destination_node_id": 662221987,
+  "edges": [
+    {
+      "closed": false,
+      "edge_id": "1535209095:0:reverse",
+      "source": 26970786,
+      "target": 1329728439
+    },
+    {
+      "closed": false,
+      "edge_id": "440462565:12:forward",
+      "source": 1329728439,
+      "target": 26970880
+    },
+    {
+      "closed": false,
+      "edge_id": "5061138:0:reverse",
+      "source": 26970880,
+      "target": 26970886
+    },
+    {
+      "closed": false,
+      "edge_id": "51894042:0:forward",
+      "source": 26970886,
+      "target": 1370249326
+    },
+    {
+      "closed": false,
+      "edge_id": "51894042:1:forward",
+      "source": 1370249326,
+      "target": 1370249338
+    },
+    {
+      "closed": false,
+      "edge_id": "51894042:2:forward",
+      "source": 1370249338,
+      "target": 662221987
+    },
+    {
+      "closed": true,
+      "edge_id": "1535209095:1:forward",
+      "source": 26970786,
+      "target": 662221987
+    }
+  ],
+  "fixture_id": "m2-pretrip-detour-r1",
+  "nodes": [
+    {
+      "node_id": 26970786,
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    {
+      "node_id": 1329728439,
+      "x": 10.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    {
+      "node_id": 26970880,
+      "x": 20.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    {
+      "node_id": 26970886,
+      "x": 30.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    {
+      "node_id": 1370249326,
+      "x": 40.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    {
+      "node_id": 1370249338,
+      "x": 50.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    {
+      "node_id": 662221987,
+      "x": 60.0,
+      "y": 0.0,
+      "z": 0.0
+    }
+  ],
+  "original_directed_edge_ids": [
+    "1535209095:1:forward"
+  ],
+  "route_id": "route-m2-detour",
+  "route_revision": 1,
+  "scene_revision": "scene-r1",
+  "session_epoch": 1,
+  "session_id": "session-001",
+  "start_node_id": 26970786
+}

@@ -1,0 +1,29 @@
+{
+  "applied_tick": 200,
+  "command_id": "command-1",
+  "contract_version": "2.0",
+  "event_sequence": 7,
+  "failure_code": null,
+  "idempotency_key": "client-key-1",
+  "message_type": "COMMAND_STATUS",
+  "result_event_id": "event-7",
+  "scene_revision": "scene-r1",
+  "session_epoch": 1,
+  "session_id": "session-001",
+  "simulation_time_s": 10.0,
+  "source": {
+    "authored": true,
+    "branch_tick": null,
+    "kind": "TRAINING_SIMULATION",
+    "recording_id": null,
+    "sequence_id": null,
+    "source_frame": null,
+    "source_timestamp": null
+  },
+  "status": "APPLIED",
+  "target_id": "incident-1",
+  "target_revision": 2,
+  "target_type": "INCIDENT",
+  "tick": 200,
+  "transform_revision": "transform-r1"
+}

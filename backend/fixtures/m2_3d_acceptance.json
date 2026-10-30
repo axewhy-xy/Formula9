@@ -1,0 +1,45 @@
+{
+  "fixture_id": "m2-3d-acceptance-r1",
+  "task": "BE-M2-09",
+  "scope": "HEADLESS_PREREQUISITES_AND_CONNECTED_ACCEPTANCE_PLAN",
+  "scenario_selector": "scenario-m2-road-3d-r1",
+  "spatial": {
+    "scene_revision": "scene-05090d14627653e854482814",
+    "spatial_revision": "spatial-05090d14627653e854482814",
+    "transform_revision": "canonical-enu-r1",
+    "manifest_sha256": "f03c7ddb81a7a420075d450d92294b22cc2907c8d746864414652ff0e4b5ccef"
+  },
+  "seed": 1000,
+  "steps": 600,
+  "sample_ticks": [0, 40, 100, 240, 600],
+  "vehicle_ids": ["shuttle-01", "shuttle-02", "shuttle-03", "shuttle-04", "shuttle-05"],
+  "road_surface_ids": ["surface-flat", "surface-ramp"],
+  "stop_entity_id": "stop-terminal",
+  "obstruction_entity_id": "obstruction-01",
+  "depot_entity_id": "depot-main",
+  "charger_entity_ids": ["charger-01", "charger-02"],
+  "proposed_bays": [
+    {"charger_entity_id": "charger-01", "support_position_m": [-12.0, -3.0, 0.0]},
+    {"charger_entity_id": "charger-02", "support_position_m": [-12.0, 3.0, 0.0]}
+  ],
+  "tolerances": {
+    "position_m": 0.01,
+    "orientation_deg": 0.1,
+    "body_extent_m": 0.02,
+    "pick_m": 0.02
+  },
+  "camera_input_script": [
+    {"start_s": 0, "end_s": 20, "action": "OVERVIEW"},
+    {"start_s": 20, "end_s": 40, "action": "ORBIT"},
+    {"start_s": 40, "end_s": 60, "action": "FOLLOW", "entity_id": "shuttle-05"},
+    {"start_s": 60, "end_s": 80, "action": "INCIDENT_FOCUS", "entity_id": "obstruction-01"},
+    {"start_s": 80, "end_s": 100, "action": "ROUTE_EDIT"},
+    {"start_s": 100, "end_s": 120, "action": "CHARGING_FOCUS", "entity_id": "charger-01"}
+  ],
+  "limitations": [
+    "The camera script is a collection plan; this fixture does not execute client input.",
+    "Proposed bays are target support coordinates, not admitted drivable surfaces or charger reservations.",
+    "The existing single-strip scene is P0 correctness content and does not satisfy the expanded P1 inventory.",
+    "Headless adapter samples cannot prove connected rendering, picking or GPU readiness."
+  ]
+}

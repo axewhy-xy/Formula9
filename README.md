@@ -1,23 +1,53 @@
 # Formula9
 
-Unity client for the Formula 9 AV shuttle fleet training simulator. It talks to the same
-FastAPI backend as the Qt and web clients in
-[Formula_9](https://github.com/axewhy-xy/Formula_9); the backend, contracts and web app stay
-there.
+Unity client and Python/FastAPI backend for the Formula 9 AV shuttle fleet training
+simulator. The backend, shared contracts, fixtures, static map and support scripts have
+been migrated from [Formula_9](https://github.com/axewhy-xy/Formula_9). This repository runs
+independently of that checkout. See [migration details](docs/backend-migration.md).
 
 ## Requirements
 
 - Unity **6000.1.4f1** (open the repository root in Unity Hub)
 - Git LFS (`git lfs install`), for models, images and audio
-- The Formula_9 backend running locally (default `http://127.0.0.1:8000`;
-  set `FORMULA9_BACKEND_URL` to use another address)
+- Python **3.12 or newer**; the backend dependency lock targets Python 3.12
+- MongoDB for persistent team accounts (`MONGODB_URI` in private `backend/.env`);
+  the isolated test server uses in-memory accounts
+
+## Running the backend
+
+From the repository root, set up the Python environment once:
+
+```powershell
+python Tools/run_backend.py --setup
+if (!(Test-Path backend/.env)) { Copy-Item backend/.env.example backend/.env }
+```
+
+Edit `backend/.env` to configure your private MongoDB connection, then start the server:
+
+```powershell
+python Tools/run_backend.py
+# Windows shortcut: run.bat
+# Development reload: run.bat --reload
+```
+
+The launcher uses `backend/.venv` when present. It serves the API at
+`http://127.0.0.1:8000` (health: `/api/health`, API explorer: `/docs`); Ctrl+C stops it.
+Without a MongoDB connection the server starts, but account endpoints return 503.
+Existing accounts remain available when configured with the same account database.
+Session state defaults to ignored `state/training.sqlite`; `TRAINING_DATABASE_PATH`
+selects another database. The bundled static map is `backend/fixtures/map/map.db`.
+Downloaded KITTI datasets and optional ML weights are not required for the default
+training scenarios. See [backend documentation](backend/README.md) for more workflows.
 
 ## Running the client
 
-1. Start the Formula_9 backend (`run.bat`, or `uvicorn src.app:app --reload` in `backend`).
+1. Start this repository's backend with `run.bat` or `python Tools/run_backend.py`.
 2. Open `Assets/Scenes/Formula9.unity` and press Play, or build a player.
 3. Log in with your team account (or **Create account**), then create or join a training
    session. New sessions default to the integrated exercise.
+
+The Unity client defaults to `http://127.0.0.1:8000`; set `FORMULA9_BACKEND_URL` to use
+another address. Opening the Unity project does not start a backend process automatically.
 
 If the scene or its UI panel settings go missing, rebuild them with
 **Formula 9 → Rebuild client scene** (or headless:
@@ -27,6 +57,10 @@ If the scene or its UI panel settings go missing, rebuild them with
 
 | Folder | Contents |
 |---|---|
+| `backend` | FastAPI server, SQL migrations, simulation services, fixtures and Python tests |
+| `contracts` | Shared Python contracts, schemas, fixtures and generators |
+| `scripts` | Backend scene generation, optional dataset and ML support scripts |
+| `docs` | Backend migration record, session documentation and historical M2 handoffs |
 | `Assets/Formula9/Runtime/Contracts` | v2 contract classes and validation |
 | `Assets/Formula9/Runtime/Backend` | HTTP access to the backend |
 | `Assets/Formula9/Runtime/Session` | Joined session, polling, events and commands |
@@ -40,13 +74,13 @@ If the scene or its UI panel settings go missing, rebuild them with
 
 ## Contracts
 
-`Runtime/Contracts/Generated` is written by `Tools/generate_contracts.py` from Formula_9's
+`Runtime/Contracts/Generated` is written by `Tools/generate_contracts.py` from local
 `contracts/v2/*.schema.json`; do not edit it by hand. The generator also embeds the schemas, so
 incoming JSON is validated against exactly the backend's rules, and copies the shared fixtures
 into the tests. `ContractRules.cs` holds the cross-field checks the schemas cannot express,
 mirroring the pydantic validators in `contracts/v2/models.py`.
 
-After the contracts change in Formula_9 (with both repositories side by side):
+After the contracts change in this repository:
 
 ```
 python Tools/generate_contracts.py
@@ -148,6 +182,17 @@ restarts in `PlayerPrefs` (`training.muteAlerts`); tests use in-memory preferenc
 
 ## Tests
 
+Run the backend suite with temporary session storage and MongoDB disabled:
+
+```powershell
+python Tools/run_backend.py --test
+# Windows shortcut: run.bat --test
+```
+
+The OpenStreetMap download tests remain opt-in (`RUN_INTEGRATION_TESTS=1`). The normal
+suite uses the bundled map and needs no dataset download. The original backend test
+suite, including real process crash/recovery tests, is retained.
+
 Run EditMode tests in the Test Runner window, or headless:
 
 ```
@@ -164,7 +209,7 @@ so they only run against an isolated backend and are skipped unless
 `FORMULA9_E2E_BACKEND_URL` is set:
 
 ```
-python Tools/isolated_backend.py          # in-memory accounts, temporary sessions, port 8010
+backend\.venv\Scripts\python Tools/isolated_backend.py  # in-memory accounts, temporary sessions, port 8010
 set FORMULA9_E2E_BACKEND_URL=http://127.0.0.1:8010
 ```
 

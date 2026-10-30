@@ -1,0 +1,92 @@
+{
+  "$id": "https://formula9.local/contracts/v2/scene_readiness.schema.json",
+  "additionalProperties": true,
+  "properties": {
+    "asset_hashes": {
+      "maxProperties": 64,
+      "patternProperties": {
+        "^[A-Za-z0-9][A-Za-z0-9_.:-]*$": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        }
+      },
+      "propertyNames": {
+        "maxLength": 128,
+        "minLength": 1
+      },
+      "title": "Asset Hashes",
+      "type": "object"
+    },
+    "asset_profile": {
+      "const": "formula9-gltf2-r1",
+      "title": "Asset Profile",
+      "type": "string"
+    },
+    "manifest_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Manifest Sha256",
+      "type": "string"
+    },
+    "render_ready": {
+      "title": "Render Ready",
+      "type": "boolean"
+    },
+    "required_capabilities": {
+      "items": {
+        "const": "world_3d",
+        "type": "string"
+      },
+      "maxItems": 1,
+      "minItems": 1,
+      "title": "Required Capabilities",
+      "type": "array"
+    },
+    "scene_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Scene Id",
+      "type": "string"
+    },
+    "scene_revision": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Scene Revision",
+      "type": "string"
+    },
+    "spatial_revision": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Spatial Revision",
+      "type": "string"
+    },
+    "spatial_schema_version": {
+      "const": "1.0",
+      "title": "Spatial Schema Version",
+      "type": "string"
+    },
+    "transform_revision": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Transform Revision",
+      "type": "string"
+    }
+  },
+  "required": [
+    "spatial_schema_version",
+    "scene_id",
+    "scene_revision",
+    "spatial_revision",
+    "transform_revision",
+    "manifest_sha256",
+    "required_capabilities",
+    "asset_profile",
+    "render_ready",
+    "asset_hashes"
+  ],
+  "title": "ReadinessRequest",
+  "type": "object"
+}

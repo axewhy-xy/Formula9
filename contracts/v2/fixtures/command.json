@@ -1,0 +1,15 @@
+{
+  "command_id": "command-1",
+  "command_type": "APPROVE_INCIDENT_OPTION",
+  "contract_version": "2.0",
+  "expected_epoch": 1,
+  "expected_revision": 2,
+  "idempotency_key": "client-key-1",
+  "payload": {
+    "candidate_id": "candidate-wait-1"
+  },
+  "reason": "Wait for the scripted obstruction to clear",
+  "session_id": "session-001",
+  "target_id": "incident-1",
+  "target_type": "INCIDENT"
+}

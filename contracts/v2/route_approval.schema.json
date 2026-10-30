@@ -1,0 +1,63 @@
+{
+  "$id": "https://formula9.local/contracts/v2/route_approval.schema.json",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Command Id",
+      "type": "string"
+    },
+    "contract_version": {
+      "default": "2.0",
+      "pattern": "^2\\.[0-9]+$",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "idempotency_key": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Idempotency Key",
+      "type": "string"
+    },
+    "preview_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Preview Id",
+      "type": "string"
+    },
+    "preview_revision": {
+      "minimum": 0,
+      "title": "Preview Revision",
+      "type": "integer"
+    },
+    "reason": {
+      "maxLength": 512,
+      "minLength": 1,
+      "title": "Reason",
+      "type": "string"
+    },
+    "target_vehicle_ids": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 16,
+      "minItems": 1,
+      "title": "Target Vehicle Ids",
+      "type": "array"
+    }
+  },
+  "required": [
+    "preview_id",
+    "preview_revision",
+    "command_id",
+    "idempotency_key",
+    "reason",
+    "target_vehicle_ids"
+  ],
+  "title": "RouteApprovalRequest",
+  "type": "object"
+}

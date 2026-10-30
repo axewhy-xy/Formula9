@@ -1,0 +1,75 @@
+{
+  "$defs": {
+    "SessionListEntry": {
+      "properties": {
+        "occupies_capacity": {
+          "title": "Occupies Capacity",
+          "type": "boolean"
+        },
+        "scenario_revision_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Scenario Revision Id",
+          "type": "string"
+        },
+        "session_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Session Id",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "DRAFT",
+            "READY",
+            "RUNNING",
+            "PAUSED",
+            "RECOVERING",
+            "COMPLETED",
+            "ARCHIVED",
+            "FAILED"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "scenario_revision_id",
+        "status",
+        "occupies_capacity"
+      ],
+      "title": "SessionListEntry",
+      "type": "object"
+    }
+  },
+  "$id": "https://formula9.local/contracts/v2/session_list.schema.json",
+  "properties": {
+    "capacity": {
+      "minimum": 1,
+      "title": "Capacity",
+      "type": "integer"
+    },
+    "live_count": {
+      "minimum": 0,
+      "title": "Live Count",
+      "type": "integer"
+    },
+    "sessions": {
+      "items": {
+        "$ref": "#/$defs/SessionListEntry"
+      },
+      "title": "Sessions",
+      "type": "array"
+    }
+  },
+  "required": [
+    "sessions",
+    "live_count",
+    "capacity"
+  ],
+  "title": "SessionListResponse",
+  "type": "object"
+}

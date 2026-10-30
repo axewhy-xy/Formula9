@@ -1,0 +1,46 @@
+{
+  "metadata": {
+    "author": "Nur Syazliyarni Binte Zazali",
+    "date_created": "28/10/2026",
+    "last_modified": "28/10/2026",
+    "description": "Authored planar BE-M2-02 through BE-M2-05 integration fixture; metre-based roads, explicit detours and depot access."
+  },
+  "fixture_id": "m2-integrated-planar-r1",
+  "scenario_selector": "scenario-m2-integrated-r1",
+  "speed_mps": 10.0,
+  "charge_s": 60.0,
+  "nodes": {"1": [0, 0], "2": [100, 0], "3": [50, 40], "4": [50, -40], "5": [100, -80], "6": [0, -80]},
+  "edges": {"main:0:forward": [1, 2], "bypass-b:0:forward": [1, 3], "bypass-b:1:forward": [3, 2], "bypass-c:0:forward": [1, 4], "bypass-c:1:forward": [4, 2], "return:0:forward": [2, 5], "return:1:forward": [5, 6], "return:2:forward": [6, 1]},
+  "route_edit": {
+    "fixture_id": "m2-integrated-routes-r1", "route_id": "route-m2-detour",
+    "start_node_id": 1, "destination_node_id": 1, "default_via_node_ids": [2],
+    "required_stops": {"stop-terminal": 2}, "operating_node_ids": [1, 2, 3, 4, 5, 6],
+    "original_directed_edge_ids": ["main:0:forward", "return:0:forward", "return:1:forward", "return:2:forward"],
+    "closed_directed_edge_ids": ["main:0:forward"],
+    "detour_directed_edge_ids": ["bypass-b:0:forward", "bypass-b:1:forward", "return:0:forward", "return:1:forward", "return:2:forward"],
+    "alternative_directed_edge_paths": [["bypass-c:0:forward", "bypass-c:1:forward", "return:0:forward", "return:1:forward", "return:2:forward"]],
+    "vehicle_width_m": 2.2, "vehicle_height_m": 2.8, "minimum_side_clearance_m": 0.3,
+    "road_width_m": 3.5, "road_height_m": 4.0, "cruise_speed_kph": 36.0,
+    "stop_dwell_s": 2.0, "loop_end_dwell_s": 2.0, "travel_kwh_per_km": 0.25, "auxiliary_kw": 1.5
+  },
+  "peer_patterns": [
+    {"route_ID": "route-peer-b", "waypoints": [{"x": 300, "y": 0}, {"x": 400, "y": 0}, {"x": 400, "y": 100}, {"x": 300, "y": 100}, {"x": 300, "y": 0}]},
+    {"route_ID": "route-peer-c", "waypoints": [{"x": 600, "y": 0}, {"x": 700, "y": 0}, {"x": 700, "y": 100}, {"x": 600, "y": 100}, {"x": 600, "y": 0}]}
+  ],
+  "vehicle_assignments": ["route-m2-detour", "route-peer-b", "route-peer-c", "route-peer-b", "route-peer-c"],
+  "initial_progress_m": [0, 0, 0, 60, 60], "initial_battery_kwh": [28, 28, 28, 28, 6.45],
+  "depot_id": "depot-m2", "depot_position_m": [0, -300],
+  "bay_positions_m": {"charger-1": [-20, -300], "charger-2": [20, -300]},
+  "depot_connectors": {
+    "route-m2-detour": [[0, 0], [-60, 0], [-60, -240]],
+    "route-peer-b": [[300, 0], [300, -240]], "route-peer-c": [[600, 0], [600, -260]]
+  },
+  "incident_overrides": {"fixture_id": "m2-integrated-obstruction-r1", "scenario_id": "m2-integrated", "block_current_route_entrance": true, "trigger_tick": 240},
+  "assumptions": [
+    "Authored planar road network and energy-r1 estimates; no recorded sensor or OSM provenance.",
+    "Shuttle-01 dwells at the common route entrance for 12 seconds; an obstruction on its approved departure branch then admits WAIT, ESCALATE, or the other validated road bypass.",
+    "Depot return follows the remainder of the current loop plus declared access geometry to the reserved bay; charging lasts 60 simulated seconds and ends in standby.",
+    "Point-centre separation and swept polyline checks inherit the bounded BE-M2-02 controller; this is not a general vehicle-body collision model.",
+    "Return ETA uses admitted remaining path length and the declared cruise speed. Before allocation it conservatively uses the longer bay approach. Dwell, traffic holds and incident delays are excluded from ETA; actual arrival time and energy are recorded separately."
+  ]
+}

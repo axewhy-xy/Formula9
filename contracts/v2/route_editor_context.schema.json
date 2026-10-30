@@ -1,0 +1,165 @@
+{
+  "$defs": {
+    "RouteEditorEdge": {
+      "additionalProperties": true,
+      "properties": {
+        "closed": {
+          "title": "Closed",
+          "type": "boolean"
+        },
+        "edge_id": {
+          "title": "Edge Id",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "integer"
+        },
+        "target": {
+          "title": "Target",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "edge_id",
+        "source",
+        "target",
+        "closed"
+      ],
+      "title": "RouteEditorEdge",
+      "type": "object"
+    },
+    "RouteEditorNode": {
+      "additionalProperties": true,
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "integer"
+        },
+        "x": {
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "title": "Y",
+          "type": "number"
+        },
+        "z": {
+          "title": "Z",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "z",
+        "node_id"
+      ],
+      "title": "RouteEditorNode",
+      "type": "object"
+    }
+  },
+  "$id": "https://formula9.local/contracts/v2/route_editor_context.schema.json",
+  "additionalProperties": true,
+  "description": "Bounded, read-only curated graph and estimate assumptions for a route editor.",
+  "properties": {
+    "assumptions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Assumptions",
+      "type": "array"
+    },
+    "contract_version": {
+      "default": "2.0",
+      "pattern": "^2\\.[0-9]+$",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "destination_node_id": {
+      "title": "Destination Node Id",
+      "type": "integer"
+    },
+    "edges": {
+      "items": {
+        "$ref": "#/$defs/RouteEditorEdge"
+      },
+      "maxItems": 256,
+      "title": "Edges",
+      "type": "array"
+    },
+    "fixture_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Fixture Id",
+      "type": "string"
+    },
+    "nodes": {
+      "items": {
+        "$ref": "#/$defs/RouteEditorNode"
+      },
+      "maxItems": 256,
+      "title": "Nodes",
+      "type": "array"
+    },
+    "original_directed_edge_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Original Directed Edge Ids",
+      "type": "array"
+    },
+    "route_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Route Id",
+      "type": "string"
+    },
+    "route_revision": {
+      "minimum": 0,
+      "title": "Route Revision",
+      "type": "integer"
+    },
+    "scene_revision": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Scene Revision",
+      "type": "string"
+    },
+    "session_epoch": {
+      "minimum": 0,
+      "title": "Session Epoch",
+      "type": "integer"
+    },
+    "session_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Session Id",
+      "type": "string"
+    },
+    "start_node_id": {
+      "title": "Start Node Id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "session_id",
+    "session_epoch",
+    "route_id",
+    "route_revision",
+    "scene_revision",
+    "fixture_id",
+    "nodes",
+    "edges",
+    "original_directed_edge_ids",
+    "start_node_id",
+    "destination_node_id",
+    "assumptions"
+  ],
+  "title": "RouteEditorContext",
+  "type": "object"
+}

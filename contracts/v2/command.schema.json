@@ -1,0 +1,108 @@
+{
+  "$id": "https://formula9.local/contracts/v2/command.schema.json",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Command Id",
+      "type": "string"
+    },
+    "command_type": {
+      "enum": [
+        "START",
+        "PAUSE",
+        "RESUME",
+        "RESET",
+        "ARCHIVE",
+        "APPROVE_ROUTE",
+        "APPROVE_INCIDENT_OPTION",
+        "RESERVE_CHARGER",
+        "CONTINUE_SERVICE"
+      ],
+      "title": "Command Type",
+      "type": "string"
+    },
+    "contract_version": {
+      "pattern": "^2\\.[0-9]+$",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "expected_epoch": {
+      "minimum": 0,
+      "title": "Expected Epoch",
+      "type": "integer"
+    },
+    "expected_revision": {
+      "minimum": 0,
+      "title": "Expected Revision",
+      "type": "integer"
+    },
+    "idempotency_key": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Idempotency Key",
+      "type": "string"
+    },
+    "payload": {
+      "additionalProperties": true,
+      "title": "Payload",
+      "type": "object"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason"
+    },
+    "session_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Session Id",
+      "type": "string"
+    },
+    "target_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Target Id",
+      "type": "string"
+    },
+    "target_type": {
+      "enum": [
+        "SESSION",
+        "ROUTE",
+        "INCIDENT",
+        "CHARGER",
+        "VEHICLE"
+      ],
+      "title": "Target Type",
+      "type": "string"
+    }
+  },
+  "required": [
+    "contract_version",
+    "command_id",
+    "idempotency_key",
+    "session_id",
+    "command_type",
+    "expected_epoch",
+    "expected_revision",
+    "target_type",
+    "target_id",
+    "payload"
+  ],
+  "title": "DispatcherCommand",
+  "type": "object"
+}

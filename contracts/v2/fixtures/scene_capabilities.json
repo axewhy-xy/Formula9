@@ -1,0 +1,22 @@
+{
+  "asset_profile": "formula9-gltf2-r1",
+  "authoritative_3d_motion": true,
+  "contract_version": "2.1",
+  "local_manoeuvre": false,
+  "manifest_sha256": "f03c7ddb81a7a420075d450d92294b22cc2907c8d746864414652ff0e4b5ccef",
+  "max_asset_bytes": 2097152,
+  "max_decode_jobs": 2,
+  "max_decoded_bytes": 8388608,
+  "max_queued_decode_jobs": 4,
+  "max_texture_dimension": 1024,
+  "recorded_perception": false,
+  "required_capabilities": [
+    "world_3d"
+  ],
+  "scene_id": "m2-blockout",
+  "scene_revision": "scene-05090d14627653e854482814",
+  "spatial_revision": "spatial-05090d14627653e854482814",
+  "spatial_schema_version": "1.0",
+  "transform_revision": "canonical-enu-r1",
+  "world_3d": true
+}

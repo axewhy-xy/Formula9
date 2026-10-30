@@ -1,0 +1,127 @@
+{
+  "$id": "https://formula9.local/contracts/v2/spatial_vehicle.schema.json",
+  "additionalProperties": true,
+  "description": "Origin is the collision body's centre; never a render mesh pivot.",
+  "properties": {
+    "asset_to_body": {
+      "items": {
+        "type": "number"
+      },
+      "maxItems": 16,
+      "minItems": 16,
+      "title": "Asset To Body",
+      "type": "array"
+    },
+    "collision_proxy_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Collision Proxy Id",
+      "type": "string"
+    },
+    "collision_proxy_revision": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Collision Proxy Revision",
+      "type": "string"
+    },
+    "deck_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Deck Id",
+      "type": "string"
+    },
+    "dimensions_m": {
+      "items": {
+        "type": "number"
+      },
+      "maxItems": 3,
+      "minItems": 3,
+      "title": "Dimensions M",
+      "type": "array"
+    },
+    "lane_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Lane Id",
+      "type": "string"
+    },
+    "movement": {
+      "enum": [
+        "CONTINUOUS",
+        "HELD",
+        "DISCONTINUITY"
+      ],
+      "title": "Movement",
+      "type": "string"
+    },
+    "orientation_xyzw": {
+      "items": {
+        "type": "number"
+      },
+      "maxItems": 4,
+      "minItems": 4,
+      "title": "Orientation Xyzw",
+      "type": "array"
+    },
+    "position_m": {
+      "items": {
+        "type": "number"
+      },
+      "maxItems": 3,
+      "minItems": 3,
+      "title": "Position M",
+      "type": "array"
+    },
+    "render_asset_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Render Asset Id",
+      "type": "string"
+    },
+    "render_asset_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Render Asset Sha256",
+      "type": "string"
+    },
+    "route_progress_m": {
+      "minimum": 0,
+      "title": "Route Progress M",
+      "type": "number"
+    },
+    "support_offset_m": {
+      "minimum": 0,
+      "title": "Support Offset M",
+      "type": "number"
+    },
+    "support_surface_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Support Surface Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "position_m",
+    "orientation_xyzw",
+    "dimensions_m",
+    "collision_proxy_id",
+    "collision_proxy_revision",
+    "support_surface_id",
+    "lane_id",
+    "deck_id",
+    "support_offset_m",
+    "route_progress_m",
+    "movement",
+    "render_asset_id",
+    "render_asset_sha256",
+    "asset_to_body"
+  ],
+  "title": "SpatialVehicle",
+  "type": "object"
+}

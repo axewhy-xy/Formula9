@@ -1,0 +1,337 @@
+{
+  "candidates": [
+    {
+      "action": "WAIT",
+      "assumptions": [
+        "Obstruction clears within 5 simulated seconds"
+      ],
+      "candidate_id": "candidate-wait-1",
+      "dependency_revisions": {
+        "incident-1": 2
+      },
+      "expires_at_tick": 300,
+      "incident_id": "incident-1",
+      "revision": 1,
+      "validation": "PASS"
+    }
+  ],
+  "chargers": [
+    {
+      "aggregate_revision": 1,
+      "charger_id": "charger-1",
+      "occupied_vehicle_ids": [],
+      "port_count": 1,
+      "power_kw": 50.0
+    },
+    {
+      "aggregate_revision": 1,
+      "charger_id": "charger-2",
+      "occupied_vehicle_ids": [],
+      "port_count": 1,
+      "power_kw": 50.0
+    }
+  ],
+  "contract_version": "2.0",
+  "depots": [
+    {
+      "charger_ids": [
+        "charger-1",
+        "charger-2"
+      ],
+      "depot_id": "depot-1",
+      "position": {
+        "x_m": 0.0,
+        "y_m": 0.0,
+        "z_m": 0.0
+      }
+    }
+  ],
+  "disruptions": [
+    {
+      "active_from_tick": 100,
+      "active_until_tick": null,
+      "affected_edge_ids": [
+        "edge-2"
+      ],
+      "aggregate_revision": 1,
+      "disruption_id": "closure-1",
+      "provenance": {
+        "authored": true,
+        "branch_tick": null,
+        "kind": "TRAINING_SIMULATION",
+        "recording_id": null,
+        "sequence_id": null,
+        "source_frame": null,
+        "source_timestamp": null
+      },
+      "reason": "Scripted road closure"
+    }
+  ],
+  "energy_forecasts": [
+    {
+      "energy_model_revision": "energy-r1",
+      "is_estimate": true,
+      "loops_remaining": 58,
+      "next_depot_eta_s": 238.0,
+      "next_depot_id": "depot-1",
+      "reaches_depot_above_reserve": true,
+      "reserve_kwh": 6.0,
+      "reserve_margin_kwh": 22.0,
+      "vehicle_id": "shuttle-01"
+    },
+    {
+      "energy_model_revision": "energy-r1",
+      "is_estimate": true,
+      "loops_remaining": 58,
+      "next_depot_eta_s": 236.0,
+      "next_depot_id": "depot-1",
+      "reaches_depot_above_reserve": true,
+      "reserve_kwh": 6.0,
+      "reserve_margin_kwh": 22.0,
+      "vehicle_id": "shuttle-02"
+    },
+    {
+      "energy_model_revision": "energy-r1",
+      "is_estimate": true,
+      "loops_remaining": 58,
+      "next_depot_eta_s": 234.0,
+      "next_depot_id": "depot-1",
+      "reaches_depot_above_reserve": true,
+      "reserve_kwh": 6.0,
+      "reserve_margin_kwh": 22.0,
+      "vehicle_id": "shuttle-03"
+    },
+    {
+      "energy_model_revision": "energy-r1",
+      "is_estimate": true,
+      "loops_remaining": 58,
+      "next_depot_eta_s": 232.0,
+      "next_depot_id": "depot-1",
+      "reaches_depot_above_reserve": true,
+      "reserve_kwh": 6.0,
+      "reserve_margin_kwh": 22.0,
+      "vehicle_id": "shuttle-04"
+    },
+    {
+      "energy_model_revision": "energy-r1",
+      "is_estimate": true,
+      "loops_remaining": 58,
+      "next_depot_eta_s": 230.0,
+      "next_depot_id": "depot-1",
+      "reaches_depot_above_reserve": true,
+      "reserve_kwh": 6.0,
+      "reserve_margin_kwh": 22.0,
+      "vehicle_id": "shuttle-05"
+    }
+  ],
+  "event_sequence": 7,
+  "incidents": [
+    {
+      "aggregate_revision": 2,
+      "candidate_ids": [
+        "candidate-wait-1"
+      ],
+      "detected_tick": 180,
+      "incident_id": "incident-1",
+      "provenance": {
+        "authored": true,
+        "branch_tick": null,
+        "kind": "TRAINING_SIMULATION",
+        "recording_id": null,
+        "sequence_id": null,
+        "source_frame": null,
+        "source_timestamp": null
+      },
+      "state": "OPTIONS_READY",
+      "vehicle_id": "shuttle-01"
+    }
+  ],
+  "message_type": "FULL_SNAPSHOT",
+  "routes": [
+    {
+      "directed_edge_ids": [
+        "edge-1",
+        "edge-2"
+      ],
+      "distance_m": 1200.0,
+      "estimated_duration_s": 180.0,
+      "required_stop_ids": [
+        "stop-1"
+      ],
+      "revision": 2,
+      "route_id": "route-a",
+      "scene_revision": "scene-r1"
+    }
+  ],
+  "scenario": {
+    "energy_model_revision": "energy-r1",
+    "provenance": {
+      "authored": true,
+      "branch_tick": null,
+      "kind": "TRAINING_SIMULATION",
+      "recording_id": null,
+      "sequence_id": null,
+      "source_frame": null,
+      "source_timestamp": null
+    },
+    "revision_id": "scenario-m2-r1",
+    "rubric_revision": "rubric-r1",
+    "rules_revision": "rules-r1",
+    "scenario_id": "scenario-m2",
+    "scene_revision": "scene-r1",
+    "seed": 142,
+    "transform_revision": "transform-r1",
+    "vehicle_model_revision": "vehicle-r1"
+  },
+  "scene_revision": "scene-old",
+  "session": {
+    "aggregate_revision": 3,
+    "authority_id": "backend-001",
+    "scenario_revision_id": "scenario-m2-r1",
+    "session_epoch": 1,
+    "session_id": "session-001",
+    "status": "RUNNING"
+  },
+  "session_epoch": 1,
+  "session_id": "session-001",
+  "simulation_time_s": 10.0,
+  "snapshot_id": "snapshot-200",
+  "source": {
+    "authored": true,
+    "branch_tick": null,
+    "kind": "TRAINING_SIMULATION",
+    "recording_id": null,
+    "sequence_id": null,
+    "source_frame": null,
+    "source_timestamp": null
+  },
+  "tick": 200,
+  "transform_revision": "transform-r1",
+  "vehicles": [
+    {
+      "aggregate_revision": 1,
+      "battery_capacity_kwh": 40.0,
+      "battery_kwh": 28.0,
+      "heading_deg": 0.0,
+      "position": {
+        "x_m": 10.0,
+        "y_m": 0.0,
+        "z_m": 0.0
+      },
+      "provenance": {
+        "authored": true,
+        "branch_tick": null,
+        "kind": "TRAINING_SIMULATION",
+        "recording_id": null,
+        "sequence_id": null,
+        "source_frame": null,
+        "source_timestamp": null
+      },
+      "route_id": "route-a",
+      "route_revision": 2,
+      "service_state": "IN_SERVICE",
+      "speed_mps": 5.0,
+      "vehicle_id": "shuttle-01"
+    },
+    {
+      "aggregate_revision": 1,
+      "battery_capacity_kwh": 40.0,
+      "battery_kwh": 28.0,
+      "heading_deg": 0.0,
+      "position": {
+        "x_m": 20.0,
+        "y_m": 0.0,
+        "z_m": 0.0
+      },
+      "provenance": {
+        "authored": true,
+        "branch_tick": null,
+        "kind": "TRAINING_SIMULATION",
+        "recording_id": null,
+        "sequence_id": null,
+        "source_frame": null,
+        "source_timestamp": null
+      },
+      "route_id": "route-a",
+      "route_revision": 2,
+      "service_state": "IN_SERVICE",
+      "speed_mps": 5.0,
+      "vehicle_id": "shuttle-02"
+    },
+    {
+      "aggregate_revision": 1,
+      "battery_capacity_kwh": 40.0,
+      "battery_kwh": 28.0,
+      "heading_deg": 0.0,
+      "position": {
+        "x_m": 30.0,
+        "y_m": 0.0,
+        "z_m": 0.0
+      },
+      "provenance": {
+        "authored": true,
+        "branch_tick": null,
+        "kind": "TRAINING_SIMULATION",
+        "recording_id": null,
+        "sequence_id": null,
+        "source_frame": null,
+        "source_timestamp": null
+      },
+      "route_id": "route-a",
+      "route_revision": 2,
+      "service_state": "IN_SERVICE",
+      "speed_mps": 5.0,
+      "vehicle_id": "shuttle-03"
+    },
+    {
+      "aggregate_revision": 1,
+      "battery_capacity_kwh": 40.0,
+      "battery_kwh": 28.0,
+      "heading_deg": 0.0,
+      "position": {
+        "x_m": 40.0,
+        "y_m": 0.0,
+        "z_m": 0.0
+      },
+      "provenance": {
+        "authored": true,
+        "branch_tick": null,
+        "kind": "TRAINING_SIMULATION",
+        "recording_id": null,
+        "sequence_id": null,
+        "source_frame": null,
+        "source_timestamp": null
+      },
+      "route_id": "route-a",
+      "route_revision": 2,
+      "service_state": "IN_SERVICE",
+      "speed_mps": 5.0,
+      "vehicle_id": "shuttle-04"
+    },
+    {
+      "aggregate_revision": 1,
+      "battery_capacity_kwh": 40.0,
+      "battery_kwh": 28.0,
+      "heading_deg": 0.0,
+      "position": {
+        "x_m": 50.0,
+        "y_m": 0.0,
+        "z_m": 0.0
+      },
+      "provenance": {
+        "authored": true,
+        "branch_tick": null,
+        "kind": "TRAINING_SIMULATION",
+        "recording_id": null,
+        "sequence_id": null,
+        "source_frame": null,
+        "source_timestamp": null
+      },
+      "route_id": "route-a",
+      "route_revision": 2,
+      "service_state": "IN_SERVICE",
+      "speed_mps": 5.0,
+      "vehicle_id": "shuttle-05"
+    }
+  ]
+}

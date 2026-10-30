@@ -1,0 +1,137 @@
+{
+  "approvable": true,
+  "checks": [
+    {
+      "check": "GEOMETRY",
+      "feature_id": null,
+      "mandatory": true,
+      "message": "Curated check passed",
+      "status": "PASS"
+    },
+    {
+      "check": "DIRECTION",
+      "feature_id": null,
+      "mandatory": true,
+      "message": "Curated check passed",
+      "status": "PASS"
+    },
+    {
+      "check": "CLOSURE",
+      "feature_id": null,
+      "mandatory": true,
+      "message": "Curated check passed",
+      "status": "PASS"
+    },
+    {
+      "check": "STOPS",
+      "feature_id": null,
+      "mandatory": true,
+      "message": "Curated check passed",
+      "status": "PASS"
+    },
+    {
+      "check": "OPERATING_AREA",
+      "feature_id": null,
+      "mandatory": true,
+      "message": "Curated check passed",
+      "status": "PASS"
+    },
+    {
+      "check": "VEHICLE_FIT",
+      "feature_id": null,
+      "mandatory": true,
+      "message": "Curated check passed",
+      "status": "PASS"
+    },
+    {
+      "check": "TURNS",
+      "feature_id": null,
+      "mandatory": true,
+      "message": "Curated check passed",
+      "status": "PASS"
+    }
+  ],
+  "closure_revisions": {
+    "closure-m2": 1
+  },
+  "contract_version": "2.0",
+  "directed_edge_ids": [
+    "1535209095:0:reverse",
+    "440462565:12:forward",
+    "5061138:0:reverse",
+    "51894042:0:forward",
+    "51894042:1:forward",
+    "51894042:2:forward"
+  ],
+  "edited": {
+    "distance_m": 250.0,
+    "duration_s": 60.0,
+    "energy_kwh": 0.225,
+    "stop_coverage": {
+      "stop-terminal": true
+    }
+  },
+  "fixture_id": "m2-pretrip-detour-r1",
+  "node_ids": [
+    26970786,
+    1329728439,
+    26970880,
+    26970886,
+    1370249326,
+    1370249338,
+    662221987
+  ],
+  "original": {
+    "distance_m": 100.0,
+    "duration_s": 33.0,
+    "energy_kwh": 0.0938,
+    "stop_coverage": {
+      "stop-terminal": true
+    }
+  },
+  "polyline": [
+    {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    {
+      "x": 10.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    {
+      "x": 20.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    {
+      "x": 30.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    {
+      "x": 40.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    {
+      "x": 50.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    {
+      "x": 60.0,
+      "y": 0.0,
+      "z": 0.0
+    }
+  ],
+  "preview_id": "preview-m2-1",
+  "preview_revision": 3,
+  "route_id": "route-m2-detour",
+  "route_revision": 1,
+  "scene_revision": "scene-r1",
+  "session_epoch": 1,
+  "session_id": "session-001",
+  "validation": "PASS"
+}

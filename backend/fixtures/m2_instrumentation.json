@@ -1,0 +1,26 @@
+{
+  "metadata": {
+    "author": "Nur Syazliyarni Binte Zazali",
+    "date_created": "28/10/2026",
+    "last_modified": "28/10/2026",
+    "description": "BE-M2-06 integrated planar backend diagnostic; client-rendered P1 acceptance is measured separately."
+  },
+  "profile": "P0_INTEGRATED_SLICE_R1",
+  "scenario_revision_id": "scenario-m2-integrated-r1",
+  "seed": 1000,
+  "ticks": 4000,
+  "lifecycle_pairs": 5,
+  "validation_samples": 20,
+  "reconnect_samples": 10,
+  "percentile_method": "nearest-rank",
+  "acceptance_profile": "P1_3D_PENDING_CONTENT_HARDWARE_AND_CLIENTS",
+  "targets": {
+    "tick_compute_ms": {"p95": 10, "p99": 25},
+    "tick_schedule_lateness_ms": {"p95": 10, "p99": 25},
+    "durable_acceptance_client_ms": {"p95": 150, "p99": 300},
+    "applied_visible_client_ms": {"p95": 250, "p99": 500},
+    "route_validation_client_ms": {"p95": 300, "p99": 750},
+    "cached_reconnect_client_ms": {"p95": 2000},
+    "verified_paused_recovery_ms": {"p95": 5000}
+  }
+}

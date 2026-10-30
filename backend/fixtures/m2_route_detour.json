@@ -1,0 +1,20 @@
+{
+  "fixture_id": "m2-pretrip-detour-r1",
+  "route_id": "route-m2-detour",
+  "start_node_id": 26970786,
+  "destination_node_id": 662221987,
+  "required_stops": {"stop-terminal": 662221987},
+  "operating_node_ids": [26970786, 1329728439, 26970880, 26970886, 1370249326, 1370249338, 662221987],
+  "original_directed_edge_ids": ["1535209095:1:forward"],
+  "closed_directed_edge_ids": ["1535209095:1:forward"],
+  "detour_directed_edge_ids": ["1535209095:0:reverse", "440462565:12:forward", "5061138:0:reverse", "51894042:0:forward", "51894042:1:forward", "51894042:2:forward"],
+  "vehicle_width_m": 2.2,
+  "vehicle_height_m": 2.8,
+  "minimum_side_clearance_m": 0.3,
+  "road_width_m": 3.5,
+  "road_height_m": 4.0,
+  "cruise_speed_kph": 20.0,
+  "stop_dwell_s": 15.0,
+  "travel_kwh_per_km": 0.8,
+  "auxiliary_kw": 1.5
+}

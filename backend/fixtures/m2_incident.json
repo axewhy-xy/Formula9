@@ -1,0 +1,30 @@
+{
+  "fixture_id": "m2-scripted-obstruction-r1",
+  "scenario_id": "m2-incident",
+  "incident_id": "incident-m2-obstruction",
+  "disruption_id": "obstruction-m2",
+  "vehicle_id": "shuttle-01",
+  "route_id": "route-m2-detour",
+  "trigger_tick": 240,
+  "clear_after_ticks": 200,
+  "escalation_after_ticks": 100,
+  "option_lifetime_ticks": 1200,
+  "step_s": 0.05,
+  "history_ticks": 200,
+  "maximum_history_gap_ticks": 2,
+  "reference_acceptable_actions": ["WAIT", "ESCALATE", "ROAD_DETOUR"],
+  "rubric_revision": "m2-incident-provisional-r1",
+  "rubric": {"safety_compliance": 40, "response_time": 20, "attempts": 10, "service_coverage": 20, "route_efficiency": 10},
+  "full_time_credit_s": 30.0,
+  "zero_time_credit_s": 60.0,
+  "assumptions": [
+    "Uncalibrated authored training fixture; points are not a real-world safety assessment.",
+    "The actor supplies a fixed 50 ms simulation clock and committed samples at least every 100 ms.",
+    "The affected shuttle is at the curated route entrance when the obstruction is triggered.",
+    "The obstruction clears ten simulated seconds after detection; simulated assistance clears it within five seconds of escalation.",
+    "All three responses are acceptable when current validation passes and all required stops remain served.",
+    "Response points use simulation time, excluding shared pauses; server wall time is recorded separately.",
+    "Service and energy consequences are estimates from the road fixture; actual battery integration belongs to the energy actor.",
+    "Local lane passing is unavailable; this fixture only validates road-network detours."
+  ]
+}

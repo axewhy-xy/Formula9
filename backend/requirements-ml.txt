@@ -1,0 +1,12 @@
+# Optional machine-learning dependencies, used only for:
+#   - Perception: detecting obstacles, pedestrians and road safety features
+#     (traffic lights, stop signs) in KITTI camera frames.
+#   - Reinforcement learning: training and running the RL action ranker.
+# Only needed on machines doing perception or RL work. Not installed by
+# run.bat or CI: the backend runs without them.
+# Install with scripts/setup_ml.py, which picks the GPU or CPU build for this
+# machine and verifies the result. The pins below are the GPU (CUDA 12.6)
+# build; setup_ml.py reuses the same versions for the CPU build.
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch==2.14.1+cu126
+torchvision==0.29.1+cu126

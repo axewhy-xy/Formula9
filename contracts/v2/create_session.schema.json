@@ -1,0 +1,25 @@
+{
+  "$id": "https://formula9.local/contracts/v2/create_session.schema.json",
+  "additionalProperties": false,
+  "properties": {
+    "scenario_revision_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Scenario Revision Id",
+      "type": "string"
+    },
+    "seed": {
+      "default": 1000,
+      "maximum": 2147483647,
+      "minimum": 0,
+      "title": "Seed",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "scenario_revision_id"
+  ],
+  "title": "CreateSessionRequest",
+  "type": "object"
+}

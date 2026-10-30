@@ -42,3 +42,18 @@ crashlytics-buildid.txt
 *.env
 TestResults*.xml
 /.tools/
+
+# Python environments, generated caches, optional datasets and live session data.
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+/data/
+/state/
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite.lock

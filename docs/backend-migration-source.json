@@ -1,0 +1,1103 @@
+{
+  "repository": "https://github.com/axewhy-xy/Formula_9",
+  "commit": "a5d699ec8c4536f7b52c248e4bd7140b1a415117",
+  "source_working_tree_clean": true,
+  "note": "Hashes record original copied bytes before repository path adaptations.",
+  "files": [
+    {
+      "source": "backend/.env.example",
+      "destination": "backend/.env.example",
+      "sha256": "5d13d01a15bb838436ebc88d0e689d04459bb3929bf4ebaae997d735f00723be"
+    },
+    {
+      "source": "backend/.gitignore",
+      "destination": "backend/.gitignore",
+      "sha256": "2e1bf9e6dff0f46a5f91db68aec615f5ae500f55b4a0eb9f17e7a33e83244c54"
+    },
+    {
+      "source": "backend/fixtures/m2_3d_acceptance.json",
+      "destination": "backend/fixtures/m2_3d_acceptance.json",
+      "sha256": "d3265fe832d77104295732b4a07f6f234192131fdb74cbdb0999a2317ef88b00"
+    },
+    {
+      "source": "backend/fixtures/m2_incident.json",
+      "destination": "backend/fixtures/m2_incident.json",
+      "sha256": "abe3861a51b490a39485ebddc4fc53102cea16d6c677ba76e21b06b736b1bcab"
+    },
+    {
+      "source": "backend/fixtures/m2_instrumentation.json",
+      "destination": "backend/fixtures/m2_instrumentation.json",
+      "sha256": "dd919de6e1e4627d7ea1ea192d57cfce979e0a88e61536664e96dbf51016d378"
+    },
+    {
+      "source": "backend/fixtures/m2_integrated.json",
+      "destination": "backend/fixtures/m2_integrated.json",
+      "sha256": "f340a77657fd953250f15ebd5889640ea0859847ce94d662fff13db573cec501"
+    },
+    {
+      "source": "backend/fixtures/m2_route_detour.json",
+      "destination": "backend/fixtures/m2_route_detour.json",
+      "sha256": "0c05fdae136724ef1944ff7a34910c095c93a97095babe79cdd8be8e16aadf64"
+    },
+    {
+      "source": "backend/fixtures/m2_scene/assets/building.glb",
+      "destination": "backend/fixtures/m2_scene/assets/building.glb",
+      "sha256": "4629ef0daab7739c481d4e90979b5c2a29962c6bb830d317c2486ef39a4cebe7"
+    },
+    {
+      "source": "backend/fixtures/m2_scene/assets/charger.glb",
+      "destination": "backend/fixtures/m2_scene/assets/charger.glb",
+      "sha256": "eb9d61bddec0065409ff5e4072b6a3e842325547161653ebf89df5fc0e9edaed"
+    },
+    {
+      "source": "backend/fixtures/m2_scene/assets/depot.glb",
+      "destination": "backend/fixtures/m2_scene/assets/depot.glb",
+      "sha256": "7672b3e0eaa7d101fb1566d84008730fe124ccc5f1995eb6e100a41abad07e40"
+    },
+    {
+      "source": "backend/fixtures/m2_scene/assets/obstruction.glb",
+      "destination": "backend/fixtures/m2_scene/assets/obstruction.glb",
+      "sha256": "dbe29f1cfc0400e5a5d64707b7e8b9b0faf2fec59c1a6f868a446b164834f1e9"
+    },
+    {
+      "source": "backend/fixtures/m2_scene/assets/ramp.glb",
+      "destination": "backend/fixtures/m2_scene/assets/ramp.glb",
+      "sha256": "00a6c6c0b93d930b6756860b71afde03896b0f0b75a2a000992d99a2ce27e9cc"
+    },
+    {
+      "source": "backend/fixtures/m2_scene/assets/road.glb",
+      "destination": "backend/fixtures/m2_scene/assets/road.glb",
+      "sha256": "23215ff3165583101812d1af3fa87fcc1534d84a5b4cf567a478634bc7c51e1b"
+    },
+    {
+      "source": "backend/fixtures/m2_scene/assets/shuttle-detail.glb",
+      "destination": "backend/fixtures/m2_scene/assets/shuttle-detail.glb",
+      "sha256": "46d8478fd120f8432d5ffaeef085acfba7edbc646a694b6737a192496a088043"
+    },
+    {
+      "source": "backend/fixtures/m2_scene/assets/shuttle.glb",
+      "destination": "backend/fixtures/m2_scene/assets/shuttle.glb",
+      "sha256": "88d4d223cddbdfe4c95a51548a7ed60682f012d9e98a27b450882b60e4590865"
+    },
+    {
+      "source": "backend/fixtures/m2_scene/assets/stop.glb",
+      "destination": "backend/fixtures/m2_scene/assets/stop.glb",
+      "sha256": "d6ffec0747fc1e4011d07b9268b690ebf79f0abf373c44fb3a78dcd2d705111f"
+    },
+    {
+      "source": "backend/fixtures/m2_scene/manifest.json",
+      "destination": "backend/fixtures/m2_scene/manifest.json",
+      "sha256": "f03c7ddb81a7a420075d450d92294b22cc2907c8d746864414652ff0e4b5ccef"
+    },
+    {
+      "source": "backend/fixtures/m2_scene/README.md",
+      "destination": "backend/fixtures/m2_scene/README.md",
+      "sha256": "41345fd3cd0e4d6dee995654fddfd947bad38040208d05552f0ad30eaa8091a5"
+    },
+    {
+      "source": "backend/fixtures/routes_testing.json",
+      "destination": "backend/fixtures/routes_testing.json",
+      "sha256": "0bb4b7ccdc548f3c9eaf866a21f6a447d0c6a993e625169408f98e575b73ee34"
+    },
+    {
+      "source": "backend/README.md",
+      "destination": "backend/README.md",
+      "sha256": "eae1c720367cda4d8640de28fb96b6ef64e1e8607894cde58b0860f8f0937b25"
+    },
+    {
+      "source": "backend/requirements-ml.txt",
+      "destination": "backend/requirements-ml.txt",
+      "sha256": "e93dcae1bf33ca5a860771a6f6fcca95de4bbd24a9caa9476a273e9d0413eece"
+    },
+    {
+      "source": "backend/requirements.lock.txt",
+      "destination": "backend/requirements.lock.txt",
+      "sha256": "56bf891e9e7025cdf5f52d09581e9c808c9efa7592872a2030ed2fe153d7417c"
+    },
+    {
+      "source": "backend/requirements.txt",
+      "destination": "backend/requirements.txt",
+      "sha256": "84ecc3b837eda65784c229935715b1fdde78ecb56be03a65b6f51c50a762a514"
+    },
+    {
+      "source": "backend/src/__init__.py",
+      "destination": "backend/src/__init__.py",
+      "sha256": "dc54fdd6f4a626fc346cbbbbb3ee3f4027f0c2948663e4f2a276da91c8e5ed90"
+    },
+    {
+      "source": "backend/src/api/__init__.py",
+      "destination": "backend/src/api/__init__.py",
+      "sha256": "57bb6323f5c17ea06cbc019010d399315522d1e5e22a3ed155b43945881b2d8f"
+    },
+    {
+      "source": "backend/src/api/router.py",
+      "destination": "backend/src/api/router.py",
+      "sha256": "9004d63c3e238de2a23073f266db9ad7d3e4d723d82ce558e09f625b50437790"
+    },
+    {
+      "source": "backend/src/api/routes/__init__.py",
+      "destination": "backend/src/api/routes/__init__.py",
+      "sha256": "0d7d72797429adfc1e500a8d6c82a76570da7d61123ad11940b9ef646e7b63d7"
+    },
+    {
+      "source": "backend/src/api/routes/auth.py",
+      "destination": "backend/src/api/routes/auth.py",
+      "sha256": "89596c8d9fde23f2a75e351399a77617682b6ef201bf64dba4b0f09421540527"
+    },
+    {
+      "source": "backend/src/api/routes/health.py",
+      "destination": "backend/src/api/routes/health.py",
+      "sha256": "732e0f72ce8cff6e7e4b1f372c6f3743ce2e33c7c123a573a2a5caaf1c935c2a"
+    },
+    {
+      "source": "backend/src/api/routes/route_planning.py",
+      "destination": "backend/src/api/routes/route_planning.py",
+      "sha256": "a723ccde45e28db9dfad124fa36c8ed3473a7ffedbe92ee2c85ba0fba5680d56"
+    },
+    {
+      "source": "backend/src/api/routes/scenes.py",
+      "destination": "backend/src/api/routes/scenes.py",
+      "sha256": "ffbf00cf1e16207bbc298b7c487a27b867b91e142e63802ed72ceabdd997a090"
+    },
+    {
+      "source": "backend/src/api/routes/simulation_ws.py",
+      "destination": "backend/src/api/routes/simulation_ws.py",
+      "sha256": "156f4c14cf19e60b04037ecd0c9721bf0f1170a676c81bc9ac682046b006343a"
+    },
+    {
+      "source": "backend/src/api/routes/simulations.py",
+      "destination": "backend/src/api/routes/simulations.py",
+      "sha256": "33bc258e06784c13126b543f97795e651306c69075cfc6194e71f3d7d398ff7f"
+    },
+    {
+      "source": "backend/src/api/routes/training_scenes.py",
+      "destination": "backend/src/api/routes/training_scenes.py",
+      "sha256": "fe14ea4cf6d2994410928dbcb2a56d40ca6e07ce0d7a34950634e053ffcaccdc"
+    },
+    {
+      "source": "backend/src/api/routes/training_v2.py",
+      "destination": "backend/src/api/routes/training_v2.py",
+      "sha256": "456fd2352459bed5efa93d48cc55ec69b4a07caf2cc5f0c38810ab8c4ef05385"
+    },
+    {
+      "source": "backend/src/app.py",
+      "destination": "backend/src/app.py",
+      "sha256": "28b180a2f0b92cc8e86d582ee6c85d0b59c739d0b2d80d67024b390b71d6657a"
+    },
+    {
+      "source": "backend/src/auth/__init__.py",
+      "destination": "backend/src/auth/__init__.py",
+      "sha256": "6a5e41cd622cf58d2e7c90642b1ba78363a2626b08cec9242b568764adfcc241"
+    },
+    {
+      "source": "backend/src/auth/middleware.py",
+      "destination": "backend/src/auth/middleware.py",
+      "sha256": "b67443da0a0e896575851ca2cd69a0a0d27b5fae63a8ee4236c14015c8df9173"
+    },
+    {
+      "source": "backend/src/auth/passwords.py",
+      "destination": "backend/src/auth/passwords.py",
+      "sha256": "dd6ac86d360a850ed58d275def219a404e1755eb962b948767415b44cdb86297"
+    },
+    {
+      "source": "backend/src/auth/service.py",
+      "destination": "backend/src/auth/service.py",
+      "sha256": "e7adc995d1a0deec04fc5366ade9244d24082dd1e600f5d56415b571f724455c"
+    },
+    {
+      "source": "backend/src/auth/store.py",
+      "destination": "backend/src/auth/store.py",
+      "sha256": "7bfbde356f8a304a23ce8d224bd5089580c50d492cd5aa6e185b00d2e2d048ad"
+    },
+    {
+      "source": "backend/src/core/__init__.py",
+      "destination": "backend/src/core/__init__.py",
+      "sha256": "f249fd05b3b499db4e513c9f7889aab2d161e6b873b14ab0e9fb435d6e5d7e61"
+    },
+    {
+      "source": "backend/src/core/config.py",
+      "destination": "backend/src/core/config.py",
+      "sha256": "44632de53b4355fc752421aca20ba0409563ffe48fa6148273ca08ee7791ba19"
+    },
+    {
+      "source": "backend/src/core/errors.py",
+      "destination": "backend/src/core/errors.py",
+      "sha256": "c6834c5762e98f8aa927b537dbd5fb2ae51e304501402275a76dbba9044b670b"
+    },
+    {
+      "source": "backend/src/core/training_telemetry.py",
+      "destination": "backend/src/core/training_telemetry.py",
+      "sha256": "aee8eded75a8ff340995ae18fbbae2a79d0df0ce4a06e230422bbe87bf449fc3"
+    },
+    {
+      "source": "backend/src/datasets/__init__.py",
+      "destination": "backend/src/datasets/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source": "backend/src/datasets/kitti_loader.py",
+      "destination": "backend/src/datasets/kitti_loader.py",
+      "sha256": "f6ef5fd630797730ecf637c5fc0c6030e8f899f8344e2acce4756751a6fa4467"
+    },
+    {
+      "source": "backend/src/datasets/trajectory_contract_adapter.py",
+      "destination": "backend/src/datasets/trajectory_contract_adapter.py",
+      "sha256": "d22bc4762c3d3f35a64197cf63f0ca06e7e11f30e92d03b4a710cf42c7c446de"
+    },
+    {
+      "source": "backend/src/datasets/trajectory_models.py",
+      "destination": "backend/src/datasets/trajectory_models.py",
+      "sha256": "ec5648b1eed5217533d56aecf63f663fcbba5edfc5aa1c04fe2d85c6ecfe301b"
+    },
+    {
+      "source": "backend/src/datasets/trajectory_normalizer.py",
+      "destination": "backend/src/datasets/trajectory_normalizer.py",
+      "sha256": "e5dc92c968e6ff15aa34fb7ca7e507c071c889ad6a115324b730128a77658100"
+    },
+    {
+      "source": "backend/src/energy/__init__.py",
+      "destination": "backend/src/energy/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source": "backend/src/energy/assessment.py",
+      "destination": "backend/src/energy/assessment.py",
+      "sha256": "dda47e4f780bc83a787e55219e668a875cb407fbba13937128fbe935b3a4c92d"
+    },
+    {
+      "source": "backend/src/energy/chargers.py",
+      "destination": "backend/src/energy/chargers.py",
+      "sha256": "df5ea492f55f99174ab245338b41f91d430478902b9cbd5d09ee933758bb1d5c"
+    },
+    {
+      "source": "backend/src/energy/decisions.py",
+      "destination": "backend/src/energy/decisions.py",
+      "sha256": "2ac74c3b99af471aa7b1236fec0ca70af134674b0cd73c8fe3c37c0a8786baf9"
+    },
+    {
+      "source": "backend/src/energy/forecast.py",
+      "destination": "backend/src/energy/forecast.py",
+      "sha256": "2220beac411a615d607338129aad06e205c602bbc9b31857e7ae14ecb7860da1"
+    },
+    {
+      "source": "backend/src/energy/model.py",
+      "destination": "backend/src/energy/model.py",
+      "sha256": "57919f78f113999a6e2b50a7c2ea7799471b47375145c20c1ae2910dbd2f4e4f"
+    },
+    {
+      "source": "backend/src/perception/__init__.py",
+      "destination": "backend/src/perception/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source": "backend/src/perception/detection.py",
+      "destination": "backend/src/perception/detection.py",
+      "sha256": "ca5c71319d06ce8081ca5788be20b225aa39cda03b3fbaa10b22fd761c8bac57"
+    },
+    {
+      "source": "backend/src/perception/frame.py",
+      "destination": "backend/src/perception/frame.py",
+      "sha256": "50237d9280c4ae6cbbad34ba0051ae4fc2369228ee4e5e9ed03ff9c6749fcff8"
+    },
+    {
+      "source": "backend/src/perception/projection.py",
+      "destination": "backend/src/perception/projection.py",
+      "sha256": "3c957e872597b174733464739e79045572d78a0a5a5bece48e2db386ab52d193"
+    },
+    {
+      "source": "backend/src/perception/sources/__init__.py",
+      "destination": "backend/src/perception/sources/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source": "backend/src/perception/sources/kitti.py",
+      "destination": "backend/src/perception/sources/kitti.py",
+      "sha256": "aa05782cc5822c889f9e6ecf673a0709b24b160c1f6d073417f520772452c513"
+    },
+    {
+      "source": "backend/src/persistence/__init__.py",
+      "destination": "backend/src/persistence/__init__.py",
+      "sha256": "bab4958c4a564dd9fcabde59fe2d6b8f9f2ad32ee2f6363c6a365a39db507ef3"
+    },
+    {
+      "source": "backend/src/persistence/migrations/0001_training.sql",
+      "destination": "backend/src/persistence/migrations/0001_training.sql",
+      "sha256": "7608b787a8c8d1c11442bdb1e19037d40c4a7c38a0940f2913c5fb8ec228eb08"
+    },
+    {
+      "source": "backend/src/persistence/migrations/0002_live_sessions.sql",
+      "destination": "backend/src/persistence/migrations/0002_live_sessions.sql",
+      "sha256": "15ae786cfbccdc10d1f2fd9e0828465e794c5033d620693d960f59c2b01b33b1"
+    },
+    {
+      "source": "backend/src/persistence/training_store.py",
+      "destination": "backend/src/persistence/training_store.py",
+      "sha256": "11759d93eac66bf17cb9c8044d984da23166d2fce89cbd2860c8b78414a93f42"
+    },
+    {
+      "source": "backend/src/routing/__init__.py",
+      "destination": "backend/src/routing/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source": "backend/src/routing/graph_loader.py",
+      "destination": "backend/src/routing/graph_loader.py",
+      "sha256": "14dd3720e9e8c1ac0f9c8da5656b03125c947b3fda0e6eae9728568d8a2a76bc"
+    },
+    {
+      "source": "backend/src/routing/map_matcher.py",
+      "destination": "backend/src/routing/map_matcher.py",
+      "sha256": "bce04fa29271af89ac3db927261b9ebee01cd1728aa86e48d6da2b02a92848b2"
+    },
+    {
+      "source": "backend/src/routing/road_graph.py",
+      "destination": "backend/src/routing/road_graph.py",
+      "sha256": "4ac879dcb8fb81e6d814d54784e627ae85d8df1a8aaf58eb6ee7118dfa5241ad"
+    },
+    {
+      "source": "backend/src/schemas/__init__.py",
+      "destination": "backend/src/schemas/__init__.py",
+      "sha256": "060b5f5a000f0d3f9cf6c8372f6fb87fca7ce015806b946bc279afc3ed5e511c"
+    },
+    {
+      "source": "backend/src/schemas/route.py",
+      "destination": "backend/src/schemas/route.py",
+      "sha256": "f316bd216ce9ad4539d4051bc1811404c24ec274b6e18ff0f573df458e3d30df"
+    },
+    {
+      "source": "backend/src/schemas/scene.py",
+      "destination": "backend/src/schemas/scene.py",
+      "sha256": "b84205638fc9c790cf9362b1e6ddd40f7555a84ce7eced58d8592fe23d31adc6"
+    },
+    {
+      "source": "backend/src/schemas/shuttle_data.py",
+      "destination": "backend/src/schemas/shuttle_data.py",
+      "sha256": "a95e2ce9474d6600aac821d6ac23ccecb7d1978a4d9a74e6abad0ee510aee646"
+    },
+    {
+      "source": "backend/src/schemas/simulation.py",
+      "destination": "backend/src/schemas/simulation.py",
+      "sha256": "eff5bdc6eaa79ac58478824ba80a461d689ce6573aab1ca71dc5837b19c321a4"
+    },
+    {
+      "source": "backend/src/services/__init__.py",
+      "destination": "backend/src/services/__init__.py",
+      "sha256": "247dfa2324a22f420eb0891999c549d2dd0382cf624798c819ad48da7dd52504"
+    },
+    {
+      "source": "backend/src/services/asset_loader.py",
+      "destination": "backend/src/services/asset_loader.py",
+      "sha256": "02d77455681ecf851631df198ab8756ef9a1d507fe209e0fca847c5ad106094c"
+    },
+    {
+      "source": "backend/src/services/battery_decision.py",
+      "destination": "backend/src/services/battery_decision.py",
+      "sha256": "88ab0049262f070511fd2ee462184f95f0284864e8aa91d74b30789fa9651ffd"
+    },
+    {
+      "source": "backend/src/services/crash_recovery.py",
+      "destination": "backend/src/services/crash_recovery.py",
+      "sha256": "0398817abd6be5d3b8b2e5954d7ecad0a2bf7b5e1488fbccad535f700a51d6a6"
+    },
+    {
+      "source": "backend/src/services/fleet_session_host.py",
+      "destination": "backend/src/services/fleet_session_host.py",
+      "sha256": "cc13d0782efc0bfd316afe82f5bf05c9bba489e899b4acfab9062ceb7f9dc7ed"
+    },
+    {
+      "source": "backend/src/services/glb_validator.py",
+      "destination": "backend/src/services/glb_validator.py",
+      "sha256": "6586a0f0944e1db72852c4c28fbf9f62b4e7d689557abf7eb56973f418f15281"
+    },
+    {
+      "source": "backend/src/services/incident_demo.py",
+      "destination": "backend/src/services/incident_demo.py",
+      "sha256": "4aca0b3111c93e3b46713d4c3cf45b7b49af260b499ab8663c0abceb15200e11"
+    },
+    {
+      "source": "backend/src/services/incidents.py",
+      "destination": "backend/src/services/incidents.py",
+      "sha256": "f81eb4583534469e464e328c28d503f5539ebf7ec6221c35061442be55eaaf81"
+    },
+    {
+      "source": "backend/src/services/integrated_actor.py",
+      "destination": "backend/src/services/integrated_actor.py",
+      "sha256": "1c947b2e7dbcbacf80f363e0b6ace727aa706d55f47d9507bbe653eaa3ef3700"
+    },
+    {
+      "source": "backend/src/services/route_edit.py",
+      "destination": "backend/src/services/route_edit.py",
+      "sha256": "036aaa56d0b54f95c4ef5f81bdf2b83bf98305c26de22e509210644e5ab9c0d5"
+    },
+    {
+      "source": "backend/src/services/route_planner.py",
+      "destination": "backend/src/services/route_planner.py",
+      "sha256": "dae2ff3f0fafbd198cfeb04ba96832b6e06fe7977a0ebf89c247c7337c452523"
+    },
+    {
+      "source": "backend/src/services/sample_ticks.py",
+      "destination": "backend/src/services/sample_ticks.py",
+      "sha256": "f9f8a87e4c78c04e8df2f6561c6f1ea22978dc7166b0de1881249413c35043f3"
+    },
+    {
+      "source": "backend/src/services/scene_repository.py",
+      "destination": "backend/src/services/scene_repository.py",
+      "sha256": "c1b58daa8bcd9d9ab403dd417a0178636ff63f47507c2f4599666c296f605060"
+    },
+    {
+      "source": "backend/src/services/scheduler_profile.py",
+      "destination": "backend/src/services/scheduler_profile.py",
+      "sha256": "80aa66cbf72cbefc3118472456551341f327e65cd9f530e6d67f594b30918150"
+    },
+    {
+      "source": "backend/src/services/session_actor.py",
+      "destination": "backend/src/services/session_actor.py",
+      "sha256": "45f53b620e6467748cdbc3a6be914f9f9fdd9b80fc4a6fd6a6817daf5f7852a0"
+    },
+    {
+      "source": "backend/src/services/session_manager.py",
+      "destination": "backend/src/services/session_manager.py",
+      "sha256": "6510545b7e42475cc6a339e04c5038f7481bedffd81a698c4b9023a6676fcb53"
+    },
+    {
+      "source": "backend/src/services/spatial_acceptance.py",
+      "destination": "backend/src/services/spatial_acceptance.py",
+      "sha256": "c260c565ea56265036dbcf9d5af0f17c5de3235ccc1b472f06e32601ea84da0f"
+    },
+    {
+      "source": "backend/src/services/spatial_motion.py",
+      "destination": "backend/src/services/spatial_motion.py",
+      "sha256": "b262940fc0b73890d4132f5e8976bf3a767fc6b59436b943d93f52c3711a78b9"
+    },
+    {
+      "source": "backend/src/services/spatial_session_actor.py",
+      "destination": "backend/src/services/spatial_session_actor.py",
+      "sha256": "cc90c83918d02a4d8d3ac9446035ac4359fc7bcc99d035aafe6316315f0b7e23"
+    },
+    {
+      "source": "backend/src/services/training_benchmark.py",
+      "destination": "backend/src/services/training_benchmark.py",
+      "sha256": "f77c9e3abef2469f3b39296c87f7689ebbed33979818ff34ae9f6c1303637968"
+    },
+    {
+      "source": "backend/src/services/training_scene.py",
+      "destination": "backend/src/services/training_scene.py",
+      "sha256": "f66a3631bcdcda7ac7dccebb2571c377e389665d668167b9dffaa994b79047df"
+    },
+    {
+      "source": "backend/src/services/training_sessions.py",
+      "destination": "backend/src/services/training_sessions.py",
+      "sha256": "c90e2524b1d941bcaa3d183bd3ee27e251390628b69937ddbce1527eb539dc26"
+    },
+    {
+      "source": "backend/src/services/training_workflow.py",
+      "destination": "backend/src/services/training_workflow.py",
+      "sha256": "36a7e42772002980efb45ef78fcb1949a15ef9a636a5ef32a0662e950049d161"
+    },
+    {
+      "source": "backend/src/services/trajectory_stream.py",
+      "destination": "backend/src/services/trajectory_stream.py",
+      "sha256": "852bb9456804c0f9c21ad0cf0d146f8d7d606f353b1033ecb96261a7aeb8b0af"
+    },
+    {
+      "source": "backend/tests/__init__.py",
+      "destination": "backend/tests/__init__.py",
+      "sha256": "2b377429c0df8525d5cbe2ca733ef3b9abb1c23c713c2416b39d69bb2440528a"
+    },
+    {
+      "source": "backend/tests/conftest.py",
+      "destination": "backend/tests/conftest.py",
+      "sha256": "efe37127b2c378a7c2f716174111a76292eda96a5bcf46e7a9455d1caa0054e2"
+    },
+    {
+      "source": "backend/tests/fixtures/sample_oxts/0000000000.txt",
+      "destination": "backend/tests/fixtures/sample_oxts/0000000000.txt",
+      "sha256": "52c104c820deb842e059f98a4b9051c2364ddc30d8ba9057c0ea379ef69db83b"
+    },
+    {
+      "source": "backend/tests/fixtures/sample_oxts/0000000001.txt",
+      "destination": "backend/tests/fixtures/sample_oxts/0000000001.txt",
+      "sha256": "9b8fca411b44c36cf6a9bbc7ad728b611ee51bb47a8b822ea91b97c53560005f"
+    },
+    {
+      "source": "backend/tests/fixtures/sample_oxts/0000000002.txt",
+      "destination": "backend/tests/fixtures/sample_oxts/0000000002.txt",
+      "sha256": "93101721516d1c407df91d5e0a57dc5cbd73d33f1033ecbfb3a23464e443e303"
+    },
+    {
+      "source": "backend/tests/fixtures/sample_oxts/0000000003.txt",
+      "destination": "backend/tests/fixtures/sample_oxts/0000000003.txt",
+      "sha256": "48f7abb90ebfbd58547ca98124eae728b1382be280d3fc2e0acac5213b8ebf1e"
+    },
+    {
+      "source": "backend/tests/fixtures/sample_oxts/0000000004.txt",
+      "destination": "backend/tests/fixtures/sample_oxts/0000000004.txt",
+      "sha256": "3461edaba2852ca5015b8693bb55edde29ebeb6f820569986d24b4271c12a60b"
+    },
+    {
+      "source": "backend/tests/fixtures/sample_oxts/0000000005.txt",
+      "destination": "backend/tests/fixtures/sample_oxts/0000000005.txt",
+      "sha256": "442c42ea9175246b0934912f7153ed57216a2165e882c39cc0ae8a2fd7206429"
+    },
+    {
+      "source": "backend/tests/fixtures/timestamps.txt",
+      "destination": "backend/tests/fixtures/timestamps.txt",
+      "sha256": "84863e03943a55a0162489eb5f2067e74f33b8d9bb1615163167c25fa3c1ce91"
+    },
+    {
+      "source": "backend/tests/native_route_smoke.py",
+      "destination": "backend/tests/native_route_smoke.py",
+      "sha256": "2f3a7e31079b9097d12cfe15730a80cc7a10dcdea340308ed24ac5bf02aa8347"
+    },
+    {
+      "source": "backend/tests/native_session_smoke.py",
+      "destination": "backend/tests/native_session_smoke.py",
+      "sha256": "1accda5e81a6bc5604a608719eb38372c42491f2fa881f1e5ccbab7348c19603"
+    },
+    {
+      "source": "backend/tests/test_auth.py",
+      "destination": "backend/tests/test_auth.py",
+      "sha256": "15381a1c44f0bda69a6d09ca3b8083cd33f7ca95877ba5f6f87961f050ff3423"
+    },
+    {
+      "source": "backend/tests/test_battery_assessment.py",
+      "destination": "backend/tests/test_battery_assessment.py",
+      "sha256": "cce63c097dbc6fa4e4e5eb726dbc10bf5126e3acd40668fe997ad83d04a04817"
+    },
+    {
+      "source": "backend/tests/test_battery_decision_service.py",
+      "destination": "backend/tests/test_battery_decision_service.py",
+      "sha256": "cd9a5e1cce3edc0a8890eaf868a3ded71dfc8efe9a484cdf7cb8d7ad7a35c8d1"
+    },
+    {
+      "source": "backend/tests/test_battery_decisions.py",
+      "destination": "backend/tests/test_battery_decisions.py",
+      "sha256": "0bc0f41f515ac2603e715562e5474778d2434929fd50dcc5e88c9390bf3095e5"
+    },
+    {
+      "source": "backend/tests/test_contract_battery_v2.py",
+      "destination": "backend/tests/test_contract_battery_v2.py",
+      "sha256": "c61344793d28d4d375e22637cf692c6fbbd73f4c7f7beda3feda0944032de7be"
+    },
+    {
+      "source": "backend/tests/test_crash_recovery.py",
+      "destination": "backend/tests/test_crash_recovery.py",
+      "sha256": "45cd4a922b143da2da07197c9228af428aea76dd6d988fe4ce42b147098c7382"
+    },
+    {
+      "source": "backend/tests/test_detection.py",
+      "destination": "backend/tests/test_detection.py",
+      "sha256": "ba19db3722ddd3b19f85ac66d5b107bc56a5e14ead3bdc7225241db97ecc35d6"
+    },
+    {
+      "source": "backend/tests/test_energy.py",
+      "destination": "backend/tests/test_energy.py",
+      "sha256": "d1abe1090c7e552508b3ff0e256381a3a84084f09a11264a3fa136f83112a619"
+    },
+    {
+      "source": "backend/tests/test_fleet_session_host.py",
+      "destination": "backend/tests/test_fleet_session_host.py",
+      "sha256": "b10b5ee415c1d658f68f5bd167aecb65b48db32e47bcd3622d791171de917718"
+    },
+    {
+      "source": "backend/tests/test_graph_loader.py",
+      "destination": "backend/tests/test_graph_loader.py",
+      "sha256": "859a3204c72eb937a93c952aa5687a6d78f76e4f249477f758f210b724355de9"
+    },
+    {
+      "source": "backend/tests/test_graph_loader_integration.py",
+      "destination": "backend/tests/test_graph_loader_integration.py",
+      "sha256": "8c6e05f6faa9db7f325416fcbafa2a7cbcc374963aad77ececd7a4a6fabda6a1"
+    },
+    {
+      "source": "backend/tests/test_incidents.py",
+      "destination": "backend/tests/test_incidents.py",
+      "sha256": "93b06ddcc38b11a8aa3887b69eabb622c7759cccdc2d590b4786486a16bebbd2"
+    },
+    {
+      "source": "backend/tests/test_kitti_loader.py",
+      "destination": "backend/tests/test_kitti_loader.py",
+      "sha256": "1a090fda92f31473a6d3908c58e71f3ef36a4ce2957000b48a39db60e7c7bc5d"
+    },
+    {
+      "source": "backend/tests/test_kitti_source.py",
+      "destination": "backend/tests/test_kitti_source.py",
+      "sha256": "0c21bb0d45a1d6f224b0545a8ef7c1f9ca13c5b1410ff6f0434efcf18499e32e"
+    },
+    {
+      "source": "backend/tests/test_map_matcher.py",
+      "destination": "backend/tests/test_map_matcher.py",
+      "sha256": "44faaed43b36bff8f8cebb99ed1dc980a1094b4a20d945aed697df6911e29688"
+    },
+    {
+      "source": "backend/tests/test_projection.py",
+      "destination": "backend/tests/test_projection.py",
+      "sha256": "c867a31da67a0da3772ed79579e8b8d536b457b376d50f263e41b4ff4f3bf8fc"
+    },
+    {
+      "source": "backend/tests/test_route_edit.py",
+      "destination": "backend/tests/test_route_edit.py",
+      "sha256": "60dd51e12934b8603df1e86836aa8e8aade3f5b3c55c0b521784ce5ff9a79b90"
+    },
+    {
+      "source": "backend/tests/test_route_geometry.py",
+      "destination": "backend/tests/test_route_geometry.py",
+      "sha256": "13006f125ac7715c08eaad50c8984f36223330c239a4ba2b3d3621ee01d98724"
+    },
+    {
+      "source": "backend/tests/test_route_planning.py",
+      "destination": "backend/tests/test_route_planning.py",
+      "sha256": "6f663a0c32d1ccfa7d1157c2b9adb825c11ea7c56cb3ed0dd4919de32b0c8237"
+    },
+    {
+      "source": "backend/tests/test_scene_api.py",
+      "destination": "backend/tests/test_scene_api.py",
+      "sha256": "7dec34f66d4b63c7818a6ba71f678ce720a7abe5d520371ca004092969c59385"
+    },
+    {
+      "source": "backend/tests/test_session_actor.py",
+      "destination": "backend/tests/test_session_actor.py",
+      "sha256": "acd6fd29322953ee097f65cf742254fea05745ffe992bfb9602d5e05213f05da"
+    },
+    {
+      "source": "backend/tests/test_session_creation.py",
+      "destination": "backend/tests/test_session_creation.py",
+      "sha256": "3c06f28aa129cb4f0c01ce01ab1e2f858fe63af73d110e5e59bc9b83eb68674b"
+    },
+    {
+      "source": "backend/tests/test_simulation_ws.py",
+      "destination": "backend/tests/test_simulation_ws.py",
+      "sha256": "ea5f525472fd15c2529c02a9e52aa8bb7263297a6774f58cfc0dd2e913ba4eeb"
+    },
+    {
+      "source": "backend/tests/test_spatial_acceptance.py",
+      "destination": "backend/tests/test_spatial_acceptance.py",
+      "sha256": "a4f604178635986ace174b5612e183f9aeadb8f665bc998e38a1838c75188d77"
+    },
+    {
+      "source": "backend/tests/test_spatial_motion.py",
+      "destination": "backend/tests/test_spatial_motion.py",
+      "sha256": "4ef7353ccba6f14a157665d0dad647d4a156d518a2ecb1c996ba2d8fb5717972"
+    },
+    {
+      "source": "backend/tests/test_spatial_scene.py",
+      "destination": "backend/tests/test_spatial_scene.py",
+      "sha256": "54707264656f0700c6e64b0beb9b0e1fd56af3e5c2bff721ec4ddcb36c6bcd81"
+    },
+    {
+      "source": "backend/tests/test_training_contract_v2.py",
+      "destination": "backend/tests/test_training_contract_v2.py",
+      "sha256": "adc51110f7b84ecd3314cb1631a8e0e38e8dc7d88e478812a2fd65a1611b767f"
+    },
+    {
+      "source": "backend/tests/test_training_integration.py",
+      "destination": "backend/tests/test_training_integration.py",
+      "sha256": "51648db9a0ec0a98757a1e38db075c2dca9e47771beb1ae1a52bf52ae7563d8b"
+    },
+    {
+      "source": "backend/tests/test_training_store.py",
+      "destination": "backend/tests/test_training_store.py",
+      "sha256": "1bc593558f8d6ca26d0706edcd89e1901f229e3b58f6f521b110ca077fae2914"
+    },
+    {
+      "source": "backend/tests/test_training_telemetry.py",
+      "destination": "backend/tests/test_training_telemetry.py",
+      "sha256": "23f748f0811eb564b82472cc07b81d3640cfc025502c5fbbc4c286041a0f58eb"
+    },
+    {
+      "source": "backend/tests/test_trajectory_contract_adapter.py",
+      "destination": "backend/tests/test_trajectory_contract_adapter.py",
+      "sha256": "8974628b1da76609c1a5afe3d708b2bb8d537979f9b31dc0310609efb70d21e4"
+    },
+    {
+      "source": "backend/tests/test_trajectory_normalizer.py",
+      "destination": "backend/tests/test_trajectory_normalizer.py",
+      "sha256": "ee714ce565644bd64826357352eaeceb1e5cd5f7612208e0b426dc44aeb2e108"
+    },
+    {
+      "source": "backend/tests/test_trajectory_stream.py",
+      "destination": "backend/tests/test_trajectory_stream.py",
+      "sha256": "9cd1fec0eff3ad0d2f0275e6b8e4facff0bd9a89735a366b0583579075641639"
+    },
+    {
+      "source": "backend/tests/web_m2_05_demo.py",
+      "destination": "backend/tests/web_m2_05_demo.py",
+      "sha256": "3f5bea39b084be56ea80b7877e4946dd1c20eeaffb748eb253e08a8402bbf6ef"
+    },
+    {
+      "source": "contracts/.gitignore",
+      "destination": "contracts/.gitignore",
+      "sha256": "1581477a291b17ed3d49ce10b316d9c61164fb4b0cbe7d938e14a25b41d89cde"
+    },
+    {
+      "source": "contracts/__init__.py",
+      "destination": "contracts/__init__.py",
+      "sha256": "4d9afb5476d7336575156b4747982fb186a278ff3b53ba7b5c4c7fa50157fc30"
+    },
+    {
+      "source": "contracts/common.py",
+      "destination": "contracts/common.py",
+      "sha256": "f5d953d19801bce07dd4d9f653b21ca056c792c3a292eb34431c25bfdee2c35e"
+    },
+    {
+      "source": "contracts/REST/__init__.py",
+      "destination": "contracts/REST/__init__.py",
+      "sha256": "ce31ccc4692fc0bc1c4617ff3c62de75aa2fba6e82a6fea6416bf0a777eaa9a2"
+    },
+    {
+      "source": "contracts/REST/REST_Contract.py",
+      "destination": "contracts/REST/REST_Contract.py",
+      "sha256": "eded13eb978e6449bbabc5ced6f91a67972c47f2c6d55de1e28d8036026f09f9"
+    },
+    {
+      "source": "contracts/v2/__init__.py",
+      "destination": "contracts/v2/__init__.py",
+      "sha256": "fa71db6277081641f2eeb1a408ceb5a91fb47443a767f6c41c07709625776821"
+    },
+    {
+      "source": "contracts/v2/alert_cues.json",
+      "destination": "contracts/v2/alert_cues.json",
+      "sha256": "ec5a1f6cdb932da8bb8bbbf956df087fcb1dbb2f09fa5ee0dd8c9bd174defada"
+    },
+    {
+      "source": "contracts/v2/command.schema.json",
+      "destination": "contracts/v2/command.schema.json",
+      "sha256": "21b4affa2324db10ffea7f363939561d061a2e84d3749070b0bb5a830f876c76"
+    },
+    {
+      "source": "contracts/v2/create_session.schema.json",
+      "destination": "contracts/v2/create_session.schema.json",
+      "sha256": "45d1c3453f737517abf002c3165a0d7c996dff177ef92ea4c61432746ba0072b"
+    },
+    {
+      "source": "contracts/v2/fixtures/command.json",
+      "destination": "contracts/v2/fixtures/command.json",
+      "sha256": "8b9ea27046485e407f2eb97a28553b8fe8c6521daaa1967871e7d52dc950eede"
+    },
+    {
+      "source": "contracts/v2/fixtures/command_status.json",
+      "destination": "contracts/v2/fixtures/command_status.json",
+      "sha256": "3e1bebc518911148ed563fc6953c5b93c8c2f1c5191aa88ce1bb05f256b9dd72"
+    },
+    {
+      "source": "contracts/v2/fixtures/create_session.json",
+      "destination": "contracts/v2/fixtures/create_session.json",
+      "sha256": "a62328f87822ac47cd6a5b70b67aa445a8fd09ea1101bee1c217faedeea30618"
+    },
+    {
+      "source": "contracts/v2/fixtures/error.json",
+      "destination": "contracts/v2/fixtures/error.json",
+      "sha256": "5f4b8a8b09695662d4427366865db7b89b38a5b9cf47d8cebeaceaf4f7a0f0b7"
+    },
+    {
+      "source": "contracts/v2/fixtures/event_replay.json",
+      "destination": "contracts/v2/fixtures/event_replay.json",
+      "sha256": "0f25119fcdc8d3aed48d9f3159b3a884f43703f26617860b59b98113a437a109"
+    },
+    {
+      "source": "contracts/v2/fixtures/incompatible_major.json",
+      "destination": "contracts/v2/fixtures/incompatible_major.json",
+      "sha256": "1ba0f29ff613c7e18070eebe15e8c059dbbbbc551971b77fd4e3c1ddf8b0fec9"
+    },
+    {
+      "source": "contracts/v2/fixtures/invalid_enum.json",
+      "destination": "contracts/v2/fixtures/invalid_enum.json",
+      "sha256": "b2abdc5a029a090cfd4bbd2c059fd2626f794f53a5d1ed633dc0db7e87908b1c"
+    },
+    {
+      "source": "contracts/v2/fixtures/invalid_event_gap.json",
+      "destination": "contracts/v2/fixtures/invalid_event_gap.json",
+      "sha256": "dc06abbbdd1d607d62601596392ca557e99d2e88e8a52e200e835f1307499589"
+    },
+    {
+      "source": "contracts/v2/fixtures/low_reserve_snapshot.json",
+      "destination": "contracts/v2/fixtures/low_reserve_snapshot.json",
+      "sha256": "e60dadb98cbdc2ca368d97a66aa740c8ce2ff3224317b2a187e73663717082fe"
+    },
+    {
+      "source": "contracts/v2/fixtures/m2_3d_motion.json",
+      "destination": "contracts/v2/fixtures/m2_3d_motion.json",
+      "sha256": "4c83f84bb50c54d54c2aee2a94d4a84c0024344fe256fc568b4855e0e3ea0468"
+    },
+    {
+      "source": "contracts/v2/fixtures/missing_reference.json",
+      "destination": "contracts/v2/fixtures/missing_reference.json",
+      "sha256": "f8ddcf190a3f31f7cb8003f26ceacd3274de7b4919180d8144e3bd015035cfbb"
+    },
+    {
+      "source": "contracts/v2/fixtures/native_world_interaction.json",
+      "destination": "contracts/v2/fixtures/native_world_interaction.json",
+      "sha256": "a80888ee3c4e615ca1e0966f8e1a73ecb3fe647eac221f8fad951a1cf3c68614"
+    },
+    {
+      "source": "contracts/v2/fixtures/route_approval.json",
+      "destination": "contracts/v2/fixtures/route_approval.json",
+      "sha256": "29ca9ba12741c534e21f626139350440f5efe85579e19a907b502ef935975f1a"
+    },
+    {
+      "source": "contracts/v2/fixtures/route_edit_preview.json",
+      "destination": "contracts/v2/fixtures/route_edit_preview.json",
+      "sha256": "e008f04709ff3c62a50ac284593f115e4564329a3319ae967dd92836b126c73c"
+    },
+    {
+      "source": "contracts/v2/fixtures/route_edit_request.json",
+      "destination": "contracts/v2/fixtures/route_edit_request.json",
+      "sha256": "070d9d8e88efd1093fce1bc43ee81eff15d5fba4f1e1a9afec7d497ae49be674"
+    },
+    {
+      "source": "contracts/v2/fixtures/route_editor_context.json",
+      "destination": "contracts/v2/fixtures/route_editor_context.json",
+      "sha256": "e4aa8a07b413c901998422e99438a17eb6630accbc917af23239928bf9fea446"
+    },
+    {
+      "source": "contracts/v2/fixtures/scene_capabilities.json",
+      "destination": "contracts/v2/fixtures/scene_capabilities.json",
+      "sha256": "9f7b3e762b64b6ae2b1a348e7e9d6e9c9b390b3f613c4b9e7aeeb0b8a4dd9fa6"
+    },
+    {
+      "source": "contracts/v2/fixtures/scene_readiness.json",
+      "destination": "contracts/v2/fixtures/scene_readiness.json",
+      "sha256": "91294f405b182660ee1a7669f1bebac42aa60d7580eb32c353ca5f851c785d2a"
+    },
+    {
+      "source": "contracts/v2/fixtures/session_list.json",
+      "destination": "contracts/v2/fixtures/session_list.json",
+      "sha256": "1fc122b6edd1cbaf8756381b8e987feb7cf54ec04c707eb6f2a3be6652ebb5fe"
+    },
+    {
+      "source": "contracts/v2/fixtures/snapshot.json",
+      "destination": "contracts/v2/fixtures/snapshot.json",
+      "sha256": "e174c707705e7b1b6ccd8630748da0ec4b41e302f18f63d2968b88950589b18b"
+    },
+    {
+      "source": "contracts/v2/fixtures/spatial_cases.json",
+      "destination": "contracts/v2/fixtures/spatial_cases.json",
+      "sha256": "9cb77f344c98719fc6fe01b0c627259829ed251989bf40ab848c2099b32cae9a"
+    },
+    {
+      "source": "contracts/v2/fixtures/spatial_manifest_cases.json",
+      "destination": "contracts/v2/fixtures/spatial_manifest_cases.json",
+      "sha256": "3f84448d9d929beb94037667601ee666786338e990811cb6cea308fb41b14c3e"
+    },
+    {
+      "source": "contracts/v2/fixtures/spatial_snapshot.json",
+      "destination": "contracts/v2/fixtures/spatial_snapshot.json",
+      "sha256": "ee626b74f9b9061cff9e6ec9fae424fa581c7e67ee533b43433905135bf0c0a7"
+    },
+    {
+      "source": "contracts/v2/fixtures/stale_scene_revision.json",
+      "destination": "contracts/v2/fixtures/stale_scene_revision.json",
+      "sha256": "cc74f843d8c27a78443f8835d6f8be702cb2b0c8b0cf03d0e147fcd81cdf0755"
+    },
+    {
+      "source": "contracts/v2/generate_fixtures.py",
+      "destination": "contracts/v2/generate_fixtures.py",
+      "sha256": "2f3ecb4eecb710aa69594453ff0829f82ca89fc5ed480f76fa79b4ff9aa17180"
+    },
+    {
+      "source": "contracts/v2/message.schema.json",
+      "destination": "contracts/v2/message.schema.json",
+      "sha256": "1229df13fe18fec60088d2234a34f58d0145a800dea8c328290a0e60675f6958"
+    },
+    {
+      "source": "contracts/v2/models.py",
+      "destination": "contracts/v2/models.py",
+      "sha256": "2d9e640d6386d11c36bda7b4959965414b57f1ff60e19a3a370669720b54b302"
+    },
+    {
+      "source": "contracts/v2/README.md",
+      "destination": "contracts/v2/README.md",
+      "sha256": "1972106df8f0c064cf2d93fafa904772d7b32eba4055e51e11882801c63ae830"
+    },
+    {
+      "source": "contracts/v2/route_approval.schema.json",
+      "destination": "contracts/v2/route_approval.schema.json",
+      "sha256": "37ee2007ea454e77ad62b5dde661a4f10462dce05d0d8259516a674ee52950f1"
+    },
+    {
+      "source": "contracts/v2/route_edit.py",
+      "destination": "contracts/v2/route_edit.py",
+      "sha256": "53ddd24f05f9d98ee13497f483f2071a1a653e0eb0bc51bfa63d14524851152e"
+    },
+    {
+      "source": "contracts/v2/route_edit_preview.schema.json",
+      "destination": "contracts/v2/route_edit_preview.schema.json",
+      "sha256": "178e299f15853826fabd9f674b48ec7441d1d80742fcc2038d7e10ace1620466"
+    },
+    {
+      "source": "contracts/v2/route_edit_request.schema.json",
+      "destination": "contracts/v2/route_edit_request.schema.json",
+      "sha256": "ca91b38a813113fc126efb4aa08b74f2d39d5c394dd290ce70301f2fda676aec"
+    },
+    {
+      "source": "contracts/v2/route_editor_context.schema.json",
+      "destination": "contracts/v2/route_editor_context.schema.json",
+      "sha256": "8767eedc9e9443e3d3d5caf67db717a255d1371d1611db6a2a231d35c413ef56"
+    },
+    {
+      "source": "contracts/v2/scene_capabilities.schema.json",
+      "destination": "contracts/v2/scene_capabilities.schema.json",
+      "sha256": "2c22675c5c6534656a69baefae15a8152d60a593ced61a179265c188ec4b3ca1"
+    },
+    {
+      "source": "contracts/v2/scene_readiness.schema.json",
+      "destination": "contracts/v2/scene_readiness.schema.json",
+      "sha256": "c0da9721521dd633a2b49c7c1aed40f16038f031ec7e6a53fe0fabb8ccffeb98"
+    },
+    {
+      "source": "contracts/v2/session_list.schema.json",
+      "destination": "contracts/v2/session_list.schema.json",
+      "sha256": "d00c55dc802fb16be7e8b3ae88b5881be425fe61a968937539dcf47acdea6400"
+    },
+    {
+      "source": "contracts/v2/sessions.py",
+      "destination": "contracts/v2/sessions.py",
+      "sha256": "9117671cbd766ebd1ae1d434cb421cb0335711605e1aef389ff52dfe0c6d9dba"
+    },
+    {
+      "source": "contracts/v2/spatial.py",
+      "destination": "contracts/v2/spatial.py",
+      "sha256": "57a114270990e5aa1e08830ca50ecc9ab67c57400c5c1f7d49244511a0ede226"
+    },
+    {
+      "source": "contracts/v2/spatial_reference.schema.json",
+      "destination": "contracts/v2/spatial_reference.schema.json",
+      "sha256": "4936d169b2723152e596f2d8f6710b41d3c8d136911339b4db0239be37a737a6"
+    },
+    {
+      "source": "contracts/v2/spatial_vehicle.schema.json",
+      "destination": "contracts/v2/spatial_vehicle.schema.json",
+      "sha256": "b9abef109fb6001fb356ba44a10dd0936a6293d07e727f4c5d94a952e9e2d1ff"
+    },
+    {
+      "source": "contracts/v2/training_scene.schema.json",
+      "destination": "contracts/v2/training_scene.schema.json",
+      "sha256": "3d03cc41e2469bd530ee6a09369844ad419e006557c0f6be5a62c8c1f7afe489"
+    },
+    {
+      "source": "contracts/websocket/__init__.py",
+      "destination": "contracts/websocket/__init__.py",
+      "sha256": "da0aea42de5adfe0005488b39437c5f51ff4bd0a422b55a90a0c77e8201d3d33"
+    },
+    {
+      "source": "contracts/websocket/backend/__init__.py",
+      "destination": "contracts/websocket/backend/__init__.py",
+      "sha256": "0676698d6fd68b63dc040b0ee1fe1b65c7979303ff06ed33cc448a976f4c3ba7"
+    },
+    {
+      "source": "contracts/websocket/backend/contract.py",
+      "destination": "contracts/websocket/backend/contract.py",
+      "sha256": "6d95744fb42d001d28c5dd54529617d17a01f3490ddf645029d3d311eef5576e"
+    },
+    {
+      "source": "contracts/websocket/backend/tick.json",
+      "destination": "contracts/websocket/backend/tick.json",
+      "sha256": "d2f3870735b03782c1111303c8a6e21424dec07f1c8748bc5ab6df676749850b"
+    },
+    {
+      "source": "contracts/websocket/frontend/__init__.py",
+      "destination": "contracts/websocket/frontend/__init__.py",
+      "sha256": "980c1b41c0461ae29b77469a25bfcf5b4ddef14e4554c3c1a3f2e8084b7ce0e1"
+    },
+    {
+      "source": "contracts/websocket/frontend/contract.py",
+      "destination": "contracts/websocket/frontend/contract.py",
+      "sha256": "400a5cc71c8a37a320eea16491c26e997be8239205d1d649a07319bae93a737d"
+    },
+    {
+      "source": "scripts/build_m2_scene.py",
+      "destination": "scripts/build_m2_scene.py",
+      "sha256": "8fc2d988aef3518010f9d397ba828263e1457333cee45f206772927bd5c6c211"
+    },
+    {
+      "source": "scripts/download_kitti.py",
+      "destination": "scripts/download_kitti.py",
+      "sha256": "06f0de574fbc6a108941d92fb77a871cd474cc8f7159265c6b8c374842e685c6"
+    },
+    {
+      "source": "scripts/exportgpsroute.py",
+      "destination": "scripts/exportgpsroute.py",
+      "sha256": "1a68a4dd8968075a20a6b71c02d55ed3195a715fd75276251ed5237ac776eed0"
+    },
+    {
+      "source": "scripts/lidar_overlay.py",
+      "destination": "scripts/lidar_overlay.py",
+      "sha256": "b4d3cceaf2edf644b762e7e23c582f2bfb1836f09870b44c5b07ae08aa628d29"
+    },
+    {
+      "source": "scripts/setup_ml.py",
+      "destination": "scripts/setup_ml.py",
+      "sha256": "622f90f8d118a90e9ec6e56839d1b687064b062e3ac466b3c4d39def35d75e7c"
+    },
+    {
+      "source": "scripts/visualize_trajectory.py",
+      "destination": "scripts/visualize_trajectory.py",
+      "sha256": "d2be7f52b7e2165f188c311b123a041f0c906b2baabc6597985d8bb698a729e8"
+    },
+    {
+      "source": "Native/Assets/Phase5_Map/map.db",
+      "destination": "backend/fixtures/map/map.db",
+      "sha256": "7ab7c31c9bc49bc3ced785ef22b358be68aea9004c18ab9b7e3e064744308d49"
+    },
+    {
+      "source": "Native/Assets/Phase5_Map/map.osm",
+      "destination": "backend/fixtures/map/map.osm",
+      "sha256": "329132102392d32067434981b94c849826d0721b7687445947e1df45650ac4b4"
+    },
+    {
+      "source": "docs/session_creation.md",
+      "destination": "docs/session_creation.md",
+      "sha256": "16044ec7e2adb435b476f8ce70376b3632ef7ebeaee8bab98e1af3669a421894"
+    },
+    {
+      "source": "docs/milestone_status/M2/be-m2-02-status.md",
+      "destination": "docs/milestone_status/M2/be-m2-02-status.md",
+      "sha256": "70aed3c849d0bab10d19192cd71da8f247b6510c78b8cb0c98204f49c428ca83"
+    },
+    {
+      "source": "docs/milestone_status/M2/be-m2-03-status.md",
+      "destination": "docs/milestone_status/M2/be-m2-03-status.md",
+      "sha256": "98ef3acc174437e35b2bc1a9593a9416fdec9e0babf00005abc5a81b500bcdbf"
+    },
+    {
+      "source": "docs/milestone_status/M2/be-m2-04-status.md",
+      "destination": "docs/milestone_status/M2/be-m2-04-status.md",
+      "sha256": "18d5eae88123defda318a622a3a195a485ad70702870974c6f71f7975b08746b"
+    },
+    {
+      "source": "docs/milestone_status/M2/be-m2-05-battery-status.md",
+      "destination": "docs/milestone_status/M2/be-m2-05-battery-status.md",
+      "sha256": "bd59e34b5f4ee67d93e7bca1af5ce85ba8ff009f57e806e550bea6d736728d75"
+    },
+    {
+      "source": "docs/milestone_status/M2/be-m2-05-incident-status.md",
+      "destination": "docs/milestone_status/M2/be-m2-05-incident-status.md",
+      "sha256": "f860ca29ca201721641e60e1023fc6db0b2a6c44693d50ce1ab7791af59a7378"
+    },
+    {
+      "source": "docs/milestone_status/M2/be-m2-07-status.md",
+      "destination": "docs/milestone_status/M2/be-m2-07-status.md",
+      "sha256": "b577ec2ef2ff2a3e05c06ecef3337f397de0efb490ffd0f1480d2b6a0f958645"
+    },
+    {
+      "source": "docs/milestone_status/M2/be-m2-08-status.md",
+      "destination": "docs/milestone_status/M2/be-m2-08-status.md",
+      "sha256": "69e7c7e7bb0c67b8ec9c32f2ea892b0c3299026ae1b0ce972c69d686ef4f10fb"
+    },
+    {
+      "source": "docs/milestone_status/M2/be-m2-08-trace.json",
+      "destination": "docs/milestone_status/M2/be-m2-08-trace.json",
+      "sha256": "4207a7b0f228d9b0304c7d00cc7e022548c36bcf35d901de8f042aaaf3eb1979"
+    },
+    {
+      "source": "docs/milestone_status/M2/be-m2-09-headless-baseline.json",
+      "destination": "docs/milestone_status/M2/be-m2-09-headless-baseline.json",
+      "sha256": "c63e78b1b22e2875e5c5ef36b4b4ee9601ae8112871f6e88025d18bcb87fc6f2"
+    },
+    {
+      "source": "docs/milestone_status/M2/be-m2-09-status.md",
+      "destination": "docs/milestone_status/M2/be-m2-09-status.md",
+      "sha256": "9c1932cbddd549094e04dd73ef621f3663fbbda1aa216a5b3f29ccb821384daf"
+    }
+  ]
+}

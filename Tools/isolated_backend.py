@@ -1,10 +1,11 @@
-"""Run the real Formula_9 backend for end-to-end tests, isolated from team data.
+"""Run this repository's backend for end-to-end tests, isolated from team data.
 
 Accounts live in memory (never the shared MongoDB) and training sessions in a temporary
 database, so tests can sign up throwaway users and create sessions freely.
 
-Usage (from this repository's root, with Formula_9 alongside it):
-    python Tools/isolated_backend.py [--formula9 ../Formula_9] [--port 8010]
+Usage (from this repository's root):
+    python Tools/isolated_backend.py [--port 8010]
+    --formula9 <repository> optionally selects another checkout for compatibility tests.
 Then run the EndToEnd tests with FORMULA9_E2E_BACKEND_URL=http://127.0.0.1:8010.
 """
 
@@ -17,7 +18,7 @@ from pathlib import Path
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--formula9", type=Path, default=Path(__file__).resolve().parents[1].parent / "Formula_9")
+    parser.add_argument("--formula9", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--port", type=int, default=8010)
     args = parser.parse_args()
     repo = args.formula9.resolve()
