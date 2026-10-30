@@ -30,7 +30,8 @@ python Tools/run_backend.py
 # Development reload: run.bat --reload
 ```
 
-The launcher uses `backend/.venv` when present. It serves the API at
+The launcher requires this repository's `backend/.venv` (created by `--setup`)
+and prints the repository, interpreter and backend paths at startup. It serves the API at
 `http://127.0.0.1:8000` (health: `/api/health`, API explorer: `/docs`); Ctrl+C stops it.
 Without a MongoDB connection the server starts, but account endpoints return 503.
 Existing accounts remain available when configured with the same account database.

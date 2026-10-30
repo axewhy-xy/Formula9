@@ -28,9 +28,18 @@ def environment_python() -> Path:
 
 def backend_environment() -> dict[str, str]:
     environment = os.environ.copy()
-    environment["PYTHONPATH"] = os.pathsep.join(
-        [str(ROOT / "backend"), str(ROOT), *filter(None, [environment.get("PYTHONPATH")])]
-    )
+    # An activated environment or PYTHONPATH from the old checkout must not supply
+    # modules to this server. The local venv owns dependencies; these paths own code.
+    environment["PYTHONPATH"] = os.pathsep.join([str(ROOT / "backend"), str(ROOT)])
+    environment.pop("PYTHONHOME", None)
+    environment["PYTHONNOUSERSITE"] = "1"
+    previous_environment = environment.pop("VIRTUAL_ENV", None)
+    paths = environment.get("PATH", "").split(os.pathsep)
+    if previous_environment:
+        previous = Path(previous_environment).resolve()
+        paths = [p for p in paths if p and not Path(p).resolve().is_relative_to(previous)]
+    environment["VIRTUAL_ENV"] = str(ENVIRONMENT)
+    environment["PATH"] = os.pathsep.join([str(environment_python().parent), *paths])
     return environment
 
 
@@ -50,10 +59,18 @@ def main() -> int:
     environment = backend_environment()
     if args.setup:
         if not environment_python().exists():
-            venv.EnvBuilder(with_pip=True).create(ENVIRONMENT)
+            venv.EnvBuilder(with_pip=False).create(ENVIRONMENT)
+        # Recover cleanly if an earlier setup created the venv but pip failed.
+        result = subprocess.call([str(environment_python()), "-m", "ensurepip", "--upgrade"], cwd=ROOT, env=environment)
+        if result:
+            return result
         return subprocess.call([str(environment_python()), "-m", "pip", "install", "-r",
                                 str(ROOT / "backend/requirements.lock.txt")], cwd=ROOT, env=environment)
-    interpreter = str(environment_python()) if environment_python().exists() else sys.executable
+    if not environment_python().exists():
+        print(f"Backend environment is missing: {ENVIRONMENT}\n"
+              f"Run {ROOT / 'run.bat'} --setup first.", file=sys.stderr)
+        return 1
+    interpreter = str(environment_python())
     if args.test:
         scratch_root = ROOT / ".tools"
         scratch_root.mkdir(exist_ok=True)
@@ -66,7 +83,7 @@ def main() -> int:
     command = [interpreter, "-m", "uvicorn", "src.app:app", "--host", args.host, "--port", str(args.port)]
     if args.reload:
         command += ["--reload", "--reload-dir", str(ROOT / "backend/src"), "--reload-dir", str(ROOT / "contracts")]
-    print("Serving this repository's backend. Run with --setup first if dependencies are missing.", flush=True)
+    print(f"Repository: {ROOT}\nPython: {interpreter}\nBackend: {ROOT / 'backend'}", flush=True)
     return subprocess.call(command, cwd=ROOT, env=environment)
 
 

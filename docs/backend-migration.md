@@ -80,7 +80,16 @@ they are not part of the backend pytest suite or the Unity test workflow.
   adaptations to `backend/src/core/config.py`, `backend/.env.example` and
   `backend/README.md`.
 
-Backend validation used Python 3.14.4 with an isolated verification environment
-and installed dependencies. The original Python 3.12 dependency lock was kept
-unchanged; a fresh installation of that lock was not part of this validation.
+The full backend validation initially used Python 3.14.4 with an isolated
+verification environment and installed dependencies. A follow-up installed the
+unchanged dependency lock into this repository's own `backend/.venv` using
+Python 3.12.10: `pip check` succeeded and 49 focused launcher, map/API and session
+creation tests passed.
+
+The launcher now requires that local environment, discards inherited Python
+import paths, and prints its repository/interpreter/backend paths at startup.
+`run.bat` changes to its own repository directory before starting. Startup and
+map/health requests passed with old-checkout environment variables injected,
+and backend/map loading also passed with file reads from `Formula_9` blocked
+by a Python audit hook. The old project directory is not a runtime dependency.
 Temporary servers used disposable accounts/storage and were stopped afterward.

@@ -75,3 +75,26 @@ def test_launcher_isolates_tests_from_configured_account_and_session_stores(monk
     monkeypatch.setattr(run_backend.subprocess, "call", inspect)
     assert run_backend.main() == 0
     assert databases and not databases[0].parent.exists()
+
+
+def test_launcher_drops_an_old_checkout_from_the_python_environment(tmp_path, monkeypatch):
+    old = tmp_path / "Formula_9"
+    old_venv = old / "backend/.venv"
+    monkeypatch.setenv("PYTHONPATH", str(old / "backend"))
+    monkeypatch.setenv("PYTHONHOME", str(old))
+    monkeypatch.setenv("VIRTUAL_ENV", str(old_venv))
+    monkeypatch.setenv("PATH", str(old_venv / "Scripts"))
+    environment = run_backend.backend_environment()
+    assert environment["PYTHONPATH"].split(run_backend.os.pathsep) == [str(ROOT / "backend"), str(ROOT)]
+    assert "PYTHONHOME" not in environment
+    assert environment["VIRTUAL_ENV"] == str(ROOT / "backend/.venv")
+    assert str(old) not in environment["PATH"]
+    assert environment["PYTHONNOUSERSITE"] == "1"
+
+
+def test_launcher_requires_local_dependencies_instead_of_using_an_old_environment(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["run_backend.py"])
+    monkeypatch.setattr(run_backend, "environment_python", lambda: tmp_path / "missing-python.exe")
+    monkeypatch.setattr(run_backend.subprocess, "call", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Must not start a fallback interpreter")))
+    assert run_backend.main() == 1
+    assert "--setup first" in capsys.readouterr().err
