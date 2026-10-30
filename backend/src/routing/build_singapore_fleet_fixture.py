@@ -324,6 +324,45 @@ def find_peer_loops(net: Network, avoid_points, used, count=2):
     raise ValueError(f"Found only {len(loops)} of {count} peer loops clear of the main loop")
 
 
+PEER_STOP_SPACING_M = 120.0
+MAX_STOPS_PER_SHUTTLE = 4
+
+
+def split_peer_routes(data: dict, net: Network, used: set[str]) -> None:
+    """Give each shuttle on a shared loop its own route and its own real stops.
+
+    Two shuttles run each peer loop. They keep the same roads, and take turns at the stops on its
+    left kerb, so each has dedicated stops. Both still pull in at the loop's start, where it closes.
+    """
+    second_routes = {"route-peer-b": "route-peer-d", "route-peer-c": "route-peer-e"}
+    patterns, stops_by_route, anchors = [], {}, {}
+    for pattern in data["peer_patterns"]:
+        route_id = pattern["route_ID"]
+        points = [(p["x"], p["y"]) for p in pattern["waypoints"]]
+        lengths = [math.dist(a, b) for a, b in zip(points, points[1:])]
+        anchor = data["peer_stops"][route_id]
+        chosen, last = [], 0.0
+        for index, along, stop in stops_along(points, net.stops, used | {anchor.split("-")[0]}):
+            progress = sum(lengths[:index]) + along
+            if progress - last < PEER_STOP_SPACING_M or sum(lengths) - progress < PEER_STOP_SPACING_M:
+                continue
+            a, b = points[index], points[index + 1]
+            share = along / max(lengths[index], 1e-9)
+            chosen.append({"stop_id": f"{stop['ref']}-{slug(stop['name'])}", "progress_m": round(progress, 3),
+                           "x": round(a[0] + (b[0] - a[0]) * share, 3), "y": round(a[1] + (b[1] - a[1]) * share, 3)})
+            last = progress
+        start = {"stop_id": anchor, "progress_m": 0.0, "x": points[0][0], "y": points[0][1]}
+        for route, own in ((route_id, chosen[0::2]), (second_routes[route_id], chosen[1::2])):
+            patterns.append({"route_ID": route, "waypoints": pattern["waypoints"]})
+            stops_by_route[route] = [start, *own[:MAX_STOPS_PER_SHUTTLE]]
+            anchors[route] = anchor
+    data["peer_patterns"] = patterns
+    data["peer_route_stops"] = stops_by_route
+    data["peer_stops"] = anchors
+    # shuttle-02 and -04 share the first loop, shuttle-03 and -05 the second
+    data["vehicle_assignments"] = [data["vehicle_assignments"][0], "route-peer-b", "route-peer-c", "route-peer-d", "route-peer-e"]
+
+
 def connector(net: Network, start_point, start_node):
     """Real roads from a loop's start to the interchange, ending just inside it."""
     entry = min(net.access.nodes, key=lambda n: math.dist(net.position[n], net.depot))
@@ -422,6 +461,7 @@ def build(osm: dict, base: dict, area: dict) -> dict:
     ]
     data["peer_stops"] = {route_id: f"{loop['stop']['ref']}-{slug(loop['stop']['name'])}"
                           for route_id, loop in zip(("route-peer-b", "route-peer-c"), peers)}
+    split_peer_routes(data, net, used)
     # Whole metres, as the yard is laid out on axis-aligned lines from the bays: arrival then lands
     # exactly on a bay instead of a hair beside it
     depot = [float(round(net.depot[0])), float(round(net.depot[1]))]
@@ -434,6 +474,9 @@ def build(osm: dict, base: dict, area: dict) -> dict:
         "route-peer-b": connector(net, peers[0]["ring"][0], peers[0]["start_node"]),
         "route-peer-c": connector(net, peers[1]["ring"][0], peers[1]["start_node"]),
     }
+    # The second shuttle on each loop leaves it for the depot the same way
+    data["depot_connectors"]["route-peer-d"] = data["depot_connectors"]["route-peer-b"]
+    data["depot_connectors"]["route-peer-e"] = data["depot_connectors"]["route-peer-c"]
     data["assumptions"][0] = (f"Real {area['name']} road geometry and LTA bus stop positions from OpenStreetMap, simplified "
                               "to at most 64 waypoints a loop; energy-r1 estimates. Lanes, signals and traffic are not modelled.")
     data["assumptions"][1] = ("Shuttle-01 dwells at its loop entrance junction for 12 seconds; an obstruction on the first "

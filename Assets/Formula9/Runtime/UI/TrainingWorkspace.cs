@@ -315,6 +315,12 @@ namespace Formula9.UI
                 routeGraph.Show(context, null, ParseDraftOrEmpty());
                 world.SetRouteDraft(context, ParseDraftOrEmpty(), null);
             }
+            // Only some routes have a graph to edit. Choosing another is not a failure, so say so here,
+            // as the Qt editor does, rather than raising it.
+            catch (BackendErrorException error) when (error.Error.Code == "INVALID_REFERENCE")
+            {
+                if (generation == requestGeneration) routeStatus.text = $"{route} can't be edited in this scenario: {error.Error.Message}.";
+            }
             finally { routeBusy = false; UpdateActions(); if (reloadContext) run(LoadContext()); }
         }
 

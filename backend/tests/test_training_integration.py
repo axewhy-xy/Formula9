@@ -175,7 +175,7 @@ def reserve(runtime, vehicle_id="shuttle-05", key="battery-choice"):
 def test_one_live_session_runs_route_incident_depot_and_charging(runtime):
     client, store, service, session_id = runtime
     initial = read(runtime)
-    assert len(initial["vehicles"]) == 5 and len(initial["routes"]) == 3 and len(initial["chargers"]) == 2
+    assert len(initial["vehicles"]) == 5 and len(initial["routes"]) == 5 and len(initial["chargers"]) == 2
     assert send(runtime, "START")["status"] == "REJECTED"  # Closed route never silently starts.
     assert read(runtime)["session"]["status"] == "READY"
     draft = preview(runtime)

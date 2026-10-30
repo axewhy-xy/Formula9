@@ -10,7 +10,8 @@ from contracts.v2.models import Id
 from ..schemas.shuttle_data import Vector2D
 
 DEFAULT_ROUTES_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "routes_testing.json"
-MAX_ROUTES = 3
+# One per shuttle at most
+MAX_ROUTES = 5
 MAX_WAYPOINTS = 64
 MAX_ASSET_BYTES = 64 * 1024
 MAX_COORDINATE_M = 1_000_000.0
