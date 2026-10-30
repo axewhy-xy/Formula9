@@ -8,7 +8,8 @@ define admission to the curated live planar fleet scenario. The authenticated
 `TrainingSession`. Authenticated `GET /api/v2/sessions` returns a
 `SessionListResponse` from `sessions.py` (also `session_list.schema.json` and the
 shared `fixtures/session_list.json`): lightweight session IDs, scenario
-revisions, statuses and capacity flags, plus the live count and capacity.
+revisions, statuses and capacity flags, plus the live count, total stored count
+and capacity. It is paged by `limit` (1-500, default 100) and `offset`.
 Live attempts appear first, newest first within each group; archived history
 remains available for joining without occupying capacity.
 See [session creation](../../docs/session_creation.md) for

@@ -233,7 +233,20 @@ namespace Formula9.UI
         public static string SessionLabel(SessionListEntry entry) => $"{entry.Status} · {entry.SessionId}";
 
         public static string Capacity(SessionListResponse list) =>
-            $"{list.LiveCount}/{list.Capacity} live sessions · {list.Sessions.Count} total";
+            $"{list.LiveCount}/{list.Capacity} live sessions · {list.Total} total" +
+            (list.Sessions.Count < list.Total ? $" · showing {list.Sessions.Count}" : "");
+
+        // Only an attempt that can never run again may be deleted; the backend checks this too.
+        public static bool CanDelete(SessionListEntry entry) =>
+            entry != null && !entry.OccupiesCapacity && (entry.Status == "ARCHIVED" || entry.Status == "COMPLETED" || entry.Status == "FAILED");
+
+        public static string Reclaimed(SessionCompaction result)
+        {
+            var text = $"Training database reduced from {Megabytes(result.DatabaseBytesBefore)} to {Megabytes(result.DatabaseBytesAfter)}.";
+            return result.WalTruncated ? text : text + " Another reader held some space; try again shortly to release it.";
+        }
+
+        private static string Megabytes(long bytes) => (bytes / 1048576.0).ToString("0.0", CultureInfo.InvariantCulture) + " MB";
 
         public static string Outcome(CommandOutcome outcome)
         {

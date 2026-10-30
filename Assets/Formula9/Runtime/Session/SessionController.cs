@@ -77,6 +77,7 @@ namespace Formula9.Session
         // report does not silently omit commands that never produced a journaled receipt.
         public event Action<CommandOutcome> CommandLedgerChanged;
         public event Action<string> ErrorOccurred;
+        public event Action SessionLeft;
 
         public SessionController(TrainingApi api, AuthSession auth, SessionStore store = null,
             Func<TimeSpan, CancellationToken, Task> delay = null)
@@ -160,6 +161,22 @@ namespace Formula9.Session
             // A same-ID join keeps the store and cursor, replaying from where it left off.
             Store.Select(sessionId);
             return RequestSnapshotAsync(sessionId);
+        }
+
+        // Forgets the selected session and stops polling it, once it has been permanently deleted.
+        public void Leave()
+        {
+            generation++;
+            if (pending != null) FinishPending(Unconfirmed("INVALID_REFERENCE"));
+            joiningSessionId = null;
+            snapshotRequest = eventsRequest = commandRequest = null;
+            SessionId = null;
+            Session = null;
+            epoch = eventCursor = -1;
+            resyncPending = false;
+            Store.Select(null);
+            SetAvailable(false);
+            SessionLeft?.Invoke();
         }
 
         // One poll: confirm a pending creation, refresh the snapshot and reconcile a pending command.
@@ -250,6 +267,13 @@ namespace Formula9.Session
                 if (joiningSessionId == sessionId) joiningSessionId = null;
                 // An expired login keeps the session; the poll resumes after the next login.
                 if (error is NotLoggedInException) return;
+                // Another client deleted the joined session; polling it would only fail forever.
+                if (SessionId == sessionId && error is BackendErrorException gone && gone.Error.Status == 404 && gone.Error.Code == "INVALID_REFERENCE")
+                {
+                    Leave();
+                    Error($"Training session {sessionId} no longer exists; it was permanently deleted.");
+                    return;
+                }
                 SetAvailable(false);
                 Error(error is ContractException ? $"Invalid v2 snapshot: {error.Message}" : $"Join/refresh failed: {error.Message}");
                 return;

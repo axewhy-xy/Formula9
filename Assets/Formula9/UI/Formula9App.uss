@@ -45,6 +45,36 @@
 
 .primary:hover, .app Button.primary:hover { background-color: rgb(26, 106, 106); }
 
+.danger, .app Button.danger {
+    color: rgb(255, 255, 255);
+    background-color: rgb(214, 48, 49);
+    border-width: 0;
+    -unity-font-style: bold;
+}
+
+.danger:hover, .app Button.danger:hover { background-color: rgb(186, 40, 41); }
+
+.dialog-overlay {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(0, 0, 0, 0.45);
+}
+
+.dialog {
+    width: 460px;
+    padding: 20px;
+    border-radius: 6px;
+    background-color: rgb(255, 255, 255);
+}
+
+.dialog-text { white-space: normal; margin-bottom: 16px; }
+.dialog-actions { flex-direction: row; justify-content: flex-end; }
+
 /* Login */
 .login {
     flex-grow: 1;

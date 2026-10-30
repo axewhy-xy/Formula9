@@ -116,7 +116,95 @@ def test_session_list_requires_login_and_returns_empty_capacity(api):
     assert client.get("/api/v2/sessions", headers={"Authorization": "Bearer invalid"}).status_code == 401
     response = client.get("/api/v2/sessions", headers=HEADERS)
     assert response.status_code == 200
-    assert response.json() == {"sessions": [], "live_count": 0, "capacity": 16}
+    assert response.json() == {"sessions": [], "live_count": 0, "total": 0, "capacity": 16}
+
+
+def archived_attempts(client, store, count):
+    ids = []
+    for index in range(count):
+        session_id = client.post("/api/v2/sessions", headers={**HEADERS, "Idempotency-Key": f"archived-{index}"},
+                                 json=BODY).json()["session_id"]
+        assert control(client, store.snapshot(session_id).model_dump(mode="json"), "ARCHIVE").json()["status"] == "APPLIED"
+        ids.append(session_id)
+    return ids
+
+
+def test_session_list_pages_keep_whole_table_counts_and_live_attempts_first(api, monkeypatch):
+    monkeypatch.setattr(TrainingSessionService, "_run", manual_clock)
+    client, store = api
+    archived = archived_attempts(client, store, 3)
+    live = create(client).json()["session_id"]
+    path = "/api/v2/sessions"
+    first = client.get(path, headers=HEADERS, params={"limit": 2}).json()
+    assert [s["session_id"] for s in first["sessions"]] == [live, archived[2]]
+    assert (first["total"], first["live_count"]) == (4, 1)
+    second = client.get(path, headers=HEADERS, params={"limit": 2, "offset": 2}).json()
+    assert [s["session_id"] for s in second["sessions"]] == [archived[1], archived[0]]
+    assert (second["total"], second["live_count"]) == (4, 1)
+    for params in ({"limit": 0}, {"limit": 501}, {"offset": -1}):
+        assert client.get(path, headers=HEADERS, params=params).status_code == 422
+
+
+def test_purge_keeps_newest_terminal_and_every_live_attempt(api, monkeypatch):
+    monkeypatch.setattr(TrainingSessionService, "_run", manual_clock)
+    client, store = api
+    archived = archived_attempts(client, store, 3)
+    live = create(client).json()["session_id"]
+    path = "/api/v2/sessions/purge"
+    assert client.post(path, params={"keep_latest": 1}).status_code == 403
+    assert client.post(path, headers=HEADERS).status_code == 422
+    assert client.post(path, headers=HEADERS, params={"keep_latest": -1}).status_code == 422
+    response = client.post(path, headers=HEADERS, params={"keep_latest": 1})
+    assert response.status_code == 200 and response.json() == {"deleted_count": 2}
+    assert [s["session_id"] for s in store.list_sessions()] == [live, archived[2]]
+    with sqlite3.connect(store.path) as connection:
+        for table in ("session_creations", "commands", "events", "checkpoints"):
+            assert connection.execute(f"SELECT COUNT(*) FROM {table} WHERE session_id=?", (archived[0],)).fetchone()[0] == 0
+    assert client.post(path, headers=HEADERS, params={"keep_latest": 1}).json() == {"deleted_count": 0}
+    assert client.post(path, headers=HEADERS, params={"keep_latest": 0}).json() == {"deleted_count": 1}
+    assert [s["session_id"] for s in store.list_sessions()] == [live]
+
+
+@pytest.mark.parametrize("keep_latest, expected", [(None, 3), (1, 1)])
+def test_retention_setting_prunes_terminal_history_at_startup_only_when_opted_in(tmp_path, monkeypatch, keep_latest, expected):
+    monkeypatch.setattr(TrainingSessionService, "_run", manual_clock)
+
+    async def exercise():
+        with TrainingStore(tmp_path / "retention.sqlite") as store:
+            first = TrainingSessionService(store)
+            for index in range(3):
+                snapshot = await first.create(CreateSessionRequest(**BODY), ACTOR, f"attempt-{index}")
+                await first.submit(ACTOR, DispatcherCommand(
+                    contract_version="2.0", command_id=str(uuid4()), idempotency_key=str(uuid4()),
+                    session_id=snapshot.session_id, command_type="ARCHIVE", expected_epoch=snapshot.session_epoch,
+                    expected_revision=snapshot.session.aggregate_revision, target_type="SESSION",
+                    target_id=snapshot.session_id, payload={}, reason=None))
+            await first.close()
+            newest = store.list_sessions()[0]["session_id"]
+            second = TrainingSessionService(store, retention_keep_latest=keep_latest)
+            await second.initialize()
+            await second.close()
+            listed = store.list_sessions()
+            assert len(listed) == expected and listed[0]["session_id"] == newest
+
+    asyncio.run(exercise())
+
+
+def test_failed_retention_does_not_block_startup(tmp_path, monkeypatch, caplog):
+    with TrainingStore(tmp_path / "retention-failure.sqlite") as store:
+        def fail(_):
+            raise TrainingStoreError("QUEUE_FULL", "Injected retention failure")
+
+        monkeypatch.setattr(store, "expired_session_ids", fail)
+
+        async def exercise():
+            service = TrainingSessionService(store, retention_keep_latest=1)
+            await service.initialize()
+            assert (await service.create(CreateSessionRequest(**BODY), ACTOR, "after")).session.status == "READY"
+            await service.close()
+
+        asyncio.run(exercise())
+    assert "Training retention failed" in caplog.text
 
 
 def test_session_list_includes_history_and_updates_capacity_after_archive(api, monkeypatch):

@@ -152,10 +152,25 @@ and `wal_truncated`. If an existing reader prevents WAL truncation,
 space. A disconnected caller does not cancel a deletion or compaction already
 accepted by the service.
 
-Cleanup is manual. History has no automatic retention policy, and the dropdown
-still loads all retained metadata. Delete unwanted terminal sessions regularly
-to limit stored history and list size; long-running retained attempts continue
-to accumulate history.
+To clear history in bulk, click **Delete old sessions…**. After confirmation it
+permanently deletes every ARCHIVED, COMPLETED and FAILED session except the 20
+most recently created. Authenticated `POST /api/v2/sessions/purge?keep_latest=N`
+exposes the same operation with any N of 0 or more and returns `deleted_count`.
+Each session is deleted in its own transaction so running sessions keep ticking;
+if interrupted, repeat the request to finish. Live attempts are never touched.
+
+For automatic retention, set `TRAINING_RETENTION_KEEP_LATEST=N` in the backend's
+environment. Each backend start then applies the same purge before serving
+requests. It is off by default because it deletes history without confirmation.
+It does not run while the backend stays up, and it does not `VACUUM`: the freed
+pages are reused by new history, so the file stops growing but does not shrink.
+A retained attempt's own history keeps growing for as long as it runs.
+
+`GET /api/v2/sessions` is paged by `limit` (1-500, default 100) and `offset`, and
+also returns `total`, the number of stored sessions. `live_count` always covers
+all sessions, and live attempts sort first, so the first page holds them. The
+dropdown lists the newest 50 and **Show more** extends it by 50, up to 500. Older
+sessions can still be joined by ID.
 
 ## Runtime and recovery
 

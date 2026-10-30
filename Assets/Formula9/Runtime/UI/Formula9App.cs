@@ -27,6 +27,14 @@ namespace Formula9.UI
         private bool signUp, busy, loggingOut;
         private List<SessionListEntry> listedSessions = new List<SessionListEntry>();
         private string lastListedState;
+        private const int SessionListPage = 50, MaxSessionListLimit = 500, KeptByPurge = 20;
+        private int sessionListLimit = SessionListPage;
+        private long liveSessions = -1;
+        private bool cleanupBusy;
+        private Button moreSessions, deleteSession, purgeSessions, reclaimDisk, dialogCancel, dialogConfirm;
+        private VisualElement dialogOverlay;
+        private Label dialogText;
+        private Func<Task> dialogAction;
 
         private VisualElement loginScreen, trainingScreen, fleet, confirmRow, fleetPanel;
         private TextField fleetSearch;
@@ -66,6 +74,14 @@ namespace Formula9.UI
                 if (outcome.Status == "REJECTED" && outcome.TargetType == "SESSION" && outcome.FailureCode == "UNKNOWN_CONSTRAINT") workspace?.ShowRoutePlanning();
             };
             session.ErrorOccurred += error => ShowMessage($"Training session: {error}");
+            session.SessionLeft += () =>
+            {
+                world.Show(null);
+                sessionId.SetValueWithoutNotify("");
+                lastListedState = null;
+                Render();
+                Run(RefreshSessionList());
+            };
 
             BindLogin(GetComponent<UIDocument>().rootVisualElement);
             BindTraining(GetComponent<UIDocument>().rootVisualElement);
@@ -202,8 +218,34 @@ namespace Formula9.UI
             scenario.RegisterValueChangedCallback(_ => { session.Scenario = TrainingPresenter.Scenarios[scenario.index].Id; Render(); });
             sessions.RegisterValueChangedCallback(_ =>
             {
-                if (sessions.index >= 0 && sessions.index < listedSessions.Count) Run(Join(listedSessions[sessions.index].SessionId));
+                RenderCleanup();
+                if (SelectedEntry != null) Run(Join(SelectedEntry.SessionId));
             });
+            moreSessions = root.Q<Button>("more-sessions");
+            moreSessions.clicked += () =>
+            {
+                sessionListLimit = Math.Min(sessionListLimit + SessionListPage, MaxSessionListLimit);
+                Run(RefreshSessionList());
+            };
+            deleteSession = root.Q<Button>("delete-session");
+            purgeSessions = root.Q<Button>("purge-sessions");
+            reclaimDisk = root.Q<Button>("reclaim-disk");
+            deleteSession.clicked += ConfirmDeleteSession;
+            purgeSessions.clicked += ConfirmPurgeSessions;
+            reclaimDisk.clicked += () => Run(Cleanup("Reclaiming disk space…", async () => TrainingPresenter.Reclaimed(await api.CompactSessionsAsync())));
+            dialogOverlay = root.Q("dialog-overlay");
+            dialogText = root.Q<Label>("dialog-text");
+            dialogCancel = root.Q<Button>("dialog-cancel");
+            dialogConfirm = root.Q<Button>("dialog-confirm");
+            dialogCancel.clicked += CloseDialog;
+            dialogConfirm.clicked += () =>
+            {
+                var confirmed = dialogAction;
+                CloseDialog();
+                if (confirmed != null) Run(confirmed());
+            };
+            dialogOverlay.RegisterCallback<KeyDownEvent>(e => { if (e.keyCode == KeyCode.Escape) CloseDialog(); }, TrickleDown.TrickleDown);
+            RenderCleanup();
 
             root.Q<Button>("logout").clicked += () =>
             {
@@ -287,6 +329,7 @@ namespace Formula9.UI
 
         private void ShowLogin(string notice)
         {
+            CloseDialog();
             loginScreen.style.display = DisplayStyle.Flex;
             trainingScreen.style.display = DisplayStyle.None;
             loginError.text = notice ?? "";
@@ -316,13 +359,81 @@ namespace Formula9.UI
             return session.JoinAsync(id);
         }
 
+        private SessionListEntry SelectedEntry =>
+            sessions.index >= 0 && sessions.index < listedSessions.Count ? listedSessions[sessions.index] : null;
+
+        private void RenderCleanup()
+        {
+            deleteSession.SetEnabled(!cleanupBusy && TrainingPresenter.CanDelete(SelectedEntry));
+            purgeSessions.SetEnabled(!cleanupBusy);
+            reclaimDisk.SetEnabled(!cleanupBusy && liveSessions == 0);
+        }
+
+        private void ConfirmDeleteSession()
+        {
+            var id = SelectedEntry?.SessionId;
+            if (id == null) return;
+            Confirm($"Permanently delete session {id}? Its history is removed for everyone. This cannot be undone.", "Delete permanently", () => Cleanup(
+                $"Deleting session {id}…",
+                async () =>
+                {
+                    await api.DeleteSessionAsync(id);
+                    if (session.Store.SelectedSessionId == id) session.Leave();
+                    return $"Session {id} was permanently deleted.";
+                }));
+        }
+
+        private void ConfirmPurgeSessions() => Confirm(
+            $"Permanently delete every archived, completed or failed session except the {KeptByPurge} most recent? Their history is removed for everyone. This cannot be undone.",
+            "Delete old sessions", () => Cleanup("Deleting old sessions…", async () =>
+            {
+                var deleted = await api.PurgeSessionsAsync(KeptByPurge);
+                return deleted == 0 ? "No old sessions to delete." : $"Deleted {deleted} old training sessions.";
+            }));
+
+        // Cancel holds the focus, so the default answer to a destructive question is no.
+        private void Confirm(string text, string action, Func<Task> confirmed)
+        {
+            dialogText.text = text;
+            dialogConfirm.text = action;
+            dialogAction = confirmed;
+            dialogOverlay.style.display = DisplayStyle.Flex;
+            dialogCancel.Focus();
+        }
+
+        private void CloseDialog()
+        {
+            dialogAction = null;
+            dialogOverlay.style.display = DisplayStyle.None;
+        }
+
+        private async Task Cleanup(string progress, Func<Task<string>> work)
+        {
+            cleanupBusy = true;
+            RenderCleanup();
+            ShowMessage(progress);
+            try { ShowMessage(await work()); }
+            catch (Exception error) when (!(error is NotLoggedInException))
+            {
+                ShowMessage($"Cleanup did not finish: {error.Message} If no reply arrived it may still complete; refresh the list to check.");
+            }
+            finally
+            {
+                cleanupBusy = false;
+                RenderCleanup();
+            }
+            await RefreshSessionList();
+        }
+
         private async Task RefreshSessionList()
         {
             refreshSessions.text = "Loading…";
             try
             {
-                var list = await api.ListSessionsAsync();
+                var list = await api.ListSessionsAsync(sessionListLimit);
                 listedSessions = list.Sessions;
+                liveSessions = list.LiveCount;
+                moreSessions.style.display = list.Sessions.Count < list.Total && sessionListLimit < MaxSessionListLimit ? DisplayStyle.Flex : DisplayStyle.None;
                 sessions.SetValueWithoutNotify(listedSessions.Count == 0 ? "No training sessions found" : "Select a session to join");
                 sessions.choices = listedSessions.Select(TrainingPresenter.SessionLabel).ToList();
                 var selected = listedSessions.FindIndex(s => s.SessionId == session.SessionId);
@@ -337,6 +448,7 @@ namespace Formula9.UI
             finally
             {
                 refreshSessions.text = "Refresh list";
+                RenderCleanup();
             }
         }
 
