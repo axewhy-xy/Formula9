@@ -10,8 +10,8 @@ namespace Formula9.Audio
 
     // amee's sound review, as the Formula_9 web app applies it (uiAudio.ts), mapped onto the Unity
     // controls:
-    //   - TileHover 2 on hover for every enabled button except the big ones (BigButtonClasses) and
-//     Start scenario, which has its own click sound; no click sound.
+    //   - TileHover 2 on hover for the enabled buttons of the main simulator (not the login page),
+//     except the big primary ones; no click sound. Start scenario is one of amee's hover buttons.
     //   - UI_Hover 6 when Start scenario is clicked.
     //   - UI Hover New 1 when a node is picked on the route planning graph.
     //   - A higher-pitched UI Hover New 1 when a dropdown opens and when an option is chosen;
@@ -44,13 +44,12 @@ namespace Formula9.Audio
         }
 
         // The large call-to-action buttons stay silent on hover, as in the web app.
-        public static readonly IReadOnlyList<string> BigButtonClasses = new[] { "primary", "login-button" };
-        public const string StartButtonName = "start";
+        public const string BigButtonClass = "primary";
 
         private Button hovered;
 
         public static bool HoverPlays(Button button) =>
-            button.enabledInHierarchy && button.name != StartButtonName && !BigButtonClasses.Any(button.ClassListContains);
+            button.enabledInHierarchy && !button.ClassListContains(BigButtonClass);
 
         public void Hovered(Button button)
         {
@@ -77,7 +76,7 @@ namespace Formula9.Audio
             if (now() - at <= ChoiceWindowSeconds) play?.Invoke(UiSound.Dropdown);
         }
 
-        // Listens once on the root, so controls the screens build later (charging decisions, map
+        // Listens once on the main simulator's root, so controls the screens build later (charging decisions, map
         // zoom buttons) are covered too. Pointer over/down bubble up from icons and labels inside a
         // control, so each is resolved to the button or dropdown that contains it.
         public void Attach(VisualElement root)

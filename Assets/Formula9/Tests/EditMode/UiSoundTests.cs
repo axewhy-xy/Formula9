@@ -37,9 +37,6 @@ namespace Formula9.Tests
             sounds.Hovered(Button("Pause"));
             sounds.Hovered(Button("Start scenario", primary: true));
             sounds.Hovered(Button("Resume", enabled: false));
-            var login = Button("LOGIN"); login.AddToClassList("login-button");
-            sounds.Hovered(login);
-            sounds.Hovered(new Button { name = UiSounds.StartButtonName, text = "Start scenario" });
             CollectionAssert.AreEqual(new[] { UiSound.ButtonHover }, played);
         }
 
@@ -47,8 +44,11 @@ namespace Formula9.Tests
         public void TheRealLayoutsBigButtonsAreTheOnesWithoutHoverSound()
         {
             var root = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/Formula9/UI/Formula9App.uxml").CloneTree();
-            var silent = root.Query<Button>().ToList().Where(b => !UiSounds.HoverPlays(b)).Select(b => b.name);
-            CollectionAssert.AreEquivalent(new[] { "submit", "create", "join", "start" }, silent);
+            var shell = root.Q("training-host");
+            var silent = shell.Query<Button>().ToList().Where(b => !UiSounds.HoverPlays(b)).Select(b => b.name);
+            CollectionAssert.AreEquivalent(new[] { "create", "join" }, silent);
+            Assert.IsTrue(UiSounds.HoverPlays(shell.Q<Button>("start")), "amee lists start among the hover buttons");
+            Assert.IsNull(shell.Q<Button>("submit"), "the login page is outside the simulator");
         }
 
         // Pointer events reach the root from whatever is under the pointer: an icon or label inside

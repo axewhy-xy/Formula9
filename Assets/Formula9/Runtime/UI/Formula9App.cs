@@ -104,7 +104,8 @@ namespace Formula9.UI
             var uiPlayer = new GameObject("Interface sounds").AddComponent<UiSoundPlayer>();
             uiPlayer.transform.SetParent(transform, false);
             var uiSounds = new UiSounds(uiPlayer.Play);
-            uiSounds.Attach(root);
+            // amee's hover buttons are all on the main simulator, so the login page stays silent.
+            uiSounds.Attach(root.Q("training-host"));
             start.clicked += uiSounds.StartClicked;
             world.RouteNodeSelected += _ => uiSounds.PointPicked();
 
