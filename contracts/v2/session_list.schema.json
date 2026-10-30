@@ -63,11 +63,17 @@
       },
       "title": "Sessions",
       "type": "array"
+    },
+    "total": {
+      "minimum": 0,
+      "title": "Total",
+      "type": "integer"
     }
   },
   "required": [
     "sessions",
     "live_count",
+    "total",
     "capacity"
   ],
   "title": "SessionListResponse",

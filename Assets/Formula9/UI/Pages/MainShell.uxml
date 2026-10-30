@@ -49,7 +49,14 @@
                 <ui:VisualElement class="row">
                     <ui:DropdownField name="sessions" label="Existing sessions" class="sessions" />
                     <ui:Button name="refresh-sessions" text="Refresh list" />
+                    <ui:Button name="more-sessions" text="Show more" tooltip="List older sessions too." style="display: none;" />
                     <ui:Label name="capacity" text="Session list not loaded" class="muted" />
+                </ui:VisualElement>
+
+                <ui:VisualElement class="row">
+                    <ui:Button name="delete-session" text="Delete permanently…" tooltip="Remove the selected archived, completed or failed session and all of its history, for everyone." />
+                    <ui:Button name="purge-sessions" text="Delete old sessions…" tooltip="Remove every finished session except the most recent ones." />
+                    <ui:Button name="reclaim-disk" text="Reclaim disk space" tooltip="Return space freed by deletions to the disk. Archive all live sessions first." />
                 </ui:VisualElement>
 
                 <ui:VisualElement class="row">
@@ -83,6 +90,16 @@
                         <ui:Instance template="Reports" name="page-reports" class="page-host" style="display: none;" />
                         <ui:Instance template="Scenarios" name="page-scenarios" class="page-host" style="display: none;" />
                     </ui:VisualElement>
+                </ui:VisualElement>
+            </ui:VisualElement>
+        </ui:VisualElement>
+
+        <ui:VisualElement name="dialog-overlay" class="dialog-overlay" style="display: none;">
+            <ui:VisualElement class="dialog">
+                <ui:Label name="dialog-text" class="dialog-text" />
+                <ui:VisualElement class="dialog-actions">
+                    <ui:Button name="dialog-cancel" text="Cancel" />
+                    <ui:Button name="dialog-confirm" class="danger" />
                 </ui:VisualElement>
             </ui:VisualElement>
         </ui:VisualElement>

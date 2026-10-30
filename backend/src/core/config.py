@@ -42,6 +42,8 @@ class Settings(BaseModel):
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     map_database_path: Path
     training_database_path: Path
+    # Opt-in: at each start, delete terminal training sessions older than this many newest ones
+    training_retention_keep_latest: int | None = Field(default=None, ge=0)
     # LTA DataMall bus stops/services/routes, written by src.transit.import_lta
     transit_database_path: Path
     # Accounts are stored in MongoDB; without a URI the /auth endpoints answer 503
@@ -95,6 +97,7 @@ def get_settings() -> Settings:
         cors_origins=[origin for origin in origins if origin],
         map_database_path=map_database_path,
         training_database_path=training_database_path,
+        training_retention_keep_latest=getenv("TRAINING_RETENTION_KEEP_LATEST") or None,
         transit_database_path=transit_database_path,
         mongodb_uri=getenv("MONGODB_URI") or None,
         mongodb_database=getenv("MONGODB_DATABASE", "formula9"),

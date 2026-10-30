@@ -9,6 +9,7 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 import hashlib
 import logging
+import sqlite3
 from typing import Any, TypeVar
 from uuid import uuid4
 
@@ -91,8 +92,9 @@ class TrainingSessionService:
     MAX_SESSIONS = 16
     FAILURE_RETRY_S = 0.25
 
-    def __init__(self, store: TrainingStore):
+    def __init__(self, store: TrainingStore, *, retention_keep_latest: int | None = None):
         self.store = store
+        self.retention_keep_latest = retention_keep_latest
         self.sessions: dict[str, LiveSession] = {}
         self.closed = False
         self._initialized = False
@@ -129,6 +131,13 @@ class TrainingSessionService:
             self._initialized = True
             for session in self.sessions.values():
                 self._start(session)
+            if self.retention_keep_latest is not None:
+                try:
+                    purged = await self._purge(self.retention_keep_latest)
+                    logger.info("Training retention deleted %d old sessions", purged["deleted_count"])
+                except (TrainingStoreError, sqlite3.Error):
+                    # History left behind is retried at the next start; it must not block training.
+                    logger.exception("Training retention failed")
 
     def _restore(self) -> dict[str, LiveSession]:
         sessions = {}
@@ -238,6 +247,22 @@ class TrainingSessionService:
         if self.owns(session_id):
             raise TrainingStoreError("INVALID_TRANSITION", "Archive the session before permanently deleting it")
         await asyncio.to_thread(self.store.delete_session, session_id)
+
+    async def purge(self, keep_latest: int) -> dict:
+        await self.initialize()
+        return await self._complete(self._purge(keep_latest))
+
+    async def _purge(self, keep_latest: int) -> dict:
+        expired = await asyncio.to_thread(self.store.expired_session_ids, keep_latest)
+        deleted = 0
+        # One writer transaction per attempt, so running sessions' ticks interleave.
+        for session_id in expired:
+            if self.closed:
+                break
+            if not self.owns(session_id):
+                await asyncio.to_thread(self.store.delete_session, session_id)
+                deleted += 1
+        return {"deleted_count": deleted}
 
     async def compact(self) -> dict:
         await self.initialize()

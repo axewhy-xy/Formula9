@@ -49,6 +49,18 @@ namespace Formula9.Backend
         [JsonProperty("expires_in", Required = Required.Always)] public long ExpiresIn { get; set; }
     }
 
+    public sealed class SessionPurge
+    {
+        [JsonProperty("deleted_count", Required = Required.Always)] public long DeletedCount { get; set; }
+    }
+
+    public sealed class SessionCompaction
+    {
+        [JsonProperty("database_bytes_before", Required = Required.Always)] public long DatabaseBytesBefore { get; set; }
+        [JsonProperty("database_bytes_after", Required = Required.Always)] public long DatabaseBytesAfter { get; set; }
+        [JsonProperty("wal_truncated", Required = Required.Always)] public bool WalTruncated { get; set; }
+    }
+
     // Shared request plumbing for the auth and training clients.
     public abstract class BackendClientBase
     {
@@ -147,13 +159,35 @@ namespace Formula9.Backend
     // /api/v2/sessions: every call needs a login and returns validated contract objects.
     public sealed partial class TrainingApi : BackendClientBase
     {
+        // Rewriting or trimming a large database outlasts the usual request bound.
+        private const int MaintenanceTimeoutSeconds = 300;
+
         private readonly AuthSession session;
 
         public TrainingApi(IHttpTransport transport, AuthSession session, Uri baseUrl = null) : base(transport, baseUrl) =>
             this.session = session ?? throw new ArgumentNullException(nameof(session));
 
-        public async Task<SessionListResponse> ListSessionsAsync(CancellationToken cancellation = default) =>
-            ContractParser.Parse<SessionListResponse>(await SendTrainingAsync("GET", "", null, cancellation));
+        public async Task<SessionListResponse> ListSessionsAsync(int limit = 100, CancellationToken cancellation = default) =>
+            ContractParser.Parse<SessionListResponse>(await SendTrainingAsync("GET", $"?limit={limit}", null, cancellation));
+
+        // Permanent. A missing session also succeeds, so retrying after a lost reply is safe.
+        public Task DeleteSessionAsync(string sessionId, CancellationToken cancellation = default) =>
+            SendTrainingAsync("DELETE", $"/{Segment(sessionId)}", null, cancellation);
+
+        // Deletes finished sessions older than the newest keepLatest; returns how many went.
+        public async Task<long> PurgeSessionsAsync(int keepLatest, CancellationToken cancellation = default) =>
+            ReadReply<SessionPurge>(await SendTrainingAsync("POST", $"/purge?keep_latest={keepLatest}", null, cancellation,
+                http => http.TimeoutSeconds = MaintenanceTimeoutSeconds)).DeletedCount;
+
+        public async Task<SessionCompaction> CompactSessionsAsync(CancellationToken cancellation = default) =>
+            ReadReply<SessionCompaction>(await SendTrainingAsync("POST", "/compact", null, cancellation,
+                http => http.TimeoutSeconds = MaintenanceTimeoutSeconds));
+
+        private static T ReadReply<T>(string json)
+        {
+            try { return JsonConvert.DeserializeObject<T>(json); }
+            catch (JsonException error) { throw new ContractException($"Invalid {typeof(T).Name} reply: {error.Message}"); }
+        }
 
         // Retrying with the same key returns the same session instead of creating another.
         public async Task<TrainingSession> CreateSessionAsync(CreateSessionRequest request, string idempotencyKey,

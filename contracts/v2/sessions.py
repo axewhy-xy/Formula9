@@ -24,5 +24,6 @@ class SessionListEntry(BaseModel):
 class SessionListResponse(BaseModel):
     sessions: list[SessionListEntry]
     live_count: Annotated[int, Field(ge=0)]
+    total: Annotated[int, Field(ge=0)]
     capacity: Annotated[int, Field(ge=1)]
 

@@ -160,6 +160,51 @@ namespace Formula9.Tests
         }
 
         [Test]
+        public async Task SessionListAsksForOnePage()
+        {
+            LogIn();
+            transport.Reply = _ => Ok(Fixture("session_list"));
+            var list = await training.ListSessionsAsync(50);
+            Assert.AreEqual("?limit=50", transport.Sent[0].Url.Query);
+            Assert.AreEqual(2, list.Total);
+        }
+
+        [Test]
+        public async Task DeleteAcceptsAnEmptyReplyAndEncodesTheId()
+        {
+            LogIn();
+            transport.Reply = _ => Ok("", 204);
+            await training.DeleteSessionAsync("session 1");
+            Assert.AreEqual("DELETE", transport.Sent[0].Method);
+            Assert.AreEqual("/api/v2/sessions/session%201", transport.Sent[0].Url.AbsolutePath);
+        }
+
+        [Test]
+        public async Task PurgeAndCompactSendMaintenanceRequestsWithALongerTimeout()
+        {
+            LogIn();
+            transport.Reply = _ => Ok("{\"deleted_count\":3}");
+            Assert.AreEqual(3, await training.PurgeSessionsAsync(20));
+            Assert.AreEqual("/api/v2/sessions/purge", transport.Sent[0].Url.AbsolutePath);
+            Assert.AreEqual("?keep_latest=20", transport.Sent[0].Url.Query);
+            Assert.Greater(transport.Sent[0].TimeoutSeconds, 10);
+
+            transport.Reply = _ => Ok("{\"database_bytes_before\":2097152,\"database_bytes_after\":1048576,\"wal_truncated\":true}");
+            var compacted = await training.CompactSessionsAsync();
+            Assert.AreEqual(1048576, compacted.DatabaseBytesAfter);
+            Assert.Greater(transport.Sent[1].TimeoutSeconds, 10);
+        }
+
+        [Test]
+        public void MalformedMaintenanceRepliesAreContractErrors()
+        {
+            LogIn();
+            transport.Reply = _ => Ok("{}");
+            Assert.ThrowsAsync<ContractException>(() => training.PurgeSessionsAsync(20));
+            Assert.ThrowsAsync<ContractException>(() => training.CompactSessionsAsync());
+        }
+
+        [Test]
         public async Task CreateSendsTheIdempotencyKeyAndValidatesTheRequestFirst()
         {
             LogIn();

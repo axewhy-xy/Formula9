@@ -36,6 +36,11 @@ from contracts.v2.models import (
 
 T = TypeVar("T")
 _MIGRATIONS = Path(__file__).with_name("migrations")
+_OCCUPIES_CAPACITY = (
+    "(s.status IN ('READY', 'PAUSED', 'RUNNING') AND"
+    " (EXISTS (SELECT 1 FROM session_runtimes r WHERE r.session_id=s.session_id)"
+    " OR EXISTS (SELECT 1 FROM session_creations c WHERE c.session_id=s.session_id)))"
+)
 
 
 class TrainingStoreError(Exception):
@@ -315,18 +320,37 @@ class TrainingStore:
                 raise TrainingStoreError("IDEMPOTENCY_CONFLICT", "Creation key was used with different scenario settings")
             return self.snapshot(row["session_id"])
 
-    def list_sessions(self) -> list[dict]:
+    def list_sessions(self, limit: int = -1, offset: int = 0) -> list[dict]:
         """Read public metadata with live attempts before history, newest first."""
         with closing(self._read_connection()) as connection:
+            return self._session_rows(connection, limit, offset)
+
+    def session_page(self, limit: int, offset: int = 0) -> dict:
+        """Read one list page and its whole-table counts from one consistent view."""
+        with closing(self._read_connection()) as connection:
+            connection.execute("BEGIN")
+            total, live = connection.execute(f"SELECT COUNT(*), COALESCE(SUM({_OCCUPIES_CAPACITY}), 0) FROM sessions s").fetchone()
+            return {"sessions": self._session_rows(connection, limit, offset), "live_count": live, "total": total}
+
+    @staticmethod
+    def _session_rows(connection: sqlite3.Connection, limit: int, offset: int) -> list[dict]:
+        rows = connection.execute(
+            "SELECT s.session_id, s.scenario_revision_id, s.status,"
+            f" {_OCCUPIES_CAPACITY} AS occupies_capacity FROM sessions s"
+            " ORDER BY occupies_capacity DESC, s.rowid DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
+        return [{**dict(row), "occupies_capacity": bool(row["occupies_capacity"])} for row in rows]
+
+    def expired_session_ids(self, keep_latest: int) -> list[str]:
+        """Terminal attempts older than the newest keep_latest, by creation order."""
+        with closing(self._read_connection()) as connection:
             rows = connection.execute(
-                "SELECT s.session_id, s.scenario_revision_id, s.status,"
-                " (s.status IN ('READY', 'PAUSED', 'RUNNING') AND"
-                " (EXISTS (SELECT 1 FROM session_runtimes r WHERE r.session_id=s.session_id)"
-                " OR EXISTS (SELECT 1 FROM session_creations c WHERE c.session_id=s.session_id)))"
-                " AS occupies_capacity FROM sessions s"
-                " ORDER BY occupies_capacity DESC, s.rowid DESC",
+                "SELECT session_id FROM sessions WHERE status IN ('ARCHIVED', 'COMPLETED', 'FAILED')"
+                " ORDER BY rowid DESC LIMIT -1 OFFSET ?",
+                (keep_latest,),
             ).fetchall()
-            return [{**dict(row), "occupies_capacity": bool(row["occupies_capacity"])} for row in rows]
+            return [row[0] for row in rows]
 
     def delete_session(self, session_id: str) -> None:
         """Permanently remove a terminal attempt, including all of its history.

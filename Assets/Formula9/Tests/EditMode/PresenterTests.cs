@@ -125,5 +125,37 @@ namespace Formula9.Tests
             Assert.AreEqual(SessionController.IntegratedScenario, TrainingPresenter.Scenarios[1].Id);
             StringAssert.StartsWith("Singapore", TrainingPresenter.ScenarioTitle(SessionController.IntegratedScenario));
         }
+
+        [TestCase("ARCHIVED", false, true)]
+        [TestCase("COMPLETED", false, true)]
+        [TestCase("FAILED", false, true)]
+        [TestCase("READY", true, false)]
+        [TestCase("RUNNING", true, false)]
+        [TestCase("PAUSED", true, false)]
+        [TestCase("PAUSED", false, false)] // a stored fixture without a live actor is not finished either
+        [TestCase("ARCHIVED", true, false)]
+        public void OnlyFinishedSessionsCanBeDeleted(string status, bool occupiesCapacity, bool expected)
+        {
+            Assert.AreEqual(expected, TrainingPresenter.CanDelete(new SessionListEntry { Status = status, OccupiesCapacity = occupiesCapacity }));
+            Assert.IsFalse(TrainingPresenter.CanDelete(null));
+        }
+
+        [Test]
+        public void CapacityCountsAllStoredSessionsAndSaysWhenTheListIsPartial()
+        {
+            var list = new SessionListResponse { LiveCount = 1, Capacity = 16, Total = 2, Sessions = new System.Collections.Generic.List<SessionListEntry> { new SessionListEntry(), new SessionListEntry() } };
+            Assert.AreEqual("1/16 live sessions · 2 total", TrainingPresenter.Capacity(list));
+            list.Total = 120;
+            Assert.AreEqual("1/16 live sessions · 120 total · showing 2", TrainingPresenter.Capacity(list));
+        }
+
+        [Test]
+        public void ReclaimedSpaceIsShownInMegabytesAndMentionsAHeldWal()
+        {
+            var result = new SessionCompaction { DatabaseBytesBefore = 3145728, DatabaseBytesAfter = 1048576, WalTruncated = true };
+            Assert.AreEqual("Training database reduced from 3.0 MB to 1.0 MB.", TrainingPresenter.Reclaimed(result));
+            result.WalTruncated = false;
+            StringAssert.Contains("try again", TrainingPresenter.Reclaimed(result));
+        }
     }
 }

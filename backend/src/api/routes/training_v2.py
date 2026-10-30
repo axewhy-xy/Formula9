@@ -7,7 +7,7 @@ from threading import Lock
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, FastAPI, Header, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, Header, Query, Request, Response
 from fastapi.responses import JSONResponse
 from starlette.authentication import UnauthenticatedUser
 
@@ -66,7 +66,7 @@ async def initialize_training_service(application: FastAPI, store: TrainingStore
     if services is None:
         services = application.state.training_services = {}
     if store not in services:
-        services[store] = TrainingSessionService(store)
+        services[store] = TrainingSessionService(store, retention_keep_latest=get_settings().training_retention_keep_latest)
     service = services[store]
     await service.initialize()
     return service
@@ -77,11 +77,11 @@ async def get_training_service(request: Request, store: TrainingStore = Depends(
 
 
 @router.get("", response_model=SessionListResponse)
-async def list_sessions(actor_id: str = Depends(get_actor_id),
+async def list_sessions(limit: Annotated[int, Query(ge=1, le=500)] = 100, offset: Annotated[int, Query(ge=0)] = 0,
+                        actor_id: str = Depends(get_actor_id),
                         service: TrainingSessionService = Depends(get_training_service)) -> dict:
-    sessions = await asyncio.to_thread(service.store.list_sessions)
-    return {"sessions": sessions, "live_count": sum(s["occupies_capacity"] for s in sessions),
-            "capacity": service.MAX_SESSIONS}
+    page = await asyncio.to_thread(service.store.session_page, limit, offset)
+    return {**page, "capacity": service.MAX_SESSIONS}
 
 
 @router.post("", response_model=TrainingSession, status_code=201)
@@ -89,6 +89,12 @@ async def create_session(payload: CreateSessionRequest, idempotency_key: Annotat
                          actor_id: str = Depends(get_actor_id),
                          service: TrainingSessionService = Depends(get_training_service)) -> TrainingSession:
     return (await service.create(payload, actor_id, idempotency_key)).session
+
+
+@router.post("/purge")
+async def purge_sessions(keep_latest: Annotated[int, Query(ge=0)], actor_id: str = Depends(get_actor_id),
+                         service: TrainingSessionService = Depends(get_training_service)) -> dict:
+    return await service.purge(keep_latest)
 
 
 @router.post("/compact")

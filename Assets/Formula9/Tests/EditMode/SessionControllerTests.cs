@@ -31,6 +31,7 @@ namespace Formula9.Tests
             public readonly List<HttpRequest> Sent = new List<HttpRequest>();
             public JObject Snapshot = Fixture("snapshot");
             public JObject LastCommand;
+            public HttpResponse SnapshotReply;
             public Func<HttpRequest, HttpResponse> OnEvents;
             public Func<HttpRequest, HttpResponse> OnCommand;
             public Func<HttpRequest, HttpResponse> OnStatus;
@@ -51,7 +52,7 @@ namespace Formula9.Tests
                 Sent.Add(request);
                 var path = request.Url.AbsolutePath;
                 if (request.Method == "POST" && path == "/api/v2/sessions") return Task.FromResult(OnCreate(request));
-                if (path.EndsWith("/snapshot")) return Task.FromResult(Json(Snapshot));
+                if (path.EndsWith("/snapshot")) return Task.FromResult(SnapshotReply ?? Json(Snapshot));
                 if (path.EndsWith("/events")) return Task.FromResult(OnEvents(request));
                 if (request.Method == "POST" && path.EndsWith("/commands"))
                 {
@@ -125,6 +126,52 @@ namespace Formula9.Tests
             controller.ErrorOccurred += errors.Add;
             controller.CommandFinished += outcomes.Add;
             controller.SnapshotAccepted += (s, reset) => snapshots.Add((s, reset));
+        }
+
+        [Test]
+        public async Task ASessionDeletedElsewhereIsLeftAndNoLongerPolled()
+        {
+            await controller.JoinAsync(SessionId);
+            var left = 0;
+            controller.SessionLeft += () => left++;
+            backend.SnapshotReply = Error(404, "INVALID_REFERENCE");
+            await controller.RefreshAsync();
+            Assert.AreEqual(1, left);
+            Assert.IsNull(controller.SessionId);
+            Assert.IsNull(controller.Session);
+            Assert.IsNull(controller.Store.Snapshot);
+            Assert.IsFalse(controller.Available);
+            StringAssert.Contains("no longer exists", errors.Last());
+            var sent = backend.Sent.Count;
+            await controller.RefreshAsync();
+            Assert.AreEqual(sent, backend.Sent.Count);
+        }
+
+        [Test]
+        public async Task JoiningAnUnknownSessionDoesNotLeaveTheCurrentOne()
+        {
+            await controller.JoinAsync(SessionId);
+            var left = 0;
+            controller.SessionLeft += () => left++;
+            backend.SnapshotReply = Error(404, "INVALID_REFERENCE");
+            await controller.JoinAsync("missing-session");
+            Assert.AreEqual(0, left);
+            Assert.AreEqual(SessionId, controller.SessionId);
+        }
+
+        [Test]
+        public async Task LeavingSettlesAnOpenCommandAsUnconfirmed()
+        {
+            await controller.JoinAsync(SessionId);
+            // Left while the reply is outstanding: a late reply must not revive the command.
+            backend.OnCommand = _ =>
+            {
+                controller.Leave();
+                return new HttpResponse { Failure = HttpFailure.Incomplete };
+            };
+            await controller.SendControlAsync("ARCHIVE");
+            Assert.IsFalse(controller.HasPendingCommand);
+            Assert.AreEqual("NEEDS_RECONFIRMATION", outcomes.Last().Status);
         }
 
         [Test]

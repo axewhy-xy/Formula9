@@ -924,6 +924,8 @@ namespace Formula9.Contracts
         public long LiveCount { get; set; }
         [JsonProperty("sessions", Required = Required.Always)]
         public List<SessionListEntry> Sessions { get; set; }
+        [JsonProperty("total", Required = Required.Always)]
+        public long Total { get; set; }
         // Additive 2.x fields from a newer backend are kept, not rejected.
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
