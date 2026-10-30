@@ -6,6 +6,7 @@ using UnityEngine.Networking;
 
 namespace Formula9.Backend
 {
+    // One request for an IHttpTransport, kept free of UnityWebRequest so tests can fake the backend.
     public sealed class HttpRequest
     {
         public string Method = "GET";
@@ -16,6 +17,7 @@ namespace Formula9.Backend
         public int TimeoutSeconds = 10;
     }
 
+    // Why a request produced no usable reply; None when the backend answered (with any status).
     public enum HttpFailure
     {
         None,
@@ -25,6 +27,7 @@ namespace Formula9.Backend
         Cancelled,
     }
 
+    // What came back: the status and body of a complete reply, or the Failure that prevented one.
     public sealed class HttpResponse
     {
         public int Status;

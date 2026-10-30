@@ -11,6 +11,7 @@ namespace Formula9.Audio
         void SetBool(string key, bool value);
     }
 
+    // Settings kept across restarts in Unity's PlayerPrefs; used by the app.
     public sealed class PlayerPreferences : IPreferences
     {
         public bool GetBool(string key, bool fallback) => PlayerPrefs.GetInt(key, fallback ? 1 : 0) != 0;
@@ -22,6 +23,7 @@ namespace Formula9.Audio
         }
     }
 
+    // Settings kept in memory only, so tests never touch the real PlayerPrefs.
     public sealed class MemoryPreferences : IPreferences
     {
         public readonly Dictionary<string, bool> Values = new Dictionary<string, bool>();

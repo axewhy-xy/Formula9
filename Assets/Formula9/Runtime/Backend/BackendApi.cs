@@ -40,6 +40,7 @@ namespace Formula9.Backend
         public NotLoggedInException(string message) : base(message) { }
     }
 
+    // The backend's reply to a login or sign-up: the account, its bearer token and when it expires.
     public sealed class LoginSession
     {
         [JsonProperty("username", Required = Required.Always)] public string Username { get; set; }

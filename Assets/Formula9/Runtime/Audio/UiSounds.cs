@@ -6,12 +6,13 @@ using UnityEngine.UIElements;
 
 namespace Formula9.Audio
 {
+    // The interface sounds amee's review assigns; Files maps each to its clip.
     public enum UiSound { ButtonHover, StartClick, MapPoint, Dropdown }
 
     // amee's sound review, as the Formula_9 web app applies it (uiAudio.ts), mapped onto the Unity
     // controls:
     //   - TileHover 2 on hover for the enabled buttons of the main simulator (not the login page),
-//     except the big primary ones; no click sound. Start scenario is one of amee's hover buttons.
+    //     except the big primary ones; no click sound. Start scenario is one of amee's hover buttons.
     //   - UI_Hover 6 when Start scenario is clicked.
     //   - UI Hover New 1 when a node is picked on the route planning graph.
     //   - A higher-pitched UI Hover New 1 when a dropdown opens and when an option is chosen;

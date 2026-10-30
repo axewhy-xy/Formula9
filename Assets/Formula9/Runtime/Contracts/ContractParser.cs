@@ -24,6 +24,8 @@ namespace Formula9.Contracts
         string SessionId { get; }
     }
 
+    // The top-level messages the backend sends. Their fields are generated from the schemas in
+    // Generated/ContractModels.g.cs; these halves only mark them as parseable messages.
     public sealed partial class FullSnapshot : IContractMessage { }
     public sealed partial class EventReplay : IContractMessage { }
     public sealed partial class CommandStatus : IContractMessage { }

@@ -67,7 +67,7 @@ If the scene or its UI panel settings go missing, rebuild them with
 | `Assets/Formula9/Runtime/Session` | Joined session, polling, events and commands |
 | `Assets/Formula9/Runtime/UI` | Screens (`Formula9App`) and their presenters |
 | `Assets/Formula9/Runtime/World` | Verified scene loading, glTFast placement and the 3D view |
-| `Assets/Formula9/Runtime/Audio` | Training alerts and the Mute alerts setting |
+| `Assets/Formula9/Runtime/Audio` | Training alerts, the Mute alerts setting and interface sounds |
 | `Assets/Formula9/UI` | UI Toolkit layout, styles, theme and panel settings |
 | `Assets/Formula9/Editor` | Editor tools, including the scene builder |
 | `Assets/Formula9/Tests/EditMode` | EditMode tests and the shared contract fixtures |
@@ -204,6 +204,25 @@ sound; each event ID plays at most once, even when a reconnect replays it; histo
 and muting still marks events as seen, so unmuting causes no burst. The sounds in
 `Resources/Formula9/Audio` are the Qt client's `alert_*.wav`. **Mute alerts** is kept across
 restarts in `PlayerPrefs` (`training.muteAlerts`); tests use in-memory preferences.
+
+## Interface sounds
+
+`UiSounds` applies amee's sound review the same way the Formula_9 web app does (`uiAudio.ts`).
+The clips in `Resources/Formula9/Audio` are copies of the web app's files:
+
+| Sound | Clip | Plays when |
+|---|---|---|
+| Button hover | `ui_button_hover.wav` (TileHover 2) | the pointer enters an enabled button of the main simulator, including Start scenario; never on click |
+| Start | `ui_start_click.wav` (UI_Hover 6) | **Start scenario** is clicked |
+| Map point | `ui_map_point.wav` (UI Hover New 1) | a node is picked for a route on the map |
+| Dropdown | `ui_map_point.wav` at 1.15× pitch | a dropdown is opened, and when the user chooses an option |
+
+The big primary buttons (**Create training session**, **Join**) and the login page stay silent
+on hover. Hovering dropdown options is silent, and so are values the app sets while it renders
+snapshots: a change only plays within 30 s of the user opening that dropdown, once per opening.
+The sounds listen once on the simulator's root, so controls built later (charging decisions,
+map zoom) are covered without extra wiring. Interface sounds play at 0.35 volume and are
+separate from training alerts, so **Mute alerts** does not silence them.
 
 ## Tests
 
