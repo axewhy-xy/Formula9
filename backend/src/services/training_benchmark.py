@@ -353,7 +353,7 @@ def run(output: Path, *, ticks=None, validation_samples=None, reconnect_samples=
                     mark("created", initial)
                     check("one_integrated_runtime", store.runtime_ids() == [session_id]
                           and len(app.state.training_services[store].sessions) == 1
-                          and len(initial.vehicles) == 5 and len(initial.routes) == 3 and len(initial.chargers) == 2)
+                          and len(initial.vehicles) == 5 and len(initial.routes) == 5 and len(initial.chargers) == 2)
                     blocked = send(client, initial, command(initial, "START"))
                     check("closed_route_prevents_start", blocked["status"] == "REJECTED"
                           and store.snapshot(session_id).session.status == "READY")

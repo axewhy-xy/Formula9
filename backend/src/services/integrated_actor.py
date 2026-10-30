@@ -181,14 +181,14 @@ class IntegratedSessionActor(SessionActor):
         primary.stops_m = [RouteStop(stop_id=stop, position=Position(x_m=float(data["nodes"][str(node)][0]),
                                                                      y_m=float(data["nodes"][str(node)][1]), z_m=0))
                            for stop, node in data["route_edit"]["required_stops"].items()]
-        # A peer loop starts and ends at the foot of its stop, so the shuttle already pulls in there
-        # each time round; say so, so clients can show it.
-        starts = {pattern["route_ID"]: pattern["waypoints"][0] for pattern in data["peer_patterns"]}
+        # Each peer shuttle has its own route and stops. Its loop starts and ends at the first stop,
+        # where the loop's end already pulls in; the rest are places to stop along the way.
         for route in self.domain.routes:
-            stop = data["peer_stops"].get(route.route_id)
-            if stop is not None:
-                route.required_stop_ids = [stop]
-                route.stops_m = [RouteStop(stop_id=stop, position=Position(x_m=starts[route.route_id]["x"], y_m=starts[route.route_id]["y"], z_m=0))]
+            stops = data["peer_route_stops"].get(route.route_id)
+            if stops is not None:
+                route.required_stop_ids = [stop["stop_id"] for stop in stops]
+                route.stops_m = [RouteStop(stop_id=stop["stop_id"], position=Position(x_m=stop["x"], y_m=stop["y"], z_m=0)) for stop in stops]
+                self.stop_progress[route.route_id] = [stop["progress_m"] for stop in stops[1:]]
         for route in self.domain.routes:
             route.estimated_duration_s = route.distance_m / data["speed_mps"] + self.DWELL_S
         primary.estimated_duration_s += data["route_edit"]["loop_end_dwell_s"]
