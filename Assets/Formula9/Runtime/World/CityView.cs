@@ -15,14 +15,13 @@ namespace Formula9.World
     {
         // Sharp tiles around the buildings, over coarser ones out to the horizon
         private const int TileZoom = 17, FarTileZoom = 14;
-        private const float GroundMarginM = 250, FarGroundMarginM = 6000, FarGroundDrop = 2, ShuttleFollow = 6;
+        private const float GroundMarginM = 250, FarGroundMarginM = 6000, FarGroundDrop = 2;
         private static readonly Vector3 ShuttleSize = new Vector3(5, 5, 12);
 
         private readonly Transform root;
         private readonly MapTiles tiles;
         private readonly List<UnityEngine.Object> owned = new List<UnityEngine.Object>();
         private readonly Dictionary<string, Transform> shuttles = new Dictionary<string, Transform>();
-        private readonly Dictionary<string, Vector3> targets = new Dictionary<string, Vector3>();
         private readonly List<(int Zoom, int X, int Y, Material Material)> groundTiles = new List<(int, int, int, Material)>();
         private readonly List<GameObject> routeObjects = new List<GameObject>();
         private string routesKey;
@@ -102,21 +101,23 @@ namespace Formula9.World
             }
         }
 
-        public void Show(FullSnapshot snapshot)
+        public void Show(FullSnapshot snapshot, ShuttleMotion motion, float now)
         {
             var ordered = snapshot.Vehicles.OrderBy(v => v.VehicleId, StringComparer.Ordinal).ToList();
+            var routes = ShuttleMotion.Routes(snapshot);
             for (var i = 0; i < ordered.Count; i++)
             {
                 var vehicle = ordered[i];
                 var at = new Vector3((float)vehicle.Position.XM, ShuttleSize.y / 2, (float)vehicle.Position.YM);
-                if (!shuttles.TryGetValue(vehicle.VehicleId, out var shuttle))
-                {
-                    shuttle = Marker(PrimitiveType.Cube, ShuttleSize, FleetMap.ShuttleColor(i), "Shuttle " + vehicle.VehicleId);
-                    shuttle.position = at;
-                    shuttles[vehicle.VehicleId] = shuttle;
-                }
-                targets[vehicle.VehicleId] = at;
+                // The backend's heading is degrees anticlockwise from east, in the plane Unity calls XZ
+                var heading = (float)vehicle.HeadingDeg * Mathf.Deg2Rad;
+                var facing = Quaternion.LookRotation(new Vector3(Mathf.Cos(heading), 0, Mathf.Sin(heading)));
+                if (!shuttles.ContainsKey(vehicle.VehicleId))
+                    shuttles[vehicle.VehicleId] = Marker(PrimitiveType.Cube, ShuttleSize, FleetMap.ShuttleColor(i), "Shuttle " + vehicle.VehicleId);
+                routes.TryGetValue(vehicle.RouteId ?? "", out var route);
+                motion.SetTarget(vehicle.VehicleId, at, facing, now, route);
             }
+            Tick(motion, now);
             var key = string.Join(";", snapshot.Routes.Select(r => $"{r.RouteId}:{r.Revision}")) + snapshot.Disruptions.Count;
             if (key != routesKey) { routesKey = key; BuildRoutes(snapshot, ordered); }
         }
@@ -159,17 +160,12 @@ namespace Formula9.World
             return item.transform;
         }
 
-        // Called each frame: shuttles glide to their latest position and face the way they travel.
-        public void Tick(float deltaSeconds)
+        // Called each frame: shuttles glide between the backend's poses.
+        public void Tick(ShuttleMotion motion, float now)
         {
-            var blend = 1 - Mathf.Exp(-ShuttleFollow * deltaSeconds);
             foreach (var pair in shuttles)
-            {
-                if (!targets.TryGetValue(pair.Key, out var target)) continue;
-                var moved = target - pair.Value.position;
-                if (moved.sqrMagnitude > 0.01f) pair.Value.rotation = Quaternion.LookRotation(new Vector3(moved.x, 0, moved.z).normalized + Vector3.forward * 1e-5f);
-                pair.Value.position = Vector3.Lerp(pair.Value.position, target, blend);
-            }
+                if (motion.Sample(pair.Key, now, out var position, out var rotation))
+                    pair.Value.SetPositionAndRotation(position, rotation);
         }
 
         public bool TryGetShuttle(string id, out Vector3 position)

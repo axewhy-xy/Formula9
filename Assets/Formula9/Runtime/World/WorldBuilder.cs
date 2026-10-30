@@ -45,18 +45,21 @@ namespace Formula9.World
         // Description:
         //     This function moves each shuttle to its snapshot pose, after checking the snapshot
         //     fits this scene: the same shuttles, each bound to the same asset, dimensions and
-        //     asset_to_body.
+        //     asset_to_body. Given a motion, the shuttles glide there as Advance is called instead.
         //
         // Args:
         //     snapshot (FullSnapshot): The snapshot.
+        //     motion (ShuttleMotion): The glides to start, or null to place the shuttles at once.
+        //     now (float): The current time in seconds, with a motion.
         //
         // Returns:
         //     string: Null on success, otherwise why the snapshot does not fit this scene (the Qt
         //         client's scene/vehicle binding mismatch).
-        public string ApplyPoses(FullSnapshot snapshot)
+        public string ApplyPoses(FullSnapshot snapshot, ShuttleMotion motion = null, float now = 0)
         {
             if (snapshot.Spatial == null || snapshot.Spatial.ManifestSha256 == null) return "snapshot has no spatial pins";
             if (snapshot.Vehicles.Count != ShuttleCount) return "shuttle count differs from the scene";
+            var routes = motion == null ? null : ShuttleMotion.Routes(snapshot);
             foreach (var vehicle in snapshot.Vehicles)
             {
                 var pose = vehicle.Spatial;
@@ -65,10 +68,30 @@ namespace Formula9.World
                 if (pose.RenderAssetId != entity.RenderAssetId || !pose.DimensionsM.SequenceEqual(entity.DimensionsM)
                     || !pose.AssetToBody.SequenceEqual(entity.AssetToBody))
                     return $"{vehicle.VehicleId} does not match its scene binding";
-                if (!WorldMath.Apply(Entities[vehicle.VehicleId], WorldMath.PlacedAsset(pose.PositionM, pose.OrientationXyzw, pose.AssetToBody)))
-                    return $"{vehicle.VehicleId} has a non-rigid pose";
+                var placed = WorldMath.PlacedAsset(pose.PositionM, pose.OrientationXyzw, pose.AssetToBody);
+                if (!WorldMath.IsRigid(placed)) return $"{vehicle.VehicleId} has a non-rigid pose";
+                if (motion == null) { WorldMath.Apply(Entities[vehicle.VehicleId], placed); continue; }
+                routes.TryGetValue(vehicle.RouteId ?? "", out var route);
+                motion.SetTarget(vehicle.VehicleId, placed.GetPosition(), placed.rotation, now, route, pose.Movement == "DISCONTINUITY");
             }
+            if (motion != null) Advance(motion, now);
             return null;
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: Advance
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function moves each shuttle along its glide, once per rendered frame.
+        //
+        // Args:
+        //     motion (ShuttleMotion): The glides.
+        //     now (float): The current time in seconds.
+        public void Advance(ShuttleMotion motion, float now)
+        {
+            foreach (var entity in Entities)
+                if (motion.Sample(entity.Key, now, out var position, out var rotation))
+                    entity.Value.SetPositionAndRotation(position, rotation);
         }
 
         // -----------------------------------------------------------------------------------
