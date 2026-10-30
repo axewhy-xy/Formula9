@@ -65,12 +65,17 @@ namespace Formula9.Backend
 
         // Sends the request and returns the body of a 2xx reply; anything else becomes one of the
         // exceptions above, so callers can tell a refusal from an unknown outcome.
-        protected async Task<string> SendAsync(HttpRequest request, CancellationToken cancellation, Action<ApiError> onUnauthorized = null)
+        protected async Task<string> SendAsync(HttpRequest request, CancellationToken cancellation, Action<ApiError> onUnauthorized = null) =>
+            (await SendForReplyAsync(request, cancellation, onUnauthorized)).Body;
+
+        // As SendAsync, but returns the whole 2xx reply, including its raw bytes.
+        protected async Task<HttpResponse> SendForReplyAsync(HttpRequest request, CancellationToken cancellation,
+            Action<ApiError> onUnauthorized = null)
         {
             var response = await Transport.SendAsync(request, cancellation);
             if (response.Failure == HttpFailure.Cancelled) throw new OperationCanceledException(cancellation);
             if (!response.Complete) throw new NoReplyException($"No complete reply from {request.Method} {request.Url.AbsolutePath}");
-            if (response.Status >= 200 && response.Status < 300) return response.Body;
+            if (response.Status >= 200 && response.Status < 300) return response;
             var error = ReadError(response);
             if (error == null) throw new NoReplyException($"Unreadable {response.Status} reply from {request.Method} {request.Url.AbsolutePath}", response.Status);
             if (response.Status == 401 && onUnauthorized != null) onUnauthorized(error);

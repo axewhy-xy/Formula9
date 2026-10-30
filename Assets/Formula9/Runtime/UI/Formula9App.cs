@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Formula9.Backend;
 using Formula9.Contracts;
 using Formula9.Session;
+using Formula9.World;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -32,8 +33,7 @@ namespace Formula9.UI
         private Button submit, modeSwitch, start, pause, resume, archive, refreshSessions;
         private DropdownField scenario, sessions;
 
-        // 3D readiness arrives from the world view in a later step; until then 3D sessions wait.
-        public bool SpatialReady { get; set; }
+        private WorldView world;
 
         private void OnEnable()
         {
@@ -45,6 +45,7 @@ namespace Formula9.UI
             auth.Ended += OnLoginEnded;
             session.SnapshotAccepted += (snapshot, reset) =>
             {
+                world.Show(snapshot);
                 Render();
                 Run(RefreshSessionListIfChanged());
             };
@@ -58,6 +59,11 @@ namespace Formula9.UI
 
             BindLogin(GetComponent<UIDocument>().rootVisualElement);
             BindTraining(GetComponent<UIDocument>().rootVisualElement);
+            // A spatial session's Start waits until its mandatory geometry is verified and drawn.
+            world = new GameObject("World View").AddComponent<WorldView>();
+            world.transform.SetParent(transform, false);
+            world.Attach(GetComponent<UIDocument>().rootVisualElement.Q("world"), new SceneLoader(transport));
+            world.ReadinessChanged += (ready, diagnostic) => Render();
             ShowLogin(null);
             StartCoroutine(Poll());
         }
@@ -254,7 +260,14 @@ namespace Formula9.UI
         private void Render()
         {
             var snapshot = session.Store.Snapshot;
-            var controls = TrainingPresenter.Controls(snapshot, session.Available, SpatialReady);
+            var worldReady = world != null && world.Ready;
+            var controls = TrainingPresenter.Controls(snapshot, session.Available, worldReady);
+            if (world != null)
+            {
+                // The diagnostic covers the view until the world is drawn, then gets out of the way.
+                worldStatus.text = world.Diagnostic;
+                worldStatus.style.display = worldReady ? DisplayStyle.None : DisplayStyle.Flex;
+            }
             start.SetEnabled(controls.Start);
             start.tooltip = controls.StartHint ?? "";
             pause.SetEnabled(controls.Pause);
@@ -268,9 +281,6 @@ namespace Formula9.UI
             title.text = TrainingPresenter.Title(snapshot);
             status.text = TrainingPresenter.StatusLine(snapshot, session.Available);
             sessionId.SetValueWithoutNotify(snapshot.SessionId);
-            worldStatus.text = snapshot.Spatial != null
-                ? "3D world view arrives in the next step of the Unity port."
-                : "This 2D exercise has no 3D world; the fleet list shows its shuttles.";
             fleet.Clear();
             foreach (var row in TrainingPresenter.Fleet(snapshot))
             {

@@ -7,6 +7,9 @@
 *.json text
 *.md text
 
+# Hash-pinned scene manifest: its exact bytes must survive checkout on every platform.
+Assets/Formula9/Tests/EditMode/Fixtures/m2_scene/manifest.json -text
+
 # Unity serialised YAML: merge as text but never guess at line endings.
 *.unity text eol=lf
 *.prefab text eol=lf

@@ -197,6 +197,13 @@ def main() -> None:
     for fixture in sorted((source / "fixtures").glob("*.json")):
         shutil.copyfile(fixture, FIXTURES / fixture.name)
     shutil.copyfile(source / "alert_cues.json", FIXTURES / "alert_cues.json")
+    # The shared 3D scene package, so world tests load the real manifest and GLB assets.
+    scene = source.parents[1] / "backend" / "fixtures" / "m2_scene"
+    if scene.is_dir():
+        target = FIXTURES / "m2_scene"
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(scene, target, ignore=shutil.ignore_patterns("README.md"))
     print(f"{len(generator.classes)} classes from {len(documents)} schemas; fixtures copied to {FIXTURES.relative_to(ROOT)}")
 
 

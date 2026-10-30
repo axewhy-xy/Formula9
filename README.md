@@ -31,7 +31,8 @@ If the scene or its UI panel settings go missing, rebuild them with
 | `Assets/Formula9/Runtime/Backend` | HTTP access to the backend |
 | `Assets/Formula9/Runtime/Session` | Joined session, polling, events and commands |
 | `Assets/Formula9/Runtime/UI` | Screens (`Formula9App`) and their presenters |
-| `Assets/Formula9/Runtime/{World,Audio}` | 3D world and alerts, still to be ported |
+| `Assets/Formula9/Runtime/World` | Verified scene loading, glTFast placement and the 3D view |
+| `Assets/Formula9/Runtime/Audio` | Alerts, still to be ported |
 | `Assets/Formula9/UI` | UI Toolkit layout, styles, theme and panel settings |
 | `Assets/Formula9/Editor` | Editor tools, including the scene builder |
 | `Assets/Formula9/Tests/EditMode` | EditMode tests and the shared contract fixtures |
@@ -76,6 +77,25 @@ latest 1,000 events.
 New sessions default to `scenario-m2-integrated-r1`, the exercise with incidents, detours and
 charging.
 
+## 3D world
+
+A spatial session's snapshot pins its scene revision and manifest hash. `SceneLoader` fetches
+`/api/v2/scenes/{revision}`: the manifest must match the pinned hash and revisions, and each
+mandatory GLB its declared size and SHA-256, before anything is decoded. `WorldBuilder` loads
+the GLBs with glTFast and places every entity; each one's rendered extent must match its
+declared `dimensions_m`, so a coordinate mistake is reported ("3D unavailable · …") rather than
+drawn. `WorldView` renders into the training screen's world panel (right-drag orbit,
+middle-drag pan, wheel zoom) and moves shuttles to each snapshot. Start stays disabled until a
+spatial session's world is ready.
+
+Coordinates (`WorldMath`): the contract world is right-handed, X east, Y north, Z up; Unity is
+left-handed, Y up, so canonical (x, y, z) becomes Unity (x, z, y). Assets are raw glTF, taken
+into the body frame by `asset_to_body` after undoing glTFast's X flip. The tests check this
+against the backend's own marker points in `m2_3d_motion.json`.
+
+The project uses Linear colour space (glTF colours are linear), and the scene builder adds
+glTFast's shaders to *Always Included Shaders* so player builds render them.
+
 ## Tests
 
 Run EditMode tests in the Test Runner window, or headless:
@@ -85,4 +105,6 @@ Run EditMode tests in the Test Runner window, or headless:
 ```
 
 Tests in the `LiveBackend` category call a running backend and are skipped when none is
-reachable. They use no real account.
+reachable. They use no real account. The `Render` test draws the real scene and needs a GPU,
+so it is skipped under `-nographics`; set `FORMULA9_RENDER_OUT` to a `.png` path to keep the
+image.

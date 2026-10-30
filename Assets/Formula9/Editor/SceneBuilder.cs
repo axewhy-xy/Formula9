@@ -41,6 +41,8 @@ namespace Formula9.EditorTools
             var camera = new GameObject("Main Camera", typeof(Camera), typeof(AudioListener)) { tag = "MainCamera" };
             camera.GetComponent<Camera>().clearFlags = CameraClearFlags.SolidColor;
             camera.GetComponent<Camera>().backgroundColor = new Color(0.1f, 0.1f, 0.12f);
+            // The UI covers the screen and the world view renders into its own texture.
+            camera.GetComponent<Camera>().cullingMask = 0;
             var app = new GameObject("Formula 9 App");
             var document = app.AddComponent<UIDocument>();
             document.panelSettings = panel;
@@ -49,8 +51,29 @@ namespace Formula9.EditorTools
             EditorSceneManager.SaveScene(scene, ScenePath);
 
             EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
+            // glTF colours are linear; Gamma colour space washes the blockout materials out.
+            PlayerSettings.colorSpace = ColorSpace.Linear;
+            IncludeGltfShaders();
             AssetDatabase.SaveAssets();
             Debug.Log($"Formula 9: built {ScenePath}");
+        }
+
+        // glTFast creates its materials at runtime, so a player build only has its shaders when they
+        // are always included; otherwise imported models render magenta.
+        private static void IncludeGltfShaders()
+        {
+            var settings = new SerializedObject(AssetDatabase.LoadAssetAtPath<Object>("ProjectSettings/GraphicsSettings.asset"));
+            var list = settings.FindProperty("m_AlwaysIncludedShaders");
+            foreach (var name in new[] { "glTF/PbrMetallicRoughness", "glTF/PbrSpecularGlossiness", "glTF/Unlit" })
+            {
+                var shader = Shader.Find(name) ?? throw new System.InvalidOperationException($"glTFast shader {name} not found");
+                var present = false;
+                for (var i = 0; i < list.arraySize; i++) present |= list.GetArrayElementAtIndex(i).objectReferenceValue == shader;
+                if (present) continue;
+                list.InsertArrayElementAtIndex(list.arraySize);
+                list.GetArrayElementAtIndex(list.arraySize - 1).objectReferenceValue = shader;
+            }
+            settings.ApplyModifiedPropertiesWithoutUndo();
         }
     }
 }

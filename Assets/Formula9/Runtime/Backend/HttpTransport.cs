@@ -29,6 +29,8 @@ namespace Formula9.Backend
     {
         public int Status;
         public string Body;
+        // The raw reply, for binary downloads such as scene assets.
+        public byte[] Data;
         public HttpFailure Failure;
 
         public bool Complete => Failure == HttpFailure.None;
@@ -64,7 +66,10 @@ namespace Formula9.Backend
             web.SendWebRequest().completed += _ =>
             {
                 registration.Dispose();
-                var response = new HttpResponse { Status = (int)web.responseCode, Body = web.downloadHandler?.text };
+                var response = new HttpResponse
+                {
+                    Status = (int)web.responseCode, Body = web.downloadHandler?.text, Data = web.downloadHandler?.data,
+                };
                 if (cancellation.IsCancellationRequested) response.Failure = HttpFailure.Cancelled;
                 // A ProtocolError still carries a complete status and body (4xx/5xx); anything
                 // else means the reply never arrived whole.

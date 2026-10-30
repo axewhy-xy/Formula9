@@ -1,0 +1,1113 @@
+{
+  "asset_profile": "formula9-gltf2-r1",
+  "assets": [
+    {
+      "asset_id": "asset-road",
+      "attribution": "Formula9 contributors; original procedural blockout, dedicated under CC0 1.0.",
+      "bounds_max_m": [
+        20.0,
+        0.10000000149011612,
+        3.0
+      ],
+      "bounds_min_m": [
+        -20.0,
+        -0.10000000149011612,
+        -3.0
+      ],
+      "byte_length": 1860,
+      "decoded_bytes": 1608,
+      "fallback_asset_id": null,
+      "license": "CC0-1.0",
+      "mandatory": true,
+      "path": "assets/road.glb",
+      "sha256": "23215ff3165583101812d1af3fa87fcc1534d84a5b4cf567a478634bc7c51e1b"
+    },
+    {
+      "asset_id": "asset-ramp",
+      "attribution": "Formula9 contributors; original procedural blockout, dedicated under CC0 1.0.",
+      "bounds_max_m": [
+        10.198039054870605,
+        0.10000000149011612,
+        3.0
+      ],
+      "bounds_min_m": [
+        -10.198039054870605,
+        -0.10000000149011612,
+        -3.0
+      ],
+      "byte_length": 1888,
+      "decoded_bytes": 1608,
+      "fallback_asset_id": null,
+      "license": "CC0-1.0",
+      "mandatory": true,
+      "path": "assets/ramp.glb",
+      "sha256": "00a6c6c0b93d930b6756860b71afde03896b0f0b75a2a000992d99a2ce27e9cc"
+    },
+    {
+      "asset_id": "asset-building",
+      "attribution": "Formula9 contributors; original procedural blockout, dedicated under CC0 1.0.",
+      "bounds_max_m": [
+        6.0,
+        5.0,
+        4.0
+      ],
+      "bounds_min_m": [
+        -6.0,
+        -5.0,
+        -4.0
+      ],
+      "byte_length": 1824,
+      "decoded_bytes": 1608,
+      "fallback_asset_id": null,
+      "license": "CC0-1.0",
+      "mandatory": true,
+      "path": "assets/building.glb",
+      "sha256": "4629ef0daab7739c481d4e90979b5c2a29962c6bb830d317c2486ef39a4cebe7"
+    },
+    {
+      "asset_id": "asset-stop",
+      "attribution": "Formula9 contributors; original procedural blockout, dedicated under CC0 1.0.",
+      "bounds_max_m": [
+        1.5,
+        1.25,
+        0.75
+      ],
+      "bounds_min_m": [
+        -1.5,
+        -1.25,
+        -0.75
+      ],
+      "byte_length": 1828,
+      "decoded_bytes": 1608,
+      "fallback_asset_id": null,
+      "license": "CC0-1.0",
+      "mandatory": true,
+      "path": "assets/stop.glb",
+      "sha256": "d6ffec0747fc1e4011d07b9268b690ebf79f0abf373c44fb3a78dcd2d705111f"
+    },
+    {
+      "asset_id": "asset-depot",
+      "attribution": "Formula9 contributors; original procedural blockout, dedicated under CC0 1.0.",
+      "bounds_max_m": [
+        8.0,
+        0.20000000298023224,
+        6.0
+      ],
+      "bounds_min_m": [
+        -8.0,
+        -0.20000000298023224,
+        -6.0
+      ],
+      "byte_length": 1856,
+      "decoded_bytes": 1608,
+      "fallback_asset_id": null,
+      "license": "CC0-1.0",
+      "mandatory": true,
+      "path": "assets/depot.glb",
+      "sha256": "7672b3e0eaa7d101fb1566d84008730fe124ccc5f1995eb6e100a41abad07e40"
+    },
+    {
+      "asset_id": "asset-charger",
+      "attribution": "Formula9 contributors; original procedural blockout, dedicated under CC0 1.0.",
+      "bounds_max_m": [
+        0.5,
+        0.8999999761581421,
+        0.4000000059604645
+      ],
+      "bounds_min_m": [
+        -0.5,
+        -0.8999999761581421,
+        -0.4000000059604645
+      ],
+      "byte_length": 1884,
+      "decoded_bytes": 1608,
+      "fallback_asset_id": null,
+      "license": "CC0-1.0",
+      "mandatory": true,
+      "path": "assets/charger.glb",
+      "sha256": "eb9d61bddec0065409ff5e4072b6a3e842325547161653ebf89df5fc0e9edaed"
+    },
+    {
+      "asset_id": "asset-shuttle",
+      "attribution": "Formula9 contributors; original procedural blockout, dedicated under CC0 1.0.",
+      "bounds_max_m": [
+        2.4000000953674316,
+        1.2999999523162842,
+        1.0
+      ],
+      "bounds_min_m": [
+        -2.4000000953674316,
+        -1.2999999523162842,
+        -1.0
+      ],
+      "byte_length": 1884,
+      "decoded_bytes": 1608,
+      "fallback_asset_id": null,
+      "license": "CC0-1.0",
+      "mandatory": true,
+      "path": "assets/shuttle.glb",
+      "sha256": "88d4d223cddbdfe4c95a51548a7ed60682f012d9e98a27b450882b60e4590865"
+    },
+    {
+      "asset_id": "asset-shuttle-detail",
+      "attribution": "Formula9 contributors; original procedural blockout, dedicated under CC0 1.0.",
+      "bounds_max_m": [
+        2.4000000953674316,
+        1.2999999523162842,
+        1.0
+      ],
+      "bounds_min_m": [
+        -2.4000000953674316,
+        -1.2999999523162842,
+        -1.0
+      ],
+      "byte_length": 1884,
+      "decoded_bytes": 1608,
+      "fallback_asset_id": "asset-shuttle",
+      "license": "CC0-1.0",
+      "mandatory": false,
+      "path": "assets/shuttle-detail.glb",
+      "sha256": "46d8478fd120f8432d5ffaeef085acfba7edbc646a694b6737a192496a088043"
+    },
+    {
+      "asset_id": "asset-obstruction",
+      "attribution": "Formula9 contributors; original procedural blockout, dedicated under CC0 1.0.",
+      "bounds_max_m": [
+        1.0,
+        0.75,
+        1.25
+      ],
+      "bounds_min_m": [
+        -1.0,
+        -0.75,
+        -1.25
+      ],
+      "byte_length": 1828,
+      "decoded_bytes": 1608,
+      "fallback_asset_id": null,
+      "license": "CC0-1.0",
+      "mandatory": true,
+      "path": "assets/obstruction.glb",
+      "sha256": "dbe29f1cfc0400e5a5d64707b7e8b9b0faf2fec59c1a6f868a446b164834f1e9"
+    }
+  ],
+  "build_tool": "formula9-scene-builder-1.0",
+  "camera_bookmarks": [
+    {
+      "camera_id": "overview",
+      "position_m": [
+        30.0,
+        -70.0,
+        55.0
+      ],
+      "target_m": [
+        25.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "camera_id": "incident-focus",
+      "position_m": [
+        25.0,
+        -12.0,
+        8.0
+      ],
+      "target_m": [
+        30.0,
+        0.0,
+        0.75
+      ]
+    }
+  ],
+  "contract_version": "2.1",
+  "entities": [
+    {
+      "asset_to_body": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "dimensions_m": [
+        40.0,
+        6.0,
+        0.2
+      ],
+      "entity_id": "road-flat",
+      "kind": "ROAD",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        20.0,
+        0.0,
+        -0.1
+      ],
+      "proxy_id": "proxy-road-flat",
+      "render_asset_id": "asset-road"
+    },
+    {
+      "asset_to_body": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "dimensions_m": [
+        20.396078054371138,
+        6.0,
+        0.2
+      ],
+      "entity_id": "road-ramp",
+      "kind": "ROAD",
+      "orientation_xyzw": [
+        0.0,
+        -0.09853761796664216,
+        0.0,
+        0.9951333266680702
+      ],
+      "position_m": [
+        50.01961161351382,
+        0.0,
+        1.901941932430908
+      ],
+      "proxy_id": "proxy-road-ramp",
+      "render_asset_id": "asset-ramp"
+    },
+    {
+      "asset_to_body": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "dimensions_m": [
+        12.0,
+        8.0,
+        10.0
+      ],
+      "entity_id": "building-01",
+      "kind": "BUILDING",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        20.0,
+        14.0,
+        5.0
+      ],
+      "proxy_id": "proxy-building-01",
+      "render_asset_id": "asset-building"
+    },
+    {
+      "asset_to_body": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "dimensions_m": [
+        3.0,
+        1.5,
+        2.5
+      ],
+      "entity_id": "stop-terminal",
+      "kind": "STOP",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        10.0,
+        -4.5,
+        1.25
+      ],
+      "proxy_id": "proxy-stop-terminal",
+      "render_asset_id": "asset-stop"
+    },
+    {
+      "asset_to_body": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "dimensions_m": [
+        16.0,
+        12.0,
+        0.4
+      ],
+      "entity_id": "depot-main",
+      "kind": "DEPOT",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        -12.0,
+        0.0,
+        -0.2
+      ],
+      "proxy_id": "proxy-depot-main",
+      "render_asset_id": "asset-depot"
+    },
+    {
+      "asset_to_body": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "dimensions_m": [
+        1.0,
+        0.8,
+        1.8
+      ],
+      "entity_id": "charger-01",
+      "kind": "CHARGER",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        -15.0,
+        -3.0,
+        0.9
+      ],
+      "proxy_id": "proxy-charger-01",
+      "render_asset_id": "asset-charger"
+    },
+    {
+      "asset_to_body": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "dimensions_m": [
+        1.0,
+        0.8,
+        1.8
+      ],
+      "entity_id": "charger-02",
+      "kind": "CHARGER",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        -15.0,
+        3.0,
+        0.9
+      ],
+      "proxy_id": "proxy-charger-02",
+      "render_asset_id": "asset-charger"
+    },
+    {
+      "asset_to_body": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "dimensions_m": [
+        2.0,
+        2.5,
+        1.5
+      ],
+      "entity_id": "obstruction-01",
+      "kind": "OBSTRUCTION",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        30.0,
+        0.0,
+        0.75
+      ],
+      "proxy_id": "proxy-obstruction-01",
+      "render_asset_id": "asset-obstruction"
+    },
+    {
+      "asset_to_body": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "dimensions_m": [
+        4.8,
+        2.0,
+        2.6
+      ],
+      "entity_id": "shuttle-01",
+      "kind": "SHUTTLE",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        2.0,
+        0.0,
+        1.3
+      ],
+      "proxy_id": "proxy-shuttle-01",
+      "render_asset_id": "asset-shuttle"
+    },
+    {
+      "asset_to_body": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "dimensions_m": [
+        4.8,
+        2.0,
+        2.6
+      ],
+      "entity_id": "shuttle-02",
+      "kind": "SHUTTLE",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        9.0,
+        0.0,
+        1.3
+      ],
+      "proxy_id": "proxy-shuttle-02",
+      "render_asset_id": "asset-shuttle"
+    },
+    {
+      "asset_to_body": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "dimensions_m": [
+        4.8,
+        2.0,
+        2.6
+      ],
+      "entity_id": "shuttle-03",
+      "kind": "SHUTTLE",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        16.0,
+        0.0,
+        1.3
+      ],
+      "proxy_id": "proxy-shuttle-03",
+      "render_asset_id": "asset-shuttle"
+    },
+    {
+      "asset_to_body": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "dimensions_m": [
+        4.8,
+        2.0,
+        2.6
+      ],
+      "entity_id": "shuttle-04",
+      "kind": "SHUTTLE",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        23.0,
+        0.0,
+        1.3
+      ],
+      "proxy_id": "proxy-shuttle-04",
+      "render_asset_id": "asset-shuttle"
+    },
+    {
+      "asset_to_body": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "dimensions_m": [
+        4.8,
+        2.0,
+        2.6
+      ],
+      "entity_id": "shuttle-05",
+      "kind": "SHUTTLE",
+      "orientation_xyzw": [
+        0.0,
+        -0.09853761796664216,
+        0.0,
+        0.9951333266680702
+      ],
+      "position_m": [
+        49.74504902432036,
+        0.0,
+        3.274754878398196
+      ],
+      "proxy_id": "proxy-shuttle-05",
+      "render_asset_id": "asset-shuttle"
+    }
+  ],
+  "geographic_origin": [
+    1.3521,
+    103.8198,
+    0.0
+  ],
+  "importer_profile": "formula9-glb-validator-1.0",
+  "local_origin_m": [
+    125.0,
+    -75.0,
+    12.0
+  ],
+  "parent_scene_revision": null,
+  "provenance": "AUTHORED_TRAINING_BLOCKOUT",
+  "proxies": [
+    {
+      "classification": "ROAD_SUPPORT",
+      "dimensions_m": [
+        40.0,
+        6.0,
+        0.2
+      ],
+      "entity_id": "road-flat",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        20.0,
+        0.0,
+        -0.1
+      ],
+      "proxy_id": "proxy-road-flat",
+      "revision": "proxy-r1"
+    },
+    {
+      "classification": "ROAD_SUPPORT",
+      "dimensions_m": [
+        20.396078054371138,
+        6.0,
+        0.2
+      ],
+      "entity_id": "road-ramp",
+      "orientation_xyzw": [
+        0.0,
+        -0.09853761796664216,
+        0.0,
+        0.9951333266680702
+      ],
+      "position_m": [
+        50.01961161351382,
+        0.0,
+        1.901941932430908
+      ],
+      "proxy_id": "proxy-road-ramp",
+      "revision": "proxy-r1"
+    },
+    {
+      "classification": "BLOCKING",
+      "dimensions_m": [
+        12.0,
+        8.0,
+        10.0
+      ],
+      "entity_id": "building-01",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        20.0,
+        14.0,
+        5.0
+      ],
+      "proxy_id": "proxy-building-01",
+      "revision": "proxy-r1"
+    },
+    {
+      "classification": "NON_OPERATIONAL",
+      "dimensions_m": [
+        3.0,
+        1.5,
+        2.5
+      ],
+      "entity_id": "stop-terminal",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        10.0,
+        -4.5,
+        1.25
+      ],
+      "proxy_id": "proxy-stop-terminal",
+      "revision": "proxy-r1"
+    },
+    {
+      "classification": "BLOCKING",
+      "dimensions_m": [
+        16.0,
+        12.0,
+        0.4
+      ],
+      "entity_id": "depot-main",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        -12.0,
+        0.0,
+        -0.2
+      ],
+      "proxy_id": "proxy-depot-main",
+      "revision": "proxy-r1"
+    },
+    {
+      "classification": "BLOCKING",
+      "dimensions_m": [
+        1.0,
+        0.8,
+        1.8
+      ],
+      "entity_id": "charger-01",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        -15.0,
+        -3.0,
+        0.9
+      ],
+      "proxy_id": "proxy-charger-01",
+      "revision": "proxy-r1"
+    },
+    {
+      "classification": "BLOCKING",
+      "dimensions_m": [
+        1.0,
+        0.8,
+        1.8
+      ],
+      "entity_id": "charger-02",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        -15.0,
+        3.0,
+        0.9
+      ],
+      "proxy_id": "proxy-charger-02",
+      "revision": "proxy-r1"
+    },
+    {
+      "classification": "BLOCKING",
+      "dimensions_m": [
+        2.0,
+        2.5,
+        1.5
+      ],
+      "entity_id": "obstruction-01",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        30.0,
+        0.0,
+        0.75
+      ],
+      "proxy_id": "proxy-obstruction-01",
+      "revision": "proxy-r1"
+    },
+    {
+      "classification": "BLOCKING",
+      "dimensions_m": [
+        4.8,
+        2.0,
+        2.6
+      ],
+      "entity_id": "shuttle-01",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        2.0,
+        0.0,
+        1.3
+      ],
+      "proxy_id": "proxy-shuttle-01",
+      "revision": "proxy-r1"
+    },
+    {
+      "classification": "BLOCKING",
+      "dimensions_m": [
+        4.8,
+        2.0,
+        2.6
+      ],
+      "entity_id": "shuttle-02",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        9.0,
+        0.0,
+        1.3
+      ],
+      "proxy_id": "proxy-shuttle-02",
+      "revision": "proxy-r1"
+    },
+    {
+      "classification": "BLOCKING",
+      "dimensions_m": [
+        4.8,
+        2.0,
+        2.6
+      ],
+      "entity_id": "shuttle-03",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        16.0,
+        0.0,
+        1.3
+      ],
+      "proxy_id": "proxy-shuttle-03",
+      "revision": "proxy-r1"
+    },
+    {
+      "classification": "BLOCKING",
+      "dimensions_m": [
+        4.8,
+        2.0,
+        2.6
+      ],
+      "entity_id": "shuttle-04",
+      "orientation_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "position_m": [
+        23.0,
+        0.0,
+        1.3
+      ],
+      "proxy_id": "proxy-shuttle-04",
+      "revision": "proxy-r1"
+    },
+    {
+      "classification": "BLOCKING",
+      "dimensions_m": [
+        4.8,
+        2.0,
+        2.6
+      ],
+      "entity_id": "shuttle-05",
+      "orientation_xyzw": [
+        0.0,
+        -0.09853761796664216,
+        0.0,
+        0.9951333266680702
+      ],
+      "position_m": [
+        49.74504902432036,
+        0.0,
+        3.274754878398196
+      ],
+      "proxy_id": "proxy-shuttle-05",
+      "revision": "proxy-r1"
+    }
+  ],
+  "road_surfaces": [
+    {
+      "clearance_m": 5.0,
+      "deck_id": "deck-ground",
+      "directed_edge_id": "edge-flat",
+      "entity_id": "road-flat",
+      "lane_id": "lane-main",
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "path_samples_m": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          40.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "permitted_next_surface_ids": [
+        "surface-ramp"
+      ],
+      "surface_id": "surface-flat",
+      "width_m": 6.0
+    },
+    {
+      "clearance_m": 5.0,
+      "deck_id": "deck-ramp",
+      "directed_edge_id": "edge-ramp",
+      "entity_id": "road-ramp",
+      "lane_id": "lane-main",
+      "normal": [
+        -0.19611613513818402,
+        0.0,
+        0.9805806756909201
+      ],
+      "path_samples_m": [
+        [
+          40.0,
+          0.0,
+          0.0
+        ],
+        [
+          60.0,
+          0.0,
+          4.0
+        ]
+      ],
+      "permitted_next_surface_ids": [],
+      "surface_id": "surface-ramp",
+      "width_m": 6.0
+    }
+  ],
+  "scene_id": "m2-blockout",
+  "scene_revision": "scene-05090d14627653e854482814",
+  "source_geography": "Authored local training blockout; geographic anchor illustrative, not surveyed Singapore roads.",
+  "spatial_revision": "spatial-05090d14627653e854482814",
+  "spatial_schema_version": "1.0",
+  "transform_revision": "canonical-enu-r1",
+  "units": "metres",
+  "world_basis": "RH_X_EAST_Y_NORTH_Z_UP"
+}
