@@ -12,13 +12,28 @@ there.
 - The Formula_9 backend running locally (default `http://127.0.0.1:8000`;
   set `FORMULA9_BACKEND_URL` to use another address)
 
+## Running the client
+
+1. Start the Formula_9 backend (`run.bat`, or `uvicorn src.app:app --reload` in `backend`).
+2. Open `Assets/Scenes/Formula9.unity` and press Play, or build a player.
+3. Log in with your team account (or **Create account**), then create or join a training
+   session. New sessions default to the integrated exercise.
+
+If the scene or its UI panel settings go missing, rebuild them with
+**Formula 9 → Rebuild client scene** (or headless:
+`Unity.exe -batchmode -quit -projectPath . -executeMethod Formula9.EditorTools.SceneBuilder.Build`).
+
 ## Layout
 
 | Folder | Contents |
 |---|---|
 | `Assets/Formula9/Runtime/Contracts` | v2 contract classes and validation |
 | `Assets/Formula9/Runtime/Backend` | HTTP access to the backend |
-| `Assets/Formula9/Runtime/{Session,World,UI,Audio}` | Client features as they are ported |
+| `Assets/Formula9/Runtime/Session` | Joined session, polling, events and commands |
+| `Assets/Formula9/Runtime/UI` | Screens (`Formula9App`) and their presenters |
+| `Assets/Formula9/Runtime/{World,Audio}` | 3D world and alerts, still to be ported |
+| `Assets/Formula9/UI` | UI Toolkit layout, styles, theme and panel settings |
+| `Assets/Formula9/Editor` | Editor tools, including the scene builder |
 | `Assets/Formula9/Tests/EditMode` | EditMode tests and the shared contract fixtures |
 | `Tools` | Scripts run outside Unity |
 

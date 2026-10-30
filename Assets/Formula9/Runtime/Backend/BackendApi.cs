@@ -28,7 +28,10 @@ namespace Formula9.Backend
     // No complete, readable reply. The request may or may not have taken effect.
     public sealed class NoReplyException : Exception
     {
-        public NoReplyException(string message) : base(message) { }
+        // The HTTP status when a reply arrived but was unreadable; 0 when nothing arrived at all.
+        public int Status { get; }
+
+        public NoReplyException(string message, int status = 0) : base(message) => Status = status;
     }
 
     // There is no valid login, either locally or because the backend rejected the token (401).
@@ -69,7 +72,7 @@ namespace Formula9.Backend
             if (!response.Complete) throw new NoReplyException($"No complete reply from {request.Method} {request.Url.AbsolutePath}");
             if (response.Status >= 200 && response.Status < 300) return response.Body;
             var error = ReadError(response);
-            if (error == null) throw new NoReplyException($"Unreadable {response.Status} reply from {request.Method} {request.Url.AbsolutePath}");
+            if (error == null) throw new NoReplyException($"Unreadable {response.Status} reply from {request.Method} {request.Url.AbsolutePath}", response.Status);
             if (response.Status == 401 && onUnauthorized != null) onUnauthorized(error);
             throw new BackendErrorException(error);
         }

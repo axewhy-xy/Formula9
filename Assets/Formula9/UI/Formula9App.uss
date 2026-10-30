@@ -1,0 +1,177 @@
+/* Light theme close to the Qt client's app.qss: neutral greys, one teal accent. */
+.app {
+    flex-grow: 1;
+    background-color: rgb(244, 246, 248);
+    color: rgb(28, 34, 40);
+    font-size: 14px;
+}
+
+.login {
+    flex-grow: 1;
+    align-items: center;
+    justify-content: center;
+    background-color: rgb(28, 40, 48);
+}
+
+.login-card {
+    width: 420px;
+    padding: 28px;
+    border-radius: 10px;
+    background-color: rgb(255, 255, 255);
+}
+
+.brand {
+    font-size: 26px;
+    -unity-font-style: bold;
+    color: rgb(18, 110, 120);
+}
+
+.subtitle {
+    margin-bottom: 14px;
+    color: rgb(96, 106, 116);
+}
+
+.hint {
+    white-space: normal;
+    margin-bottom: 8px;
+    color: rgb(96, 106, 116);
+}
+
+.error {
+    white-space: normal;
+    min-height: 20px;
+    margin: 6px 0;
+    color: rgb(190, 40, 40);
+}
+
+.primary {
+    background-color: rgb(18, 110, 120);
+    color: rgb(255, 255, 255);
+    -unity-font-style: bold;
+    border-width: 0;
+}
+
+.primary:hover {
+    background-color: rgb(14, 92, 100);
+}
+
+.primary:disabled {
+    background-color: rgb(160, 176, 180);
+}
+
+.link {
+    background-color: rgba(0, 0, 0, 0);
+    border-width: 0;
+    color: rgb(18, 110, 120);
+}
+
+.training {
+    flex-grow: 1;
+    padding: 12px 16px;
+}
+
+.top-bar {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.title {
+    flex-grow: 1;
+    font-size: 20px;
+    -unity-font-style: bold;
+}
+
+.user {
+    margin-right: 8px;
+    color: rgb(96, 106, 116);
+}
+
+.row {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+}
+
+.scenario {
+    min-width: 300px;
+}
+
+.session-id {
+    min-width: 320px;
+}
+
+.sessions {
+    min-width: 420px;
+}
+
+.muted {
+    color: rgb(96, 106, 116);
+    white-space: normal;
+}
+
+.status {
+    margin-top: 4px;
+    -unity-font-style: bold;
+}
+
+.message {
+    white-space: normal;
+    min-height: 20px;
+    margin-bottom: 8px;
+    color: rgb(18, 90, 100);
+}
+
+.body {
+    flex-grow: 1;
+    flex-direction: row;
+}
+
+.world {
+    flex-grow: 3;
+    margin-right: 12px;
+    border-radius: 8px;
+    background-color: rgb(26, 26, 30);
+    align-items: center;
+    justify-content: center;
+}
+
+.world .muted {
+    color: rgb(200, 206, 212);
+}
+
+.fleet-panel {
+    flex-grow: 2;
+    flex-basis: 0;
+    padding: 10px;
+    border-radius: 8px;
+    background-color: rgb(255, 255, 255);
+}
+
+.panel-title {
+    font-size: 16px;
+    -unity-font-style: bold;
+    margin-bottom: 6px;
+}
+
+.fleet {
+    flex-grow: 1;
+}
+
+.fleet-row {
+    flex-direction: row;
+    padding: 4px 0;
+    border-bottom-width: 1px;
+    border-color: rgb(228, 232, 236);
+}
+
+.fleet-header {
+    -unity-font-style: bold;
+}
+
+.fleet-cell {
+    flex-grow: 1;
+    flex-basis: 0;
+    overflow: hidden;
+}
