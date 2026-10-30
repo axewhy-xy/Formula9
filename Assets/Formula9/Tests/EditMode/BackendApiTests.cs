@@ -1,3 +1,18 @@
+/*
+ * Unit tests for the backend layer (BackendApi.cs, AuthSession.cs).
+ *
+ * Author: Choo Jian Wei
+ * Contributors: Lau Xiang Yang (session list and cleanup tests)
+ * Date Created: 30/10/2026
+ * Last Modified: 30/10/2026
+ *
+ * Description:
+ *     Uses a scripted fake transport and clock, so no backend is needed. Covers login and the
+ *     token's lifetime, that training requests are never anonymous, 401 handling across re-logins,
+ *     the three kinds of failure, every training call's request and reply checks, and the session
+ *     cleanup calls.
+ */
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -11,14 +26,37 @@ using UnityEngine;
 
 namespace Formula9.Tests
 {
+    // -----------------------------------------------------------------------------------
+    // Class: BackendApiTests
+    // -----------------------------------------------------------------------------------
+    // Description:
+    //     This class tests the login and training clients against a fake transport.
     public class BackendApiTests
     {
-        // Answers each request from a script and records what was sent.
+        // -----------------------------------------------------------------------------------
+        // Class: FakeTransport
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This class answers each request from a script and records what was sent.
+        //
+        //     Attributes: Sent lists the requests; Reply answers each one (500 by default).
         private sealed class FakeTransport : IHttpTransport
         {
             public readonly List<HttpRequest> Sent = new List<HttpRequest>();
             public Func<HttpRequest, HttpResponse> Reply = _ => new HttpResponse { Status = 500, Body = "{}" };
 
+            // -----------------------------------------------------------------------------------
+            // Function: FakeTransport.SendAsync
+            // -----------------------------------------------------------------------------------
+            // Description:
+            //     This function records the request and returns the scripted reply.
+            //
+            // Args:
+            //     request (HttpRequest): The request.
+            //     cancellation (CancellationToken): Unused.
+            //
+            // Returns:
+            //     Task<HttpResponse>: The scripted reply.
             public Task<HttpResponse> SendAsync(HttpRequest request, CancellationToken cancellation = default)
             {
                 Sent.Add(request);
@@ -32,17 +70,59 @@ namespace Formula9.Tests
         private FakeTransport transport;
         private TrainingApi training;
 
+        // -----------------------------------------------------------------------------------
+        // Function: Fixture
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function reads a shared contract fixture.
+        //
+        // Args:
+        //     name (string): The fixture name, without .json.
+        //
+        // Returns:
+        //     string: The fixture's JSON.
         private static string Fixture(string name) =>
             File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures", name + ".json"));
 
+        // -----------------------------------------------------------------------------------
+        // Function: Ok
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function makes a successful reply.
+        //
+        // Args:
+        //     body (string): The body.
+        //     status (int): The status, 200 by default.
+        //
+        // Returns:
+        //     HttpResponse: The reply.
         private static HttpResponse Ok(string body, int status = 200) => new HttpResponse { Status = status, Body = body };
 
+        // -----------------------------------------------------------------------------------
+        // Function: Error
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function makes a backend error reply.
+        //
+        // Args:
+        //     status (int): The HTTP status.
+        //     code (string): The error code.
+        //     retryable (bool): The retryable flag.
+        //
+        // Returns:
+        //     HttpResponse: The reply.
         private static HttpResponse Error(int status, string code, bool retryable = false) => new HttpResponse
         {
             Status = status,
             Body = new JObject { ["error"] = new JObject { ["code"] = code, ["message"] = code + " message", ["retryable"] = retryable } }.ToString(),
         };
 
+        // -----------------------------------------------------------------------------------
+        // Function: SetUp
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function gives each test a fixed clock, a logged-out session and a fresh fake
+        //     transport.
         [SetUp]
         public void SetUp()
         {
@@ -52,8 +132,21 @@ namespace Formula9.Tests
             training = new TrainingApi(transport, session, Base);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: LogIn
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function starts a one-hour login.
+        //
+        // Args:
+        //     token (string): The token to use.
         private void LogIn(string token = "token-1") => session.Begin("trainee", token, 3600);
 
+        // -----------------------------------------------------------------------------------
+        // Function: LoginStoresTheTokenAndTrimsTheUsername
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A login sends the trimmed username and keeps the returned token.
         [Test]
         public async Task LoginStoresTheTokenAndTrimsTheUsername()
         {
@@ -65,6 +158,11 @@ namespace Formula9.Tests
             Assert.AreEqual("trainee", (string)JObject.Parse(transport.Sent[0].Body)["username"]);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: WrongPasswordIsABackendErrorAndLeavesTheUserLoggedOut
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A refused login is a backend error and starts no login.
         [Test]
         public void WrongPasswordIsABackendErrorAndLeavesTheUserLoggedOut()
         {
@@ -74,6 +172,11 @@ namespace Formula9.Tests
             Assert.IsFalse(session.IsLoggedIn);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: TokensAreTreatedAsExpiredAMinuteEarly
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A token counts as expired one minute before its real expiry.
         [Test]
         public void TokensAreTreatedAsExpiredAMinuteEarly()
         {
@@ -84,6 +187,11 @@ namespace Formula9.Tests
             Assert.IsFalse(session.IsLoggedIn);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: TrainingCallsAreNeverSentAnonymously
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Without a login, training calls fail before anything is sent.
         [Test]
         public void TrainingCallsAreNeverSentAnonymously()
         {
@@ -91,6 +199,11 @@ namespace Formula9.Tests
             Assert.IsEmpty(transport.Sent);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: SnapshotRequestCarriesTheTokenAndEncodesTheId
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A snapshot request carries the bearer token and escapes the session ID.
         [Test]
         public async Task SnapshotRequestCarriesTheTokenAndEncodesTheId()
         {
@@ -104,6 +217,11 @@ namespace Formula9.Tests
             Assert.AreEqual($"/api/v2/sessions/{Uri.EscapeDataString(id)}/snapshot", transport.Sent[0].Url.AbsolutePath);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: SnapshotForAnotherSessionIsRejected
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A snapshot for a different session than asked is a contract error.
         [Test]
         public void SnapshotForAnotherSessionIsRejected()
         {
@@ -112,6 +230,11 @@ namespace Formula9.Tests
             Assert.ThrowsAsync<ContractException>(() => training.GetSnapshotAsync("some-other-session"));
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: ExpiredTokenEndsTheLogin
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A 401 for the current token ends the login and is reported as not logged in.
         [Test]
         public void ExpiredTokenEndsTheLogin()
         {
@@ -124,6 +247,11 @@ namespace Formula9.Tests
             Assert.IsFalse(session.IsLoggedIn);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: A401ForAnOldTokenDoesNotEndANewerLogin
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A late 401 for a token from before a re-login leaves the new login alone.
         [Test]
         public void A401ForAnOldTokenDoesNotEndANewerLogin()
         {
@@ -138,6 +266,11 @@ namespace Formula9.Tests
             Assert.AreEqual("new-token", session.Token);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: CompleteBackendErrorsKeepTheirCodeAndRetryFlag
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A complete error reply keeps its status, code and retryable flag.
         [Test]
         public void CompleteBackendErrorsKeepTheirCodeAndRetryFlag()
         {
@@ -149,6 +282,11 @@ namespace Formula9.Tests
             Assert.IsTrue(error.Error.Retryable);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: MissingOrUnreadableRepliesAreUnknownOutcomes
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     No reply, or an unreadable one, is reported as an unknown outcome.
         [Test]
         public void MissingOrUnreadableRepliesAreUnknownOutcomes()
         {
@@ -159,6 +297,11 @@ namespace Formula9.Tests
             Assert.ThrowsAsync<NoReplyException>(() => training.ListSessionsAsync());
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: SessionListAsksForOnePage
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The session list asks for one page of the given size.
         [Test]
         public async Task SessionListAsksForOnePage()
         {
@@ -169,6 +312,11 @@ namespace Formula9.Tests
             Assert.AreEqual(2, list.Total);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: DeleteAcceptsAnEmptyReplyAndEncodesTheId
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Delete escapes the session ID and accepts an empty 204 reply.
         [Test]
         public async Task DeleteAcceptsAnEmptyReplyAndEncodesTheId()
         {
@@ -179,6 +327,11 @@ namespace Formula9.Tests
             Assert.AreEqual("/api/v2/sessions/session%201", transport.Sent[0].Url.AbsolutePath);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: PurgeAndCompactSendMaintenanceRequestsWithALongerTimeout
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Purge and compact use their own paths and a longer timeout, and return their results.
         [Test]
         public async Task PurgeAndCompactSendMaintenanceRequestsWithALongerTimeout()
         {
@@ -195,6 +348,11 @@ namespace Formula9.Tests
             Assert.Greater(transport.Sent[1].TimeoutSeconds, 10);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: MalformedMaintenanceRepliesAreContractErrors
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Purge and compact replies missing their fields are contract errors.
         [Test]
         public void MalformedMaintenanceRepliesAreContractErrors()
         {
@@ -204,6 +362,11 @@ namespace Formula9.Tests
             Assert.ThrowsAsync<ContractException>(() => training.CompactSessionsAsync());
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: CreateSendsTheIdempotencyKeyAndValidatesTheRequestFirst
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Create sends its idempotency key, and an invalid request is refused before sending.
         [Test]
         public async Task CreateSendsTheIdempotencyKeyAndValidatesTheRequestFirst()
         {
@@ -220,6 +383,11 @@ namespace Formula9.Tests
             Assert.AreEqual(1, transport.Sent.Count, "an invalid request is never sent");
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: CommandsReturnTheirJournaledStatus
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Submitting a command and asking its status both return the journaled status.
         [Test]
         public async Task CommandsReturnTheirJournaledStatus()
         {
@@ -232,6 +400,11 @@ namespace Formula9.Tests
             Assert.AreEqual(command.IdempotencyKey, (string)JObject.Parse(transport.Sent[0].Body)["idempotency_key"]);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: EventReplayMustAnswerTheCursorThatWasAskedFor
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     An event replay for a different cursor than asked is a contract error.
         [Test]
         public void EventReplayMustAnswerTheCursorThatWasAskedFor()
         {

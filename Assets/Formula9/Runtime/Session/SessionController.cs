@@ -1,3 +1,22 @@
+/*
+ * Creates, joins and polls a training session, and sends its commands.
+ *
+ * Author: Choo Jian Wei
+ * Contributors: Lau Xiang Yang (leaving a deleted session)
+ * Date Created: 30/10/2026
+ * Last Modified: 30/10/2026
+ *
+ * Description:
+ *     Part of the Unity client's session layer. A port of the training half of the Qt client's
+ *     BackendClient. It creates sessions with a retry key kept per owner, joins and polls the
+ *     joined session every second, replays events from a committed cursor, fetches events a
+ *     recovery appended after an epoch change, and resynchronises from a fresh snapshot when an
+ *     event batch does not fit. It holds at most one open command: a lost reply is confirmed by
+ *     resending the same command, or by asking for its status after a recovery, backing off to at
+ *     most 5 s, and the command waits for its own account across logins. Call it from Unity's main
+ *     thread.
+ */
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -9,8 +28,15 @@ using Formula9.Contracts;
 
 namespace Formula9.Session
 {
-    // What happened to a submitted command. Confirmed is false for outcomes the client had to
-    // conclude itself (NEEDS_RECONFIRMATION) because the backend could no longer confirm it.
+    // -----------------------------------------------------------------------------------
+    // Class: CommandOutcome
+    // -----------------------------------------------------------------------------------
+    // Description:
+    //     This class says what happened to a submitted command.
+    //
+    //     Attributes: the command's IDs, Status, target, AppliedTick and FailureCode; Confirmed is
+    //     false for outcomes the client had to conclude itself (NEEDS_RECONFIRMATION) because the
+    //     backend could no longer confirm them.
     public sealed class CommandOutcome
     {
         public string CommandId, IdempotencyKey, Status, TargetType, TargetId, FailureCode;
@@ -18,6 +44,17 @@ namespace Formula9.Session
         public long? AppliedTick;
         public bool Confirmed;
 
+        // -----------------------------------------------------------------------------------
+        // Function: CommandOutcome.From
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function makes an outcome from the backend's command status.
+        //
+        // Args:
+        //     status (CommandStatus): The journaled status.
+        //
+        // Returns:
+        //     CommandOutcome: The confirmed outcome.
         internal static CommandOutcome From(CommandStatus status) => new CommandOutcome
         {
             CommandId = status.CommandId, IdempotencyKey = status.IdempotencyKey, Status = status.Status,
@@ -26,9 +63,20 @@ namespace Formula9.Session
         };
     }
 
-    // Owns the joined training session: creation, join, the 1 s poll, event catch-up and the one
-    // command whose outcome is still open. Port of the training half of the Qt BackendClient.
-    // Call it from Unity's main thread; drive Refresh from a 1 s timer.
+    // -----------------------------------------------------------------------------------
+    // Class: SessionController
+    // -----------------------------------------------------------------------------------
+    // Description:
+    //     This class owns the joined training session: creation, join, the 1 s poll, event catch-up
+    //     and the one command whose outcome is still open. Drive RefreshAsync from a 1 s timer.
+    //
+    //     Attributes: Store, SessionId, Session and Available describe the joined session;
+    //     HasPendingCommand and CreationPending tell whether a command or creation is unresolved;
+    //     Scenario is used for the next creation (an unresolved creation keeps the one it started
+    //     with). Events report accepted snapshots and events, recovery events, availability,
+    //     command outcomes, the command ledger (including submissions with an unknown outcome and
+    //     complete refusals, so a report never silently omits a command), errors, and leaving a
+    //     session.
     public sealed class SessionController
     {
         public const string IntegratedScenario = "scenario-m2-integrated-r1";
@@ -36,6 +84,15 @@ namespace Formula9.Session
         private static readonly Regex IdPattern = new Regex("^[A-Za-z0-9][A-Za-z0-9_.:-]*$");
         private static readonly HashSet<string> SessionControls = new HashSet<string> { "START", "PAUSE", "RESUME", "ARCHIVE" };
 
+        // -----------------------------------------------------------------------------------
+        // Class: PendingCommand
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This class is the one command whose outcome is still open.
+        //
+        //     Attributes: Command; Approval for a route approval, which uses its own endpoint;
+        //     StatusOnly once the command may have been received, so it is only confirmed, never
+        //     resent; Owner, the account it belongs to.
         private sealed class PendingCommand
         {
             public DispatcherCommand Command;
@@ -79,6 +136,21 @@ namespace Formula9.Session
         public event Action<string> ErrorOccurred;
         public event Action SessionLeft;
 
+        // -----------------------------------------------------------------------------------
+        // Function: SessionController (constructor)
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function creates the controller.
+        //
+        // Args:
+        //     api (TrainingApi): The training API.
+        //     auth (AuthSession): The login.
+        //     store (SessionStore): Where state is kept; a new store when null.
+        //     delay (Func<TimeSpan, CancellationToken, Task>): Waits between retries; Task.Delay
+        //         when null. Tests pass an instant delay.
+        //
+        // Throws:
+        //     ArgumentNullException: If api or auth is null.
         public SessionController(TrainingApi api, AuthSession auth, SessionStore store = null,
             Func<TimeSpan, CancellationToken, Task> delay = null)
         {
@@ -88,13 +160,26 @@ namespace Formula9.Session
             this.delay = delay ?? Task.Delay;
         }
 
-        // Stops retries and ignores replies still in flight, for example when the scene closes.
+        // -----------------------------------------------------------------------------------
+        // Function: Shutdown
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function stops retries and ignores replies still in flight, for example when the
+        //     scene closes.
         public void Shutdown()
         {
             generation++;
             lifetime.Cancel();
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: CreateAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function creates a training session and joins it. The creation key is kept until
+        //     the backend confirms the attempt, so a retry after a lost reply returns the same
+        //     session; only the account that started it can confirm it. A late success for another
+        //     login does not select its session or drop its retry key.
         public async Task CreateAsync()
         {
             if (createRequest != null) return;
@@ -144,6 +229,17 @@ namespace Formula9.Session
             await JoinAsync(created.SessionId);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: JoinAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function joins a session and loads its snapshot. Requests for the previous join
+        //     are abandoned and their replies ignored. A command still open for another session can
+        //     no longer be confirmed, so it finishes as NEEDS_RECONFIRMATION. Joining the same ID
+        //     again keeps the store and cursor, replaying from where it left off.
+        //
+        // Args:
+        //     sessionId (string): The session ID, checked against the backend's ID rules.
         public Task JoinAsync(string sessionId)
         {
             if (string.IsNullOrEmpty(sessionId) || sessionId.Length > 128 || !IdPattern.IsMatch(sessionId))
@@ -163,7 +259,12 @@ namespace Formula9.Session
             return RequestSnapshotAsync(sessionId);
         }
 
-        // Forgets the selected session and stops polling it, once it has been permanently deleted.
+        // -----------------------------------------------------------------------------------
+        // Function: Leave
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function forgets the selected session and stops polling it, once it has been
+        //     permanently deleted.
         public void Leave()
         {
             generation++;
@@ -179,7 +280,12 @@ namespace Formula9.Session
             SessionLeft?.Invoke();
         }
 
-        // One poll: confirm a pending creation, refresh the snapshot and reconcile a pending command.
+        // -----------------------------------------------------------------------------------
+        // Function: RefreshAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function is one poll: it confirms a pending creation, refreshes the snapshot
+        //     (which catches up events) and reconciles a pending command.
         public async Task RefreshAsync()
         {
             if (!auth.IsLoggedIn) return;
@@ -188,7 +294,20 @@ namespace Formula9.Session
             if (pending != null && pending.Command.SessionId == SessionId) await RunPendingAsync(0);
         }
 
-        // START, PAUSE, RESUME or ARCHIVE for the joined session.
+        // -----------------------------------------------------------------------------------
+        // Function: SendControlAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function sends START, PAUSE, RESUME or ARCHIVE for the joined session.
+        //
+        // Args:
+        //     commandType (string): The control.
+        //
+        // Returns:
+        //     Task<bool>: True when the command was accepted for sending.
+        //
+        // Throws:
+        //     ArgumentException: If commandType is not a session control.
         public Task<bool> SendControlAsync(string commandType)
         {
             if (!SessionControls.Contains(commandType)) throw new ArgumentException("Not a session control", nameof(commandType));
@@ -202,7 +321,22 @@ namespace Formula9.Session
             });
         }
 
-        // Submits one command; only one may be open at a time, as in the Qt client.
+        // -----------------------------------------------------------------------------------
+        // Function: SubmitAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function submits one command. Only one may be open at a time, as in the Qt
+        //     client, and a malformed command is rejected before it becomes pending.
+        //
+        // Args:
+        //     command (DispatcherCommand): The command for the joined session.
+        //
+        // Returns:
+        //     Task<bool>: False when refused because the session is not ready or a command is open.
+        //
+        // Throws:
+        //     ArgumentException: If the command is for another session.
+        //     ContractException: If the command breaks the contract.
         public async Task<bool> SubmitAsync(DispatcherCommand command)
         {
             if (Session == null || !Available || resyncPending || joiningSessionId != null || pending != null) return await Refuse();
@@ -214,8 +348,25 @@ namespace Formula9.Session
             return true;
         }
 
-        // Route approvals use a separate endpoint, with the same identity, owner and recovery
-        // machinery as all other commands. A lost reply must never create a second approval.
+        // -----------------------------------------------------------------------------------
+        // Function: ApproveRouteAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function approves a validated route proposal. Route approvals use a separate
+        //     endpoint, with the same identity, owner and recovery machinery as all other commands,
+        //     so a lost reply never creates a second approval. Every shuttle on the route is a
+        //     target.
+        //
+        // Args:
+        //     preview (RouteEditPreview): A fresh, approvable preview of the current route
+        //         revision.
+        //     reason (string): Why the route is changed.
+        //
+        // Returns:
+        //     Task<bool>: False when refused because the session is not ready or a command is open.
+        //
+        // Throws:
+        //     ArgumentException: If the preview is stale or not approvable, or the reason is empty.
         public async Task<bool> ApproveRouteAsync(RouteEditPreview preview, string reason)
         {
             if (Session == null || !Available || resyncPending || joiningSessionId != null || pending != null) return await Refuse();
@@ -244,12 +395,32 @@ namespace Formula9.Session
             return true;
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: Refuse
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function reports why a command cannot be sent now.
+        //
+        // Returns:
+        //     Task<bool>: False.
         private Task<bool> Refuse()
         {
             Error("Refresh the selected session and finish any pending command first.");
             return Task.FromResult(false);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: RequestSnapshotAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function loads a snapshot into the store, then catches up events. An expired
+        //     login keeps the session for the next login; a session another client deleted is left.
+        //     On a new epoch of the same run it fetches the events recovery appended, which the
+        //     cursor jump would otherwise skip, and an open command is only confirmed, never
+        //     resent.
+        //
+        // Args:
+        //     sessionId (string): The session.
         private async Task RequestSnapshotAsync(string sessionId)
         {
             if (snapshotRequest != null) return;
@@ -314,6 +485,13 @@ namespace Formula9.Session
             if (!resetEvents) await RequestEventsAsync();
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: RequestEventsAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function fetches events after the cursor and adds them to the store. The cursor
+        //     moves only after the store accepts the batch; an invalid or mismatched batch triggers
+        //     a resync.
         private async Task RequestEventsAsync()
         {
             if (eventsRequest != null || resyncPending || SessionId == null || eventCursor < 0) return;
@@ -356,6 +534,17 @@ namespace Formula9.Session
             EventsAccepted?.Invoke(replay.Events);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: RequestRecoveryEventsAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function fetches the durable events a recovery appended before the new epoch's
+        //     snapshot. They are the newest before through, so one bounded page reaches them.
+        //
+        // Args:
+        //     sessionId (string): The session.
+        //     after (long): The cursor before the recovery.
+        //     through (long): The new snapshot's event sequence.
         private async Task RequestRecoveryEventsAsync(string sessionId, long after, long through)
         {
             // Recovery events are the newest before `through`; one bounded page reaches them.
@@ -373,6 +562,14 @@ namespace Formula9.Session
             RecoveryEventsReceived?.Invoke(replay.Events.Where(e => e.EventSequence <= through).ToList());
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: ResyncAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function marks the session unavailable and reloads it from a fresh snapshot.
+        //
+        // Args:
+        //     reason (string): Why, for the error message.
         private Task ResyncAsync(string reason)
         {
             resyncPending = true;
@@ -381,8 +578,19 @@ namespace Formula9.Session
             return RequestSnapshotAsync(SessionId);
         }
 
-        // Sends the pending command, or checks its status once its outcome is open. Never gives up
-        // and never forgets the key: a fresh command could otherwise apply the decision twice.
+        // -----------------------------------------------------------------------------------
+        // Function: RunPendingAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function sends the pending command, or checks its status once its outcome is
+        //     open. It never gives up and never forgets the key, since a fresh command could apply
+        //     the decision twice. Without a login it waits: an anonymous request's 403 is final and
+        //     would drop a command the backend may have accepted. A complete refusal of a
+        //     submission is final; a status check the backend can no longer answer ends as
+        //     NEEDS_RECONFIRMATION.
+        //
+        // Args:
+        //     attempt (int): How many times this command has been retried, for the backoff.
         private async Task RunPendingAsync(int attempt)
         {
             var command = pending;
@@ -469,12 +677,33 @@ namespace Formula9.Session
             }
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: RetryLater
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function schedules the next try, backing off by 100 ms (250 ms for status
+        //     checks) per attempt, up to 5 s.
+        //
+        // Args:
+        //     command (PendingCommand): The command.
+        //     attempt (int): The attempt that just failed.
+        //     statusOnly (bool): True for a status check.
         private void RetryLater(PendingCommand command, int attempt, bool statusOnly)
         {
             var wait = TimeSpan.FromMilliseconds(Math.Min((statusOnly ? 250 : 100) * (attempt + 1), 5000));
             _ = RetryAfterAsync(command, attempt + 1, wait);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: RetryAfterAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function waits, then retries the command if it is still the pending one.
+        //
+        // Args:
+        //     command (PendingCommand): The command.
+        //     attempt (int): The attempt number.
+        //     wait (TimeSpan): How long to wait.
         private async Task RetryAfterAsync(PendingCommand command, int attempt, TimeSpan wait)
         {
             try { await delay(wait, lifetime.Token); }
@@ -482,15 +711,36 @@ namespace Formula9.Session
             if (pending == command) await RunPendingAsync(attempt);
         }
 
-        // A command made while logged out belongs to whoever logs in next. After that it stays
-        // with that account: resent under another, the backend answers IDEMPOTENCY_CONFLICT, which
-        // reads as final and would drop the original decision.
+        // -----------------------------------------------------------------------------------
+        // Function: ClaimForCurrentLogin
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function gives a command made while logged out to whoever logs in next. After
+        //     that it stays with that account: resent under another, the backend answers
+        //     IDEMPOTENCY_CONFLICT, which reads as final and would drop the original decision.
+        //
+        // Args:
+        //     command (PendingCommand): The command.
+        //
+        // Returns:
+        //     bool: True when the current login owns the command.
         private bool ClaimForCurrentLogin(PendingCommand command)
         {
             if (command.Owner == null) command.Owner = auth.Username;
             return command.Owner == auth.Username;
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: Unconfirmed
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function makes a NEEDS_RECONFIRMATION outcome for the pending command.
+        //
+        // Args:
+        //     failureCode (string): Why; INVALID_REFERENCE when null.
+        //
+        // Returns:
+        //     CommandOutcome: The unconfirmed outcome.
         private CommandOutcome Unconfirmed(string failureCode) => new CommandOutcome
         {
             CommandId = pending.Command.CommandId, IdempotencyKey = pending.Command.IdempotencyKey, Status = "NEEDS_RECONFIRMATION",
@@ -498,6 +748,14 @@ namespace Formula9.Session
             TargetRevision = pending.Command.ExpectedRevision, FailureCode = failureCode ?? "INVALID_REFERENCE", Confirmed = false,
         };
 
+        // -----------------------------------------------------------------------------------
+        // Function: FinishPending
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function closes the pending command and reports its outcome, if any.
+        //
+        // Args:
+        //     outcome (CommandOutcome): The outcome to report, or null when already reported.
         private void FinishPending(CommandOutcome outcome)
         {
             pending = null;
@@ -505,6 +763,16 @@ namespace Formula9.Session
             if (outcome != null) { CommandLedgerChanged?.Invoke(outcome); CommandFinished?.Invoke(outcome); }
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: RecordPending
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function adds the pending command to the command ledger with a client-side
+        //     status.
+        //
+        // Args:
+        //     status (string): For example PENDING_CONFIRMATION or NOT_ACCEPTED.
+        //     failure (string): The failure code or message, if any.
         private void RecordPending(string status, string failure = null)
         {
             var outcome = Unconfirmed(failure);
@@ -512,6 +780,15 @@ namespace Formula9.Session
             CommandLedgerChanged?.Invoke(outcome);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: SetAvailable
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function changes whether the session can take commands. While it cannot, an open
+        //     command may have been received, so it is only confirmed afterwards.
+        //
+        // Args:
+        //     available (bool): The new availability.
         private void SetAvailable(bool available)
         {
             if (Available == available) return;
@@ -520,6 +797,14 @@ namespace Formula9.Session
             AvailabilityChanged?.Invoke(available);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: Error
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function reports an error to the screens.
+        //
+        // Args:
+        //     message (string): The message.
         private void Error(string message) => ErrorOccurred?.Invoke(message);
     }
 }

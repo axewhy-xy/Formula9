@@ -1,11 +1,19 @@
-"""Generate the Unity client's C# contract classes from this repository's v2 JSON schemas.
+"""
+Generate the Unity client's C# contract classes from this repository's v2 JSON schemas.
 
-The schemas stay the single source of truth: this script writes typed C# classes for every
-object they define, embeds the schemas so the client validates incoming JSON against the same
-rules as the backend, and copies the shared fixtures for the EditMode tests.
+Author: Choo Jian Wei
+Date Created: 30/10/2026
+Last Modified: 30/10/2026
 
-Usage (from this repository's root):
-    python Tools/generate_contracts.py [--source contracts/v2]
+Description:
+    The schemas stay the single source of truth: this script writes typed C# classes for every
+    object they define, embeds the schemas so the client validates incoming JSON against the same
+    rules as the backend, writes the shared alert cue table, and copies the shared fixtures and
+    the 3D scene package for the EditMode tests.
+
+    Usage (from this repository's root):
+
+        python Tools/generate_contracts.py [--source contracts/v2]
 """
 
 from __future__ import annotations
@@ -24,18 +32,70 @@ NAMESPACE = "Formula9.Contracts"
 CSHARP_KEYWORDS = {"base", "class", "event", "object", "string", "params", "operator", "internal", "fixed", "checked", "lock"}
 
 
+"""
+# -----------------------------------------------------------------------------------
+# Function: pascal
+# -----------------------------------------------------------------------------------
+Description:
+    This function turns a schema name into a C# identifier in PascalCase. A name starting with a
+    digit gets a leading underscore.
+
+Args:
+    name (str): The schema or field name.
+
+Returns:
+    str: The identifier.
+"""
 def pascal(name: str) -> str:
     result = "".join(part[:1].upper() + part[1:] for part in re.split(r"[^A-Za-z0-9]+", name) if part)
     return result if result and not result[0].isdigit() else "_" + result
 
 
+"""
+# -----------------------------------------------------------------------------------
+# Function: ref_name
+# -----------------------------------------------------------------------------------
+Description:
+    This function reads the definition name from a "#/$defs/Name" reference.
+
+Args:
+    ref (str): The $ref value.
+
+Returns:
+    str: The definition name.
+
+Raises:
+    ValueError: If the reference is of another form.
+"""
 def ref_name(ref: str) -> str:
     if not ref.startswith("#/$defs/"):
         raise ValueError(f"Unsupported $ref {ref}")
     return ref.split("/")[-1]
 
 
+"""
+# -----------------------------------------------------------------------------------
+# Class: Generator
+# -----------------------------------------------------------------------------------
+Description:
+    This class collects every object the schemas define and writes their C# classes and the embedded
+    schemas.
+
+    Attributes: documents, schema file name to parsed schema; classes, class name to its document
+    and schema.
+"""
 class Generator:
+    """
+    # -----------------------------------------------------------------------------------
+    # Function: __init__
+    # -----------------------------------------------------------------------------------
+    Description:
+        This function collects the $defs of every document, and each document that is itself an
+        object.
+
+    Args:
+        documents (dict[str, dict]): Schema file name (without .schema.json) to parsed schema.
+    """
     def __init__(self, documents: dict[str, dict]):
         self.documents = documents
         self.classes: dict[str, tuple[str, dict]] = {}  # class name -> (document key, schema)
@@ -45,6 +105,22 @@ class Generator:
             if document.get("type") == "object" and document.get("properties"):
                 self.add_class(document["title"], key, document)
 
+    """
+    # -----------------------------------------------------------------------------------
+    # Function: add_class
+    # -----------------------------------------------------------------------------------
+    Description:
+        This function records one class. A standalone schema file repeats a $defs entry; the copies
+        must agree, apart from their $id label.
+
+    Args:
+        name (str): The class name.
+        document (str): The document it comes from.
+        schema (dict): Its schema.
+
+    Raises:
+        ValueError: If two copies of a definition differ.
+    """
     def add_class(self, name: str, document: str, schema: dict) -> None:
         if name in self.classes:
             # A standalone schema file repeats a $defs entry; only its $id label may differ.
@@ -55,6 +131,21 @@ class Generator:
             return
         self.classes[name] = (document, schema)
 
+    """
+    # -----------------------------------------------------------------------------------
+    # Function: type_of
+    # -----------------------------------------------------------------------------------
+    Description:
+        This function picks the C# type for a schema: references become their class, nullable unions
+        their single other type, enums string or bool, arrays List and maps Dictionary. Anything
+        else stays JToken.
+
+    Args:
+        schema (dict): The property schema.
+
+    Returns:
+        tuple[str, bool]: The C# type, and whether it is a value type (needs '?' to hold null).
+    """
     def type_of(self, schema: dict) -> tuple[str, bool]:
         """C# type and whether that type is a value type (needs '?' to hold null)."""
         if "$ref" in schema:
@@ -100,6 +191,24 @@ class Generator:
             return "JObject", False
         return "JToken", False
 
+    """
+    # -----------------------------------------------------------------------------------
+    # Function: property
+    # -----------------------------------------------------------------------------------
+    Description:
+        This function writes one C# property with its JSON name, whether it is required or may be
+        null, and its default. pydantic's default_factory leaves no default in the schema, so an
+        absent optional list or map starts empty.
+
+    Args:
+        class_name (str): The class being written.
+        field (str): The JSON field name.
+        schema (dict): The field's schema.
+        required (bool): Whether the field is required.
+
+    Returns:
+        list[str]: The C# lines.
+    """
     def property(self, class_name: str, field: str, schema: dict, required: bool) -> list[str]:
         cs_type, value_type = self.type_of(schema)
         nullable = (not required and "default" not in schema) or self.allows_null(schema) or (
@@ -133,11 +242,39 @@ class Generator:
         lines.append(f"        public {declared} {member} {{ get; set; }}{initializer}")
         return lines
 
+    """
+    # -----------------------------------------------------------------------------------
+    # Function: allows_null
+    # -----------------------------------------------------------------------------------
+    Description:
+        This function tells whether a schema accepts null.
+
+    Args:
+        schema (dict): The schema.
+
+    Returns:
+        bool: True when null is allowed.
+    """
     @staticmethod
     def allows_null(schema: dict) -> bool:
         return any(s.get("type") == "null" for s in schema.get("anyOf", [])) or (
             isinstance(schema.get("type"), list) and "null" in schema["type"])
 
+    """
+    # -----------------------------------------------------------------------------------
+    # Function: class_source
+    # -----------------------------------------------------------------------------------
+    Description:
+        This function writes one partial C# class. Unless the schema forbids extra properties, the
+        class keeps additive 2.x fields from a newer backend instead of rejecting them.
+
+    Args:
+        name (str): The schema name.
+        schema (dict): Its schema.
+
+    Returns:
+        str: The C# source.
+    """
     def class_source(self, name: str, schema: dict) -> str:
         class_name = pascal(name)
         required = set(schema.get("required", []))
@@ -152,11 +289,32 @@ class Generator:
         return "\n".join([f"    /// <summary>{summary}</summary>",
                           f"    public sealed partial class {class_name}", "    {", *body, "    }"])
 
+    """
+    # -----------------------------------------------------------------------------------
+    # Function: models
+    # -----------------------------------------------------------------------------------
+    Description:
+        This function writes ContractModels.g.cs: every class, sorted by name.
+
+    Returns:
+        str: The file's source.
+    """
     def models(self) -> str:
         parts = [self.class_source(name, schema) for name, (_, schema) in sorted(self.classes.items())]
         return HEADER + "using System.Collections.Generic;\nusing Newtonsoft.Json;\nusing Newtonsoft.Json.Linq;\n\n" + \
             f"namespace {NAMESPACE}\n{{\n" + "\n\n".join(parts) + "\n}\n"
 
+    """
+    # -----------------------------------------------------------------------------------
+    # Function: schemas
+    # -----------------------------------------------------------------------------------
+    Description:
+        This function writes ContractSchemas.g.cs: each schema document exactly as published, and
+        where each class's schema lives (document and JSON pointer).
+
+    Returns:
+        str: The file's source.
+    """
     def schemas(self) -> str:
         documents = []
         for key, document in sorted(self.documents.items()):
@@ -180,6 +338,23 @@ HEADER = "// <auto-generated>\n// Generated by Tools/generate_contracts.py from 
          "// change the schemas in contracts/v2 and run the generator again.\n// </auto-generated>\n"
 
 
+"""
+# -----------------------------------------------------------------------------------
+# Function: alert_cues
+# -----------------------------------------------------------------------------------
+Description:
+    This function writes AlertCues.g.cs from the shared table that maps "entityType/eventType" to
+    the cue that plays.
+
+Args:
+    path (Path): contracts/v2/alert_cues.json.
+
+Returns:
+    str: The file's source.
+
+Raises:
+    ValueError: If the table does not map event keys to nonempty cue names.
+"""
 def alert_cues(path: Path) -> str:
     """The shared "entityType/eventType" -> cue table that decides which events play a sound."""
     cues = json.loads(path.read_text(encoding="utf-8"))
@@ -193,6 +368,17 @@ def alert_cues(path: Path) -> str:
         entries + "\n        };\n    }\n}\n"
 
 
+"""
+# -----------------------------------------------------------------------------------
+# Function: main
+# -----------------------------------------------------------------------------------
+Description:
+    This function generates the three C# files, copies the shared fixtures and alert cues, and
+    copies the 3D scene package, keeping Unity's .meta files and their GUIDs.
+
+Raises:
+    SystemExit: If there are no schemas under the source folder.
+"""
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--source", type=Path, default=ROOT / "contracts" / "v2")

@@ -1,3 +1,19 @@
+/*
+ * The operational 3D view of a training session.
+ *
+ * Author: Choo Jian Wei
+ * Contributors: Lau Xiang Yang (3D route drafting), Rishika (real Singapore map)
+ * Date Created: 30/10/2026
+ * Last Modified: 30/10/2026
+ *
+ * Description:
+ *     Part of the Unity client's 3D world. It renders the selected session's verified scene into a
+ *     UI Toolkit element and moves shuttles to each accepted snapshot. It owns no clock or
+ *     commands: like the Qt client's TrainingWorldViewport it only shows what the backend says. A
+ *     session without a 3D world shows its 2D map instead, and the trainee can switch between the
+ *     two. Right-drag orbits, middle-drag pans, the wheel zooms and a left click selects.
+ */
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -10,9 +26,16 @@ using UnityEngine.UIElements;
 
 namespace Formula9.World
 {
-    // The operational 3D view. It renders the selected session's verified scene into a UI Toolkit
-    // element and moves shuttles to each accepted snapshot. It owns no clock or commands: like the
-    // Qt TrainingWorldViewport it only shows what the backend says.
+    // -----------------------------------------------------------------------------------
+    // Class: WorldView
+    // -----------------------------------------------------------------------------------
+    // Description:
+    //     This component shows the 3D world and the 2D map of the selected session.
+    //
+    //     Attributes: Ready and Diagnostic say whether the world is shown and why not, and
+    //     ReadinessChanged reports changes; SelectedId and EntitySelected track the selected
+    //     entity; RouteEditing enables picking route nodes, reported through RouteNodeSelected;
+    //     ShowingMap and Offline describe the view.
     public sealed class WorldView : MonoBehaviour
     {
         public const string NoWorld = "3D unavailable · this session has no spatial capability.";
@@ -60,6 +83,19 @@ namespace Formula9.World
         public string Diagnostic { get; private set; } = "Join a training session to see its world.";
         public event Action<bool, string> ReadinessChanged;
 
+        // -----------------------------------------------------------------------------------
+        // Function: Attach
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function sets the view up inside a UI element: the opaque 2D map, the drafting
+        //     controls, the off-screen camera, the lighting and the pointer handlers.
+        //
+        // Args:
+        //     view (VisualElement): The element the world is drawn into.
+        //     sceneLoader (SceneLoader): Downloads scene packages.
+        //     basemap (MapTiles): The map tiles under the 2D map, or null.
+        //     busStops (TransitClient): Bus stop data for the 2D map, or null.
+        //     buildings (CityClient): Building data for the 3D city, or null.
         public void Attach(VisualElement view, SceneLoader sceneLoader, MapTiles basemap = null, TransitClient busStops = null, CityClient buildings = null)
         {
             cityClient = buildings;
@@ -101,6 +137,12 @@ namespace Formula9.World
             surface.RegisterCallback<WheelEvent>(OnWheel);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: OnDestroy
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function cancels loading and releases the world, tiles, material and render
+        //     texture.
         private void OnDestroy()
         {
             loading?.Cancel();
@@ -116,7 +158,17 @@ namespace Formula9.World
             if (texture != null) texture.Release();
         }
 
-        // Called for every accepted snapshot of the selected session.
+        // -----------------------------------------------------------------------------------
+        // Function: Show
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function is called for every accepted snapshot of the selected session. A new
+        //     session or epoch resets the view. A planar session shows its 2D map; a spatial one
+        //     loads its scene when the pins change, otherwise moves the shuttles, reporting a
+        //     snapshot that does not fit the scene.
+        //
+        // Args:
+        //     snapshot (FullSnapshot): The snapshot, or null when no session is joined.
         public void Show(FullSnapshot snapshot)
         {
             var boundary = snapshot == null ? null : $"{snapshot.SessionId}/{snapshot.SessionEpoch}";
@@ -152,7 +204,15 @@ namespace Formula9.World
             if (following) FocusSelected(false);
         }
 
-        // A 2D session's streets in 3D: its buildings are real, its routes and shuttles the backend's.
+        // -----------------------------------------------------------------------------------
+        // Function: ShowCity
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function shows a 2D session's streets in 3D: its buildings are real, its routes
+        //     and shuttles the backend's.
+        //
+        //     Args:
+        //         snapshot (FullSnapshot): The latest snapshot.
         private void ShowCity(FullSnapshot snapshot)
         {
             map.style.display = DisplayStyle.None;
@@ -178,6 +238,14 @@ namespace Formula9.World
             }
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: FrameCity
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function points the camera at the whole city.
+        //
+        //     Args:
+        //         view (CityView): The loaded city.
         private void FrameCity(CityView view)
         {
             var center = view.Bounds.center;
@@ -187,6 +255,19 @@ namespace Formula9.World
             PlaceCamera();
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: LoadCityAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function loads the buildings, then draws the latest snapshot over them. A failure
+        //     goes back to the 2D map.
+        //
+        //     Args:
+        //         view (CityView): The city to load.
+        //         cancellation (CancellationToken): Cancels the load.
+        //
+        //     Returns:
+        //         Task: Finishes when the load does.
         private async Task LoadCityAsync(CityView view, CancellationToken cancellation)
         {
             try
@@ -210,6 +291,11 @@ namespace Formula9.World
             }
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: Update
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function moves the city's shuttles each frame and keeps a followed one in view.
         private void Update()
         {
             if (!CityShown || city == null) return;
@@ -217,6 +303,11 @@ namespace Formula9.World
             if (following) FocusSelected(false);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: Retry
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function loads the current session's scene again, after a failure.
         public void Retry()
         {
             if (latest?.Spatial == null) return;
@@ -224,6 +315,15 @@ namespace Formula9.World
             Show(latest);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: LoadAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function downloads, builds and frames the scene, renders it once, and only then
+        //     reports readiness to the backend. A load overtaken by newer pins is discarded.
+        //
+        // Args:
+        //     pins (SpatialReference): The session's spatial pins.
         private async Task LoadAsync(SpatialReference pins)
         {
             loading?.Cancel();
@@ -267,6 +367,11 @@ namespace Formula9.World
             }
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: Clear
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function removes the world and any route draft and stops rendering.
         private void Clear()
         {
             world?.Destroy();
@@ -277,6 +382,15 @@ namespace Formula9.World
             if (viewCamera != null) viewCamera.enabled = false;
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: SetReady
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function records whether the world is shown and reports a change.
+        //
+        // Args:
+        //     ready (bool): True when the world is shown.
+        //     diagnostic (string): What the trainee sees about it.
         private void SetReady(bool ready, string diagnostic)
         {
             if (Ready == ready && Diagnostic == diagnostic) return;
@@ -285,10 +399,30 @@ namespace Formula9.World
             ReadinessChanged?.Invoke(ready, diagnostic);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: SamePins
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function tells whether two pins name the same scene revision and manifest.
+        //
+        // Args:
+        //     a (SpatialReference): The first pins.
+        //     b (SpatialReference): The second pins.
+        //
+        // Returns:
+        //     bool: True when both are present and the same.
         private static bool SamePins(SpatialReference a, SpatialReference b) =>
             a != null && b != null && a.ManifestSha256 == b.ManifestSha256 && a.SceneRevision == b.SceneRevision;
 
-        // Starts from the manifest's first camera bookmark, like the Qt overview camera.
+        // -----------------------------------------------------------------------------------
+        // Function: Frame
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function points the camera from the manifest's first camera bookmark, like the
+        //     Qt overview camera.
+        //
+        // Args:
+        //     manifest (TrainingSceneRevision): The scene manifest.
         private void Frame(TrainingSceneRevision manifest)
         {
             if (manifest.CameraBookmarks.Count == 0) return;
@@ -301,6 +435,11 @@ namespace Formula9.World
             PlaceCamera();
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: PlaceCamera
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function places the orbit camera from its target, yaw, pitch and distance.
         private void PlaceCamera()
         {
             if (viewCamera == null) return;
@@ -316,6 +455,12 @@ namespace Formula9.World
             viewCamera.transform.LookAt(target, Vector3.up);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: Resize
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function matches the render texture to the element's size in physical pixels, so
+        //     the image stays sharp; UI Toolkit lays out in points.
         private void Resize()
         {
             var rect = surface.contentRect;
@@ -333,7 +478,15 @@ namespace Formula9.World
             surface.style.backgroundImage = new StyleBackground(Background.FromRenderTexture(texture));
         }
 
-        // Right-drag orbits, middle-drag pans and the wheel zooms, as in the Qt client.
+        // -----------------------------------------------------------------------------------
+        // Function: OnPointerDown
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function selects what was clicked, or starts an orbit (right button) or pan
+        //     (middle button).
+        //
+        // Args:
+        //     e (PointerDownEvent): The pointer event.
         private void OnPointerDown(PointerDownEvent e)
         {
             if (e.target != surface) return;
@@ -345,6 +498,14 @@ namespace Formula9.World
             e.StopPropagation();
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: OnPointerMove
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function orbits or pans while a drag is in progress.
+        //
+        // Args:
+        //     e (PointerMoveEvent): The pointer event.
         private void OnPointerMove(PointerMoveEvent e)
         {
             if (dragButton < 0 || !surface.HasPointerCapture(e.pointerId)) return;
@@ -364,6 +525,14 @@ namespace Formula9.World
             PlaceCamera();
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: OnPointerUp
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function ends a drag.
+        //
+        // Args:
+        //     e (PointerUpEvent): The pointer event.
         private void OnPointerUp(PointerUpEvent e)
         {
             if (e.button != dragButton) return;
@@ -371,6 +540,14 @@ namespace Formula9.World
             surface.ReleasePointer(e.pointerId);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: OnWheel
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function zooms the camera.
+        //
+        // Args:
+        //     e (WheelEvent): The wheel event.
         private void OnWheel(WheelEvent e)
         {
             if (e.target != surface) return;
@@ -379,24 +556,75 @@ namespace Formula9.World
             e.StopPropagation();
         }
 
-        // The workspace's own planar maps sit on the same real Singapore as this one.
+        // -----------------------------------------------------------------------------------
+        // Function: UseRealMap
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function puts another planar map on the same real Singapore map as this one.
+        //
+        // Args:
+        //     other (FleetMap): The map, for example the workspace's.
         public void UseRealMap(FleetMap other) => other.UseRealMap(tiles, transit);
 
         public string SelectedId => selectedId;
         // The 2D Map / 3D View switch. A session without a 3D world always shows its map.
         public bool ShowingMap => latest == null || preferMap || (latest.Spatial == null && cityClient == null);
+        // -----------------------------------------------------------------------------------
+        // Function: ShowMap
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function is the 2D Map / 3D View switch. A session without a 3D world always
+        //     shows its map.
+        //
+        // Args:
+        //     value (bool): True for the 2D map.
         public void ShowMap(bool value) { preferMap = value; if (latest != null) Show(latest); }
         public bool Offline { get; private set; }
+        // -----------------------------------------------------------------------------------
+        // Function: SetOffline
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function marks the view as showing positions frozen at the last report.
+        //
+        // Args:
+        //     offline (bool): True while the backend cannot be reached.
         public void SetOffline(bool offline) { Offline = offline; map?.SetOffline(offline); }
 
+        // -----------------------------------------------------------------------------------
+        // Function: SelectEntity
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function selects an entity in both views and reports it.
+        //
+        // Args:
+        //     id (string): The entity ID, or null.
         public void SelectEntity(string id)
         {
             selectedId = id; map.SelectedId = id;
             EntitySelected?.Invoke(id);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: FollowSelected
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function focuses the camera on the selected entity and keeps it there as it
+        //     moves.
         public void FollowSelected() { following = true; FocusSelected(); }
+        // -----------------------------------------------------------------------------------
+        // Function: FocusSelected
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function focuses and zooms the camera on the selected entity once.
         public void FocusSelected() => FocusSelected(true);
+        // -----------------------------------------------------------------------------------
+        // Function: FocusSelected
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function points the camera at the selected entity.
+        //
+        // Args:
+        //     zoom (bool): True to also move in close.
         private void FocusSelected(bool zoom)
         {
             if (CityShown && city != null && city.TryGetShuttle(selectedId, out var shuttle))
@@ -412,6 +640,11 @@ namespace Formula9.World
             if (zoom) distance = 24;
             PlaceCamera();
         }
+        // -----------------------------------------------------------------------------------
+        // Function: Overview
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function stops following and returns to the overview camera of the scene or city.
         public void Overview()
         {
             following = false;
@@ -419,6 +652,17 @@ namespace Formula9.World
             else if (CityShown && city != null && city.BuildingCount > 0) FrameCity(city);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: SetRouteDraft
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function shows a route proposal: the road network on the 2D map, and in 3D the
+        //     nodes that can be picked, the chosen ones and the previewed path.
+        //
+        // Args:
+        //     context (RouteEditorContext): The route editor graph, or null.
+        //     nodes (List<long>): The chosen nodes.
+        //     preview (RouteEditPreview): The validated preview, or null.
         public void SetRouteDraft(RouteEditorContext context, List<long> nodes, RouteEditPreview preview)
         {
             routeContext = context; draftNodes = nodes ?? new List<long>(); routePreview = preview; DrawDraft();
@@ -426,15 +670,44 @@ namespace Formula9.World
         }
 
         private string SurfaceId => (surfaces?.value ?? "").Split('|')[0].Trim();
+        // -----------------------------------------------------------------------------------
+        // Function: CanDraftNode
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function tells whether a node lies on the road surface currently selected for
+        //     drafting.
+        //
+        // Args:
+        //     id (long): The node ID.
+        //
+        // Returns:
+        //     bool: True when it can be picked now.
         public bool CanDraftNode(long id) => world != null && routeContext != null && routeContext.Nodes.Any(n => n.NodeId == id &&
             WorldInteraction.NodeOnSurface(world.Package.Manifest, routeContext, n, SurfaceId));
 
-        // A draft can cross several surfaces. The surface selector only disambiguates a click;
-        // changing it must not invalidate nodes already chosen on another lane or deck.
+        // -----------------------------------------------------------------------------------
+        // Function: HasDraftSupport
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function tells whether a node lies on any road surface of the shown world. A
+        //     draft can cross several surfaces: the surface selector only disambiguates a click,
+        //     and changing it must not invalidate nodes already chosen on another lane or deck.
+        //
+        // Args:
+        //     id (long): The node ID.
+        //
+        // Returns:
+        //     bool: True when the node is supported.
         public bool HasDraftSupport(long id) => Ready && world != null && routeContext != null &&
             routeContext.Nodes.Any(n => n.NodeId == id && world.Package.Manifest.RoadSurfaces.Any(s =>
                 WorldInteraction.NodeOnSurface(world.Package.Manifest, routeContext, n, s.SurfaceId)));
 
+        // -----------------------------------------------------------------------------------
+        // Function: DrawDraft
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function redraws the 3D route draft overlays: a cross on each pickable node
+        //     (chosen ones in yellow) and the previewed path in green.
         private void DrawDraft()
         {
             if (draftRoot != null) WorldBuilder.Remove(draftRoot.gameObject);
@@ -451,6 +724,15 @@ namespace Formula9.World
             if (routePreview != null) DrawLine(routePreview.Polyline.Select(p => WorldMath.ToUnity(new List<double> { p.X, p.Y, p.Z }) + Vector3.up * 0.1f).ToArray(), Color.green);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: DrawLine
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function draws one overlay line.
+        //
+        // Args:
+        //     points (Vector3[]): The points in Unity space.
+        //     color (Color): The colour.
         private void DrawLine(Vector3[] points, Color color)
         {
             if (points.Length < 2) return;
@@ -459,6 +741,15 @@ namespace Formula9.World
             line.startWidth = line.endWidth = 0.15f; line.startColor = line.endColor = color;
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: Pick
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function selects the entity under a click and, while drafting a route on a road,
+        //     picks the nearest node within 1 m on the selected surface.
+        //
+        // Args:
+        //     pixel (Vector2): The click position in the element.
         private void Pick(Vector2 pixel)
         {
             if (world == null || !Ready) return;

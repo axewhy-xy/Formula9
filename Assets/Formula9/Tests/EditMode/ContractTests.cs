@@ -1,3 +1,17 @@
+/*
+ * Unit tests for the contract layer (ContractParser.cs, SchemaValidator.cs, ContractRules.cs).
+ *
+ * Author: Choo Jian Wei
+ * Date Created: 30/10/2026
+ * Last Modified: 30/10/2026
+ *
+ * Description:
+ *     Uses the same shared fixtures the backend, web and Qt clients test against, copied from
+ *     Formula_9 contracts/v2/fixtures by Tools/generate_contracts.py. Valid fixtures must parse,
+ *     invalid ones must be rejected for the right reason, and the strict rules (integer types,
+ *     duplicate keys, provenance, command status) must hold.
+ */
+
 using System.IO;
 using Formula9.Contracts;
 using Newtonsoft.Json.Linq;
@@ -6,15 +20,45 @@ using UnityEngine;
 
 namespace Formula9.Tests
 {
-    // The same shared fixtures the backend, web and Qt clients test against
-    // (copied from Formula_9 contracts/v2/fixtures by Tools/generate_contracts.py).
+    // -----------------------------------------------------------------------------------
+    // Class: ContractTests
+    // -----------------------------------------------------------------------------------
+    // Description:
+    //     This class tests parsing and validation against the shared fixtures.
     public class ContractTests
     {
+        // -----------------------------------------------------------------------------------
+        // Function: Fixture
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function reads a shared contract fixture.
+        //
+        // Args:
+        //     name (string): The fixture name, without .json.
+        //
+        // Returns:
+        //     string: The fixture's JSON.
         private static string Fixture(string name) =>
             File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures", name + ".json"));
 
+        // -----------------------------------------------------------------------------------
+        // Function: FixtureObject
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function reads a shared fixture as JSON to modify.
+        //
+        // Args:
+        //     name (string): The fixture name, without .json.
+        //
+        // Returns:
+        //     JObject: The fixture.
         private static JObject FixtureObject(string name) => JObject.Parse(Fixture(name));
 
+        // -----------------------------------------------------------------------------------
+        // Function: SharedPositiveFixturesParse
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Every valid shared fixture parses as its message type.
         [TestCase("snapshot", "FULL_SNAPSHOT")]
         [TestCase("low_reserve_snapshot", "FULL_SNAPSHOT")]
         [TestCase("spatial_snapshot", "FULL_SNAPSHOT")]
@@ -26,6 +70,11 @@ namespace Formula9.Tests
             Assert.AreEqual(messageType, ContractParser.ParseMessage(Fixture(name)).MessageType);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: SharedNegativeFixturesAreRejectedForTheRightReason
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Every invalid shared fixture is rejected, and the problem names the rule it breaks.
         [TestCase("invalid_enum", "service_state")]
         [TestCase("missing_reference", "missing vehicle route revision reference")]
         [TestCase("stale_scene_revision", "snapshot scene/transform revision mismatch")]
@@ -37,6 +86,11 @@ namespace Formula9.Tests
             StringAssert.Contains(reason, error.Message);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: SnapshotFieldsAreTyped
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Snapshot fields read as typed values, and absent optional lists read as empty.
         [Test]
         public void SnapshotFieldsAreTyped()
         {
@@ -49,6 +103,12 @@ namespace Formula9.Tests
             Assert.IsNotNull(snapshot.ChargeOptions, "absent optional lists read as empty");
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: MinorVersionAndAdditiveFieldsAreAccepted
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A newer minor version and unknown extra fields are accepted, and the extra fields are
+        //     kept.
         [Test]
         public void MinorVersionAndAdditiveFieldsAreAccepted()
         {
@@ -59,6 +119,11 @@ namespace Formula9.Tests
             Assert.AreEqual(true, (bool)snapshot.Extra["future_metadata"]["ignored"]);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: RecordedProvenanceRequiresActualFrameAndTimestamp
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Recorded sensor provenance must name its frame and timestamp.
         [Test]
         public void RecordedProvenanceRequiresActualFrameAndTimestamp()
         {
@@ -67,6 +132,11 @@ namespace Formula9.Tests
             Assert.Throws<ContractException>(() => ContractParser.ParseMessage(value.ToString()));
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: QueuedCommandCannotClaimApplication
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A QUEUED command status cannot carry an applied tick or result event.
         [Test]
         public void QueuedCommandCannotClaimApplication()
         {
@@ -76,6 +146,11 @@ namespace Formula9.Tests
             StringAssert.Contains("QUEUED cannot claim application", error.Message);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: IntegersMustBeJsonIntegers
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     An integer field holding a decimal number is rejected.
         [Test]
         public void IntegersMustBeJsonIntegers()
         {
@@ -84,6 +159,11 @@ namespace Formula9.Tests
             Assert.Throws<ContractException>(() => ContractParser.ParseMessage(value.ToString()));
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: DuplicateKeysAreRejected
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A document with a repeated key is rejected.
         [Test]
         public void DuplicateKeysAreRejected()
         {
@@ -91,6 +171,11 @@ namespace Formula9.Tests
             Assert.Throws<ContractException>(() => ContractParser.ParseMessage(json));
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: CommandFixtureParsesAndDecisionsNeedAReason
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The command fixture parses, and a decision command without a reason is rejected.
         [Test]
         public void CommandFixtureParsesAndDecisionsNeedAReason()
         {
@@ -101,6 +186,11 @@ namespace Formula9.Tests
             StringAssert.Contains("decision command requires reason", error.Message);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: SessionListAndCreateRequestFixturesParse
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The session list and create-session fixtures parse.
         [Test]
         public void SessionListAndCreateRequestFixturesParse()
         {
@@ -110,6 +200,12 @@ namespace Formula9.Tests
             Assert.IsNotNull(ContractParser.Parse<CreateSessionRequest>(Fixture("create_session")).ScenarioRevisionId);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: OutgoingCreateRequestIsValidatedAndSerialised
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     An outgoing create request is serialised in contract form, and an invalid one is
+        //     refused.
         [Test]
         public void OutgoingCreateRequestIsValidatedAndSerialised()
         {

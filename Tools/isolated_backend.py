@@ -1,12 +1,22 @@
-"""Run this repository's backend for end-to-end tests, isolated from team data.
+"""
+Run this repository's backend for end-to-end tests, isolated from team data.
 
-Accounts live in memory (never the shared MongoDB) and training sessions in a temporary
-database, so tests can sign up throwaway users and create sessions freely.
+Author: Choo Jian Wei
+Contributors: Lau Xiang Yang (default to this repository)
+Date Created: 30/10/2026
+Last Modified: 30/10/2026
 
-Usage (from this repository's root):
-    python Tools/isolated_backend.py [--port 8010]
-    --formula9 <repository> optionally selects another checkout for compatibility tests.
-Then run the EndToEnd tests with FORMULA9_E2E_BACKEND_URL=http://127.0.0.1:8010.
+Description:
+    Accounts live in memory (never the shared MongoDB) and training sessions in a temporary
+    database, so tests can sign up throwaway users and create sessions freely. It refuses to
+    start if a MongoDB URI is still configured.
+
+    Usage (from this repository's root):
+
+        python Tools/isolated_backend.py [--port 8010]
+        --formula9 <repository> optionally selects another checkout for compatibility tests.
+
+    Then run the EndToEnd tests with FORMULA9_E2E_BACKEND_URL=http://127.0.0.1:8010.
 """
 
 import argparse
@@ -16,6 +26,18 @@ import tempfile
 from pathlib import Path
 
 
+"""
+# -----------------------------------------------------------------------------------
+# Function: main
+# -----------------------------------------------------------------------------------
+Description:
+    This function points the backend at a temporary training database, blanks the MongoDB URI (a
+    blank value wins over backend/.env), installs an in-memory account store, and serves the app on
+    127.0.0.1.
+
+Raises:
+    SystemExit: If a MongoDB URI is still configured.
+"""
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--formula9", type=Path, default=Path(__file__).resolve().parents[1])

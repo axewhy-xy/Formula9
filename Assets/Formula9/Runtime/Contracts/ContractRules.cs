@@ -1,16 +1,44 @@
+/*
+ * Cross-field rules of the v2 contracts that the schemas cannot express.
+ *
+ * Author: Choo Jian Wei
+ * Date Created: 30/10/2026
+ * Last Modified: 30/10/2026
+ *
+ * Description:
+ *     Part of the Unity client's contract layer. Each rule mirrors a pydantic validator in
+ *     Formula_9 contracts/v2 (models.py, spatial.py), and the messages match those, so the client
+ *     rejects exactly the documents the backend would. Keep the two in step when a rule changes.
+ */
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
 namespace Formula9.Contracts
 {
-    // Cross-field rules the schemas cannot express. Each mirrors a pydantic validator in
-    // Formula_9 contracts/v2 (models.py, spatial.py); keep the messages in step with those.
+    // -----------------------------------------------------------------------------------
+    // Class: ContractRules
+    // -----------------------------------------------------------------------------------
+    // Description:
+    //     This class applies the cross-field rules to a parsed contract document.
     public static class ContractRules
     {
         private static readonly HashSet<string> DecisionCommands =
             new HashSet<string> { "APPROVE_ROUTE", "APPROVE_INCIDENT_OPTION", "RESERVE_CHARGER", "CONTINUE_SERVICE" };
 
+        // -----------------------------------------------------------------------------------
+        // Function: Check
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function applies the rules that belong to a document's type. Types without rules
+        //     pass.
+        //
+        // Args:
+        //     value (object): The parsed document.
+        //
+        // Returns:
+        //     IReadOnlyList<string>: The problems found; empty when the document is valid.
         public static IReadOnlyList<string> Check(object value)
         {
             var problems = new List<string>();
@@ -25,19 +53,51 @@ namespace Formula9.Contracts
             return problems;
         }
 
-        // models.supported_version: major 2, any numeric minor.
+        // -----------------------------------------------------------------------------------
+        // Function: SupportedVersion
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function tells whether a contract version is supported: major 2, any numeric
+        //     minor, as models.supported_version decides.
+        //
+        // Args:
+        //     version (string): The contract_version value.
+        //
+        // Returns:
+        //     bool: True when supported.
         public static bool SupportedVersion(string version)
         {
             var parts = (version ?? "").Split('.');
             return parts.Length == 2 && parts[0] == "2" && parts[1].Length > 0 && parts[1].All(char.IsDigit);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: CheckEnvelope
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function checks a message's contract version and source.
+        //
+        // Args:
+        //     version (string): The contract version.
+        //     source (Provenance): The message source.
+        //     problems (List<string>): Where problems are added.
         private static void CheckEnvelope(string version, Provenance source, List<string> problems)
         {
             if (!SupportedVersion(version)) problems.Add("unsupported contract major version");
             CheckProvenance(source, problems);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: CheckProvenance
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function checks a provenance record: recorded sensor data must name its
+        //     recording, sequence, frame and timestamp, and only recorded sensor data may name a
+        //     frame.
+        //
+        // Args:
+        //     source (Provenance): The provenance, or null.
+        //     problems (List<string>): Where problems are added.
         private static void CheckProvenance(Provenance source, List<string> problems)
         {
             if (source == null) return;
@@ -48,6 +108,16 @@ namespace Formula9.Contracts
                 problems.Add("source_frame belongs only to recorded sensor data");
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: CheckCommand
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function checks an outgoing command: a supported version, and a reason for every
+        //     decision command.
+        //
+        // Args:
+        //     command (DispatcherCommand): The command.
+        //     problems (List<string>): Where problems are added.
         private static void CheckCommand(DispatcherCommand command, List<string> problems)
         {
             if (!SupportedVersion(command.ContractVersion)) problems.Add("unsupported contract major version");
@@ -55,6 +125,16 @@ namespace Formula9.Contracts
                 problems.Add("decision command requires reason");
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: CheckStatus
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function checks a command status: APPLIED needs its tick and result event,
+        //     REJECTED a failure code, and QUEUED cannot claim to be applied.
+        //
+        // Args:
+        //     status (CommandStatus): The status.
+        //     problems (List<string>): Where problems are added.
         private static void CheckStatus(CommandStatus status, List<string> problems)
         {
             if (status.Status == "APPLIED" && (status.AppliedTick == null || status.ResultEventId == null))
@@ -64,6 +144,17 @@ namespace Formula9.Contracts
                 problems.Add("QUEUED cannot claim application");
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: CheckReplay
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function checks an event replay: event sequence numbers follow the requested
+        //     cursor without gaps, and the next cursor is the last event returned and not beyond
+        //     the session.
+        //
+        // Args:
+        //     replay (EventReplay): The replay.
+        //     problems (List<string>): Where problems are added.
         private static void CheckReplay(EventReplay replay, List<string> problems)
         {
             CheckEnvelope(replay.ContractVersion, replay.Source, problems);
@@ -78,6 +169,17 @@ namespace Formula9.Contracts
             if (replay.NextSequence != last || replay.NextSequence > replay.EventSequence) problems.Add("invalid replay cursor");
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: CheckSnapshot
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function checks each entity in a snapshot on its own (batteries, routes,
+        //     forecasts, charge options, provenance), then, if all of those pass, the references
+        //     between entities.
+        //
+        // Args:
+        //     s (FullSnapshot): The snapshot.
+        //     problems (List<string>): Where problems are added.
         private static void CheckSnapshot(FullSnapshot s, List<string> problems)
         {
             CheckEnvelope(s.ContractVersion, s.Source, problems);
@@ -112,7 +214,17 @@ namespace Formula9.Contracts
             if (problems.Count == 0) CheckReferences(s, problems);
         }
 
-        // FullSnapshot.references in models.py, in the same order.
+        // -----------------------------------------------------------------------------------
+        // Function: CheckReferences
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function checks the references between snapshot entities, in the same order as
+        //     FullSnapshot.references in models.py, stopping at the first problem as it does. It
+        //     also drops zero charge deferrals, which models.py drops rather than rejects.
+        //
+        // Args:
+        //     s (FullSnapshot): The snapshot.
+        //     problems (List<string>): Where problems are added.
         private static void CheckReferences(FullSnapshot s, List<string> problems)
         {
             void Fail(string message) => problems.Add(message);
@@ -186,11 +298,35 @@ namespace Formula9.Contracts
                 s.ChargeDecisionDeferrals.Remove(id);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: SameSpatial
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function tells whether two spatial references name the same scene, revisions,
+        //     manifest and capabilities.
+        //
+        // Args:
+        //     a (SpatialReference): The first reference.
+        //     b (SpatialReference): The second reference.
+        //
+        // Returns:
+        //     bool: True when both are present and identical.
         private static bool SameSpatial(SpatialReference a, SpatialReference b) =>
             a != null && b != null && a.SceneId == b.SceneId && a.SceneRevision == b.SceneRevision && a.SpatialRevision == b.SpatialRevision
             && a.TransformRevision == b.TransformRevision && a.ManifestSha256 == b.ManifestSha256
             && a.SpatialSchemaVersion == b.SpatialSchemaVersion && a.RequiredCapabilities.SequenceEqual(b.RequiredCapabilities);
 
+        // -----------------------------------------------------------------------------------
+        // Function: Duplicates
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function tells whether any ID appears twice.
+        //
+        // Args:
+        //     ids (IEnumerable<string>): The IDs.
+        //
+        // Returns:
+        //     bool: True when an ID repeats.
         private static bool Duplicates(IEnumerable<string> ids)
         {
             var seen = new HashSet<string>();

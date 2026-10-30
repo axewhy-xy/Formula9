@@ -1,3 +1,18 @@
+/*
+ * Unit tests for the session layer (SessionController.cs, SessionStore.cs).
+ *
+ * Author: Choo Jian Wei
+ * Contributors: Lau Xiang Yang (leaving a deleted session)
+ * Date Created: 30/10/2026
+ * Last Modified: 30/10/2026
+ *
+ * Description:
+ *     Uses a scripted fake backend serving the shared fixtures and an instant retry delay, so the
+ *     whole join, poll, event, command and creation flow runs without a backend. Covers event
+ *     cursors, gaps and recovery, the one open command and its confirmation with the same key,
+ *     retries and final refusals, logins expiring mid-command, and leaving or switching sessions.
+ */
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -13,19 +28,68 @@ using UnityEngine;
 
 namespace Formula9.Tests
 {
+    // -----------------------------------------------------------------------------------
+    // Class: SessionControllerTests
+    // -----------------------------------------------------------------------------------
+    // Description:
+    //     This class tests the session controller against a fake backend.
     public class SessionControllerTests
     {
+        // -----------------------------------------------------------------------------------
+        // Function: Fixture
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function reads a shared fixture.
+        //
+        // Args:
+        //     name (string): The fixture name, without .json.
+        //
+        // Returns:
+        //     JObject: The fixture.
         private static JObject Fixture(string name) =>
             JObject.Parse(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures", name + ".json")));
 
+        // -----------------------------------------------------------------------------------
+        // Function: Json
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function makes a JSON reply.
+        //
+        // Args:
+        //     body (JToken): The body.
+        //     status (int): The status, 200 by default.
+        //
+        // Returns:
+        //     HttpResponse: The reply.
         private static HttpResponse Json(JToken body, int status = 200) => new HttpResponse { Status = status, Body = body.ToString() };
 
+        // -----------------------------------------------------------------------------------
+        // Function: Error
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function makes a backend error reply.
+        //
+        // Args:
+        //     status (int): The HTTP status.
+        //     code (string): The error code.
+        //
+        // Returns:
+        //     HttpResponse: The reply.
         private static HttpResponse Error(int status, string code) => Json(new JObject
         {
             ["error"] = new JObject { ["code"] = code, ["message"] = code, ["retryable"] = false },
         }, status);
 
-        // A scripted backend serving the shared fixtures. Tests replace the handlers they need.
+        // -----------------------------------------------------------------------------------
+        // Class: FakeBackend
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This class is a scripted backend serving the shared fixtures. Tests replace the
+        //     handlers they need.
+        //
+        //     Attributes: Sent lists the requests; Snapshot is served for snapshot requests unless
+        //     SnapshotReply is set; LastCommand is the last command submitted; OnEvents, OnCommand,
+        //     OnStatus and OnCreate answer those requests.
         private sealed class FakeBackend : IHttpTransport
         {
             public readonly List<HttpRequest> Sent = new List<HttpRequest>();
@@ -37,6 +101,11 @@ namespace Formula9.Tests
             public Func<HttpRequest, HttpResponse> OnStatus;
             public Func<HttpRequest, HttpResponse> OnCreate;
 
+            // -----------------------------------------------------------------------------------
+            // Function: FakeBackend (constructor)
+            // -----------------------------------------------------------------------------------
+            // Description:
+            //     This function sets default handlers: no new events, and commands applied at once.
             public FakeBackend()
             {
                 OnEvents = request => Json(Replay(After(request)));
@@ -44,9 +113,33 @@ namespace Formula9.Tests
                 OnStatus = _ => Json(Status("APPLIED"));
             }
 
+            // -----------------------------------------------------------------------------------
+            // Function: To
+            // -----------------------------------------------------------------------------------
+            // Description:
+            //     This function finds the requests sent to paths ending in a suffix.
+            //
+            // Args:
+            //     suffix (string): The path ending.
+            //     method (string): The HTTP method, or null for any.
+            //
+            // Returns:
+            //     IEnumerable<HttpRequest>: The matching requests.
             public IEnumerable<HttpRequest> To(string suffix, string method = null) =>
                 Sent.Where(r => r.Url.AbsolutePath.EndsWith(suffix) && (method == null || r.Method == method));
 
+            // -----------------------------------------------------------------------------------
+            // Function: FakeBackend.SendAsync
+            // -----------------------------------------------------------------------------------
+            // Description:
+            //     This function records the request and answers it with the handler for its path.
+            //
+            // Args:
+            //     request (HttpRequest): The request.
+            //     cancellation (CancellationToken): Unused.
+            //
+            // Returns:
+            //     Task<HttpResponse>: The reply.
             public Task<HttpResponse> SendAsync(HttpRequest request, CancellationToken cancellation = default)
             {
                 Sent.Add(request);
@@ -63,10 +156,35 @@ namespace Formula9.Tests
                 return Task.FromResult(Error(404, "INVALID_REFERENCE"));
             }
 
+            // -----------------------------------------------------------------------------------
+            // Function: After
+            // -----------------------------------------------------------------------------------
+            // Description:
+            //     This function reads the after cursor of an events request.
+            //
+            // Args:
+            //     request (HttpRequest): The events request.
+            //
+            // Returns:
+            //     long: The cursor.
             public static long After(HttpRequest request) =>
                 long.Parse(request.Url.Query.TrimStart('?').Split('&').First(p => p.StartsWith("after=")).Substring(6));
 
-            // An event page after the cursor: `count` new events, contiguous unless told otherwise.
+            // -----------------------------------------------------------------------------------
+            // Function: Replay
+            // -----------------------------------------------------------------------------------
+            // Description:
+            //     This function makes an event page after the cursor with count new events,
+            //     contiguous unless told otherwise.
+            //
+            // Args:
+            //     after (long): The cursor.
+            //     count (int): How many events.
+            //     firstSequence (long?): The first event's sequence, to make a gap; after + 1 when
+            //         null.
+            //
+            // Returns:
+            //     JObject: The replay.
             public JObject Replay(long after, int count = 0, long? firstSequence = null)
             {
                 var template = Fixture("event_replay");
@@ -89,7 +207,18 @@ namespace Formula9.Tests
                 return template;
             }
 
-            // The journaled status for the last submitted command.
+            // -----------------------------------------------------------------------------------
+            // Function: Status
+            // -----------------------------------------------------------------------------------
+            // Description:
+            //     This function makes the journaled status for the last submitted command.
+            //
+            // Args:
+            //     status (string): The status.
+            //     failureCode (string): The failure code, or null.
+            //
+            // Returns:
+            //     JObject: The command status.
             public JObject Status(string status, string failureCode = null)
             {
                 var value = Fixture("command_status");
@@ -111,6 +240,12 @@ namespace Formula9.Tests
         private List<(FullSnapshot snapshot, bool reset)> snapshots;
         private const string SessionId = "session-001";
 
+        // -----------------------------------------------------------------------------------
+        // Function: SetUp
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function gives each test a fresh fake backend, a login, a controller with an
+        //     instant retry delay, and lists of the errors, outcomes and snapshots it reports.
         [SetUp]
         public void SetUp()
         {
@@ -128,6 +263,11 @@ namespace Formula9.Tests
             controller.SnapshotAccepted += (s, reset) => snapshots.Add((s, reset));
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: ASessionDeletedElsewhereIsLeftAndNoLongerPolled
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A session another client deleted is left with a message and no longer polled.
         [Test]
         public async Task ASessionDeletedElsewhereIsLeftAndNoLongerPolled()
         {
@@ -147,6 +287,11 @@ namespace Formula9.Tests
             Assert.AreEqual(sent, backend.Sent.Count);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: JoiningAnUnknownSessionDoesNotLeaveTheCurrentOne
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A failed join of an unknown session leaves the joined one in place.
         [Test]
         public async Task JoiningAnUnknownSessionDoesNotLeaveTheCurrentOne()
         {
@@ -159,6 +304,12 @@ namespace Formula9.Tests
             Assert.AreEqual(SessionId, controller.SessionId);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: LeavingSettlesAnOpenCommandAsUnconfirmed
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Leaving a session settles its open command as unconfirmed, and a late reply does not
+        //     revive it.
         [Test]
         public async Task LeavingSettlesAnOpenCommandAsUnconfirmed()
         {
@@ -174,6 +325,11 @@ namespace Formula9.Tests
             Assert.AreEqual("NEEDS_RECONFIRMATION", outcomes.Last().Status);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: JoinShowsTheSnapshotThenReplaysEventsFromItsSequence
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A join shows the snapshot, then asks for events from its sequence.
         [Test]
         public async Task JoinShowsTheSnapshotThenReplaysEventsFromItsSequence()
         {
@@ -187,6 +343,11 @@ namespace Formula9.Tests
             Assert.IsEmpty(errors);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: PollContinuesFromTheCommittedCursor
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Each poll asks for events after the last batch the store accepted.
         [Test]
         public async Task PollContinuesFromTheCommittedCursor()
         {
@@ -198,6 +359,11 @@ namespace Formula9.Tests
             CollectionAssert.AreEqual(new long[] { 7, 8 }, backend.To("/events").Select(FakeBackend.After));
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: AnEventGapResynchronisesFromAFreshSnapshot
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A batch with a gap is refused and the session reloads from a fresh snapshot.
         [Test]
         public async Task AnEventGapResynchronisesFromAFreshSnapshot()
         {
@@ -210,6 +376,11 @@ namespace Formula9.Tests
             Assert.IsTrue(controller.Available);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: ANewEpochFetchesTheEventsRecoveryAppended
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A new epoch fetches the events recovery appended before it, and reports them.
         [Test]
         public async Task ANewEpochFetchesTheEventsRecoveryAppended()
         {
@@ -226,6 +397,12 @@ namespace Formula9.Tests
             CollectionAssert.AreEqual(new long[] { 8, 9 }, recovered.Select(e => e.EventSequence));
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: StartIsSentWithTheSessionRevisionAndConfirmed
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Start is sent with the session's epoch and revision, and its applied status is
+        //     reported.
         [Test]
         public async Task StartIsSentWithTheSessionRevisionAndConfirmed()
         {
@@ -239,6 +416,11 @@ namespace Formula9.Tests
             Assert.IsFalse(controller.HasPendingCommand);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: ALostReplyIsConfirmedWithTheSameKeyNotANewCommand
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     After a lost reply the same command and key are resent, never a new command.
         [Test]
         public async Task ALostReplyIsConfirmedWithTheSameKeyNotANewCommand()
         {
@@ -254,6 +436,11 @@ namespace Formula9.Tests
             Assert.AreEqual("APPLIED", outcomes.Single().Status);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: QueuedAndRecoveringRepliesAreRetriedUntilFinal
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     QUEUED and SESSION_RECOVERING replies are retried with a growing wait until final.
         [Test]
         public async Task QueuedAndRecoveringRepliesAreRetriedUntilFinal()
         {
@@ -272,6 +459,11 @@ namespace Formula9.Tests
             Assert.IsFalse(controller.HasPendingCommand);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: ACompleteRefusalIsFinal
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A complete refusal of a submission ends the command without retrying.
         [Test]
         public async Task ACompleteRefusalIsFinal()
         {
@@ -283,7 +475,18 @@ namespace Formula9.Tests
             StringAssert.Contains("STALE_REVISION", errors.Last());
         }
 
-        // A controller whose retries wait forever, so an open command stays open during the test.
+        // -----------------------------------------------------------------------------------
+        // Function: Stalled
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function makes a controller whose retries wait forever, so an open command stays
+        //     open during the test.
+        //
+        // Args:
+        //     outcomesSeen (List<CommandOutcome>): Collects the outcomes it reports, or null.
+        //
+        // Returns:
+        //     SessionController: The joined controller.
         private SessionController Stalled(List<CommandOutcome> outcomesSeen = null)
         {
             var stalled = new SessionController(new TrainingApi(backend, auth, new Uri("http://backend.test")), auth,
@@ -292,6 +495,11 @@ namespace Formula9.Tests
             return stalled;
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: OnlyOneCommandMayBeOpen
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A second command is refused while one is open.
         [Test]
         public async Task OnlyOneCommandMayBeOpen()
         {
@@ -304,6 +512,12 @@ namespace Formula9.Tests
             Assert.IsFalse(backend.To("/commands", "POST").Any(c => (string)JObject.Parse(c.Body)["command_type"] == "RESUME"));
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: AnExpiredLoginKeepsTheCommandForTheSameAccount
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A login that expires mid-command keeps the command, which is resent only after the
+        //     same account logs in again.
         [Test]
         public async Task AnExpiredLoginKeepsTheCommandForTheSameAccount()
         {
@@ -326,6 +540,11 @@ namespace Formula9.Tests
             Assert.AreEqual("APPLIED", outcomes.Last().Status);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: JoiningAnotherSessionClosesAnOpenCommandAsUnconfirmed
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Joining another session closes the open command as unconfirmed.
         [Test]
         public async Task JoiningAnotherSessionClosesAnOpenCommandAsUnconfirmed()
         {
@@ -340,6 +559,11 @@ namespace Formula9.Tests
             Assert.IsFalse(closed.Single().Confirmed);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: AfterAnEpochChangeTheCommandIsOnlyCheckedNotResent
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     After an epoch change an open command's status is checked, and it is never resent.
         [Test]
         public async Task AfterAnEpochChangeTheCommandIsOnlyCheckedNotResent()
         {
@@ -358,6 +582,11 @@ namespace Formula9.Tests
             Assert.AreEqual("NEEDS_RECONFIRMATION", closed.Single().Status);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: CreationKeepsItsKeyUntilItSucceedsThenJoins
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A creation retries with the same key until it succeeds, then joins the session.
         [Test]
         public async Task CreationKeepsItsKeyUntilItSucceedsThenJoins()
         {
@@ -383,6 +612,11 @@ namespace Formula9.Tests
             Assert.AreEqual(SessionId, controller.SessionId);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: CreationWaitsForItsOwnAccount
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A pending creation is only confirmed by the account that started it.
         [Test]
         public async Task CreationWaitsForItsOwnAccount()
         {
@@ -394,6 +628,11 @@ namespace Formula9.Tests
             Assert.AreEqual(1, backend.To("/api/v2/sessions", "POST").Count());
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: NothingIsSentWhileLoggedOut
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Nothing is sent to the backend while logged out.
         [Test]
         public async Task NothingIsSentWhileLoggedOut()
         {

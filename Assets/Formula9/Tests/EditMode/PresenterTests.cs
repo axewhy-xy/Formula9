@@ -1,3 +1,18 @@
+/*
+ * Unit tests for Presenters.cs.
+ *
+ * Author: Choo Jian Wei
+ * Contributors: Rishika (fleet card tests), Lau Xiang Yang (session cleanup tests)
+ * Date Created: 30/10/2026
+ * Last Modified: 30/10/2026
+ *
+ * Description:
+ *     Checks what the screens show, using the shared snapshot fixture: login and command messages
+ *     match the Qt client, session controls follow the status (and Start waits for a detour when a
+ *     route crosses a closed road), fleet rows are sorted and readable, and the session list and
+ *     cleanup texts.
+ */
+
 using System.IO;
 using System.Linq;
 using Formula9.Backend;
@@ -10,8 +25,24 @@ using UnityEngine;
 
 namespace Formula9.Tests
 {
+    // -----------------------------------------------------------------------------------
+    // Class: PresenterTests
+    // -----------------------------------------------------------------------------------
+    // Description:
+    //     This class tests the presenters.
     public class PresenterTests
     {
+        // -----------------------------------------------------------------------------------
+        // Function: Snapshot
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function parses the shared snapshot fixture, optionally changed first.
+        //
+        // Args:
+        //     change (Action<JObject>): Changes the fixture's JSON before parsing, or null.
+        //
+        // Returns:
+        //     FullSnapshot: The snapshot.
         private static FullSnapshot Snapshot(System.Action<JObject> change = null)
         {
             var value = JObject.Parse(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/snapshot.json")));
@@ -19,13 +50,29 @@ namespace Formula9.Tests
             return (FullSnapshot)ContractParser.ParseMessage(value.ToString());
         }
 
-        // The fixture's scripted closure blocks route-a; clear it so only the status decides.
+        // -----------------------------------------------------------------------------------
+        // Function: WithStatus
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function makes a snapshot with a given session status. The fixture's scripted
+        //     closure blocks route-a, so it is cleared and only the status decides.
+        //
+        // Args:
+        //     status (string): The session status.
+        //
+        // Returns:
+        //     FullSnapshot: The snapshot.
         private static FullSnapshot WithStatus(string status) => Snapshot(v =>
         {
             v["session"]["status"] = status;
             v["disruptions"] = new JArray();
         });
 
+        // -----------------------------------------------------------------------------------
+        // Function: TheFixturesScriptedClosureBlocksStart
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The unchanged fixture's closure blocks Start, which is why WithStatus clears it.
         [Test]
         public void TheFixturesScriptedClosureBlocksStart()
         {
@@ -34,6 +81,11 @@ namespace Formula9.Tests
             Assert.IsFalse(TrainingPresenter.Controls(snapshot, true, true).Start);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: LoginMessagesMatchTheQtClient
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Every login outcome shows the Qt client's wording.
         [Test]
         public void LoginMessagesMatchTheQtClient()
         {
@@ -49,6 +101,11 @@ namespace Formula9.Tests
             Assert.IsNull(LoginMessages.Validate("trainee", "secret", false, null));
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: StatusLineAndTitleDescribeTheSnapshot
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The status line and title describe the joined session.
         [Test]
         public void StatusLineAndTitleDescribeTheSnapshot()
         {
@@ -59,6 +116,11 @@ namespace Formula9.Tests
             StringAssert.StartsWith("Singapore, real streets", TrainingPresenter.Title(snapshot));
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: ControlsFollowTheSessionStatus
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Each session status enables exactly the controls it allows.
         [TestCase("READY", true, false, false, true)]
         [TestCase("RUNNING", false, true, false, true)]
         [TestCase("PAUSED", false, false, true, true)]
@@ -69,6 +131,11 @@ namespace Formula9.Tests
             Assert.AreEqual(new[] { start, pause, resume, archive }, new[] { controls.Start, controls.Pause, controls.Resume, controls.Archive });
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: NothingIsEnabledWhileOfflineOrWithoutASession
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     No control is enabled while offline or with no session.
         [Test]
         public void NothingIsEnabledWhileOfflineOrWithoutASession()
         {
@@ -78,6 +145,12 @@ namespace Formula9.Tests
             Assert.IsFalse(none.Start || none.Pause || none.Resume || none.Archive);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: StartWaitsWhileAnAssignedRouteCrossesAnActiveClosure
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Start stays disabled, with a hint, while an assigned route crosses a closure that is
+        //     active now, and not before or after it.
         [Test]
         public void StartWaitsWhileAnAssignedRouteCrossesAnActiveClosure()
         {
@@ -96,6 +169,11 @@ namespace Formula9.Tests
             StringAssert.Contains("closed road", controls.StartHint);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: FleetRowsAreSortedAndReadable
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Fleet rows are sorted by shuttle ID and show readable status, route and battery.
         [Test]
         public void FleetRowsAreSortedAndReadable()
         {
@@ -107,6 +185,11 @@ namespace Formula9.Tests
             Assert.AreEqual("28 / 40 kWh", first.Battery);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: OutcomeMessagesMatchTheQtClient
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Every command outcome shows the Qt client's wording.
         [Test]
         public void OutcomeMessagesMatchTheQtClient()
         {
@@ -118,6 +201,11 @@ namespace Formula9.Tests
             StringAssert.Contains("needs reconfirmation", TrainingPresenter.Outcome(unconfirmed));
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: TheScenariosAreOfferedInTheQtOrder
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The scenarios are offered in the Qt client's order, the 3D exercise first.
         [Test]
         public void TheScenariosAreOfferedInTheQtOrder()
         {
@@ -126,6 +214,12 @@ namespace Formula9.Tests
             StringAssert.StartsWith("Singapore", TrainingPresenter.ScenarioTitle(SessionController.IntegratedScenario));
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: OnlyFinishedSessionsCanBeDeleted
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Only archived, completed or failed sessions that no longer occupy capacity can be
+        //     deleted.
         [TestCase("ARCHIVED", false, true)]
         [TestCase("COMPLETED", false, true)]
         [TestCase("FAILED", false, true)]
@@ -140,6 +234,11 @@ namespace Formula9.Tests
             Assert.IsFalse(TrainingPresenter.CanDelete(null));
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: CapacityCountsAllStoredSessionsAndSaysWhenTheListIsPartial
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The capacity line counts every stored session and says when only some are shown.
         [Test]
         public void CapacityCountsAllStoredSessionsAndSaysWhenTheListIsPartial()
         {
@@ -149,6 +248,11 @@ namespace Formula9.Tests
             Assert.AreEqual("1/16 live sessions · 120 total · showing 2", TrainingPresenter.Capacity(list));
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: ReclaimedSpaceIsShownInMegabytesAndMentionsAHeldWal
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Reclaimed space is shown in megabytes, with a note when the write-ahead log was held.
         [Test]
         public void ReclaimedSpaceIsShownInMegabytesAndMentionsAHeldWal()
         {
