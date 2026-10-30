@@ -77,5 +77,47 @@ namespace Formula9.Tests
             }
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
         }
+
+        // A horizontal ScrollView lays its children out side by side. Each data table must keep its
+        // heading and rows in one column inside it, or the rows render beside the heading, out of view.
+        [Test]
+        public async Task DataTableRowsSitUnderTheirHeadings()
+        {
+            var raw = Fixture("snapshot");
+            var backend = new Backend();
+            backend.Reply = request =>
+            {
+                if (request.Url.AbsolutePath.EndsWith("/snapshot")) return Task.FromResult(new HttpResponse { Status = 200, Body = raw.ToString() });
+                if (request.Url.AbsolutePath.EndsWith("/editor")) return Task.FromResult(new HttpResponse { Failure = HttpFailure.Incomplete });
+                var replay = Fixture("event_replay"); replay["events"] = new JArray();
+                replay["after_sequence"] = raw["event_sequence"].DeepClone(); replay["next_sequence"] = raw["event_sequence"].DeepClone();
+                return Task.FromResult(new HttpResponse { Status = 200, Body = replay.ToString() });
+            };
+            var auth = new AuthSession(); auth.Begin("trainee", "token", 3600);
+            var api = new TrainingApi(backend, auth, new Uri("http://backend.test"));
+            var session = new SessionController(api, auth);
+            var root = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/Formula9/UI/Formula9App.uxml").CloneTree();
+            var rig = new GameObject("Table layout test"); var world = rig.AddComponent<WorldView>();
+            try
+            {
+                world.Attach(root.Q("world"), new SceneLoader(backend, new Uri("http://backend.test")));
+                var workspace = new TrainingWorkspace(root, api, session, world, _ => { }, _ => { });
+                await session.JoinAsync((string)raw["session_id"]);
+                workspace.Render();
+                var tables = root.Query<ScrollView>(className: "data-table").ToList();
+                Assert.GreaterOrEqual(tables.Count, 7, "Charging, Incidents and Reports tables");
+                foreach (var table in tables)
+                {
+                    Assert.AreEqual(1, table.contentContainer.childCount, "one column holds heading and rows");
+                    Assert.IsTrue(table.contentContainer[0].ClassListContains("data-table-body"));
+                }
+                // The battery table's first data row is in the same column, directly under the heading.
+                var cell = root.Query<Label>(className: "data-cell").ToList().First(l => l.text == "shuttle-01" && !l.ClassListContains("data-heading"));
+                var column = cell.parent.parent.parent;
+                Assert.IsTrue(column.ClassListContains("data-table-body"));
+                Assert.IsTrue(column[0].Children().All(c => c.ClassListContains("data-heading")), "the heading row comes first");
+            }
+            finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
+        }
     }
 }

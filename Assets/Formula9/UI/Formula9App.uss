@@ -188,6 +188,9 @@
 }
 
 .data-table { flex-shrink: 0; margin-bottom: 10px; }
+.data-table-body { flex-direction: column; flex-shrink: 0; }
+/* The page switcher keeps its size; a tall page scrolls under it instead of squeezing it. */
+.workspace-nav { flex-shrink: 0; }
 .data-cell { width: 145px; flex-shrink: 0; white-space: normal; padding: 4px; border-bottom-width: 1px; border-color: rgb(228, 232, 236); }
 .data-heading { -unity-font-style: bold; background-color: rgb(236, 242, 244); }
 .data-table .row { flex-wrap: nowrap; align-items: stretch; margin-bottom: 0; }

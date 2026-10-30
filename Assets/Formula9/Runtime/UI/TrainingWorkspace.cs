@@ -50,7 +50,7 @@ namespace Formula9.UI
             var host = root.Q("fleet-panel");
             var fleetChildren = host.Children().ToList();
             host.Clear();
-            var nav = new VisualElement(); nav.AddToClassList("row"); host.Add(nav);
+            var nav = new VisualElement(); nav.AddToClassList("row"); nav.AddToClassList("workspace-nav"); host.Add(nav);
             var fleet = Page(host, nav, "Fleet");
             foreach (var child in fleetChildren) fleet.Add(child);
             selection = Text(fleet, "Select a shuttle in the fleet or map.");
@@ -286,8 +286,18 @@ namespace Formula9.UI
         private async Task ApproveRoute()
         {
             if (!Current || preview == null) return;
-            await session.ApproveRouteAsync(preview, routeReason.value);
+            var routeId = preview.RouteId;
+            var basedOn = preview.RouteRevision;
+            if (!await session.ApproveRouteAsync(preview, routeReason.value)) return;
             InvalidateRoute(); await session.RefreshAsync();
+            // Once applied, the route has a new revision and this draft is finished: start clean on
+            // the new graph. A queued or rejected approval keeps the draft for another try.
+            var route = session.Store.Snapshot?.Routes.FirstOrDefault(r => r.RouteId == routeId);
+            if (route != null && route.Revision > basedOn)
+            {
+                ResetDraft();
+                RequestContext();
+            }
         }
 
         private async Task SubmitCharge()
@@ -422,9 +432,12 @@ namespace Formula9.UI
         {
             Text(parent, title);
             var scroll = new ScrollView(ScrollViewMode.Horizontal); scroll.AddToClassList("data-table"); parent.Add(scroll);
-            var head = Row(scroll);
+            // A horizontal scroll view lays its children out side by side, so the heading and the
+            // rows share one column inside it; otherwise the rows land to the right of the heading.
+            var body = new VisualElement(); body.AddToClassList("data-table-body"); scroll.Add(body);
+            var head = Row(body);
             foreach (var column in columns) { var cell = new Label(column); cell.AddToClassList("data-cell"); cell.AddToClassList("data-heading"); head.Add(cell); }
-            var rows = new VisualElement(); scroll.Add(rows); return rows;
+            var rows = new VisualElement(); rows.AddToClassList("data-table-body"); body.Add(rows); return rows;
         }
         private static void Rows(VisualElement table, IEnumerable<string[]> values)
         {

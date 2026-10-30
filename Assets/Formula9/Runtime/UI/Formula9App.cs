@@ -157,7 +157,7 @@ namespace Formula9.UI
                 loggingOut = true;
                 Run(authClient.LogOutAsync());
             };
-            root.Q<Button>("create").clicked += () => { message.text = "Creating a training session…"; Run(session.CreateAsync()); };
+            root.Q<Button>("create").clicked += () => Run(Create());
             root.Q<Button>("join").clicked += () => Run(Join(sessionId.value.Trim()));
             root.Q<Button>("refresh").clicked += () => Run(session.RefreshAsync());
             refreshSessions.clicked += () => Run(RefreshSessionList());
@@ -240,6 +240,16 @@ namespace Formula9.UI
             trainingScreen.style.display = DisplayStyle.Flex;
             user.text = auth.Username;
             Render();
+        }
+
+        // The progress note goes once the attempt finishes; a failure has already replaced it
+        // with its own message, which stays.
+        private async Task Create()
+        {
+            const string creating = "Creating a training session…";
+            message.text = creating;
+            await session.CreateAsync();
+            if (message.text == creating) message.text = "";
         }
 
         private Task Join(string id)
