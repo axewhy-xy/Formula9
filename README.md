@@ -46,6 +46,21 @@ kinds: `BackendErrorException` (a complete error reply, for example `SESSION_REC
 must be confirmed, never re-created) or `NotLoggedInException`. Training requests are never
 sent without a login.
 
+## Sessions
+
+`Runtime/Session` ports the training half of the Qt client's `BackendClient` and its
+`SessionStore`. `SessionController` creates (keeping the creation key and its owner until the
+attempt is confirmed), joins and polls a session every second, replays events from a
+committed cursor, fetches events a recovery appended after an epoch change, and resynchronises
+from a fresh snapshot when an event batch does not fit. It holds at most one open command:
+a lost reply is confirmed by resending the same command, or by asking for its status after a
+recovery, backing off to at most 5 s, and the command waits for its own account across logins.
+`SessionStore` refuses older epochs, stale or reused snapshots and event gaps, and keeps the
+latest 1,000 events.
+
+New sessions default to `scenario-m2-integrated-r1`, the exercise with incidents, detours and
+charging.
+
 ## Tests
 
 Run EditMode tests in the Test Runner window, or headless:
