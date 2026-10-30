@@ -135,6 +135,24 @@ need a free [DataMall key](https://datamall.lta.gov.sg) in `backend/.env` as `LT
 `python -m src.routing.build_singapore_fleet_fixture` rebuilds the scenario from the committed
 extract in `backend/fixtures/osm`.
 
+## Background traffic data
+
+`backend/fixtures/traffic/toa-payoh.json` holds the background traffic prepared for the 3D view. The 3D
+view does not draw it yet, and no API serves it yet. To rebuild it, run this from `backend/`:
+
+```powershell
+python -m src.traffic.import_vehicle_population [--percent 0.1] [--year YYYY] [--seed N] [--offline]
+```
+
+It downloads LTA's [Annual Motor Vehicle Population by Vehicle Type](https://data.gov.sg/datasets/d_2873f3b1b2a836103f51f696350b98fa/view)
+from data.gov.sg (no key needed) and saves the rows as `vehicle-population.json`; `--offline` rebuilds from that copy.
+It takes `--percent` of each vehicle type, keeping at least one of every type, and places them in lanes of
+the real roads inside the service area's box. Each vehicle has a model, colour, road, lane, position and
+heading in local metres. The file also has the model sizes and the road network, split at junctions.
+
+The counts come from the dataset. The sizes, colours and how much busier each road class is are illustrative
+assumptions, and the mix of types is national, because the dataset has no location data.
+
 ## Training workspace
 
 All seven remaining Qt client workflows are available in Unity. The workspace tabs beside
