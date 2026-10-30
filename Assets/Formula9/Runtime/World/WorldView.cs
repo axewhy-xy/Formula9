@@ -39,6 +39,10 @@ namespace Formula9.World
     public sealed class WorldView : MonoBehaviour
     {
         public const string NoWorld = "3D unavailable · this session has no spatial capability.";
+        public const string MapHint = "2D map · press 3D View for the buildings in 3D.";
+        private const string CityArea = "toa-payoh";
+        private const float CityMaxDistance = 3000, CityFarClip = 8000, CityPanMargin = 150;
+        private static readonly Color CitySky = new Color(0.72f, 0.84f, 0.92f), WorldBackground = new Color(0.10f, 0.10f, 0.12f);
         private const float MinDistance = 5, MaxDistance = 300, MinPitch = 0.12f, MaxPitch = 1.45f;
 
         private VisualElement surface;
@@ -54,6 +58,12 @@ namespace Formula9.World
         private int dragButton = -1;
         private FleetMap map;
         private bool preferMap;
+        private CityClient cityClient;
+        private CityView city;
+        private Task cityLoad;
+        private CancellationTokenSource cityCancellation;
+        private bool CityShown => latest != null && latest.Spatial == null && cityClient != null && !preferMap;
+        private float maxDistance = MaxDistance;
         private MapTiles tiles;
         private TransitClient transit;
         private DropdownField surfaces;
@@ -85,8 +95,10 @@ namespace Formula9.World
         //     sceneLoader (SceneLoader): Downloads scene packages.
         //     basemap (MapTiles): The map tiles under the 2D map, or null.
         //     busStops (TransitClient): Bus stop data for the 2D map, or null.
-        public void Attach(VisualElement view, SceneLoader sceneLoader, MapTiles basemap = null, TransitClient busStops = null)
+        //     buildings (CityClient): Building data for the 3D city, or null.
+        public void Attach(VisualElement view, SceneLoader sceneLoader, MapTiles basemap = null, TransitClient busStops = null, CityClient buildings = null)
         {
+            cityClient = buildings;
             surface = view;
             loader = sceneLoader;
             tiles = basemap;
@@ -135,6 +147,8 @@ namespace Formula9.World
         {
             loading?.Cancel();
             Clear();
+            cityCancellation?.Cancel();
+            city?.Dispose();
             tiles?.Dispose();
             if (lineMaterial != null)
             {
@@ -158,19 +172,24 @@ namespace Formula9.World
         public void Show(FullSnapshot snapshot)
         {
             var boundary = snapshot == null ? null : $"{snapshot.SessionId}/{snapshot.SessionEpoch}";
-            if (boundary != sessionBoundary) { sessionBoundary = boundary; preferMap = false; following = false; selectedId = null; routeContext = null; DrawDraft(); }
+            if (boundary != sessionBoundary) { sessionBoundary = boundary; preferMap = snapshot?.Spatial == null; following = false; selectedId = null; routeContext = null; DrawDraft(); }
             latest = snapshot;
             if (snapshot?.Spatial == null)
             {
                 loading?.Cancel();
                 Clear();
+                surfaces.parent.style.display = DisplayStyle.None;
+                if (CityShown) { ShowCity(snapshot); return; }
+                city?.SetVisible(false);
+                maxDistance = MaxDistance; viewCamera.farClipPlane = 1200;
                 // With a real map there is something to see before joining: the whole island
                 map.style.display = snapshot == null && !map.ShowsIslandWhenEmpty ? DisplayStyle.None : DisplayStyle.Flex;
                 map.Show(snapshot);
-                surfaces.parent.style.display = DisplayStyle.None;
-                SetReady(snapshot != null, snapshot == null ? "Join a training session to see its world." : NoWorld);
+                SetReady(snapshot != null, snapshot == null ? "Join a training session to see its world." : cityClient != null ? MapHint : NoWorld);
                 return;
             }
+            city?.SetVisible(false);
+            maxDistance = MaxDistance; viewCamera.farClipPlane = 1200; viewCamera.backgroundColor = WorldBackground;
             map.style.display = preferMap ? DisplayStyle.Flex : DisplayStyle.None;
             if (preferMap) map.Show(snapshot);
             surfaces.parent.style.display = preferMap ? DisplayStyle.None : DisplayStyle.Flex;
@@ -182,6 +201,105 @@ namespace Formula9.World
             if (world == null) return; // still loading; the latest snapshot is applied when it finishes
             var mismatch = world.ApplyPoses(snapshot);
             if (mismatch != null) SetReady(false, $"3D unavailable · scene/vehicle binding mismatch: {mismatch}");
+            if (following) FocusSelected(false);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: ShowCity
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function shows a 2D session's streets in 3D: its buildings are real, its routes
+        //     and shuttles the backend's.
+        //
+        //     Args:
+        //         snapshot (FullSnapshot): The latest snapshot.
+        private void ShowCity(FullSnapshot snapshot)
+        {
+            map.style.display = DisplayStyle.None;
+            viewCamera.farClipPlane = CityFarClip;
+            viewCamera.backgroundColor = CitySky;
+            maxDistance = CityMaxDistance;
+            viewCamera.enabled = true;
+            Resize();
+            if (city == null)
+            {
+                city = new CityView(transform, tiles);
+                cityCancellation = new CancellationTokenSource();
+                SetReady(false, "Loading 3D buildings…");
+                cityLoad = LoadCityAsync(city, cityCancellation.Token);
+                return;
+            }
+            city.SetVisible(true);
+            if (cityLoad != null && !cityLoad.IsCompleted) return;
+            if (city.BuildingCount > 0)
+            {
+                city.Show(snapshot);
+                SetReady(true, $"3D city · {city.BuildingCount} buildings · right-drag orbit, left-drag pan, wheel zoom");
+            }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: FrameCity
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function points the camera at the whole city.
+        //
+        //     Args:
+        //         view (CityView): The loaded city.
+        private void FrameCity(CityView view)
+        {
+            var center = view.Bounds.center;
+            target = new Vector3(center.x, 0, center.z);
+            // From the south, looking north, so the map's text reads the right way up
+            distance = 1200; pitch = 0.75f; yaw = Mathf.PI - 0.35f;
+            PlaceCamera();
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: LoadCityAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function loads the buildings, then draws the latest snapshot over them. A failure
+        //     goes back to the 2D map.
+        //
+        //     Args:
+        //         view (CityView): The city to load.
+        //         cancellation (CancellationToken): Cancels the load.
+        //
+        //     Returns:
+        //         Task: Finishes when the load does.
+        private async Task LoadCityAsync(CityView view, CancellationToken cancellation)
+        {
+            try
+            {
+                await view.LoadAsync(cityClient, CityArea, cancellation);
+                if (cancellation.IsCancellationRequested) return;
+                FrameCity(view);
+                // The load has finished by the time this runs, so the next Show draws it
+                cityLoad = null;
+                if (latest != null && CityShown) Show(latest);
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception error)
+            {
+                // Forget it, so going back to 3D View tries again
+                city?.Dispose(); city = null; cityLoad = null;
+                preferMap = true;
+                viewCamera.enabled = false;
+                if (latest != null) { map.style.display = DisplayStyle.Flex; map.Show(latest); }
+                SetReady(latest != null, $"3D buildings unavailable · {error.Message}");
+            }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: Update
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function moves the city's shuttles each frame and keeps a followed one in view.
+        private void Update()
+        {
+            if (!CityShown || city == null) return;
+            city.Tick(Time.deltaTime);
             if (following) FocusSelected(false);
         }
 
@@ -325,6 +443,13 @@ namespace Formula9.World
         private void PlaceCamera()
         {
             if (viewCamera == null) return;
+            // Keep the view over the city; the map runs out beyond it
+            if (CityShown && city != null && city.BuildingCount > 0)
+            {
+                var bounds = city.Bounds;
+                target.x = Mathf.Clamp(target.x, bounds.min.x - CityPanMargin, bounds.max.x + CityPanMargin);
+                target.z = Mathf.Clamp(target.z, bounds.min.z - CityPanMargin, bounds.max.z + CityPanMargin);
+            }
             var offset = new Vector3(Mathf.Sin(yaw) * Mathf.Cos(pitch), Mathf.Sin(pitch), Mathf.Cos(yaw) * Mathf.Cos(pitch)) * distance;
             viewCamera.transform.position = target + offset;
             viewCamera.transform.LookAt(target, Vector3.up);
@@ -365,8 +490,8 @@ namespace Formula9.World
         private void OnPointerDown(PointerDownEvent e)
         {
             if (e.target != surface) return;
-            if (e.button == 0) { Pick(e.localPosition); e.StopPropagation(); return; }
-            if (e.button != 1 && e.button != 2) return;
+            if (e.button == 0 && !CityShown) { Pick(e.localPosition); e.StopPropagation(); return; }
+            if (e.button != 0 && e.button != 1 && e.button != 2) return;
             following = false;
             dragButton = e.button;
             surface.CapturePointer(e.pointerId);
@@ -426,7 +551,7 @@ namespace Formula9.World
         private void OnWheel(WheelEvent e)
         {
             if (e.target != surface) return;
-            distance = Mathf.Clamp(distance * Mathf.Exp(e.delta.y * 0.03f), MinDistance, MaxDistance);
+            distance = Mathf.Clamp(distance * Mathf.Exp(e.delta.y * 0.03f), MinDistance, maxDistance);
             PlaceCamera();
             e.StopPropagation();
         }
@@ -443,7 +568,7 @@ namespace Formula9.World
 
         public string SelectedId => selectedId;
         // The 2D Map / 3D View switch. A session without a 3D world always shows its map.
-        public bool ShowingMap => latest?.Spatial == null || preferMap;
+        public bool ShowingMap => latest == null || preferMap || (latest.Spatial == null && cityClient == null);
         // -----------------------------------------------------------------------------------
         // Function: ShowMap
         // -----------------------------------------------------------------------------------
@@ -502,6 +627,13 @@ namespace Formula9.World
         //     zoom (bool): True to also move in close.
         private void FocusSelected(bool zoom)
         {
+            if (CityShown && city != null && city.TryGetShuttle(selectedId, out var shuttle))
+            {
+                target = new Vector3(shuttle.x, 0, shuttle.z);
+                if (zoom) distance = 120;
+                PlaceCamera();
+                return;
+            }
             if (world == null || !world.Entities.TryGetValue(selectedId ?? "", out var entity)) return;
             var renderers = entity.GetComponentsInChildren<Renderer>();
             target = renderers.Length > 0 ? renderers[0].bounds.center : entity.position;
@@ -512,8 +644,13 @@ namespace Formula9.World
         // Function: Overview
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function stops following and returns to the scene's overview camera.
-        public void Overview() { following = false; if (world != null) Frame(world.Package.Manifest); }
+        //     This function stops following and returns to the overview camera of the scene or city.
+        public void Overview()
+        {
+            following = false;
+            if (world != null) Frame(world.Package.Manifest);
+            else if (CityShown && city != null && city.BuildingCount > 0) FrameCity(city);
+        }
 
         // -----------------------------------------------------------------------------------
         // Function: SetRouteDraft

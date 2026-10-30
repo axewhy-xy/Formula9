@@ -115,7 +115,7 @@ namespace Formula9.UI
             world = new GameObject("World View").AddComponent<WorldView>();
             world.transform.SetParent(transform, false);
             world.Attach(GetComponent<UIDocument>().rootVisualElement.Q("world"), new SceneLoader(transport),
-                MapTiles.FromEnvironment(transport), new TransitClient(transport));
+                MapTiles.FromEnvironment(transport), new TransitClient(transport), new CityClient(transport));
             world.ReadinessChanged += (ready, diagnostic) => Render();
             world.EntitySelected += _ => { if (session.Store.Snapshot != null) RenderFleet(session.Store.Snapshot); };
             workspace = new TrainingWorkspace(GetComponent<UIDocument>().rootVisualElement, api, session, world, Run, text => ShowMessage(text));
