@@ -44,8 +44,9 @@ namespace Formula9.World
         private static readonly Color DepotColor = new Color(0.122f, 0.306f, 0.349f);
         private static readonly Color[] ShuttlePalette =
         {
-            new Color(0.184f, 0.502f, 0.929f), new Color(0.153f, 0.682f, 0.376f), new Color(0.949f, 0.6f, 0.29f), new Color(0.608f, 0.318f, 0.878f),
-            new Color(0, 0.639f, 0.639f), new Color(0.91f, 0.365f, 0.627f), new Color(0.51f, 0.392f, 0.235f), new Color(0.353f, 0.431f, 0.549f),
+            // No green: planned routes are green, so a green shuttle would vanish on one.
+            new Color(0.184f, 0.502f, 0.929f), new Color(0.91f, 0.365f, 0.627f), new Color(0.949f, 0.6f, 0.29f), new Color(0.608f, 0.318f, 0.878f),
+            new Color(0, 0.639f, 0.639f), new Color(0.51f, 0.392f, 0.235f), new Color(0.353f, 0.431f, 0.549f),
         };
         // The same colour for a shuttle on the map and on its fleet card.
         public static Color ShuttleColor(int index) => ShuttlePalette[index % ShuttlePalette.Length];
@@ -59,6 +60,8 @@ namespace Formula9.World
         private readonly Label credit = new Label { pickingMode = PickingMode.Ignore };
         private readonly List<Image> tileViews = new List<Image>();
         private readonly List<Rect> placedLabels = new List<Rect>();
+        private readonly List<Rect> busBoxes = new List<Rect>();
+        private const float BusBoxSize = 38;
         private Vector2 min, max, pan, lastPointer;
         private float zoom = 1;
         private bool pressed, dragging;
@@ -109,17 +112,28 @@ namespace Formula9.World
             scale.AddToClassList("map-scale"); Add(scale);
             banner.AddToClassList("map-banner"); banner.style.display = DisplayStyle.None; Add(banner);
             legend.AddToClassList("map-legend"); legend.style.display = DisplayStyle.None; Add(legend);
-            var legendTitle = new Label("Legend") { pickingMode = PickingMode.Ignore }; legendTitle.AddToClassList("map-legend-title"); legend.Add(legendTitle);
-            LegendRow(legend, "Planned route", PlannedRoute, "swatch-line");
-            LegendRow(legend, "Approved detour", ApprovedDetour, "swatch-line");
-            LegendRow(legend, "Road closed", RoadClosed, "swatch-band");
-            LegendRow(legend, "Other roads", OtherRoads, "swatch-thin");
-            LegendRow(legend, "Shuttle", ShuttlePalette[0], "swatch-square");
-            LegendRow(legend, "Incident", RoadClosed, "swatch-dot");
-            LegendRow(legend, "No recent update", Frozen, "swatch-square");
-            LegendRow(legend, "Shuttle's stop (its colour)", StopColor, "swatch-ring");
-            LegendRow(legend, "Depot", DepotColor, "swatch-dot");
-            busStopLegend = LegendRow(legend, "Other bus stop", BusStopColor, "swatch-dot");
+            // Click the title to fold the list away and see the map underneath.
+            var legendRows = new VisualElement { pickingMode = PickingMode.Ignore };
+            var legendToggle = new Button { text = "Legend  -", tooltip = "Show or hide the legend" };
+            legendToggle.clicked += () =>
+            {
+                var hide = legendRows.resolvedStyle.display != DisplayStyle.None;
+                legendRows.style.display = hide ? DisplayStyle.None : DisplayStyle.Flex;
+                legendToggle.text = hide ? "Legend  +" : "Legend  -";
+            };
+            legendToggle.AddToClassList("map-legend-title");
+            legend.Add(legendToggle);
+            legend.Add(legendRows);
+            LegendRow(legendRows, "Planned route", PlannedRoute, "swatch-line");
+            LegendRow(legendRows, "Approved detour", ApprovedDetour, "swatch-line");
+            LegendRow(legendRows, "Road closed", RoadClosed, "swatch-band");
+            LegendRow(legendRows, "Other roads", OtherRoads, "swatch-thin");
+            LegendRow(legendRows, "Shuttle", ShuttlePalette[0], "swatch-square");
+            LegendRow(legendRows, "Incident", RoadClosed, "swatch-dot");
+            LegendRow(legendRows, "No recent update", Frozen, "swatch-square");
+            LegendRow(legendRows, "Shuttle's stop (its colour)", StopColor, "swatch-ring");
+            LegendRow(legendRows, "Depot", DepotColor, "swatch-dot");
+            busStopLegend = LegendRow(legendRows, "Other bus stop", BusStopColor, "swatch-dot");
             var controls = new VisualElement { pickingMode = PickingMode.Ignore }; controls.AddToClassList("map-controls");
             var compass = new VisualElement { pickingMode = PickingMode.Ignore, tooltip = "The map is always north-up" }; compass.AddToClassList("map-compass");
             compass.Add(new Glyph(GlyphKind.Compass, RoadClosed, 14)); compass.Add(new Label("N") { pickingMode = PickingMode.Ignore }); controls.Add(compass);
@@ -284,9 +298,14 @@ namespace Formula9.World
             return power;
         }
 
-        private List<Color> ServingColors(string routeId) => snapshot.Vehicles.OrderBy(v => v.VehicleId, StringComparer.Ordinal)
-            .Select((v, index) => (v.RouteId, Color: offline ? Frozen : ShuttleColor(index)))
-            .Where(v => v.RouteId == routeId).Select(v => v.Color).ToList();
+        // Each stop once, with the colours of every shuttle whose route calls there.
+        private List<(RouteStop Stop, List<Color> Colors)> ServedStops()
+        {
+            var vehicles = snapshot.Vehicles.OrderBy(v => v.VehicleId, StringComparer.Ordinal)
+                .Select((v, index) => (v.RouteId, Color: offline ? Frozen : ShuttleColor(index))).ToList();
+            return snapshot.Routes.SelectMany(r => r.StopsM.Select(s => (Stop: s, r.RouteId))).GroupBy(s => s.Stop.StopId)
+                .Select(g => (g.First().Stop, g.SelectMany(s => vehicles.Where(v => v.RouteId == s.RouteId).Select(v => v.Color)).ToList())).ToList();
+        }
 
         // An LTA stop one of our routes serves is drawn in that route's colours instead of gold.
         // Route stop IDs start with the LTA stop code, such as 52449-toa-payoh-police-centre.
@@ -348,6 +367,10 @@ namespace Formula9.World
         {
             labels.Clear();
             placedLabels.Clear();
+            busBoxes.Clear();
+            // Shuttles matter most: a stop or depot name that would cover one waits until it has passed
+            if (context == null && snapshot != null)
+                foreach (var vehicle in snapshot.Vehicles) { var at = ShownAt(vehicle); busBoxes.Add(new Rect(at.x - BusBoxSize / 2, at.y - BusBoxSize / 2, BusBoxSize, BusBoxSize)); }
             if (context != null)
                 foreach (var node in context.Nodes) PlaceLabel(node.NodeId.ToString(), Project(node.X, node.Y), LabelStyle.Beside, DotOutline);
             else if (snapshot != null)
@@ -355,12 +378,7 @@ namespace Formula9.World
                 // The selected shuttle first; a label that would cover another is left out, as in the Qt map
                 foreach (var vehicle in snapshot.Vehicles.OrderBy(v => v.VehicleId == SelectedId ? 0 : 1).ThenBy(v => v.VehicleId, StringComparer.Ordinal))
                     PlaceLabel(vehicle.VehicleId + (snapshot.Incidents.Any(i => i.VehicleId == vehicle.VehicleId && i.State != "RESOLVED") ? " !" : ""), ShownAt(vehicle), LabelStyle.Below, DotOutline);
-                foreach (var route in snapshot.Routes)
-                {
-                    var colors = ServingColors(route.RouteId);
-                    foreach (var stop in route.StopsM) PlaceLabel(stop.StopId, Project(stop.Position.XM, stop.Position.YM), LabelStyle.Beside, colors.Count > 0 ? colors[0] : StopColor);
-                }
-                foreach (var depot in snapshot.Depots) PlaceLabel(depot.DepotId + " / " + string.Join(", ", depot.ChargerIds), Project(depot.Position.XM, depot.Position.YM), LabelStyle.Beside, DepotColor);
+                foreach (var (stop, colors) in ServedStops()) PlaceLabel(stop.StopId, Project(stop.Position.XM, stop.Position.YM), LabelStyle.Beside, colors.Count > 0 ? colors[0] : StopColor);
             }
             // Bus stop names last, so they never push a shuttle or session stop label off the map
             if (BusStopsShown && MetresPerPoint <= BusStopLabelMetresPerPoint)
@@ -379,6 +397,7 @@ namespace Formula9.World
             var width = text.Length * 6.5f + 12;
             var box = placement == LabelStyle.Below ? new Rect(point.x - width / 2, point.y + 18, width, 20) : new Rect(point.x + 10, point.y - 10, width, 20);
             if (placedLabels.Any(other => other.Overlaps(box))) return;
+            if (placement == LabelStyle.Beside && busBoxes.Any(bus => bus.Overlaps(box))) return;
             placedLabels.Add(box);
             var label = new Label(text) { pickingMode = PickingMode.Ignore };
             label.style.position = UnityEngine.UIElements.Position.Absolute;
@@ -567,18 +586,14 @@ namespace Formula9.World
                         else Line(painter, path, routeColor, 6);
                     }
                 }
-                // A stop wears the colours of the shuttles that serve it: an outer ring for the
-                // first, an inner one for a second on the same route
-                foreach (var route in snapshot.Routes)
+                // A stop wears the colours of the shuttles that serve it: an outer ring for the first,
+                // an inner one for a second where two share it
+                foreach (var (stop, colors) in ServedStops())
                 {
-                    var colors = ServingColors(route.RouteId);
-                    foreach (var stop in route.StopsM)
-                    {
-                        var at = Project(stop.Position.XM, stop.Position.YM);
-                        Dot(painter, at, colors.Count > 0 ? colors[0] : StopColor, 9, false);
-                        if (colors.Count > 1) Dot(painter, at, colors[1], 6, false);
-                        Dot(painter, at, Color.white, 3, false);
-                    }
+                    var at = Project(stop.Position.XM, stop.Position.YM);
+                    Dot(painter, at, colors.Count > 0 ? colors[0] : StopColor, 9, false);
+                    if (colors.Count > 1) Dot(painter, at, colors[1], 6, false);
+                    Dot(painter, at, Color.white, 3, false);
                 }
                 foreach (var depot in snapshot.Depots)
                 {

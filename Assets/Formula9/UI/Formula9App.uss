@@ -401,7 +401,17 @@
     background-color: rgba(255, 255, 255, 0.94);
 }
 
-.map-legend-title { -unity-font-style: bold; font-size: 12px; margin-bottom: 4px; color: rgb(30, 42, 46); }
+.app Button.map-legend-title {
+    height: 22px;
+    margin: 0;
+    padding: 0;
+    -unity-font-style: bold;
+    -unity-text-align: middle-left;
+    font-size: 12px;
+    color: rgb(30, 42, 46);
+    border-width: 0;
+    background-color: rgba(0, 0, 0, 0);
+}
 .map-legend-row { flex-direction: row; align-items: center; margin-bottom: 3px; }
 .map-legend-key { width: 26px; align-items: center; justify-content: center; }
 .map-legend-row Label { font-size: 12px; color: rgb(30, 42, 46); }

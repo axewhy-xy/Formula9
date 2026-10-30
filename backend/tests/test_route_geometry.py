@@ -76,8 +76,12 @@ def test_every_shuttle_pulls_in_at_every_stop_on_its_route():
     actor = IntegratedSessionActor(seed=1000, session_id="stops")
     routes = {route.route_id: route for route in actor.domain.routes}
     assert len(routes["route-m2-detour"].stops_m) == 3
-    for peer in ("route-peer-b", "route-peer-c"):
-        assert len(routes[peer].stops_m) == 1, "a peer route reports the stop it serves"
+    assert len({shuttle.route_ID for shuttle in actor.shuttles}) == 5, "every shuttle has its own route"
+    pairs = (("route-peer-b", "route-peer-d"), ("route-peer-c", "route-peer-e"))
+    for first, second in pairs:
+        own = [{stop.stop_id for stop in routes[route].stops_m[1:]} for route in (first, second)]
+        assert all(own) and not own[0] & own[1], "shuttles sharing a loop have different stops"
+        assert routes[first].stops_m[0].stop_id == routes[second].stops_m[0].stop_id, "they share where the loop closes"
     actor.is_paused = False
     actor.modes = {index: "IN_SERVICE" for index in actor.modes}
     visited = {shuttle.ID: set() for shuttle in actor.shuttles}
