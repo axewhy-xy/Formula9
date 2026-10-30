@@ -24,16 +24,13 @@ Enter a login token and click **Apply credential**, then **Create session**
 and **Start scenario**. The token stays in page memory and must be entered again
 after a reload. The created session ID is added to the URL.
 
-In the native app, log in, open **Fleet Training**, leave **3D fleet exercise**
-selected and click **Create training session**. Native creates the shared
-`scenario-m2-road-3d-r1` scenario, joins it, and opens **3D View** while the
-required scene geometry loads. Once the world is ready, click **Start scenario**.
-**2D Map** and **3D View** display the same session and shuttle IDs; switching
-views preserves the session and selection. New snapshots preserve the chosen
-view. Select **Integrated exercise (2D)** before creating a session to use the
-incident, detour and charging workflow; that exercise still has planar geometry.
-Changing the picker affects the next creation, not a joined session or an
-unresolved creation retry. The login token is kept in memory only, so
+In the Unity app, log in and click **Create training session** with
+**Singapore, real streets (2D)** selected. The app creates and joins the shared
+`scenario-m2-integrated-r1` exercise with incidents, detours and charging.
+Open **Route planning**, validate the default detour, enter an approval reason,
+and approve it for every assigned shuttle before clicking **Start scenario**.
+Existing sessions remain available through **Existing sessions** or by joining
+their session ID. The login token is kept in memory only, so
 every launch logs in again. If login expires during session creation, signing
 back in as the same user confirms the original attempt with its original key.
 Another account cannot retry an unresolved creation belonging to that user.
@@ -82,8 +79,8 @@ For the BE-M2-08 road-constrained 3D fixture, use
 `{"scenario_revision_id":"scenario-m2-road-3d-r1","seed":1000}` with the same
 endpoint and credentials. Its snapshot is v2.1 and pins the shared M2 scene,
 spatial revision, proxy/asset bindings and authoritative body-centre poses.
-This is also the native creation default; web creation retains its planar
-default and can join the native-created session by ID. Scene capabilities
+This fixture is available through the API; it is not offered in the Unity
+scenario picker. Clients can still join existing 3D sessions by ID. Scene capabilities
 advertise `authoritative_3d_motion=true`,
 while `local_manoeuvre` and `recorded_perception` remain false. This is the
 five-body ramp/obstruction foundation, not the integrated BE-M2-09 exercise.

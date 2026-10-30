@@ -4,12 +4,13 @@
  * Author: Choo Jian Wei
  * Contributors: Lau Xiang Yang (3D route drafting), Rishika (real Singapore map)
  * Date Created: 30/10/2026
- * Last Modified: 30/10/2026
+ * Last Modified: 31/10/2026
  *
  * Description:
  *     Part of the Unity client's 3D world. It renders the selected session's verified scene into a
- *     UI Toolkit element and moves shuttles to each accepted snapshot. It owns no clock or
- *     commands: like the Qt client's TrainingWorldViewport it only shows what the backend says. A
+ *     UI Toolkit element and, each frame, glides shuttles towards the latest accepted snapshot. It
+ *     owns no simulation clock or commands: like the Qt client's TrainingWorldViewport it only
+ *     shows what the backend says, and the glide never predicts past the backend's last pose. A
  *     session without a 3D world shows its 2D map instead, and the trainee can switch between the
  *     two. Right-drag orbits, middle-drag pans, the wheel zooms and a left click selects.
  */
@@ -60,6 +61,7 @@ namespace Formula9.World
         private bool preferMap;
         private CityClient cityClient;
         private CityView city;
+        private readonly ShuttleMotion motion = new ShuttleMotion();
         private Task cityLoad;
         private CancellationTokenSource cityCancellation;
         private bool CityShown => latest != null && latest.Spatial == null && cityClient != null && !preferMap;
@@ -172,8 +174,9 @@ namespace Formula9.World
         public void Show(FullSnapshot snapshot)
         {
             var boundary = snapshot == null ? null : $"{snapshot.SessionId}/{snapshot.SessionEpoch}";
-            if (boundary != sessionBoundary) { sessionBoundary = boundary; preferMap = snapshot?.Spatial == null; following = false; selectedId = null; routeContext = null; DrawDraft(); }
+            if (boundary != sessionBoundary) { sessionBoundary = boundary; preferMap = snapshot?.Spatial == null; following = false; selectedId = null; routeContext = null; motion.Clear(); DrawDraft(); }
             latest = snapshot;
+            if (snapshot != null) motion.BeginSnapshot(snapshot.Tick, Time.unscaledTime);
             if (snapshot?.Spatial == null)
             {
                 loading?.Cancel();
@@ -199,9 +202,8 @@ namespace Formula9.World
                 return;
             }
             if (world == null) return; // still loading; the latest snapshot is applied when it finishes
-            var mismatch = world.ApplyPoses(snapshot);
+            var mismatch = world.ApplyPoses(snapshot, motion, Time.unscaledTime);
             if (mismatch != null) SetReady(false, $"3D unavailable · scene/vehicle binding mismatch: {mismatch}");
-            if (following) FocusSelected(false);
         }
 
         // -----------------------------------------------------------------------------------
@@ -233,7 +235,7 @@ namespace Formula9.World
             if (cityLoad != null && !cityLoad.IsCompleted) return;
             if (city.BuildingCount > 0)
             {
-                city.Show(snapshot);
+                city.Show(snapshot, motion, Time.unscaledTime);
                 SetReady(true, $"3D city · {city.BuildingCount} buildings · right-drag orbit, left-drag pan, wheel zoom");
             }
         }
@@ -295,11 +297,13 @@ namespace Formula9.World
         // Function: Update
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function moves the city's shuttles each frame and keeps a followed one in view.
+        //     This function is the 3D view's animation loop, independent of the snapshot rate: it
+        //     moves the shuttles of the city or scene each frame and keeps a followed one in view.
         private void Update()
         {
-            if (!CityShown || city == null) return;
-            city.Tick(Time.deltaTime);
+            if (CityShown && city != null) city.Tick(motion, Time.unscaledTime);
+            else if (world != null) world.Advance(motion, Time.unscaledTime);
+            else return;
             if (following) FocusSelected(false);
         }
 
@@ -329,6 +333,7 @@ namespace Formula9.World
             loading?.Cancel();
             var cancellation = loading = new CancellationTokenSource();
             Clear();
+            motion.Clear();
             shownPins = pins;
             SetReady(false, "Loading mandatory 3D geometry…");
             try
@@ -578,7 +583,7 @@ namespace Formula9.World
         //
         // Args:
         //     value (bool): True for the 2D map.
-        public void ShowMap(bool value) { preferMap = value; if (latest != null) Show(latest); }
+        public void ShowMap(bool value) { preferMap = value; motion.Clear(); if (latest != null) Show(latest); }
         public bool Offline { get; private set; }
         // -----------------------------------------------------------------------------------
         // Function: SetOffline

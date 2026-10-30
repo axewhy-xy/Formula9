@@ -335,6 +335,44 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
+        // Function: ShuttlesGlideToTheSnapshotPoses
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     With a motion, a shuttle reaches its pose over the frames after a snapshot instead of
+        //     jumping there, and a snapshot that does not fit the scene is still reported.
+        [UnityTest]
+        public IEnumerator ShuttlesGlideToTheSnapshotPoses()
+        {
+            var build = WorldBuilder.BuildAsync(Package(), null);
+            yield return Await(build);
+            var world = build.Result;
+            try
+            {
+                var motion = new ShuttleMotion();
+                var snapshot = SpatialSnapshot();
+                Assert.IsNull(world.ApplyPoses(snapshot, motion, 0));
+                var vehicle = snapshot.Vehicles[0];
+                var shuttle = world.Entities[vehicle.VehicleId];
+                var before = shuttle.position;
+                vehicle.Spatial.PositionM[0] += 2;
+                vehicle.Spatial.Movement = "CONTINUOUS";
+                Assert.IsNull(world.ApplyPoses(snapshot, motion, 1));
+                Assert.Less(Vector3.Distance(shuttle.position, before), 0.001f, "the snapshot does not move it by itself");
+                world.Advance(motion, 1.55f);
+                Assert.Less(Vector3.Distance(shuttle.position, before + Vector3.right), 0.001f, "halfway at halfway");
+                world.Advance(motion, 5);
+                Assert.Less(Vector3.Distance(shuttle.position, before + Vector3.right * 2), 0.001f, "it ends on the pose");
+
+                vehicle.Spatial.RenderAssetId = "asset-building";
+                StringAssert.Contains("does not match its scene binding", world.ApplyPoses(snapshot, motion, 6));
+            }
+            finally
+            {
+                WorldBuilder.Remove(world.Root.gameObject);
+            }
+        }
+
+        // -----------------------------------------------------------------------------------
         // Function: TheOverviewShowsTheScene
         // -----------------------------------------------------------------------------------
         // Description:

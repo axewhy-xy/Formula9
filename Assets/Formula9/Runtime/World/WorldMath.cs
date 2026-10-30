@@ -149,11 +149,27 @@ namespace Formula9.World
         //     bool: False when the matrix is not rigid; the target is then unchanged.
         public static bool Apply(Transform target, Matrix4x4 matrix)
         {
-            var scale = matrix.lossyScale;
-            if (Mathf.Abs(scale.x - 1) > 1e-3f || Mathf.Abs(scale.y - 1) > 1e-3f || Mathf.Abs(scale.z - 1) > 1e-3f
-                || matrix.determinant < 0) return false;
+            if (!IsRigid(matrix)) return false;
             target.SetPositionAndRotation(matrix.GetPosition(), matrix.rotation);
             return true;
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: IsRigid
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function tells whether a matrix is free of scale, shear and reflection.
+        //
+        // Args:
+        //     matrix (Matrix4x4): The world transform.
+        //
+        // Returns:
+        //     bool: True when a Transform can hold it exactly.
+        public static bool IsRigid(Matrix4x4 matrix)
+        {
+            var scale = matrix.lossyScale;
+            return Mathf.Abs(scale.x - 1) <= 1e-3f && Mathf.Abs(scale.y - 1) <= 1e-3f && Mathf.Abs(scale.z - 1) <= 1e-3f
+                && matrix.determinant >= 0;
         }
     }
 }

@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using Formula9.Backend;
+using Formula9.Contracts;
 using Formula9.World;
 using NUnit.Framework;
 using UnityEngine;
@@ -64,6 +65,39 @@ namespace Formula9.Tests
             var mesh = CityMesh.Build(new[] { broken });
             try { Assert.AreEqual(0, mesh.vertexCount); }
             finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
+        public void TheCitysShuttlesGlideBetweenSnapshotsAndFaceTheirHeading()
+        {
+            var rig = new GameObject("City shuttle rig");
+            var view = new CityView(rig.transform, null);
+            try
+            {
+                var snapshot = (FullSnapshot)ContractParser.ParseMessage(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/snapshot.json")));
+                var motion = new ShuttleMotion();
+                var vehicle = snapshot.Vehicles[0];
+                vehicle.RouteId = null;
+                vehicle.HeadingDeg = 90;
+                view.Show(snapshot, motion, 0);
+                Assert.IsTrue(view.TryGetShuttle(vehicle.VehicleId, out var start), "placed at once");
+                Assert.AreEqual((float)vehicle.Position.XM, start.x, 1e-3f);
+
+                vehicle.Position.XM += 11;
+                view.Show(snapshot, motion, 1);
+                view.TryGetShuttle(vehicle.VehicleId, out var unmoved);
+                Assert.Less(Vector3.Distance(unmoved, start), 1e-3f, "the snapshot does not move it by itself");
+                view.Tick(motion, 1.55f);
+                view.TryGetShuttle(vehicle.VehicleId, out var halfway);
+                Assert.Less(Vector3.Distance(halfway, start + Vector3.right * 5.5f), 1e-2f, "halfway at halfway");
+                motion.Sample(vehicle.VehicleId, 1.55f, out _, out var rotation);
+                Assert.Less(Vector3.Angle(rotation * Vector3.forward, Vector3.forward), 0.1f, "90 degrees from east is north, Unity's +Z");
+            }
+            finally
+            {
+                view.Dispose();
+                UnityEngine.Object.DestroyImmediate(rig);
+            }
         }
 
         // Draws the real buildings from a live backend, to look at. Needs a GPU and the isolated
