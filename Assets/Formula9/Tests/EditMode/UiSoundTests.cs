@@ -37,6 +37,9 @@ namespace Formula9.Tests
             sounds.Hovered(Button("Pause"));
             sounds.Hovered(Button("Start scenario", primary: true));
             sounds.Hovered(Button("Resume", enabled: false));
+            var login = Button("LOGIN"); login.AddToClassList("login-button");
+            sounds.Hovered(login);
+            sounds.Hovered(new Button { name = UiSounds.StartButtonName, text = "Start scenario" });
             CollectionAssert.AreEqual(new[] { UiSound.ButtonHover }, played);
         }
 
@@ -44,8 +47,34 @@ namespace Formula9.Tests
         public void TheRealLayoutsBigButtonsAreTheOnesWithoutHoverSound()
         {
             var root = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/Formula9/UI/Formula9App.uxml").CloneTree();
-            var big = root.Query<Button>().ToList().Where(b => b.ClassListContains("primary")).Select(b => b.name);
-            CollectionAssert.AreEquivalent(new[] { "submit", "create", "start" }, big);
+            var silent = root.Query<Button>().ToList().Where(b => !UiSounds.HoverPlays(b)).Select(b => b.name);
+            CollectionAssert.AreEquivalent(new[] { "submit", "create", "join", "start" }, silent);
+        }
+
+        // Pointer events reach the root from whatever is under the pointer: an icon or label inside
+        // a nav button, or a button the screens built after Attach.
+        [Test]
+        public void HoverIsResolvedToTheEnclosingButtonOncePerButton()
+        {
+            var nav = Button("");
+            var label = new Label("Route Planning"); nav.Add(label);
+            var row = new VisualElement();
+            sounds.PointerOver(label);
+            sounds.PointerOver(nav);
+            sounds.PointerOver(row);
+            sounds.PointerOver(nav);
+            CollectionAssert.AreEqual(new[] { UiSound.ButtonHover, UiSound.ButtonHover }, played, "entering again after leaving plays again");
+        }
+
+        [Test]
+        public void DropdownsAreFoundFromThePartPressed()
+        {
+            var field = new DropdownField("Route", new List<string> { "a", "b" }, 0);
+            var inner = field.Q<VisualElement>(className: DropdownField.inputUssClassName);
+            sounds.PointerDown(inner ?? field);
+            sounds.ValueChanged(field);
+            sounds.ValueChanged(new TextField());
+            CollectionAssert.AreEqual(new[] { UiSound.Dropdown, UiSound.Dropdown }, played);
         }
 
         [Test]

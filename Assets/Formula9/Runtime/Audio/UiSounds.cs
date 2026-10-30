@@ -10,7 +10,8 @@ namespace Formula9.Audio
 
     // amee's sound review, as the Formula_9 web app applies it (uiAudio.ts), mapped onto the Unity
     // controls:
-    //   - TileHover 2 on hover for every enabled button except the big primary ones; no click sound.
+    //   - TileHover 2 on hover for every enabled button except the big ones (BigButtonClasses) and
+//     Start scenario, which has its own click sound; no click sound.
     //   - UI_Hover 6 when Start scenario is clicked.
     //   - UI Hover New 1 when a node is picked on the route planning graph.
     //   - A higher-pitched UI Hover New 1 when a dropdown opens and when an option is chosen;
@@ -42,7 +43,14 @@ namespace Formula9.Audio
             this.now = now ?? (() => Time.realtimeSinceStartup);
         }
 
-        public static bool HoverPlays(Button button) => button.enabledInHierarchy && !button.ClassListContains("primary");
+        // The large call-to-action buttons stay silent on hover, as in the web app.
+        public static readonly IReadOnlyList<string> BigButtonClasses = new[] { "primary", "login-button" };
+        public const string StartButtonName = "start";
+
+        private Button hovered;
+
+        public static bool HoverPlays(Button button) =>
+            button.enabledInHierarchy && button.name != StartButtonName && !BigButtonClasses.Any(button.ClassListContains);
 
         public void Hovered(Button button)
         {
@@ -69,17 +77,41 @@ namespace Formula9.Audio
             if (now() - at <= ChoiceWindowSeconds) play?.Invoke(UiSound.Dropdown);
         }
 
-        // Hooks every button and dropdown already in the tree. Call it once the screens are built.
+        // Listens once on the root, so controls the screens build later (charging decisions, map
+        // zoom buttons) are covered too. Pointer over/down bubble up from icons and labels inside a
+        // control, so each is resolved to the button or dropdown that contains it.
         public void Attach(VisualElement root)
         {
-            foreach (var button in root.Query<Button>().ToList())
-                button.RegisterCallback<PointerEnterEvent>(_ => Hovered(button));
-            foreach (var field in root.Query<DropdownField>().ToList())
-            {
-                // The field's own input handles the press, so listen on the way down.
-                field.RegisterCallback<PointerDownEvent>(_ => DropdownOpened(field), TrickleDown.TrickleDown);
-                field.RegisterValueChangedCallback(_ => DropdownChanged(field));
-            }
+            root.RegisterCallback<PointerOverEvent>(e => PointerOver(e.target), TrickleDown.TrickleDown);
+            // The field's own input handles the press, so listen on the way down.
+            root.RegisterCallback<PointerDownEvent>(e => PointerDown(e.target), TrickleDown.TrickleDown);
+            root.RegisterCallback<ChangeEvent<string>>(e => ValueChanged(e.target));
+        }
+
+        public void PointerOver(IEventHandler target)
+        {
+            var button = Enclosing<Button>(target);
+            if (button == hovered) return;
+            hovered = button;
+            if (button != null) Hovered(button);
+        }
+
+        public void PointerDown(IEventHandler target)
+        {
+            var field = Enclosing<DropdownField>(target);
+            if (field != null) DropdownOpened(field);
+        }
+
+        public void ValueChanged(IEventHandler target)
+        {
+            if (target is DropdownField field) DropdownChanged(field);
+        }
+
+        private static T Enclosing<T>(IEventHandler target) where T : VisualElement
+        {
+            for (var element = target as VisualElement; element != null; element = element.parent)
+                if (element is T match) return match;
+            return null;
         }
     }
 

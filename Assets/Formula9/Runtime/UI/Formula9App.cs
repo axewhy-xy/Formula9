@@ -99,14 +99,14 @@ namespace Formula9.UI
             session.EventsAccepted += events => alerts.OnEvents(events, true);
             session.RecoveryEventsReceived += events => alerts.OnEvents(events, true);
 
-            // Interface sounds from amee's review, attached once every screen and control exists.
+            // Interface sounds from amee's review.
             var root = GetComponent<UIDocument>().rootVisualElement;
             var uiPlayer = new GameObject("Interface sounds").AddComponent<UiSoundPlayer>();
             uiPlayer.transform.SetParent(transform, false);
             var uiSounds = new UiSounds(uiPlayer.Play);
             uiSounds.Attach(root);
             start.clicked += uiSounds.StartClicked;
-            root.Q<FleetMap>("route-map").NodeSelected += _ => uiSounds.PointPicked();
+            world.RouteNodeSelected += _ => uiSounds.PointPicked();
 
             ShowLogin(null);
             StartCoroutine(Poll());
