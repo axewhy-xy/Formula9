@@ -102,8 +102,10 @@
     min-width: 300px;
 }
 
+/* Fixed width, so typing an ID does not push Join and Refresh along. */
 .session-id {
-    min-width: 320px;
+    width: 420px;
+    flex-shrink: 0;
 }
 
 .sessions {
@@ -132,8 +134,10 @@
     flex-direction: row;
 }
 
+/* flex-basis 0 on both panels keeps the 3:2 split whatever their content. */
 .world {
     flex-grow: 3;
+    flex-basis: 0;
     margin-right: 12px;
     border-radius: 8px;
     background-color: rgb(26, 26, 30);
@@ -178,4 +182,20 @@
     flex-grow: 1;
     flex-basis: 0;
     overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    padding-right: 8px;
+}
+
+/* Shuttle, State, Route / revision, Battery, Provenance */
+.fleet-col-2 {
+    flex-grow: 1.8;
+}
+
+.fleet-col-3 {
+    flex-grow: 1.3;
+}
+
+.fleet-col-4 {
+    flex-grow: 1.6;
 }

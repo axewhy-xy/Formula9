@@ -109,7 +109,16 @@ namespace Formula9.UI
             modeSwitch = root.Q<Button>("mode-switch");
             submit.clicked += () => Run(SubmitLogin());
             modeSwitch.clicked += () => SetSignUp(!signUp);
-            password.RegisterCallback<KeyDownEvent>(e => { if (e.keyCode == KeyCode.Return) Run(SubmitLogin()); });
+            // Enter submits from either field, as in the Qt login. The text field consumes Return
+            // itself, so listen on the way down (trickle-down) rather than as the event bubbles up.
+            EventCallback<KeyDownEvent> submitOnEnter = e =>
+            {
+                if (e.keyCode != KeyCode.Return && e.keyCode != KeyCode.KeypadEnter) return;
+                e.StopPropagation();
+                Run(SubmitLogin());
+            };
+            foreach (var field in new[] { username, password, confirm })
+                field.RegisterCallback(submitOnEnter, TrickleDown.TrickleDown);
             SetSignUp(false);
         }
 
@@ -156,7 +165,7 @@ namespace Formula9.UI
             archive.clicked += () => Run(session.SendControlAsync("ARCHIVE"));
 
             var header = root.Q("fleet-header");
-            foreach (var column in FleetColumns) header.Add(Cell(column));
+            for (var column = 0; column < FleetColumns.Length; column++) header.Add(Cell(FleetColumns[column], column));
             Render();
         }
 
@@ -299,15 +308,19 @@ namespace Formula9.UI
             {
                 var line = new VisualElement();
                 line.AddToClassList("fleet-row");
-                foreach (var value in new[] { row.ShuttleId, row.State, row.Route, row.Battery, row.Provenance }) line.Add(Cell(value));
+                var values = new[] { row.ShuttleId, row.State, row.Route, row.Battery, row.Provenance };
+                for (var column = 0; column < values.Length; column++) line.Add(Cell(values[column], column));
                 fleet.Add(line);
             }
         }
 
-        private static Label Cell(string text)
+        // Each column has its own class so header and rows share widths; long values end in "…"
+        // and the full text is in the tooltip.
+        private static Label Cell(string text, int column)
         {
-            var cell = new Label(text);
+            var cell = new Label(text) { tooltip = text };
             cell.AddToClassList("fleet-cell");
+            cell.AddToClassList($"fleet-col-{column}");
             return cell;
         }
 

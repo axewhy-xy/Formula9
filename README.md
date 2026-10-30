@@ -114,6 +114,18 @@ Run EditMode tests in the Test Runner window, or headless:
 ```
 
 Tests in the `LiveBackend` category call a running backend and are skipped when none is
-reachable. They use no real account. The `Render` test draws the real scene and needs a GPU,
+reachable. They use no real account.
+
+The `EndToEnd` tests run the whole client over real HTTP: sign up, log in, create, start, pause,
+resume and archive sessions, and load and place a live 3D world. They sign up throwaway users,
+so they only run against an isolated backend and are skipped unless
+`FORMULA9_E2E_BACKEND_URL` is set:
+
+```
+python Tools/isolated_backend.py          # in-memory accounts, temporary sessions, port 8010
+set FORMULA9_E2E_BACKEND_URL=http://127.0.0.1:8010
+```
+
+Never point `FORMULA9_E2E_BACKEND_URL` at the team's shared backend. The `Render` test draws the real scene and needs a GPU,
 so it is skipped under `-nographics`; set `FORMULA9_RENDER_OUT` to a `.png` path to keep the
 image.
