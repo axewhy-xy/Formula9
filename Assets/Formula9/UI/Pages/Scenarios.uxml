@@ -1,0 +1,7 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:f9="Formula9.World" xmlns:f9ui="Formula9.UI">
+    <Style src="project://database/Assets/Formula9/UI/Formula9App.uss" />
+    <ui:ScrollView class="workspace-page">
+        <ui:Label text="Scenarios" class="page-title" />
+        <ui:Label text="Choose a scenario above when creating a training session. Configuring scenarios is coming in a later milestone." class="workspace-text" />
+    </ui:ScrollView>
+</ui:UXML>

@@ -1,0 +1,128 @@
+using UnityEngine;
+using UnityEngine.UIElements;
+
+namespace Formula9.World
+{
+    public enum GlyphKind { Bus, Pin, Warning, Plug, Document, User, Lock, Eye, Fit, Compass, Info }
+
+    // A small line icon drawn in code, as the Qt client's AppShell glyphs are, so it stays sharp at
+    // any scale and needs no image asset. It never takes clicks; whatever holds it does.
+    [UxmlElement]
+    public sealed partial class Glyph : VisualElement
+    {
+        private GlyphKind kind;
+        private Color tint = Color.white;
+
+        [UxmlAttribute("kind")] public GlyphKind Kind { get => kind; set { kind = value; MarkDirtyRepaint(); } }
+        [UxmlAttribute("tint")] public Color Tint { get => tint; set { tint = value; MarkDirtyRepaint(); } }
+        [UxmlAttribute("size")] public float Size { get => style.width.value.value; set { style.width = style.height = value; } }
+
+        public Glyph() : this(GlyphKind.Bus, Color.white) { }
+
+        public Glyph(GlyphKind kind, Color tint, float size = 22)
+        {
+            this.kind = kind; this.tint = tint;
+            pickingMode = PickingMode.Ignore;
+            Size = size;
+            style.flexShrink = 0;
+            generateVisualContent += Draw;
+        }
+
+        // The front of a bus, centred on a point, in the shuttle's colour.
+        public static void DrawBus(Painter2D painter, Vector2 center, float size, Color body)
+        {
+            var s = size / 36;
+            Vector2 At(float x, float y) => center + new Vector2((x - 18) * s, (y - 18) * s);
+            painter.fillColor = new Color(body.r * 0.7f, body.g * 0.7f, body.b * 0.7f, body.a);
+            painter.BeginPath(); painter.Arc(At(11, 32), 3 * s, 0, 360); painter.Fill();
+            painter.BeginPath(); painter.Arc(At(25, 32), 3 * s, 0, 360); painter.Fill();
+            Rounded(painter, At(5, 3), 26 * s, 28 * s, 6 * s, body); painter.Fill();
+            painter.strokeColor = Color.white; painter.lineWidth = Mathf.Max(1, 1.5f * s); painter.Stroke();
+            Rounded(painter, At(9, 7), 18 * s, 10 * s, 2 * s, Color.white); painter.Fill();
+        }
+
+        private static void Rounded(Painter2D painter, Vector2 corner, float width, float height, float radius, Color fill)
+        {
+            painter.fillColor = fill;
+            painter.BeginPath();
+            painter.MoveTo(corner + new Vector2(radius, 0));
+            painter.ArcTo(corner + new Vector2(width, 0), corner + new Vector2(width, height), radius);
+            painter.ArcTo(corner + new Vector2(width, height), corner + new Vector2(0, height), radius);
+            painter.ArcTo(corner + new Vector2(0, height), corner, radius);
+            painter.ArcTo(corner, corner + new Vector2(width, 0), radius);
+            painter.ClosePath();
+        }
+
+        private void Draw(MeshGenerationContext mesh)
+        {
+            var p = mesh.painter2D;
+            var s = contentRect.width;
+            if (s < 1) return;
+            Vector2 At(float x, float y) => new Vector2(x * s, y * s);
+            void Lines(bool closed, params Vector2[] points)
+            {
+                p.BeginPath(); p.MoveTo(points[0]);
+                for (var i = 1; i < points.Length; i++) p.LineTo(points[i]);
+                if (closed) p.ClosePath();
+                p.Stroke();
+            }
+            void Circle(float x, float y, float radius) { p.BeginPath(); p.Arc(At(x, y), radius * s, 0, 360); p.Stroke(); }
+            p.strokeColor = tint; p.fillColor = tint; p.lineWidth = Mathf.Max(1.2f, s * 0.08f);
+            p.lineCap = LineCap.Round; p.lineJoin = LineJoin.Round;
+            switch (kind)
+            {
+                case GlyphKind.Bus:
+                    Lines(true, At(0.2f, 0.1f), At(0.8f, 0.1f), At(0.8f, 0.76f), At(0.2f, 0.76f));
+                    Lines(false, At(0.2f, 0.48f), At(0.8f, 0.48f));
+                    Lines(false, At(0.3f, 0.76f), At(0.3f, 0.92f));
+                    Lines(false, At(0.7f, 0.76f), At(0.7f, 0.92f));
+                    break;
+                case GlyphKind.Pin:
+                    Circle(0.5f, 0.38f, 0.28f);
+                    Circle(0.5f, 0.38f, 0.08f);
+                    Lines(false, At(0.28f, 0.56f), At(0.5f, 0.94f), At(0.72f, 0.56f));
+                    break;
+                case GlyphKind.Warning:
+                    Lines(true, At(0.5f, 0.1f), At(0.95f, 0.88f), At(0.05f, 0.88f));
+                    Lines(false, At(0.5f, 0.38f), At(0.5f, 0.62f));
+                    Lines(false, At(0.5f, 0.74f), At(0.5f, 0.76f));
+                    break;
+                case GlyphKind.Plug:
+                    Lines(false, At(0.36f, 0.08f), At(0.36f, 0.32f));
+                    Lines(false, At(0.64f, 0.08f), At(0.64f, 0.32f));
+                    Lines(true, At(0.22f, 0.32f), At(0.78f, 0.32f), At(0.68f, 0.58f), At(0.32f, 0.58f));
+                    Lines(false, At(0.5f, 0.58f), At(0.5f, 0.92f));
+                    break;
+                case GlyphKind.Document:
+                    Lines(true, At(0.24f, 0.1f), At(0.6f, 0.1f), At(0.78f, 0.28f), At(0.78f, 0.9f), At(0.24f, 0.9f));
+                    foreach (var y in new[] { 0.46f, 0.6f, 0.74f }) Lines(false, At(0.36f, y), At(0.66f, y));
+                    break;
+                case GlyphKind.User:
+                    Circle(0.5f, 0.32f, 0.18f);
+                    Lines(false, At(0.16f, 0.9f), At(0.26f, 0.66f), At(0.74f, 0.66f), At(0.84f, 0.9f));
+                    break;
+                case GlyphKind.Lock:
+                    Lines(true, At(0.22f, 0.46f), At(0.78f, 0.46f), At(0.78f, 0.9f), At(0.22f, 0.9f));
+                    Lines(false, At(0.34f, 0.46f), At(0.34f, 0.26f), At(0.5f, 0.1f), At(0.66f, 0.26f), At(0.66f, 0.46f));
+                    break;
+                case GlyphKind.Eye:
+                    Lines(true, At(0.06f, 0.5f), At(0.3f, 0.28f), At(0.7f, 0.28f), At(0.94f, 0.5f), At(0.7f, 0.72f), At(0.3f, 0.72f));
+                    Circle(0.5f, 0.5f, 0.12f);
+                    break;
+                case GlyphKind.Fit:
+                    Lines(false, At(0.14f, 0.86f), At(0.86f, 0.14f));
+                    Lines(false, At(0.5f, 0.14f), At(0.86f, 0.14f), At(0.86f, 0.5f));
+                    Lines(false, At(0.14f, 0.5f), At(0.14f, 0.86f), At(0.5f, 0.86f));
+                    break;
+                case GlyphKind.Compass:
+                    p.BeginPath(); p.MoveTo(At(0.5f, 0.02f)); p.LineTo(At(0.76f, 0.62f)); p.LineTo(At(0.24f, 0.62f)); p.ClosePath(); p.Fill();
+                    break;
+                case GlyphKind.Info:
+                    Circle(0.5f, 0.5f, 0.42f);
+                    Lines(false, At(0.5f, 0.46f), At(0.5f, 0.72f));
+                    Lines(false, At(0.5f, 0.28f), At(0.5f, 0.3f));
+                    break;
+            }
+        }
+    }
+}

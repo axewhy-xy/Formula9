@@ -6,11 +6,14 @@
 *.asmdef text
 *.json text
 *.md text
+# cmd.exe can miss labels in a batch file with LF line endings.
+*.bat text eol=crlf
 
 # Hash-pinned scene manifest: its exact bytes must survive checkout on every platform.
 Assets/Formula9/Tests/EditMode/Fixtures/m2_scene/manifest.json -text
 backend/fixtures/m2_scene/manifest.json -text
 backend/fixtures/map/map.db -text
+backend/fixtures/transit/transit.sqlite -text
 
 # Unity serialised YAML: merge as text but never guess at line endings.
 *.unity text eol=lf

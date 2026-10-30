@@ -1,0 +1,2932 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="Win32-MSBuild"
+	tests="181"
+	failures="0"
+	disabled="0"
+	skipped="1"
+	hostname="Wabbit"
+	time="54"
+	timestamp="2026-10-29T09:55:14"
+	>
+	<testcase name="AlertGateTest.MeaningfulLiveEventPlaysItsSound" classname="AlertGateTest.MeaningfulLiveEventPlaysItsSound" time="0.0621127" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = AlertGateTest.MeaningfulLiveEventPlaysItsSound
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from AlertGateTest
+[ RUN      ] AlertGateTest.MeaningfulLiveEventPlaysItsSound
+[       OK ] AlertGateTest.MeaningfulLiveEventPlaysItsSound (0 ms)
+[----------] 1 test from AlertGateTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="AlertGateTest.RoutineEventsAreSilent" classname="AlertGateTest.RoutineEventsAreSilent" time="0.0723024" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = AlertGateTest.RoutineEventsAreSilent
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from AlertGateTest
+[ RUN      ] AlertGateTest.RoutineEventsAreSilent
+[       OK ] AlertGateTest.RoutineEventsAreSilent (0 ms)
+[----------] 1 test from AlertGateTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="AlertGateTest.CueKeyNeedsEntityAndEventType" classname="AlertGateTest.CueKeyNeedsEntityAndEventType" time="0.0644168" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = AlertGateTest.CueKeyNeedsEntityAndEventType
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from AlertGateTest
+[ RUN      ] AlertGateTest.CueKeyNeedsEntityAndEventType
+[       OK ] AlertGateTest.CueKeyNeedsEntityAndEventType (0 ms)
+[----------] 1 test from AlertGateTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="AlertGateTest.EveryDefaultCueIsReachable" classname="AlertGateTest.EveryDefaultCueIsReachable" time="0.0610039" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = AlertGateTest.EveryDefaultCueIsReachable
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from AlertGateTest
+[ RUN      ] AlertGateTest.EveryDefaultCueIsReachable
+[       OK ] AlertGateTest.EveryDefaultCueIsReachable (0 ms)
+[----------] 1 test from AlertGateTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="AlertGateTest.DefaultCuesCoverM2AttentionEvents" classname="AlertGateTest.DefaultCuesCoverM2AttentionEvents" time="0.0629556" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = AlertGateTest.DefaultCuesCoverM2AttentionEvents
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from AlertGateTest
+[ RUN      ] AlertGateTest.DefaultCuesCoverM2AttentionEvents
+[       OK ] AlertGateTest.DefaultCuesCoverM2AttentionEvents (0 ms)
+[----------] 1 test from AlertGateTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="AlertGateTest.SharedCueContractIsEmbedded" classname="AlertGateTest.SharedCueContractIsEmbedded" time="0.062293" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = AlertGateTest.SharedCueContractIsEmbedded
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from AlertGateTest
+[ RUN      ] AlertGateTest.SharedCueContractIsEmbedded
+[       OK ] AlertGateTest.SharedCueContractIsEmbedded (0 ms)
+[----------] 1 test from AlertGateTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="AlertGateTest.SameEventIdAlertsOnlyOnce" classname="AlertGateTest.SameEventIdAlertsOnlyOnce" time="0.0519178" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = AlertGateTest.SameEventIdAlertsOnlyOnce
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from AlertGateTest
+[ RUN      ] AlertGateTest.SameEventIdAlertsOnlyOnce
+[       OK ] AlertGateTest.SameEventIdAlertsOnlyOnce (0 ms)
+[----------] 1 test from AlertGateTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="AlertGateTest.HistoryPlaybackIsSilentAndNotRemembered" classname="AlertGateTest.HistoryPlaybackIsSilentAndNotRemembered" time="0.0649475" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = AlertGateTest.HistoryPlaybackIsSilentAndNotRemembered
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from AlertGateTest
+[ RUN      ] AlertGateTest.HistoryPlaybackIsSilentAndNotRemembered
+[       OK ] AlertGateTest.HistoryPlaybackIsSilentAndNotRemembered (0 ms)
+[----------] 1 test from AlertGateTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="AlertGateTest.MuteSilencesWithoutBurstOnUnmute" classname="AlertGateTest.MuteSilencesWithoutBurstOnUnmute" time="0.0605663" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = AlertGateTest.MuteSilencesWithoutBurstOnUnmute
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from AlertGateTest
+[ RUN      ] AlertGateTest.MuteSilencesWithoutBurstOnUnmute
+[       OK ] AlertGateTest.MuteSilencesWithoutBurstOnUnmute (0 ms)
+[----------] 1 test from AlertGateTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="AlertGateTest.MemoryLimitForgetsOldestFirst" classname="AlertGateTest.MemoryLimitForgetsOldestFirst" time="0.0646861" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = AlertGateTest.MemoryLimitForgetsOldestFirst
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from AlertGateTest
+[ RUN      ] AlertGateTest.MemoryLimitForgetsOldestFirst
+[       OK ] AlertGateTest.MemoryLimitForgetsOldestFirst (0 ms)
+[----------] 1 test from AlertGateTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="AlertGateTest.RoutineEventsAreRememberedToo" classname="AlertGateTest.RoutineEventsAreRememberedToo" time="0.0600948" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = AlertGateTest.RoutineEventsAreRememberedToo
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from AlertGateTest
+[ RUN      ] AlertGateTest.RoutineEventsAreRememberedToo
+[       OK ] AlertGateTest.RoutineEventsAreRememberedToo (0 ms)
+[----------] 1 test from AlertGateTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="AlertGateTest.CustomCueTable" classname="AlertGateTest.CustomCueTable" time="0.104463" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = AlertGateTest.CustomCueTable
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from AlertGateTest
+[ RUN      ] AlertGateTest.CustomCueTable
+[       OK ] AlertGateTest.CustomCueTable (0 ms)
+[----------] 1 test from AlertGateTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="AlertGateTest.SharedFixtureReplayEventAlertsOnce" classname="AlertGateTest.SharedFixtureReplayEventAlertsOnce" time="0.0823198" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = AlertGateTest.SharedFixtureReplayEventAlertsOnce
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from AlertGateTest
+[ RUN      ] AlertGateTest.SharedFixtureReplayEventAlertsOnce
+[       OK ] AlertGateTest.SharedFixtureReplayEventAlertsOnce (1 ms)
+[----------] 1 test from AlertGateTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="PropertyDocumentTest.InvalidImportsPreserveModelHistoryAndSavedBaseline" classname="PropertyDocumentTest.InvalidImportsPreserveModelHistoryAndSavedBaseline" time="0.165052" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = PropertyDocumentTest.InvalidImportsPreserveModelHistoryAndSavedBaseline
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from PropertyDocumentTest
+[ RUN      ] PropertyDocumentTest.InvalidImportsPreserveModelHistoryAndSavedBaseline
+[       OK ] PropertyDocumentTest.InvalidImportsPreserveModelHistoryAndSavedBaseline (15 ms)
+[----------] 1 test from PropertyDocumentTest (15 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (15 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="PropertyDocumentTest.ValidJsonAndBinaryImportsStillReplaceTheModel" classname="PropertyDocumentTest.ValidJsonAndBinaryImportsStillReplaceTheModel" time="0.0988414" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = PropertyDocumentTest.ValidJsonAndBinaryImportsStillReplaceTheModel
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from PropertyDocumentTest
+[ RUN      ] PropertyDocumentTest.ValidJsonAndBinaryImportsStillReplaceTheModel
+[       OK ] PropertyDocumentTest.ValidJsonAndBinaryImportsStillReplaceTheModel (42 ms)
+[----------] 1 test from PropertyDocumentTest (43 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (43 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="HierarchyFilesTest.PageFileStemReplacesSpacesAndDropsInvalidCharacters" classname="HierarchyFilesTest.PageFileStemReplacesSpacesAndDropsInvalidCharacters" time="0.0523267" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = HierarchyFilesTest.PageFileStemReplacesSpacesAndDropsInvalidCharacters
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from HierarchyFilesTest
+[ RUN      ] HierarchyFilesTest.PageFileStemReplacesSpacesAndDropsInvalidCharacters
+[       OK ] HierarchyFilesTest.PageFileStemReplacesSpacesAndDropsInvalidCharacters (0 ms)
+[----------] 1 test from HierarchyFilesTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="HierarchyFilesTest.PageFileStemRejectsUnusableNames" classname="HierarchyFilesTest.PageFileStemRejectsUnusableNames" time="0.05222" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = HierarchyFilesTest.PageFileStemRejectsUnusableNames
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from HierarchyFilesTest
+[ RUN      ] HierarchyFilesTest.PageFileStemRejectsUnusableNames
+[       OK ] HierarchyFilesTest.PageFileStemRejectsUnusableNames (0 ms)
+[----------] 1 test from HierarchyFilesTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="HierarchyFilesTest.PagesRoundTripInOrder" classname="HierarchyFilesTest.PagesRoundTripInOrder" time="0.066018" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = HierarchyFilesTest.PagesRoundTripInOrder
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from HierarchyFilesTest
+[ RUN      ] HierarchyFilesTest.PagesRoundTripInOrder
+[       OK ] HierarchyFilesTest.PagesRoundTripInOrder (18 ms)
+[----------] 1 test from HierarchyFilesTest (18 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (18 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="HierarchyFilesTest.MissingOrderFileMeansNoPages" classname="HierarchyFilesTest.MissingOrderFileMeansNoPages" time="0.0497521" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = HierarchyFilesTest.MissingOrderFileMeansNoPages
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from HierarchyFilesTest
+[ RUN      ] HierarchyFilesTest.MissingOrderFileMeansNoPages
+[       OK ] HierarchyFilesTest.MissingOrderFileMeansNoPages (1 ms)
+[----------] 1 test from HierarchyFilesTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="HierarchyFilesTest.SaveDeletesRemovedPagesButKeepsCaseOnlyRename" classname="HierarchyFilesTest.SaveDeletesRemovedPagesButKeepsCaseOnlyRename" time="0.0730668" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = HierarchyFilesTest.SaveDeletesRemovedPagesButKeepsCaseOnlyRename
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from HierarchyFilesTest
+[ RUN      ] HierarchyFilesTest.SaveDeletesRemovedPagesButKeepsCaseOnlyRename
+[       OK ] HierarchyFilesTest.SaveDeletesRemovedPagesButKeepsCaseOnlyRename (26 ms)
+[----------] 1 test from HierarchyFilesTest (26 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (26 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="HierarchyFilesTest.SaveRejectsPagesSharingAFile" classname="HierarchyFilesTest.SaveRejectsPagesSharingAFile" time="0.0518502" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = HierarchyFilesTest.SaveRejectsPagesSharingAFile
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from HierarchyFilesTest
+[ RUN      ] HierarchyFilesTest.SaveRejectsPagesSharingAFile
+[       OK ] HierarchyFilesTest.SaveRejectsPagesSharingAFile (2 ms)
+[----------] 1 test from HierarchyFilesTest (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="HierarchyFilesTest.RenamedPageKeepsItsContentInTheNewFile" classname="HierarchyFilesTest.RenamedPageKeepsItsContentInTheNewFile" time="0.0755187" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = HierarchyFilesTest.RenamedPageKeepsItsContentInTheNewFile
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from HierarchyFilesTest
+[ RUN      ] HierarchyFilesTest.RenamedPageKeepsItsContentInTheNewFile
+[       OK ] HierarchyFilesTest.RenamedPageKeepsItsContentInTheNewFile (22 ms)
+[----------] 1 test from HierarchyFilesTest (23 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (23 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="HierarchyFilesTest.PageVisibilityAndLockAreSavedAsOneOrZero" classname="HierarchyFilesTest.PageVisibilityAndLockAreSavedAsOneOrZero" time="0.0707794" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = HierarchyFilesTest.PageVisibilityAndLockAreSavedAsOneOrZero
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from HierarchyFilesTest
+[ RUN      ] HierarchyFilesTest.PageVisibilityAndLockAreSavedAsOneOrZero
+[       OK ] HierarchyFilesTest.PageVisibilityAndLockAreSavedAsOneOrZero (15 ms)
+[----------] 1 test from HierarchyFilesTest (15 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (16 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="HierarchyFilesTest.MainPageVisibleFollowsTickAndDeletion" classname="HierarchyFilesTest.MainPageVisibleFollowsTickAndDeletion" time="0.0772522" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = HierarchyFilesTest.MainPageVisibleFollowsTickAndDeletion
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from HierarchyFilesTest
+[ RUN      ] HierarchyFilesTest.MainPageVisibleFollowsTickAndDeletion
+[       OK ] HierarchyFilesTest.MainPageVisibleFollowsTickAndDeletion (28 ms)
+[----------] 1 test from HierarchyFilesTest (28 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (28 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="HierarchyFilesTest.LayersSaveKeepsColoursAndOtherFields" classname="HierarchyFilesTest.LayersSaveKeepsColoursAndOtherFields" time="0.0584787" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = HierarchyFilesTest.LayersSaveKeepsColoursAndOtherFields
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from HierarchyFilesTest
+[ RUN      ] HierarchyFilesTest.LayersSaveKeepsColoursAndOtherFields
+[       OK ] HierarchyFilesTest.LayersSaveKeepsColoursAndOtherFields (9 ms)
+[----------] 1 test from HierarchyFilesTest (9 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (10 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BackendClientTrainingTest.RejectedBatchResyncsSameEpochBeforeAdvancingCursor" classname="BackendClientTrainingTest.RejectedBatchResyncsSameEpochBeforeAdvancingCursor" time="2.486" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BackendClientTrainingTest.RejectedBatchResyncsSameEpochBeforeAdvancingCursor
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BackendClientTrainingTest
+[ RUN      ] BackendClientTrainingTest.RejectedBatchResyncsSameEpochBeforeAdvancingCursor
+[       OK ] BackendClientTrainingTest.RejectedBatchResyncsSameEpochBeforeAdvancingCursor (2433 ms)
+[----------] 1 test from BackendClientTrainingTest (2433 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2433 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BackendClientTrainingTest.CreateKeepsTheSharedPlanarScenarioByDefault" classname="BackendClientTrainingTest.CreateKeepsTheSharedPlanarScenarioByDefault" time="0.142631" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BackendClientTrainingTest.CreateKeepsTheSharedPlanarScenarioByDefault
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BackendClientTrainingTest
+[ RUN      ] BackendClientTrainingTest.CreateKeepsTheSharedPlanarScenarioByDefault
+[       OK ] BackendClientTrainingTest.CreateKeepsTheSharedPlanarScenarioByDefault (65 ms)
+[----------] 1 test from BackendClientTrainingTest (65 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (65 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BackendClientTrainingIntegrationTest.CreatesStartsAndJoinsSharedLiveScenario" classname="BackendClientTrainingIntegrationTest.CreatesStartsAndJoinsSharedLiveScenario" time="0.0880407" status="notrun">
+		<skipped message="SKIP_REGULAR_EXPRESSION_MATCHED"/>
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BackendClientTrainingIntegrationTest.CreatesStartsAndJoinsSharedLiveScenario
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BackendClientTrainingIntegrationTest
+[ RUN      ] BackendClientTrainingIntegrationTest.CreatesStartsAndJoinsSharedLiveScenario
+C:\Digipen\Year 04\GAM300\Formula_9\Native\Tests\backend_client_training_tests.cpp(175): Skipped
+Run backend.tests.native_session_smoke against an isolated real backend
+
+[  SKIPPED ] BackendClientTrainingIntegrationTest.CreatesStartsAndJoinsSharedLiveScenario (0 ms)
+[----------] 1 test from BackendClientTrainingIntegrationTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 0 tests.
+[  SKIPPED ] 1 test, listed below:
+[  SKIPPED ] BackendClientTrainingIntegrationTest.CreatesStartsAndJoinsSharedLiveScenario
+</system-out>
+	</testcase>
+	<testcase name="BackendClientCreationTest.LoggedOutAndLocallyExpiredLoginsSendNoCreationRequest" classname="BackendClientCreationTest.LoggedOutAndLocallyExpiredLoginsSendNoCreationRequest" time="0.229983" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BackendClientCreationTest.LoggedOutAndLocallyExpiredLoginsSendNoCreationRequest
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BackendClientCreationTest
+[ RUN      ] BackendClientCreationTest.LoggedOutAndLocallyExpiredLoginsSendNoCreationRequest
+[       OK ] BackendClientCreationTest.LoggedOutAndLocallyExpiredLoginsSendNoCreationRequest (157 ms)
+[----------] 1 test from BackendClientCreationTest (157 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (157 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BackendClientCreationTest.RejectedLoginReturnsToLoginAndResumesOriginalCreationAfterLogin" classname="BackendClientCreationTest.RejectedLoginReturnsToLoginAndResumesOriginalCreationAfterLogin" time="0.260622" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BackendClientCreationTest.RejectedLoginReturnsToLoginAndResumesOriginalCreationAfterLogin
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BackendClientCreationTest
+[ RUN      ] BackendClientCreationTest.RejectedLoginReturnsToLoginAndResumesOriginalCreationAfterLogin
+[       OK ] BackendClientCreationTest.RejectedLoginReturnsToLoginAndResumesOriginalCreationAfterLogin (192 ms)
+[----------] 1 test from BackendClientCreationTest (192 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (192 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BackendClientCreationTest.LostReplyCanOnlyBeRetriedByItsOriginalAccount" classname="BackendClientCreationTest.LostReplyCanOnlyBeRetriedByItsOriginalAccount" time="0.364131" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BackendClientCreationTest.LostReplyCanOnlyBeRetriedByItsOriginalAccount
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BackendClientCreationTest
+[ RUN      ] BackendClientCreationTest.LostReplyCanOnlyBeRetriedByItsOriginalAccount
+[       OK ] BackendClientCreationTest.LostReplyCanOnlyBeRetriedByItsOriginalAccount (296 ms)
+[----------] 1 test from BackendClientCreationTest (296 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (296 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BackendClientCreationTest.LateRejectionOfPreviousTokenKeepsTheNewLoginAndOriginalAttempt" classname="BackendClientCreationTest.LateRejectionOfPreviousTokenKeepsTheNewLoginAndOriginalAttempt" time="0.284061" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BackendClientCreationTest.LateRejectionOfPreviousTokenKeepsTheNewLoginAndOriginalAttempt
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BackendClientCreationTest
+[ RUN      ] BackendClientCreationTest.LateRejectionOfPreviousTokenKeepsTheNewLoginAndOriginalAttempt
+[       OK ] BackendClientCreationTest.LateRejectionOfPreviousTokenKeepsTheNewLoginAndOriginalAttempt (209 ms)
+[----------] 1 test from BackendClientCreationTest (209 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (209 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BackendClientCreationTest.LateSuccessDoesNotSelectAnotherAccountsSession" classname="BackendClientCreationTest.LateSuccessDoesNotSelectAnotherAccountsSession" time="0.230733" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BackendClientCreationTest.LateSuccessDoesNotSelectAnotherAccountsSession
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BackendClientCreationTest
+[ RUN      ] BackendClientCreationTest.LateSuccessDoesNotSelectAnotherAccountsSession
+[       OK ] BackendClientCreationTest.LateSuccessDoesNotSelectAnotherAccountsSession (144 ms)
+[----------] 1 test from BackendClientCreationTest (144 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (144 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BatteryStoreTest.NormalSnapshotHasDepotAndFiveForecasts" classname="BatteryStoreTest.NormalSnapshotHasDepotAndFiveForecasts" time="0.0819721" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BatteryStoreTest.NormalSnapshotHasDepotAndFiveForecasts
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BatteryStoreTest
+[ RUN      ] BatteryStoreTest.NormalSnapshotHasDepotAndFiveForecasts
+[       OK ] BatteryStoreTest.NormalSnapshotHasDepotAndFiveForecasts (1 ms)
+[----------] 1 test from BatteryStoreTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BatteryStoreTest.LowReserveForecastFieldsAreRead" classname="BatteryStoreTest.LowReserveForecastFieldsAreRead" time="0.0629503" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BatteryStoreTest.LowReserveForecastFieldsAreRead
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BatteryStoreTest
+[ RUN      ] BatteryStoreTest.LowReserveForecastFieldsAreRead
+[       OK ] BatteryStoreTest.LowReserveForecastFieldsAreRead (1 ms)
+[----------] 1 test from BatteryStoreTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BatteryStoreTest.ContinueOptionFieldsAreRead" classname="BatteryStoreTest.ContinueOptionFieldsAreRead" time="0.0529351" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BatteryStoreTest.ContinueOptionFieldsAreRead
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BatteryStoreTest
+[ RUN      ] BatteryStoreTest.ContinueOptionFieldsAreRead
+[       OK ] BatteryStoreTest.ContinueOptionFieldsAreRead (1 ms)
+[----------] 1 test from BatteryStoreTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BatteryStoreTest.ChargeNowOptionFieldsAreRead" classname="BatteryStoreTest.ChargeNowOptionFieldsAreRead" time="0.0536347" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BatteryStoreTest.ChargeNowOptionFieldsAreRead
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BatteryStoreTest
+[ RUN      ] BatteryStoreTest.ChargeNowOptionFieldsAreRead
+[       OK ] BatteryStoreTest.ChargeNowOptionFieldsAreRead (1 ms)
+[----------] 1 test from BatteryStoreTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BatteryStoreTest.OlderSnapshotWithoutBatteryListsStillParses" classname="BatteryStoreTest.OlderSnapshotWithoutBatteryListsStillParses" time="0.0481164" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BatteryStoreTest.OlderSnapshotWithoutBatteryListsStillParses
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BatteryStoreTest
+[ RUN      ] BatteryStoreTest.OlderSnapshotWithoutBatteryListsStillParses
+[       OK ] BatteryStoreTest.OlderSnapshotWithoutBatteryListsStillParses (1 ms)
+[----------] 1 test from BatteryStoreTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BatteryStoreTest.NullFieldsParseAsEmpty" classname="BatteryStoreTest.NullFieldsParseAsEmpty" time="0.0556091" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BatteryStoreTest.NullFieldsParseAsEmpty
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BatteryStoreTest
+[ RUN      ] BatteryStoreTest.NullFieldsParseAsEmpty
+[       OK ] BatteryStoreTest.NullFieldsParseAsEmpty (1 ms)
+[----------] 1 test from BatteryStoreTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BatteryStoreTest.NegativeMarginIsAllowed" classname="BatteryStoreTest.NegativeMarginIsAllowed" time="0.0543963" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BatteryStoreTest.NegativeMarginIsAllowed
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BatteryStoreTest
+[ RUN      ] BatteryStoreTest.NegativeMarginIsAllowed
+[       OK ] BatteryStoreTest.NegativeMarginIsAllowed (1 ms)
+[----------] 1 test from BatteryStoreTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BatteryStoreTest.BadValuesAreRejected" classname="BatteryStoreTest.BadValuesAreRejected" time="0.0524416" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BatteryStoreTest.BadValuesAreRejected
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BatteryStoreTest
+[ RUN      ] BatteryStoreTest.BadValuesAreRejected
+[       OK ] BatteryStoreTest.BadValuesAreRejected (4 ms)
+[----------] 1 test from BatteryStoreTest (4 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BatteryStoreTest.CoverageIsOptionalAndBoundedByTheFleet" classname="BatteryStoreTest.CoverageIsOptionalAndBoundedByTheFleet" time="0.0601192" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BatteryStoreTest.CoverageIsOptionalAndBoundedByTheFleet
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BatteryStoreTest
+[ RUN      ] BatteryStoreTest.CoverageIsOptionalAndBoundedByTheFleet
+[       OK ] BatteryStoreTest.CoverageIsOptionalAndBoundedByTheFleet (2 ms)
+[----------] 1 test from BatteryStoreTest (3 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingAlertsTest.LiveBatchPlaysMeaningfulCuesInOrder" classname="TrainingAlertsTest.LiveBatchPlaysMeaningfulCuesInOrder" time="0.0502613" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingAlertsTest.LiveBatchPlaysMeaningfulCuesInOrder
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingAlertsTest
+[ RUN      ] TrainingAlertsTest.LiveBatchPlaysMeaningfulCuesInOrder
+[       OK ] TrainingAlertsTest.LiveBatchPlaysMeaningfulCuesInOrder (0 ms)
+[----------] 1 test from TrainingAlertsTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingAlertsTest.RepeatedBatchIsSilent" classname="TrainingAlertsTest.RepeatedBatchIsSilent" time="0.0524906" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingAlertsTest.RepeatedBatchIsSilent
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingAlertsTest
+[ RUN      ] TrainingAlertsTest.RepeatedBatchIsSilent
+[       OK ] TrainingAlertsTest.RepeatedBatchIsSilent (0 ms)
+[----------] 1 test from TrainingAlertsTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingAlertsTest.HistoryIsSilentThenLiveAlerts" classname="TrainingAlertsTest.HistoryIsSilentThenLiveAlerts" time="0.0530864" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingAlertsTest.HistoryIsSilentThenLiveAlerts
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingAlertsTest
+[ RUN      ] TrainingAlertsTest.HistoryIsSilentThenLiveAlerts
+[       OK ] TrainingAlertsTest.HistoryIsSilentThenLiveAlerts (0 ms)
+[----------] 1 test from TrainingAlertsTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingAlertsTest.MutePassesThroughWithoutBurst" classname="TrainingAlertsTest.MutePassesThroughWithoutBurst" time="0.0559838" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingAlertsTest.MutePassesThroughWithoutBurst
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingAlertsTest
+[ RUN      ] TrainingAlertsTest.MutePassesThroughWithoutBurst
+[       OK ] TrainingAlertsTest.MutePassesThroughWithoutBurst (0 ms)
+[----------] 1 test from TrainingAlertsTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingAlertsTest.UsesTheGivenGate" classname="TrainingAlertsTest.UsesTheGivenGate" time="0.0512793" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingAlertsTest.UsesTheGivenGate
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingAlertsTest
+[ RUN      ] TrainingAlertsTest.UsesTheGivenGate
+[       OK ] TrainingAlertsTest.UsesTheGivenGate (0 ms)
+[----------] 1 test from TrainingAlertsTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingAlertsTest.MissingPlayerDoesNotThrow" classname="TrainingAlertsTest.MissingPlayerDoesNotThrow" time="0.048738" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingAlertsTest.MissingPlayerDoesNotThrow
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingAlertsTest
+[ RUN      ] TrainingAlertsTest.MissingPlayerDoesNotThrow
+[       OK ] TrainingAlertsTest.MissingPlayerDoesNotThrow (0 ms)
+[----------] 1 test from TrainingAlertsTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingAlertsTest.SharedFixtureReplayAlertsOnce" classname="TrainingAlertsTest.SharedFixtureReplayAlertsOnce" time="0.0484611" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingAlertsTest.SharedFixtureReplayAlertsOnce
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingAlertsTest
+[ RUN      ] TrainingAlertsTest.SharedFixtureReplayAlertsOnce
+[       OK ] TrainingAlertsTest.SharedFixtureReplayAlertsOnce (1 ms)
+[----------] 1 test from TrainingAlertsTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingAlertSoundsTest.EveryCueHasItsOwnExistingSoundFile" classname="TrainingAlertSoundsTest.EveryCueHasItsOwnExistingSoundFile" time="0.0606533" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingAlertSoundsTest.EveryCueHasItsOwnExistingSoundFile
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingAlertSoundsTest
+[ RUN      ] TrainingAlertSoundsTest.EveryCueHasItsOwnExistingSoundFile
+[       OK ] TrainingAlertSoundsTest.EveryCueHasItsOwnExistingSoundFile (0 ms)
+[----------] 1 test from TrainingAlertSoundsTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BackendClientRecoveryTest.RecoveryEventsReachTheAlertPlayer" classname="BackendClientRecoveryTest.RecoveryEventsReachTheAlertPlayer" time="0.210688" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BackendClientRecoveryTest.RecoveryEventsReachTheAlertPlayer
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BackendClientRecoveryTest
+[ RUN      ] BackendClientRecoveryTest.RecoveryEventsReachTheAlertPlayer
+[       OK ] BackendClientRecoveryTest.RecoveryEventsReachTheAlertPlayer (157 ms)
+[----------] 1 test from BackendClientRecoveryTest (157 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (157 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BackendClientReserveTest.ReserveSendsTheChosenOfferAndReportsTheResult" classname="BackendClientReserveTest.ReserveSendsTheChosenOfferAndReportsTheResult" time="0.243922" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BackendClientReserveTest.ReserveSendsTheChosenOfferAndReportsTheResult
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BackendClientReserveTest
+[ RUN      ] BackendClientReserveTest.ReserveSendsTheChosenOfferAndReportsTheResult
+[       OK ] BackendClientReserveTest.ReserveSendsTheChosenOfferAndReportsTheResult (165 ms)
+[----------] 1 test from BackendClientReserveTest (165 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (166 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BackendClientReserveTest.RejectionsAndInvalidInputAreReported" classname="BackendClientReserveTest.RejectionsAndInvalidInputAreReported" time="0.269214" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BackendClientReserveTest.RejectionsAndInvalidInputAreReported
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BackendClientReserveTest
+[ RUN      ] BackendClientReserveTest.RejectionsAndInvalidInputAreReported
+[       OK ] BackendClientReserveTest.RejectionsAndInvalidInputAreReported (190 ms)
+[----------] 1 test from BackendClientReserveTest (190 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (190 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BackendClientReserveTest.UnclearRepliesAreResolvedByResendingTheSameCommand" classname="BackendClientReserveTest.UnclearRepliesAreResolvedByResendingTheSameCommand" time="0.932277" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BackendClientReserveTest.UnclearRepliesAreResolvedByResendingTheSameCommand
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BackendClientReserveTest
+[ RUN      ] BackendClientReserveTest.UnclearRepliesAreResolvedByResendingTheSameCommand
+[       OK ] BackendClientReserveTest.UnclearRepliesAreResolvedByResendingTheSameCommand (854 ms)
+[----------] 1 test from BackendClientReserveTest (854 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (854 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BackendClientReserveTest.QueuedOrBusyCommandIsNeverForgotten" classname="BackendClientReserveTest.QueuedOrBusyCommandIsNeverForgotten" time="1.86954" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BackendClientReserveTest.QueuedOrBusyCommandIsNeverForgotten
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BackendClientReserveTest
+[ RUN      ] BackendClientReserveTest.QueuedOrBusyCommandIsNeverForgotten
+[       OK ] BackendClientReserveTest.QueuedOrBusyCommandIsNeverForgotten (1791 ms)
+[----------] 1 test from BackendClientReserveTest (1791 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1791 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BackendClientReserveTest.PendingCommandIsOnlyResentByTheAccountThatSentIt" classname="BackendClientReserveTest.PendingCommandIsOnlyResentByTheAccountThatSentIt" time="1.75175" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BackendClientReserveTest.PendingCommandIsOnlyResentByTheAccountThatSentIt
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BackendClientReserveTest
+[ RUN      ] BackendClientReserveTest.PendingCommandIsOnlyResentByTheAccountThatSentIt
+[       OK ] BackendClientReserveTest.PendingCommandIsOnlyResentByTheAccountThatSentIt (1672 ms)
+[----------] 1 test from BackendClientReserveTest (1672 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1672 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BackendClientReserveTest.ReserveIsRefusedWhileAnotherSessionLoads" classname="BackendClientReserveTest.ReserveIsRefusedWhileAnotherSessionLoads" time="0.260087" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BackendClientReserveTest.ReserveIsRefusedWhileAnotherSessionLoads
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BackendClientReserveTest
+[ RUN      ] BackendClientReserveTest.ReserveIsRefusedWhileAnotherSessionLoads
+[       OK ] BackendClientReserveTest.ReserveIsRefusedWhileAnotherSessionLoads (159 ms)
+[----------] 1 test from BackendClientReserveTest (159 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (159 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BackendClientReserveTest.LateResultFromAnotherSessionIsNotShown" classname="BackendClientReserveTest.LateResultFromAnotherSessionIsNotShown" time="0.76534" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BackendClientReserveTest.LateResultFromAnotherSessionIsNotShown
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BackendClientReserveTest
+[ RUN      ] BackendClientReserveTest.LateResultFromAnotherSessionIsNotShown
+[       OK ] BackendClientReserveTest.LateResultFromAnotherSessionIsNotShown (683 ms)
+[----------] 1 test from BackendClientReserveTest (684 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (684 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BackendClientReserveTest.ReconnectQueriesOutstandingStatusWithoutResubmitting" classname="BackendClientReserveTest.ReconnectQueriesOutstandingStatusWithoutResubmitting" time="1.27052" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BackendClientReserveTest.ReconnectQueriesOutstandingStatusWithoutResubmitting
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BackendClientReserveTest
+[ RUN      ] BackendClientReserveTest.ReconnectQueriesOutstandingStatusWithoutResubmitting
+[       OK ] BackendClientReserveTest.ReconnectQueriesOutstandingStatusWithoutResubmitting (1188 ms)
+[----------] 1 test from BackendClientReserveTest (1189 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1189 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="BackendClientReserveTest.KeepInServiceSendsTheShuttleDecision" classname="BackendClientReserveTest.KeepInServiceSendsTheShuttleDecision" time="0.25024" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = BackendClientReserveTest.KeepInServiceSendsTheShuttleDecision
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from BackendClientReserveTest
+[ RUN      ] BackendClientReserveTest.KeepInServiceSendsTheShuttleDecision
+[       OK ] BackendClientReserveTest.KeepInServiceSendsTheShuttleDecision (168 ms)
+[----------] 1 test from BackendClientReserveTest (168 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (168 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingWorkspaceTest.SelectionSurvivesSnapshotsWithoutEmittingCameraFeedback" classname="TrainingWorkspaceTest.SelectionSurvivesSnapshotsWithoutEmittingCameraFeedback" time="0.122906" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingWorkspaceTest.SelectionSurvivesSnapshotsWithoutEmittingCameraFeedback
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingWorkspaceTest
+[ RUN      ] TrainingWorkspaceTest.SelectionSurvivesSnapshotsWithoutEmittingCameraFeedback
+[       OK ] TrainingWorkspaceTest.SelectionSurvivesSnapshotsWithoutEmittingCameraFeedback (60 ms)
+[----------] 1 test from TrainingWorkspaceTest (60 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (60 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingWorkspaceTest.ReserveButtonSurvivesRefreshesUntilTheOfferChanges" classname="TrainingWorkspaceTest.ReserveButtonSurvivesRefreshesUntilTheOfferChanges" time="0.110034" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingWorkspaceTest.ReserveButtonSurvivesRefreshesUntilTheOfferChanges
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingWorkspaceTest
+[ RUN      ] TrainingWorkspaceTest.ReserveButtonSurvivesRefreshesUntilTheOfferChanges
+[       OK ] TrainingWorkspaceTest.ReserveButtonSurvivesRefreshesUntilTheOfferChanges (43 ms)
+[----------] 1 test from TrainingWorkspaceTest (43 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (43 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingWorkspaceTest.SpatialScenarioStartRequiresRenderedMandatoryGeometry" classname="TrainingWorkspaceTest.SpatialScenarioStartRequiresRenderedMandatoryGeometry" time="0.138125" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingWorkspaceTest.SpatialScenarioStartRequiresRenderedMandatoryGeometry
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingWorkspaceTest
+[ RUN      ] TrainingWorkspaceTest.SpatialScenarioStartRequiresRenderedMandatoryGeometry
+[       OK ] TrainingWorkspaceTest.SpatialScenarioStartRequiresRenderedMandatoryGeometry (63 ms)
+[----------] 1 test from TrainingWorkspaceTest (63 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (63 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingWorkspaceTest.KeepInServiceButtonRequestsTheContinueOffer" classname="TrainingWorkspaceTest.KeepInServiceButtonRequestsTheContinueOffer" time="0.11344" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingWorkspaceTest.KeepInServiceButtonRequestsTheContinueOffer
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingWorkspaceTest
+[ RUN      ] TrainingWorkspaceTest.KeepInServiceButtonRequestsTheContinueOffer
+[       OK ] TrainingWorkspaceTest.KeepInServiceButtonRequestsTheContinueOffer (46 ms)
+[----------] 1 test from TrainingWorkspaceTest (46 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (46 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingWorkspaceTest.NonChargingAppliedResultDoesNotClearChargingReason" classname="TrainingWorkspaceTest.NonChargingAppliedResultDoesNotClearChargingReason" time="0.106711" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingWorkspaceTest.NonChargingAppliedResultDoesNotClearChargingReason
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingWorkspaceTest
+[ RUN      ] TrainingWorkspaceTest.NonChargingAppliedResultDoesNotClearChargingReason
+[       OK ] TrainingWorkspaceTest.NonChargingAppliedResultDoesNotClearChargingReason (38 ms)
+[----------] 1 test from TrainingWorkspaceTest (38 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (38 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingWorkspaceTest.BatteryDecisionsTableKeepsFullTextAndButtonsVisible" classname="TrainingWorkspaceTest.BatteryDecisionsTableKeepsFullTextAndButtonsVisible" time="0.119703" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingWorkspaceTest.BatteryDecisionsTableKeepsFullTextAndButtonsVisible
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingWorkspaceTest
+[ RUN      ] TrainingWorkspaceTest.BatteryDecisionsTableKeepsFullTextAndButtonsVisible
+[       OK ] TrainingWorkspaceTest.BatteryDecisionsTableKeepsFullTextAndButtonsVisible (42 ms)
+[----------] 1 test from TrainingWorkspaceTest (42 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (42 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingWorkspaceTest.BatteryChoicesShowTheirCoverageConsequence" classname="TrainingWorkspaceTest.BatteryChoicesShowTheirCoverageConsequence" time="0.121393" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingWorkspaceTest.BatteryChoicesShowTheirCoverageConsequence
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingWorkspaceTest
+[ RUN      ] TrainingWorkspaceTest.BatteryChoicesShowTheirCoverageConsequence
+[       OK ] TrainingWorkspaceTest.BatteryChoicesShowTheirCoverageConsequence (41 ms)
+[----------] 1 test from TrainingWorkspaceTest (41 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (41 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingWorkspaceTest.MuteAlertsChoiceIsRestoredAndSaved" classname="TrainingWorkspaceTest.MuteAlertsChoiceIsRestoredAndSaved" time="0.180184" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingWorkspaceTest.MuteAlertsChoiceIsRestoredAndSaved
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingWorkspaceTest
+[ RUN      ] TrainingWorkspaceTest.MuteAlertsChoiceIsRestoredAndSaved
+[       OK ] TrainingWorkspaceTest.MuteAlertsChoiceIsRestoredAndSaved (90 ms)
+[----------] 1 test from TrainingWorkspaceTest (90 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (90 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingRouteContractTest.ValidatesSharedContextAndPreview" classname="TrainingRouteContractTest.ValidatesSharedContextAndPreview" time="0.0586851" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingRouteContractTest.ValidatesSharedContextAndPreview
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingRouteContractTest
+[ RUN      ] TrainingRouteContractTest.ValidatesSharedContextAndPreview
+[       OK ] TrainingRouteContractTest.ValidatesSharedContextAndPreview (1 ms)
+[----------] 1 test from TrainingRouteContractTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingRouteContractTest.MissingRequiredChecksAndContradictoryApprovalAreRejected" classname="TrainingRouteContractTest.MissingRequiredChecksAndContradictoryApprovalAreRejected" time="0.0575615" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingRouteContractTest.MissingRequiredChecksAndContradictoryApprovalAreRejected
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingRouteContractTest
+[ RUN      ] TrainingRouteContractTest.MissingRequiredChecksAndContradictoryApprovalAreRejected
+[       OK ] TrainingRouteContractTest.MissingRequiredChecksAndContradictoryApprovalAreRejected (1 ms)
+[----------] 1 test from TrainingRouteContractTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="RouteWidgetTest.NumericDraftRequiresReasonAndCommittedSnapshotBeforeActiveRouteChanges" classname="RouteWidgetTest.NumericDraftRequiresReasonAndCommittedSnapshotBeforeActiveRouteChanges" time="0.0912046" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = RouteWidgetTest.NumericDraftRequiresReasonAndCommittedSnapshotBeforeActiveRouteChanges
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from RouteWidgetTest
+[ RUN      ] RouteWidgetTest.NumericDraftRequiresReasonAndCommittedSnapshotBeforeActiveRouteChanges
+[       OK ] RouteWidgetTest.NumericDraftRequiresReasonAndCommittedSnapshotBeforeActiveRouteChanges (35 ms)
+[----------] 1 test from RouteWidgetTest (35 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (35 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="RouteWidgetTest.MouseDragUsesGraphNodeAndInvalidatesValidatedDraft" classname="RouteWidgetTest.MouseDragUsesGraphNodeAndInvalidatesValidatedDraft" time="0.0980483" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = RouteWidgetTest.MouseDragUsesGraphNodeAndInvalidatesValidatedDraft
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from RouteWidgetTest
+[ RUN      ] RouteWidgetTest.MouseDragUsesGraphNodeAndInvalidatesValidatedDraft
+[       OK ] RouteWidgetTest.MouseDragUsesGraphNodeAndInvalidatesValidatedDraft (47 ms)
+[----------] 1 test from RouteWidgetTest (47 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (47 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="RouteWidgetTest.PeerApprovalClosureChangePartialAssignmentsAndDisconnectBlockApproval" classname="RouteWidgetTest.PeerApprovalClosureChangePartialAssignmentsAndDisconnectBlockApproval" time="0.0968771" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = RouteWidgetTest.PeerApprovalClosureChangePartialAssignmentsAndDisconnectBlockApproval
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from RouteWidgetTest
+[ RUN      ] RouteWidgetTest.PeerApprovalClosureChangePartialAssignmentsAndDisconnectBlockApproval
+[       OK ] RouteWidgetTest.PeerApprovalClosureChangePartialAssignmentsAndDisconnectBlockApproval (40 ms)
+[----------] 1 test from RouteWidgetTest (40 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (40 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="RouteWidgetTest.ReadErrorDoesNotUnlockAnApprovalInFlight" classname="RouteWidgetTest.ReadErrorDoesNotUnlockAnApprovalInFlight" time="0.100853" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = RouteWidgetTest.ReadErrorDoesNotUnlockAnApprovalInFlight
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from RouteWidgetTest
+[ RUN      ] RouteWidgetTest.ReadErrorDoesNotUnlockAnApprovalInFlight
+[       OK ] RouteWidgetTest.ReadErrorDoesNotUnlockAnApprovalInFlight (37 ms)
+[----------] 1 test from RouteWidgetTest (37 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (37 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="RouteWidgetTest.MouseDragPreservesAndReplacesOrderedTypedWaypoints" classname="RouteWidgetTest.MouseDragPreservesAndReplacesOrderedTypedWaypoints" time="0.115778" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = RouteWidgetTest.MouseDragPreservesAndReplacesOrderedTypedWaypoints
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from RouteWidgetTest
+[ RUN      ] RouteWidgetTest.MouseDragPreservesAndReplacesOrderedTypedWaypoints
+[       OK ] RouteWidgetTest.MouseDragPreservesAndReplacesOrderedTypedWaypoints (57 ms)
+[----------] 1 test from RouteWidgetTest (57 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (57 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="RouteWidgetTest.SessionChangeDoesNotUnlockAnotherPendingApproval" classname="RouteWidgetTest.SessionChangeDoesNotUnlockAnotherPendingApproval" time="0.0943796" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = RouteWidgetTest.SessionChangeDoesNotUnlockAnotherPendingApproval
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from RouteWidgetTest
+[ RUN      ] RouteWidgetTest.SessionChangeDoesNotUnlockAnotherPendingApproval
+[       OK ] RouteWidgetTest.SessionChangeDoesNotUnlockAnotherPendingApproval (36 ms)
+[----------] 1 test from RouteWidgetTest (36 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (36 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="RouteWidgetTest.MouseDragRespectsWaypointLimitWithoutDiscardingTypedNodes" classname="RouteWidgetTest.MouseDragRespectsWaypointLimitWithoutDiscardingTypedNodes" time="0.120352" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = RouteWidgetTest.MouseDragRespectsWaypointLimitWithoutDiscardingTypedNodes
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from RouteWidgetTest
+[ RUN      ] RouteWidgetTest.MouseDragRespectsWaypointLimitWithoutDiscardingTypedNodes
+[       OK ] RouteWidgetTest.MouseDragRespectsWaypointLimitWithoutDiscardingTypedNodes (54 ms)
+[----------] 1 test from RouteWidgetTest (54 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (54 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="RouteWidgetTest.FailedOrUnknownConstraintCannotBeApprovedAndUnknownIsVisible" classname="RouteWidgetTest.FailedOrUnknownConstraintCannotBeApprovedAndUnknownIsVisible" time="0.0956547" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = RouteWidgetTest.FailedOrUnknownConstraintCannotBeApprovedAndUnknownIsVisible
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from RouteWidgetTest
+[ RUN      ] RouteWidgetTest.FailedOrUnknownConstraintCannotBeApprovedAndUnknownIsVisible
+[       OK ] RouteWidgetTest.FailedOrUnknownConstraintCannotBeApprovedAndUnknownIsVisible (37 ms)
+[----------] 1 test from RouteWidgetTest (37 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (37 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="RouteWidgetTest.UndoRedoCancelInvalidatePreviewAndRespectPendingApproval" classname="RouteWidgetTest.UndoRedoCancelInvalidatePreviewAndRespectPendingApproval" time="0.107272" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = RouteWidgetTest.UndoRedoCancelInvalidatePreviewAndRespectPendingApproval
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from RouteWidgetTest
+[ RUN      ] RouteWidgetTest.UndoRedoCancelInvalidatePreviewAndRespectPendingApproval
+[       OK ] RouteWidgetTest.UndoRedoCancelInvalidatePreviewAndRespectPendingApproval (38 ms)
+[----------] 1 test from RouteWidgetTest (38 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (38 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="RouteWidgetTest.PointerAndNumericSpatialDraftsHaveIdenticalTargetsAndRejectStalePins" classname="RouteWidgetTest.PointerAndNumericSpatialDraftsHaveIdenticalTargetsAndRejectStalePins" time="0.114178" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = RouteWidgetTest.PointerAndNumericSpatialDraftsHaveIdenticalTargetsAndRejectStalePins
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from RouteWidgetTest
+[ RUN      ] RouteWidgetTest.PointerAndNumericSpatialDraftsHaveIdenticalTargetsAndRejectStalePins
+[       OK ] RouteWidgetTest.PointerAndNumericSpatialDraftsHaveIdenticalTargetsAndRejectStalePins (37 ms)
+[----------] 1 test from RouteWidgetTest (37 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (37 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingRouteClientTest.LostReplyResendsIdenticalApproval" classname="TrainingRouteClientTest.LostReplyResendsIdenticalApproval" time="1.24398" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingRouteClientTest.LostReplyResendsIdenticalApproval
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingRouteClientTest
+[ RUN      ] TrainingRouteClientTest.LostReplyResendsIdenticalApproval
+[       OK ] TrainingRouteClientTest.LostReplyResendsIdenticalApproval (1174 ms)
+[----------] 1 test from TrainingRouteClientTest (1174 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1175 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingRouteClientTest.MissingStatusBeforeAcceptanceDoesNotReleasePendingApproval" classname="TrainingRouteClientTest.MissingStatusBeforeAcceptanceDoesNotReleasePendingApproval" time="1.34486" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingRouteClientTest.MissingStatusBeforeAcceptanceDoesNotReleasePendingApproval
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingRouteClientTest
+[ RUN      ] TrainingRouteClientTest.MissingStatusBeforeAcceptanceDoesNotReleasePendingApproval
+[       OK ] TrainingRouteClientTest.MissingStatusBeforeAcceptanceDoesNotReleasePendingApproval (1253 ms)
+[----------] 1 test from TrainingRouteClientTest (1253 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1253 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingRouteClientTest.MalformedHttpConflictResendsIdenticalApproval" classname="TrainingRouteClientTest.MalformedHttpConflictResendsIdenticalApproval" time="1.2763" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingRouteClientTest.MalformedHttpConflictResendsIdenticalApproval
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingRouteClientTest
+[ RUN      ] TrainingRouteClientTest.MalformedHttpConflictResendsIdenticalApproval
+[       OK ] TrainingRouteClientTest.MalformedHttpConflictResendsIdenticalApproval (1209 ms)
+[----------] 1 test from TrainingRouteClientTest (1209 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1209 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingRouteClientTest.QueuedReceiptIsPendingUntilAuthoritativeApplication" classname="TrainingRouteClientTest.QueuedReceiptIsPendingUntilAuthoritativeApplication" time="1.27803" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingRouteClientTest.QueuedReceiptIsPendingUntilAuthoritativeApplication
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingRouteClientTest
+[ RUN      ] TrainingRouteClientTest.QueuedReceiptIsPendingUntilAuthoritativeApplication
+[       OK ] TrainingRouteClientTest.QueuedReceiptIsPendingUntilAuthoritativeApplication (1201 ms)
+[----------] 1 test from TrainingRouteClientTest (1201 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1201 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingRouteClientTest.PeerRevisionDisconnectAndPartialTargetsCannotSubmit" classname="TrainingRouteClientTest.PeerRevisionDisconnectAndPartialTargetsCannotSubmit" time="0.259842" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingRouteClientTest.PeerRevisionDisconnectAndPartialTargetsCannotSubmit
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingRouteClientTest
+[ RUN      ] TrainingRouteClientTest.PeerRevisionDisconnectAndPartialTargetsCannotSubmit
+[       OK ] TrainingRouteClientTest.PeerRevisionDisconnectAndPartialTargetsCannotSubmit (172 ms)
+[----------] 1 test from TrainingRouteClientTest (172 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (173 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingRouteClientTest.LateApprovalFromPreviousSessionDoesNotShowInNewSession" classname="TrainingRouteClientTest.LateApprovalFromPreviousSessionDoesNotShowInNewSession" time="1.51788" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingRouteClientTest.LateApprovalFromPreviousSessionDoesNotShowInNewSession
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingRouteClientTest
+[ RUN      ] TrainingRouteClientTest.LateApprovalFromPreviousSessionDoesNotShowInNewSession
+[       OK ] TrainingRouteClientTest.LateApprovalFromPreviousSessionDoesNotShowInNewSession (1328 ms)
+[----------] 1 test from TrainingRouteClientTest (1329 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1329 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingRouteClientTest.ReplayErrorCannotDisproveOriginalInFlightApproval" classname="TrainingRouteClientTest.ReplayErrorCannotDisproveOriginalInFlightApproval" time="3.3591" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingRouteClientTest.ReplayErrorCannotDisproveOriginalInFlightApproval
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingRouteClientTest
+[ RUN      ] TrainingRouteClientTest.ReplayErrorCannotDisproveOriginalInFlightApproval
+[       OK ] TrainingRouteClientTest.ReplayErrorCannotDisproveOriginalInFlightApproval (3275 ms)
+[----------] 1 test from TrainingRouteClientTest (3275 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3275 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingRouteClientTest.DefinitiveInitialRejectionReleasesPendingState" classname="TrainingRouteClientTest.DefinitiveInitialRejectionReleasesPendingState" time="0.199394" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingRouteClientTest.DefinitiveInitialRejectionReleasesPendingState
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingRouteClientTest
+[ RUN      ] TrainingRouteClientTest.DefinitiveInitialRejectionReleasesPendingState
+[       OK ] TrainingRouteClientTest.DefinitiveInitialRejectionReleasesPendingState (129 ms)
+[----------] 1 test from TrainingRouteClientTest (129 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (129 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingRouteClientTest.QueuedApprovalBacksOffAndRetainsOriginalDecision" classname="TrainingRouteClientTest.QueuedApprovalBacksOffAndRetainsOriginalDecision" time="3.33772" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingRouteClientTest.QueuedApprovalBacksOffAndRetainsOriginalDecision
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingRouteClientTest
+[ RUN      ] TrainingRouteClientTest.QueuedApprovalBacksOffAndRetainsOriginalDecision
+[       OK ] TrainingRouteClientTest.QueuedApprovalBacksOffAndRetainsOriginalDecision (3251 ms)
+[----------] 1 test from TrainingRouteClientTest (3251 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3251 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingRouteClientTest.BackendPathPrefixAndTrailingSlashArePreserved" classname="TrainingRouteClientTest.BackendPathPrefixAndTrailingSlashArePreserved" time="0.22878" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingRouteClientTest.BackendPathPrefixAndTrailingSlashArePreserved
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingRouteClientTest
+[ RUN      ] TrainingRouteClientTest.BackendPathPrefixAndTrailingSlashArePreserved
+[       OK ] TrainingRouteClientTest.BackendPathPrefixAndTrailingSlashArePreserved (144 ms)
+[----------] 1 test from TrainingRouteClientTest (144 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (145 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingRouteClientTest.ApprovalWaitsWhileLoggedOutAndIsSentAfterLogin" classname="TrainingRouteClientTest.ApprovalWaitsWhileLoggedOutAndIsSentAfterLogin" time="3.24028" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingRouteClientTest.ApprovalWaitsWhileLoggedOutAndIsSentAfterLogin
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingRouteClientTest
+[ RUN      ] TrainingRouteClientTest.ApprovalWaitsWhileLoggedOutAndIsSentAfterLogin
+[       OK ] TrainingRouteClientTest.ApprovalWaitsWhileLoggedOutAndIsSentAfterLogin (3143 ms)
+[----------] 1 test from TrainingRouteClientTest (3143 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3143 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingRouteClientTest.LateRejectionOfAnEarlierLoginKeepsTheNewLogin" classname="TrainingRouteClientTest.LateRejectionOfAnEarlierLoginKeepsTheNewLogin" time="1.24725" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingRouteClientTest.LateRejectionOfAnEarlierLoginKeepsTheNewLogin
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingRouteClientTest
+[ RUN      ] TrainingRouteClientTest.LateRejectionOfAnEarlierLoginKeepsTheNewLogin
+[       OK ] TrainingRouteClientTest.LateRejectionOfAnEarlierLoginKeepsTheNewLogin (1165 ms)
+[----------] 1 test from TrainingRouteClientTest (1165 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1165 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingRouteClientTest.PendingApprovalIsOnlyResentByTheAccountThatMadeIt" classname="TrainingRouteClientTest.PendingApprovalIsOnlyResentByTheAccountThatMadeIt" time="3.29813" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingRouteClientTest.PendingApprovalIsOnlyResentByTheAccountThatMadeIt
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingRouteClientTest
+[ RUN      ] TrainingRouteClientTest.PendingApprovalIsOnlyResentByTheAccountThatMadeIt
+[       OK ] TrainingRouteClientTest.PendingApprovalIsOnlyResentByTheAccountThatMadeIt (3212 ms)
+[----------] 1 test from TrainingRouteClientTest (3212 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3212 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingRouteClientTest.ExpiredLoginKeepsApprovalPendingUntilTheNextLogin" classname="TrainingRouteClientTest.ExpiredLoginKeepsApprovalPendingUntilTheNextLogin" time="1.30875" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingRouteClientTest.ExpiredLoginKeepsApprovalPendingUntilTheNextLogin
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingRouteClientTest
+[ RUN      ] TrainingRouteClientTest.ExpiredLoginKeepsApprovalPendingUntilTheNextLogin
+[       OK ] TrainingRouteClientTest.ExpiredLoginKeepsApprovalPendingUntilTheNextLogin (1202 ms)
+[----------] 1 test from TrainingRouteClientTest (1202 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1203 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="MapRendererTest.DoesNotLoadLegacyFilesByDefault" classname="MapRendererTest.DoesNotLoadLegacyFilesByDefault" time="0.0704486" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = MapRendererTest.DoesNotLoadLegacyFilesByDefault
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from MapRendererTest
+[ RUN      ] MapRendererTest.DoesNotLoadLegacyFilesByDefault
+Waiting for backend static scene
+[       OK ] MapRendererTest.DoesNotLoadLegacyFilesByDefault (0 ms)
+[----------] 1 test from MapRendererTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="MapRendererTest.ZoomIsClampedToSupportedRange" classname="MapRendererTest.ZoomIsClampedToSupportedRange" time="0.0837032" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = MapRendererTest.ZoomIsClampedToSupportedRange
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from MapRendererTest
+[ RUN      ] MapRendererTest.ZoomIsClampedToSupportedRange
+Waiting for backend static scene
+[       OK ] MapRendererTest.ZoomIsClampedToSupportedRange (0 ms)
+[----------] 1 test from MapRendererTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="MapRendererTest.DesiredLodFollowsZoomThresholds" classname="MapRendererTest.DesiredLodFollowsZoomThresholds" time="0.0505541" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = MapRendererTest.DesiredLodFollowsZoomThresholds
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from MapRendererTest
+[ RUN      ] MapRendererTest.DesiredLodFollowsZoomThresholds
+Waiting for backend static scene
+[       OK ] MapRendererTest.DesiredLodFollowsZoomThresholds (0 ms)
+[----------] 1 test from MapRendererTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="CanonicalSceneTest.ConfiguringSceneSwitchesToBackendMode" classname="CanonicalSceneTest.ConfiguringSceneSwitchesToBackendMode" time="0.0488049" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = CanonicalSceneTest.ConfiguringSceneSwitchesToBackendMode
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CanonicalSceneTest
+[ RUN      ] CanonicalSceneTest.ConfiguringSceneSwitchesToBackendMode
+Waiting for backend static scene
+[       OK ] CanonicalSceneTest.ConfiguringSceneSwitchesToBackendMode (0 ms)
+[----------] 1 test from CanonicalSceneTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="CanonicalSceneTest.OriginMapsToLocalZero" classname="CanonicalSceneTest.OriginMapsToLocalZero" time="0.0460263" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = CanonicalSceneTest.OriginMapsToLocalZero
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CanonicalSceneTest
+[ RUN      ] CanonicalSceneTest.OriginMapsToLocalZero
+Waiting for backend static scene
+[       OK ] CanonicalSceneTest.OriginMapsToLocalZero (0 ms)
+[----------] 1 test from CanonicalSceneTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="CanonicalSceneTest.LocalAndLonLatConversionsRoundTrip" classname="CanonicalSceneTest.LocalAndLonLatConversionsRoundTrip" time="0.0497228" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = CanonicalSceneTest.LocalAndLonLatConversionsRoundTrip
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CanonicalSceneTest
+[ RUN      ] CanonicalSceneTest.LocalAndLonLatConversionsRoundTrip
+Waiting for backend static scene
+[       OK ] CanonicalSceneTest.LocalAndLonLatConversionsRoundTrip (0 ms)
+[----------] 1 test from CanonicalSceneTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="CanonicalSceneTest.FitViewCentresCameraOnScene" classname="CanonicalSceneTest.FitViewCentresCameraOnScene" time="0.0518532" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = CanonicalSceneTest.FitViewCentresCameraOnScene
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CanonicalSceneTest
+[ RUN      ] CanonicalSceneTest.FitViewCentresCameraOnScene
+Waiting for backend static scene
+[       OK ] CanonicalSceneTest.FitViewCentresCameraOnScene (0 ms)
+[----------] 1 test from CanonicalSceneTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="CanonicalSceneTest.FitViewIgnoresEmptyViewport" classname="CanonicalSceneTest.FitViewIgnoresEmptyViewport" time="0.0448961" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = CanonicalSceneTest.FitViewIgnoresEmptyViewport
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CanonicalSceneTest
+[ RUN      ] CanonicalSceneTest.FitViewIgnoresEmptyViewport
+Waiting for backend static scene
+[       OK ] CanonicalSceneTest.FitViewIgnoresEmptyViewport (0 ms)
+[----------] 1 test from CanonicalSceneTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="CanonicalSceneTest.ScreenCentreMapsToCameraCentre" classname="CanonicalSceneTest.ScreenCentreMapsToCameraCentre" time="0.0555396" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = CanonicalSceneTest.ScreenCentreMapsToCameraCentre
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CanonicalSceneTest
+[ RUN      ] CanonicalSceneTest.ScreenCentreMapsToCameraCentre
+Waiting for backend static scene
+[       OK ] CanonicalSceneTest.ScreenCentreMapsToCameraCentre (0 ms)
+[----------] 1 test from CanonicalSceneTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="CanonicalSceneTest.CameraBoundsAreValidAndContainScene" classname="CanonicalSceneTest.CameraBoundsAreValidAndContainScene" time="0.0544647" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = CanonicalSceneTest.CameraBoundsAreValidAndContainScene
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CanonicalSceneTest
+[ RUN      ] CanonicalSceneTest.CameraBoundsAreValidAndContainScene
+Waiting for backend static scene
+[       OK ] CanonicalSceneTest.CameraBoundsAreValidAndContainScene (0 ms)
+[----------] 1 test from CanonicalSceneTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="CanonicalSceneTest.ChunkReplacementLoadsAllLayers" classname="CanonicalSceneTest.ChunkReplacementLoadsAllLayers" time="0.0508095" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = CanonicalSceneTest.ChunkReplacementLoadsAllLayers
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CanonicalSceneTest
+[ RUN      ] CanonicalSceneTest.ChunkReplacementLoadsAllLayers
+Waiting for backend static scene
+[       OK ] CanonicalSceneTest.ChunkReplacementLoadsAllLayers (0 ms)
+[----------] 1 test from CanonicalSceneTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="CanonicalSceneTest.EachChunkReplacementIsCounted" classname="CanonicalSceneTest.EachChunkReplacementIsCounted" time="0.0529922" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = CanonicalSceneTest.EachChunkReplacementIsCounted
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CanonicalSceneTest
+[ RUN      ] CanonicalSceneTest.EachChunkReplacementIsCounted
+Waiting for backend static scene
+[       OK ] CanonicalSceneTest.EachChunkReplacementIsCounted (0 ms)
+[----------] 1 test from CanonicalSceneTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="CanonicalSceneTest.ChunkLodIsClampedToValidRange" classname="CanonicalSceneTest.ChunkLodIsClampedToValidRange" time="0.0541735" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = CanonicalSceneTest.ChunkLodIsClampedToValidRange
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CanonicalSceneTest
+[ RUN      ] CanonicalSceneTest.ChunkLodIsClampedToValidRange
+Waiting for backend static scene
+[       OK ] CanonicalSceneTest.ChunkLodIsClampedToValidRange (0 ms)
+[----------] 1 test from CanonicalSceneTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="CanonicalSceneTest.EgoMarkerIsCreatedOnce" classname="CanonicalSceneTest.EgoMarkerIsCreatedOnce" time="0.0571606" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = CanonicalSceneTest.EgoMarkerIsCreatedOnce
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CanonicalSceneTest
+[ RUN      ] CanonicalSceneTest.EgoMarkerIsCreatedOnce
+Waiting for backend static scene
+[       OK ] CanonicalSceneTest.EgoMarkerIsCreatedOnce (0 ms)
+[----------] 1 test from CanonicalSceneTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="CanonicalSceneTest.EgoMarkerMovesInPlace" classname="CanonicalSceneTest.EgoMarkerMovesInPlace" time="0.0503426" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = CanonicalSceneTest.EgoMarkerMovesInPlace
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CanonicalSceneTest
+[ RUN      ] CanonicalSceneTest.EgoMarkerMovesInPlace
+Waiting for backend static scene
+[       OK ] CanonicalSceneTest.EgoMarkerMovesInPlace (0 ms)
+[----------] 1 test from CanonicalSceneTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="CanonicalSceneTest.BackendSceneIgnoresLocalRefreshAndPlayback" classname="CanonicalSceneTest.BackendSceneIgnoresLocalRefreshAndPlayback" time="0.0512426" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = CanonicalSceneTest.BackendSceneIgnoresLocalRefreshAndPlayback
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CanonicalSceneTest
+[ RUN      ] CanonicalSceneTest.BackendSceneIgnoresLocalRefreshAndPlayback
+Waiting for backend static scene
+[       OK ] CanonicalSceneTest.BackendSceneIgnoresLocalRefreshAndPlayback (0 ms)
+[----------] 1 test from CanonicalSceneTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="CanonicalSceneTest.PlannedRoutePreviewIncludesSegmentsAndEndpoints" classname="CanonicalSceneTest.PlannedRoutePreviewIncludesSegmentsAndEndpoints" time="0.0475769" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = CanonicalSceneTest.PlannedRoutePreviewIncludesSegmentsAndEndpoints
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CanonicalSceneTest
+[ RUN      ] CanonicalSceneTest.PlannedRoutePreviewIncludesSegmentsAndEndpoints
+Waiting for backend static scene
+[       OK ] CanonicalSceneTest.PlannedRoutePreviewIncludesSegmentsAndEndpoints (0 ms)
+[----------] 1 test from CanonicalSceneTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="CanonicalSceneTest.CanonicalTrajectoryAndObstaclesHaveStableDrawRanges" classname="CanonicalSceneTest.CanonicalTrajectoryAndObstaclesHaveStableDrawRanges" time="0.0518205" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = CanonicalSceneTest.CanonicalTrajectoryAndObstaclesHaveStableDrawRanges
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CanonicalSceneTest
+[ RUN      ] CanonicalSceneTest.CanonicalTrajectoryAndObstaclesHaveStableDrawRanges
+Waiting for backend static scene
+[       OK ] CanonicalSceneTest.CanonicalTrajectoryAndObstaclesHaveStableDrawRanges (0 ms)
+[----------] 1 test from CanonicalSceneTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="CanonicalSceneTest.CanonicalEgoInterpolatesBetweenAuthoritativeTicks" classname="CanonicalSceneTest.CanonicalEgoInterpolatesBetweenAuthoritativeTicks" time="0.0503208" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = CanonicalSceneTest.CanonicalEgoInterpolatesBetweenAuthoritativeTicks
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CanonicalSceneTest
+[ RUN      ] CanonicalSceneTest.CanonicalEgoInterpolatesBetweenAuthoritativeTicks
+Waiting for backend static scene
+[       OK ] CanonicalSceneTest.CanonicalEgoInterpolatesBetweenAuthoritativeTicks (0 ms)
+[----------] 1 test from CanonicalSceneTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="RenderStylesTest.LoadsLayerColourAndFlags" classname="RenderStylesTest.LoadsLayerColourAndFlags" time="0.0499772" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = RenderStylesTest.LoadsLayerColourAndFlags
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from RenderStylesTest
+[ RUN      ] RenderStylesTest.LoadsLayerColourAndFlags
+[       OK ] RenderStylesTest.LoadsLayerColourAndFlags (0 ms)
+[----------] 1 test from RenderStylesTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="RenderStylesTest.UnknownKindUsesWhiteLayerZeroFallback" classname="RenderStylesTest.UnknownKindUsesWhiteLayerZeroFallback" time="0.052314" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = RenderStylesTest.UnknownKindUsesWhiteLayerZeroFallback
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from RenderStylesTest
+[ RUN      ] RenderStylesTest.UnknownKindUsesWhiteLayerZeroFallback
+[       OK ] RenderStylesTest.UnknownKindUsesWhiteLayerZeroFallback (0 ms)
+[----------] 1 test from RenderStylesTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="RenderStylesTest.InvalidFileKeepsPreviousStyles" classname="RenderStylesTest.InvalidFileKeepsPreviousStyles" time="0.0527386" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = RenderStylesTest.InvalidFileKeepsPreviousStyles
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from RenderStylesTest
+[ RUN      ] RenderStylesTest.InvalidFileKeepsPreviousStyles
+[       OK ] RenderStylesTest.InvalidFileKeepsPreviousStyles (0 ms)
+[----------] 1 test from RenderStylesTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="RenderStylesTest.ApplySetsComponentAndMeshColour" classname="RenderStylesTest.ApplySetsComponentAndMeshColour" time="0.053165" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = RenderStylesTest.ApplySetsComponentAndMeshColour
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from RenderStylesTest
+[ RUN      ] RenderStylesTest.ApplySetsComponentAndMeshColour
+[       OK ] RenderStylesTest.ApplySetsComponentAndMeshColour (0 ms)
+[----------] 1 test from RenderStylesTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="RenderStylesTest.ShippedStyleFileIsValid" classname="RenderStylesTest.ShippedStyleFileIsValid" time="0.0565173" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = RenderStylesTest.ShippedStyleFileIsValid
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from RenderStylesTest
+[ RUN      ] RenderStylesTest.ShippedStyleFileIsValid
+[       OK ] RenderStylesTest.ShippedStyleFileIsValid (0 ms)
+[----------] 1 test from RenderStylesTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="SimulationRequestTest.EmptyResponseUsesDefaults" classname="SimulationRequestTest.EmptyResponseUsesDefaults" time="0.0507636" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = SimulationRequestTest.EmptyResponseUsesDefaults
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SimulationRequestTest
+[ RUN      ] SimulationRequestTest.EmptyResponseUsesDefaults
+[       OK ] SimulationRequestTest.EmptyResponseUsesDefaults (0 ms)
+[----------] 1 test from SimulationRequestTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="SimulationRequestTest.DemoReplayKeepsSceneAndSpeed" classname="SimulationRequestTest.DemoReplayKeepsSceneAndSpeed" time="0.089736" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = SimulationRequestTest.DemoReplayKeepsSceneAndSpeed
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SimulationRequestTest
+[ RUN      ] SimulationRequestTest.DemoReplayKeepsSceneAndSpeed
+[       OK ] SimulationRequestTest.DemoReplayKeepsSceneAndSpeed (0 ms)
+[----------] 1 test from SimulationRequestTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="SimulationRequestTest.DemoReplayDropsResponseOnlyMetadata" classname="SimulationRequestTest.DemoReplayDropsResponseOnlyMetadata" time="0.0520801" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = SimulationRequestTest.DemoReplayDropsResponseOnlyMetadata
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SimulationRequestTest
+[ RUN      ] SimulationRequestTest.DemoReplayDropsResponseOnlyMetadata
+[       OK ] SimulationRequestTest.DemoReplayDropsResponseOnlyMetadata (0 ms)
+[----------] 1 test from SimulationRequestTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="SimulationRequestTest.EmptySceneIdIsOmitted" classname="SimulationRequestTest.EmptySceneIdIsOmitted" time="0.0504186" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = SimulationRequestTest.EmptySceneIdIsOmitted
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SimulationRequestTest
+[ RUN      ] SimulationRequestTest.EmptySceneIdIsOmitted
+[       OK ] SimulationRequestTest.EmptySceneIdIsOmitted (0 ms)
+[----------] 1 test from SimulationRequestTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="SimulationRequestTest.KittiDatasetNameIsNormalisedToLowercase" classname="SimulationRequestTest.KittiDatasetNameIsNormalisedToLowercase" time="0.0530439" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = SimulationRequestTest.KittiDatasetNameIsNormalisedToLowercase
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SimulationRequestTest
+[ RUN      ] SimulationRequestTest.KittiDatasetNameIsNormalisedToLowercase
+[       OK ] SimulationRequestTest.KittiDatasetNameIsNormalisedToLowercase (0 ms)
+[----------] 1 test from SimulationRequestTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="SimulationRequestTest.KittiWithoutSequenceIdIsNotSent" classname="SimulationRequestTest.KittiWithoutSequenceIdIsNotSent" time="0.0545707" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = SimulationRequestTest.KittiWithoutSequenceIdIsNotSent
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SimulationRequestTest
+[ RUN      ] SimulationRequestTest.KittiWithoutSequenceIdIsNotSent
+[       OK ] SimulationRequestTest.KittiWithoutSequenceIdIsNotSent (0 ms)
+[----------] 1 test from SimulationRequestTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="SimulationRequestTest.KittiRequestCarriesExplicitSourceProvenance" classname="SimulationRequestTest.KittiRequestCarriesExplicitSourceProvenance" time="0.0583085" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = SimulationRequestTest.KittiRequestCarriesExplicitSourceProvenance
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SimulationRequestTest
+[ RUN      ] SimulationRequestTest.KittiRequestCarriesExplicitSourceProvenance
+[       OK ] SimulationRequestTest.KittiRequestCarriesExplicitSourceProvenance (0 ms)
+[----------] 1 test from SimulationRequestTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="SimulationRequestTest.PlannedRouteRequestDoesNotSelectDataset" classname="SimulationRequestTest.PlannedRouteRequestDoesNotSelectDataset" time="0.0557594" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = SimulationRequestTest.PlannedRouteRequestDoesNotSelectDataset
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SimulationRequestTest
+[ RUN      ] SimulationRequestTest.PlannedRouteRequestDoesNotSelectDataset
+[       OK ] SimulationRequestTest.PlannedRouteRequestDoesNotSelectDataset (0 ms)
+[----------] 1 test from SimulationRequestTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="SimulationRequestTest.PlannedRouteReplayPreservesRouteId" classname="SimulationRequestTest.PlannedRouteReplayPreservesRouteId" time="0.0586404" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = SimulationRequestTest.PlannedRouteReplayPreservesRouteId
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SimulationRequestTest
+[ RUN      ] SimulationRequestTest.PlannedRouteReplayPreservesRouteId
+[       OK ] SimulationRequestTest.PlannedRouteReplayPreservesRouteId (0 ms)
+[----------] 1 test from SimulationRequestTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingContractTest.SharedPositiveFixtures" classname="TrainingContractTest.SharedPositiveFixtures" time="0.0584271" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingContractTest.SharedPositiveFixtures
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingContractTest
+[ RUN      ] TrainingContractTest.SharedPositiveFixtures
+[       OK ] TrainingContractTest.SharedPositiveFixtures (2 ms)
+[----------] 1 test from TrainingContractTest (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingContractTest.SharedNegativeFixtures" classname="TrainingContractTest.SharedNegativeFixtures" time="0.0576451" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingContractTest.SharedNegativeFixtures
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingContractTest
+[ RUN      ] TrainingContractTest.SharedNegativeFixtures
+[       OK ] TrainingContractTest.SharedNegativeFixtures (2 ms)
+[----------] 1 test from TrainingContractTest (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingContractTest.AdditiveUnknownField" classname="TrainingContractTest.AdditiveUnknownField" time="0.0522535" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingContractTest.AdditiveUnknownField
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingContractTest
+[ RUN      ] TrainingContractTest.AdditiveUnknownField
+[       OK ] TrainingContractTest.AdditiveUnknownField (1 ms)
+[----------] 1 test from TrainingContractTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingContractTest.GoldenDispatcherCommand" classname="TrainingContractTest.GoldenDispatcherCommand" time="0.049597" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingContractTest.GoldenDispatcherCommand
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingContractTest
+[ RUN      ] TrainingContractTest.GoldenDispatcherCommand
+[       OK ] TrainingContractTest.GoldenDispatcherCommand (0 ms)
+[----------] 1 test from TrainingContractTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingContractTest.ArchiveTargetsTheSessionRevision" classname="TrainingContractTest.ArchiveTargetsTheSessionRevision" time="0.0521345" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingContractTest.ArchiveTargetsTheSessionRevision
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingContractTest
+[ RUN      ] TrainingContractTest.ArchiveTargetsTheSessionRevision
+[       OK ] TrainingContractTest.ArchiveTargetsTheSessionRevision (1 ms)
+[----------] 1 test from TrainingContractTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingContractTest.StaleRevisionAndExpiredOption" classname="TrainingContractTest.StaleRevisionAndExpiredOption" time="0.0476725" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingContractTest.StaleRevisionAndExpiredOption
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingContractTest
+[ RUN      ] TrainingContractTest.StaleRevisionAndExpiredOption
+[       OK ] TrainingContractTest.StaleRevisionAndExpiredOption (1 ms)
+[----------] 1 test from TrainingContractTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingContractTest.ContinueServiceTargetsTheShuttleRevision" classname="TrainingContractTest.ContinueServiceTargetsTheShuttleRevision" time="0.0471313" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingContractTest.ContinueServiceTargetsTheShuttleRevision
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingContractTest
+[ RUN      ] TrainingContractTest.ContinueServiceTargetsTheShuttleRevision
+[       OK ] TrainingContractTest.ContinueServiceTargetsTheShuttleRevision (1 ms)
+[----------] 1 test from TrainingContractTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="SpatialContractTest.SharedManifestAdmissionCases" classname="SpatialContractTest.SharedManifestAdmissionCases" time="0.0676047" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = SpatialContractTest.SharedManifestAdmissionCases
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SpatialContractTest
+[ RUN      ] SpatialContractTest.SharedManifestAdmissionCases
+[       OK ] SpatialContractTest.SharedManifestAdmissionCases (17 ms)
+[----------] 1 test from SpatialContractTest (17 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (17 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="SpatialContractTest.SharedBindingsAndHashes" classname="SpatialContractTest.SharedBindingsAndHashes" time="0.0685835" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = SpatialContractTest.SharedBindingsAndHashes
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SpatialContractTest
+[ RUN      ] SpatialContractTest.SharedBindingsAndHashes
+[       OK ] SpatialContractTest.SharedBindingsAndHashes (4 ms)
+[----------] 1 test from SpatialContractTest (4 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="SpatialContractTest.SharedNegativeSnapshots" classname="SpatialContractTest.SharedNegativeSnapshots" time="0.0525329" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = SpatialContractTest.SharedNegativeSnapshots
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SpatialContractTest
+[ RUN      ] SpatialContractTest.SharedNegativeSnapshots
+[       OK ] SpatialContractTest.SharedNegativeSnapshots (2 ms)
+[----------] 1 test from SpatialContractTest (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="SpatialContractTest.BasisAsymmetricRampAndOriginFixtures" classname="SpatialContractTest.BasisAsymmetricRampAndOriginFixtures" time="0.0532499" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = SpatialContractTest.BasisAsymmetricRampAndOriginFixtures
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SpatialContractTest
+[ RUN      ] SpatialContractTest.BasisAsymmetricRampAndOriginFixtures
+[       OK ] SpatialContractTest.BasisAsymmetricRampAndOriginFixtures (1 ms)
+[----------] 1 test from SpatialContractTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="SpatialContractTest.ChangedRenderHashBlocksBinding" classname="SpatialContractTest.ChangedRenderHashBlocksBinding" time="0.056352" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = SpatialContractTest.ChangedRenderHashBlocksBinding
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SpatialContractTest
+[ RUN      ] SpatialContractTest.ChangedRenderHashBlocksBinding
+[       OK ] SpatialContractTest.ChangedRenderHashBlocksBinding (2 ms)
+[----------] 1 test from SpatialContractTest (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="SpatialContractTest.AuthoritativeSameTickMotionSamples" classname="SpatialContractTest.AuthoritativeSameTickMotionSamples" time="0.187462" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = SpatialContractTest.AuthoritativeSameTickMotionSamples
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SpatialContractTest
+[ RUN      ] SpatialContractTest.AuthoritativeSameTickMotionSamples
+[       OK ] SpatialContractTest.AuthoritativeSameTickMotionSamples (13 ms)
+[----------] 1 test from SpatialContractTest (13 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (13 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSceneTest.ImportsExactSharedPackageWithMandatoryTierAndThirteenSemanticObjects" classname="TrainingSceneTest.ImportsExactSharedPackageWithMandatoryTierAndThirteenSemanticObjects" time="0.0725372" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSceneTest.ImportsExactSharedPackageWithMandatoryTierAndThirteenSemanticObjects
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSceneTest
+[ RUN      ] TrainingSceneTest.ImportsExactSharedPackageWithMandatoryTierAndThirteenSemanticObjects
+[       OK ] TrainingSceneTest.ImportsExactSharedPackageWithMandatoryTierAndThirteenSemanticObjects (5 ms)
+[----------] 1 test from TrainingSceneTest (5 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (5 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSceneTest.EverySharedAssetHasExactDeclaredDecodedInventoryAndBounds" classname="TrainingSceneTest.EverySharedAssetHasExactDeclaredDecodedInventoryAndBounds" time="0.0673516" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSceneTest.EverySharedAssetHasExactDeclaredDecodedInventoryAndBounds
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSceneTest
+[ RUN      ] TrainingSceneTest.EverySharedAssetHasExactDeclaredDecodedInventoryAndBounds
+[       OK ] TrainingSceneTest.EverySharedAssetHasExactDeclaredDecodedInventoryAndBounds (4 ms)
+[----------] 1 test from TrainingSceneTest (4 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSceneTest.MissingCorruptAndWrongManifestHashesBlockReadiness" classname="TrainingSceneTest.MissingCorruptAndWrongManifestHashesBlockReadiness" time="0.0700514" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSceneTest.MissingCorruptAndWrongManifestHashesBlockReadiness
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSceneTest
+[ RUN      ] TrainingSceneTest.MissingCorruptAndWrongManifestHashesBlockReadiness
+[       OK ] TrainingSceneTest.MissingCorruptAndWrongManifestHashesBlockReadiness (10 ms)
+[----------] 1 test from TrainingSceneTest (10 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (11 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSceneTest.RejectsHeaderTruncationOversizeAndExternalUris" classname="TrainingSceneTest.RejectsHeaderTruncationOversizeAndExternalUris" time="0.0562037" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSceneTest.RejectsHeaderTruncationOversizeAndExternalUris
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSceneTest
+[ RUN      ] TrainingSceneTest.RejectsHeaderTruncationOversizeAndExternalUris
+[       OK ] TrainingSceneTest.RejectsHeaderTruncationOversizeAndExternalUris (1 ms)
+[----------] 1 test from TrainingSceneTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSceneTest.DuplicateJsonKeysCannotChangeProfileInterpretation" classname="TrainingSceneTest.DuplicateJsonKeysCannotChangeProfileInterpretation" time="0.0562011" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSceneTest.DuplicateJsonKeysCannotChangeProfileInterpretation
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSceneTest
+[ RUN      ] TrainingSceneTest.DuplicateJsonKeysCannotChangeProfileInterpretation
+[       OK ] TrainingSceneTest.DuplicateJsonKeysCannotChangeProfileInterpretation (0 ms)
+[----------] 1 test from TrainingSceneTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSceneTest.RejectsUnsupportedFeaturesAccessorOverflowAndInvalidIndices" classname="TrainingSceneTest.RejectsUnsupportedFeaturesAccessorOverflowAndInvalidIndices" time="0.0578045" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSceneTest.RejectsUnsupportedFeaturesAccessorOverflowAndInvalidIndices
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSceneTest
+[ RUN      ] TrainingSceneTest.RejectsUnsupportedFeaturesAccessorOverflowAndInvalidIndices
+[       OK ] TrainingSceneTest.RejectsUnsupportedFeaturesAccessorOverflowAndInvalidIndices (2 ms)
+[----------] 1 test from TrainingSceneTest (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSceneTest.RejectsNodeCyclesScaleAndUnboundGeometry" classname="TrainingSceneTest.RejectsNodeCyclesScaleAndUnboundGeometry" time="0.0564562" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSceneTest.RejectsNodeCyclesScaleAndUnboundGeometry
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSceneTest
+[ RUN      ] TrainingSceneTest.RejectsNodeCyclesScaleAndUnboundGeometry
+[       OK ] TrainingSceneTest.RejectsNodeCyclesScaleAndUnboundGeometry (2 ms)
+[----------] 1 test from TrainingSceneTest (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSceneTest.NestedRigidNodeTransformsAreAppliedOnce" classname="TrainingSceneTest.NestedRigidNodeTransformsAreAppliedOnce" time="0.0593108" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSceneTest.NestedRigidNodeTransformsAreAppliedOnce
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSceneTest
+[ RUN      ] TrainingSceneTest.NestedRigidNodeTransformsAreAppliedOnce
+[       OK ] TrainingSceneTest.NestedRigidNodeTransformsAreAppliedOnce (0 ms)
+[----------] 1 test from TrainingSceneTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSceneTest.EmbeddedPngMaterialDecodesAndOversizedTextureFailsBeforeUpload" classname="TrainingSceneTest.EmbeddedPngMaterialDecodesAndOversizedTextureFailsBeforeUpload" time="0.0556949" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSceneTest.EmbeddedPngMaterialDecodesAndOversizedTextureFailsBeforeUpload
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSceneTest
+[ RUN      ] TrainingSceneTest.EmbeddedPngMaterialDecodesAndOversizedTextureFailsBeforeUpload
+[       OK ] TrainingSceneTest.EmbeddedPngMaterialDecodesAndOversizedTextureFailsBeforeUpload (2 ms)
+[----------] 1 test from TrainingSceneTest (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSceneTest.RuntimeMatrixMatchesSharedAsymmetricOriginAndRampGoldenMarkers" classname="TrainingSceneTest.RuntimeMatrixMatchesSharedAsymmetricOriginAndRampGoldenMarkers" time="0.0621303" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSceneTest.RuntimeMatrixMatchesSharedAsymmetricOriginAndRampGoldenMarkers
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSceneTest
+[ RUN      ] TrainingSceneTest.RuntimeMatrixMatchesSharedAsymmetricOriginAndRampGoldenMarkers
+[       OK ] TrainingSceneTest.RuntimeMatrixMatchesSharedAsymmetricOriginAndRampGoldenMarkers (2 ms)
+[----------] 1 test from TrainingSceneTest (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSceneTest.SpatialSnapshotRetainsTypedReadinessAndBodyPose" classname="TrainingSceneTest.SpatialSnapshotRetainsTypedReadinessAndBodyPose" time="0.0621306" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSceneTest.SpatialSnapshotRetainsTypedReadinessAndBodyPose
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSceneTest
+[ RUN      ] TrainingSceneTest.SpatialSnapshotRetainsTypedReadinessAndBodyPose
+[       OK ] TrainingSceneTest.SpatialSnapshotRetainsTypedReadinessAndBodyPose (2 ms)
+[----------] 1 test from TrainingSceneTest (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSceneTest.ActiveSessionCannotHotSwapManifestOrDropSpatialCapability" classname="TrainingSceneTest.ActiveSessionCannotHotSwapManifestOrDropSpatialCapability" time="0.0547952" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSceneTest.ActiveSessionCannotHotSwapManifestOrDropSpatialCapability
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSceneTest
+[ RUN      ] TrainingSceneTest.ActiveSessionCannotHotSwapManifestOrDropSpatialCapability
+[       OK ] TrainingSceneTest.ActiveSessionCannotHotSwapManifestOrDropSpatialCapability (1 ms)
+[----------] 1 test from TrainingSceneTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingWorldInteractionTest.SharedGoldenPicksRespectRampDepthAndOcclusion" classname="TrainingWorldInteractionTest.SharedGoldenPicksRespectRampDepthAndOcclusion" time="0.0651551" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingWorldInteractionTest.SharedGoldenPicksRespectRampDepthAndOcclusion
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingWorldInteractionTest
+[ RUN      ] TrainingWorldInteractionTest.SharedGoldenPicksRespectRampDepthAndOcclusion
+[       OK ] TrainingWorldInteractionTest.SharedGoldenPicksRespectRampDepthAndOcclusion (7 ms)
+[----------] 1 test from TrainingWorldInteractionTest (7 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (7 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingWorldInteractionTest.InversePickingPreservesNonzeroOriginAndAssetTransforms" classname="TrainingWorldInteractionTest.InversePickingPreservesNonzeroOriginAndAssetTransforms" time="0.0684035" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingWorldInteractionTest.InversePickingPreservesNonzeroOriginAndAssetTransforms
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingWorldInteractionTest
+[ RUN      ] TrainingWorldInteractionTest.InversePickingPreservesNonzeroOriginAndAssetTransforms
+[       OK ] TrainingWorldInteractionTest.InversePickingPreservesNonzeroOriginAndAssetTransforms (7 ms)
+[----------] 1 test from TrainingWorldInteractionTest (7 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (8 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingWorldInteractionTest.OverlappingDecksChooseVisibleLevelAndNeverNearestXY" classname="TrainingWorldInteractionTest.OverlappingDecksChooseVisibleLevelAndNeverNearestXY" time="0.0701197" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingWorldInteractionTest.OverlappingDecksChooseVisibleLevelAndNeverNearestXY
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingWorldInteractionTest
+[ RUN      ] TrainingWorldInteractionTest.OverlappingDecksChooseVisibleLevelAndNeverNearestXY
+[       OK ] TrainingWorldInteractionTest.OverlappingDecksChooseVisibleLevelAndNeverNearestXY (8 ms)
+[----------] 1 test from TrainingWorldInteractionTest (8 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (8 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingWorldInteractionTest.RouteTargetsRequireSceneEdgeSurfaceAndHeightBindings" classname="TrainingWorldInteractionTest.RouteTargetsRequireSceneEdgeSurfaceAndHeightBindings" time="0.0581184" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingWorldInteractionTest.RouteTargetsRequireSceneEdgeSurfaceAndHeightBindings
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingWorldInteractionTest
+[ RUN      ] TrainingWorldInteractionTest.RouteTargetsRequireSceneEdgeSurfaceAndHeightBindings
+[       OK ] TrainingWorldInteractionTest.RouteTargetsRequireSceneEdgeSurfaceAndHeightBindings (6 ms)
+[----------] 1 test from TrainingWorldInteractionTest (6 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (6 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingWorldInteractionTest.RouteContextRetainsCanonicalHeight" classname="TrainingWorldInteractionTest.RouteContextRetainsCanonicalHeight" time="0.0525934" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingWorldInteractionTest.RouteContextRetainsCanonicalHeight
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingWorldInteractionTest
+[ RUN      ] TrainingWorldInteractionTest.RouteContextRetainsCanonicalHeight
+[       OK ] TrainingWorldInteractionTest.RouteContextRetainsCanonicalHeight (0 ms)
+[----------] 1 test from TrainingWorldInteractionTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingWorldInteractionTest.ExplicitSurfaceDisambiguatesCoincidentSeamWithoutChangingHeight" classname="TrainingWorldInteractionTest.ExplicitSurfaceDisambiguatesCoincidentSeamWithoutChangingHeight" time="0.0570005" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingWorldInteractionTest.ExplicitSurfaceDisambiguatesCoincidentSeamWithoutChangingHeight
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingWorldInteractionTest
+[ RUN      ] TrainingWorldInteractionTest.ExplicitSurfaceDisambiguatesCoincidentSeamWithoutChangingHeight
+[       OK ] TrainingWorldInteractionTest.ExplicitSurfaceDisambiguatesCoincidentSeamWithoutChangingHeight (5 ms)
+[----------] 1 test from TrainingWorldInteractionTest (5 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (5 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingWorldInteractionTest.CameraModesAreBoundedAndScreenRaysRoundTrip" classname="TrainingWorldInteractionTest.CameraModesAreBoundedAndScreenRaysRoundTrip" time="0.0588563" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingWorldInteractionTest.CameraModesAreBoundedAndScreenRaysRoundTrip
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingWorldInteractionTest
+[ RUN      ] TrainingWorldInteractionTest.CameraModesAreBoundedAndScreenRaysRoundTrip
+[       OK ] TrainingWorldInteractionTest.CameraModesAreBoundedAndScreenRaysRoundTrip (7 ms)
+[----------] 1 test from TrainingWorldInteractionTest (7 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (7 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSessionStoreTest.SharedFixtureHasStableIdsAcrossViews" classname="TrainingSessionStoreTest.SharedFixtureHasStableIdsAcrossViews" time="0.0797029" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSessionStoreTest.SharedFixtureHasStableIdsAcrossViews
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSessionStoreTest
+[ RUN      ] TrainingSessionStoreTest.SharedFixtureHasStableIdsAcrossViews
+[       OK ] TrainingSessionStoreTest.SharedFixtureHasStableIdsAcrossViews (1 ms)
+[----------] 1 test from TrainingSessionStoreTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSessionStoreTest.InvalidRecordNeverMutatesVisibleState" classname="TrainingSessionStoreTest.InvalidRecordNeverMutatesVisibleState" time="0.0636832" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSessionStoreTest.InvalidRecordNeverMutatesVisibleState
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSessionStoreTest
+[ RUN      ] TrainingSessionStoreTest.InvalidRecordNeverMutatesVisibleState
+[       OK ] TrainingSessionStoreTest.InvalidRecordNeverMutatesVisibleState (2 ms)
+[----------] 1 test from TrainingSessionStoreTest (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSessionStoreTest.OldEpochAndSnapshotCannotReplaceBaseline" classname="TrainingSessionStoreTest.OldEpochAndSnapshotCannotReplaceBaseline" time="0.0560297" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSessionStoreTest.OldEpochAndSnapshotCannotReplaceBaseline
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSessionStoreTest
+[ RUN      ] TrainingSessionStoreTest.OldEpochAndSnapshotCannotReplaceBaseline
+[       OK ] TrainingSessionStoreTest.OldEpochAndSnapshotCannotReplaceBaseline (2 ms)
+[----------] 1 test from TrainingSessionStoreTest (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSessionStoreTest.TypedReceiptAndEventUseSharedFixture" classname="TrainingSessionStoreTest.TypedReceiptAndEventUseSharedFixture" time="0.0476912" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSessionStoreTest.TypedReceiptAndEventUseSharedFixture
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSessionStoreTest
+[ RUN      ] TrainingSessionStoreTest.TypedReceiptAndEventUseSharedFixture
+[       OK ] TrainingSessionStoreTest.TypedReceiptAndEventUseSharedFixture (1 ms)
+[----------] 1 test from TrainingSessionStoreTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSessionStoreTest.TypedIngressRejectsIncompatibleSelectedRun" classname="TrainingSessionStoreTest.TypedIngressRejectsIncompatibleSelectedRun" time="0.0485684" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSessionStoreTest.TypedIngressRejectsIncompatibleSelectedRun
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSessionStoreTest
+[ RUN      ] TrainingSessionStoreTest.TypedIngressRejectsIncompatibleSelectedRun
+[       OK ] TrainingSessionStoreTest.TypedIngressRejectsIncompatibleSelectedRun (1 ms)
+[----------] 1 test from TrainingSessionStoreTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSessionStoreTest.EventBatchIsAtomicAndBoundToSelectedEpoch" classname="TrainingSessionStoreTest.EventBatchIsAtomicAndBoundToSelectedEpoch" time="0.0649148" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSessionStoreTest.EventBatchIsAtomicAndBoundToSelectedEpoch
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSessionStoreTest
+[ RUN      ] TrainingSessionStoreTest.EventBatchIsAtomicAndBoundToSelectedEpoch
+[       OK ] TrainingSessionStoreTest.EventBatchIsAtomicAndBoundToSelectedEpoch (1 ms)
+[----------] 1 test from TrainingSessionStoreTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSessionStoreTest.SameSessionRejoinKeepsEventCursor" classname="TrainingSessionStoreTest.SameSessionRejoinKeepsEventCursor" time="0.0555174" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSessionStoreTest.SameSessionRejoinKeepsEventCursor
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSessionStoreTest
+[ RUN      ] TrainingSessionStoreTest.SameSessionRejoinKeepsEventCursor
+[       OK ] TrainingSessionStoreTest.SameSessionRejoinKeepsEventCursor (1 ms)
+[----------] 1 test from TrainingSessionStoreTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSessionStoreTest.EventHistoryIsBoundedWithoutLosingSequenceCursor" classname="TrainingSessionStoreTest.EventHistoryIsBoundedWithoutLosingSequenceCursor" time="0.0562894" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSessionStoreTest.EventHistoryIsBoundedWithoutLosingSequenceCursor
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSessionStoreTest
+[ RUN      ] TrainingSessionStoreTest.EventHistoryIsBoundedWithoutLosingSequenceCursor
+[       OK ] TrainingSessionStoreTest.EventHistoryIsBoundedWithoutLosingSequenceCursor (3 ms)
+[----------] 1 test from TrainingSessionStoreTest (3 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TrainingSessionStoreTest.SameEpochResyncReplacesRejectedEventBaseline" classname="TrainingSessionStoreTest.SameEpochResyncReplacesRejectedEventBaseline" time="0.0505046" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TrainingSessionStoreTest.SameEpochResyncReplacesRejectedEventBaseline
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TrainingSessionStoreTest
+[ RUN      ] TrainingSessionStoreTest.SameEpochResyncReplacesRejectedEventBaseline
+[       OK ] TrainingSessionStoreTest.SameEpochResyncReplacesRejectedEventBaseline (2 ms)
+[----------] 1 test from TrainingSessionStoreTest (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TimeTest.DeltaTimeIsZeroBeforeFirstTick" classname="TimeTest.DeltaTimeIsZeroBeforeFirstTick" time="0.0505028" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TimeTest.DeltaTimeIsZeroBeforeFirstTick
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TimeTest
+[ RUN      ] TimeTest.DeltaTimeIsZeroBeforeFirstTick
+[       OK ] TimeTest.DeltaTimeIsZeroBeforeFirstTick (0 ms)
+[----------] 1 test from TimeTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TimeTest.TickMeasuresElapsedSeconds" classname="TimeTest.TickMeasuresElapsedSeconds" time="0.0721517" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TimeTest.TickMeasuresElapsedSeconds
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TimeTest
+[ RUN      ] TimeTest.TickMeasuresElapsedSeconds
+[       OK ] TimeTest.TickMeasuresElapsedSeconds (23 ms)
+[----------] 1 test from TimeTest (23 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (23 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="TimeTest.TickMeasuresFromPreviousTick" classname="TimeTest.TickMeasuresFromPreviousTick" time="0.125841" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = TimeTest.TickMeasuresFromPreviousTick
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TimeTest
+[ RUN      ] TimeTest.TickMeasuresFromPreviousTick
+[       OK ] TimeTest.TickMeasuresFromPreviousTick (58 ms)
+[----------] 1 test from TimeTest (58 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (59 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="EditorTest.EmptyGroupsAndDuplicateNamesSurviveSaveReloadAndUndo" classname="EditorTest.EmptyGroupsAndDuplicateNamesSurviveSaveReloadAndUndo" time="0.171109" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = EditorTest.EmptyGroupsAndDuplicateNamesSurviveSaveReloadAndUndo
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from EditorTest
+[ RUN      ] EditorTest.EmptyGroupsAndDuplicateNamesSurviveSaveReloadAndUndo
+[       OK ] EditorTest.EmptyGroupsAndDuplicateNamesSurviveSaveReloadAndUndo (100 ms)
+[----------] 1 test from EditorTest (100 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (100 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="EditorTest.ReloadUsesHandEditedStyleGroupsAndLayerOrderAfterSavingEmptyGroups" classname="EditorTest.ReloadUsesHandEditedStyleGroupsAndLayerOrderAfterSavingEmptyGroups" time="0.170851" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = EditorTest.ReloadUsesHandEditedStyleGroupsAndLayerOrderAfterSavingEmptyGroups
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from EditorTest
+[ RUN      ] EditorTest.ReloadUsesHandEditedStyleGroupsAndLayerOrderAfterSavingEmptyGroups
+[       OK ] EditorTest.ReloadUsesHandEditedStyleGroupsAndLayerOrderAfterSavingEmptyGroups (120 ms)
+[----------] 1 test from EditorTest (120 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (120 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="EditorTest.ReturningToInspectorEndsPagePreview" classname="EditorTest.ReturningToInspectorEndsPagePreview" time="0.122601" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = EditorTest.ReturningToInspectorEndsPagePreview
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from EditorTest
+[ RUN      ] EditorTest.ReturningToInspectorEndsPagePreview
+[       OK ] EditorTest.ReturningToInspectorEndsPagePreview (56 ms)
+[----------] 1 test from EditorTest (56 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (56 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="EditorTest.ClosingThePanelOrCompletingLoginEndsPagePreview" classname="EditorTest.ClosingThePanelOrCompletingLoginEndsPagePreview" time="0.121509" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = EditorTest.ClosingThePanelOrCompletingLoginEndsPagePreview
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from EditorTest
+[ RUN      ] EditorTest.ClosingThePanelOrCompletingLoginEndsPagePreview
+[       OK ] EditorTest.ClosingThePanelOrCompletingLoginEndsPagePreview (65 ms)
+[----------] 1 test from EditorTest (65 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (65 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="EditorTest.InspectorEditsAndUndoCannotRestoreStylesFromBeforeHierarchySave" classname="EditorTest.InspectorEditsAndUndoCannotRestoreStylesFromBeforeHierarchySave" time="0.142512" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = EditorTest.InspectorEditsAndUndoCannotRestoreStylesFromBeforeHierarchySave
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from EditorTest
+[ RUN      ] EditorTest.InspectorEditsAndUndoCannotRestoreStylesFromBeforeHierarchySave
+[       OK ] EditorTest.InspectorEditsAndUndoCannotRestoreStylesFromBeforeHierarchySave (88 ms)
+[----------] 1 test from EditorTest (88 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (88 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="EditorTest.FreshInstallCreatesAnAccountAndLaterLaunchesUseNormalLogin" classname="EditorTest.FreshInstallCreatesAnAccountAndLaterLaunchesUseNormalLogin" time="5.00066" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = EditorTest.FreshInstallCreatesAnAccountAndLaterLaunchesUseNormalLogin
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from EditorTest
+[ RUN      ] EditorTest.FreshInstallCreatesAnAccountAndLaterLaunchesUseNormalLogin
+[       OK ] EditorTest.FreshInstallCreatesAnAccountAndLaterLaunchesUseNormalLogin (4939 ms)
+[----------] 1 test from EditorTest (4939 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4939 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="EditorTest.BrokenExistingUserListDoesNotOfferAccountReplacement" classname="EditorTest.BrokenExistingUserListDoesNotOfferAccountReplacement" time="0.171576" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = EditorTest.BrokenExistingUserListDoesNotOfferAccountReplacement
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from EditorTest
+[ RUN      ] EditorTest.BrokenExistingUserListDoesNotOfferAccountReplacement
+[       OK ] EditorTest.BrokenExistingUserListDoesNotOfferAccountReplacement (103 ms)
+[----------] 1 test from EditorTest (103 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (103 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="EditorTest.UnknownUserCanReachSignupAndAddATeammateWithoutReplacingAccounts" classname="EditorTest.UnknownUserCanReachSignupAndAddATeammateWithoutReplacingAccounts" time="1.76389" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = EditorTest.UnknownUserCanReachSignupAndAddATeammateWithoutReplacingAccounts
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from EditorTest
+[ RUN      ] EditorTest.UnknownUserCanReachSignupAndAddATeammateWithoutReplacingAccounts
+[       OK ] EditorTest.UnknownUserCanReachSignupAndAddATeammateWithoutReplacingAccounts (1687 ms)
+[----------] 1 test from EditorTest (1687 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1687 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="EditorTest.ValidEmptyUserListOffersSetup" classname="EditorTest.ValidEmptyUserListOffersSetup" time="0.157579" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = EditorTest.ValidEmptyUserListOffersSetup
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from EditorTest
+[ RUN      ] EditorTest.ValidEmptyUserListOffersSetup
+[       OK ] EditorTest.ValidEmptyUserListOffersSetup (76 ms)
+[----------] 1 test from EditorTest (76 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (77 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="EditorTest.DestroyingLoginPageDuringSignupDoesNotCallDeletedUi" classname="EditorTest.DestroyingLoginPageDuringSignupDoesNotCallDeletedUi" time="1.71598" status="run">
+		<properties/>
+		<system-out>Running main() from C:\Digipen\Year 04\GAM300\Formula_9\build\automated\native\_deps\googletest-src\googletest\src\gtest_main.cc
+Note: Google Test filter = EditorTest.DestroyingLoginPageDuringSignupDoesNotCallDeletedUi
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from EditorTest
+[ RUN      ] EditorTest.DestroyingLoginPageDuringSignupDoesNotCallDeletedUi
+[       OK ] EditorTest.DestroyingLoginPageDuringSignupDoesNotCallDeletedUi (1644 ms)
+[----------] 1 test from EditorTest (1644 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1644 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+</testsuite>

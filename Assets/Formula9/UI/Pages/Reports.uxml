@@ -1,0 +1,13 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:f9="Formula9.World" xmlns:f9ui="Formula9.UI">
+    <Style src="project://database/Assets/Formula9/UI/Formula9App.uss" />
+    <ui:ScrollView class="workspace-page">
+        <ui:Label text="Reports" class="page-title" />
+        <ui:VisualElement class="tabs">
+            <ui:Button name="reports-tab-log" text="Log (latest 1000)" class="tab-item" />
+            <ui:Button name="reports-tab-commands" text="Commands (latest 200)" class="tab-item" />
+        </ui:VisualElement>
+        <!-- The tables' headings and columns are set in TrainingWorkspace.cs; their rows come from the backend. -->
+        <ui:VisualElement name="reports-log-panel"><ui:VisualElement name="events-table-host" /></ui:VisualElement>
+        <ui:VisualElement name="reports-commands-panel" style="display: none;"><ui:VisualElement name="ledger-table-host" /></ui:VisualElement>
+    </ui:ScrollView>
+</ui:UXML>

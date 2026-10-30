@@ -1,0 +1,14 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:f9="Formula9.World" xmlns:f9ui="Formula9.UI">
+    <Style src="project://database/Assets/Formula9/UI/Formula9App.uss" />
+    <ui:ScrollView class="workspace-page">
+        <ui:Label text="Charging" class="page-title" />
+        <!-- The tables' columns are set in TrainingWorkspace.cs; their rows come from the backend. -->
+        <ui:Label text="Authoritative battery state" class="workspace-text" />
+        <ui:VisualElement name="battery-table-host" />
+        <ui:Label text="Authoritative charger occupancy" class="workspace-text" />
+        <ui:VisualElement name="charger-table-host" />
+        <ui:Label text="Battery decisions (backend estimates)" class="workspace-text" />
+        <ui:TextField name="charge-reason" max-length="2048" placeholder-text="Reason for the charging decision (required)" />
+        <ui:VisualElement name="offer-table-host" />
+    </ui:ScrollView>
+</ui:UXML>

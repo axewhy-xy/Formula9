@@ -24,11 +24,14 @@ namespace Formula9.UI
         private readonly Action<string> notify;
         private readonly List<VisualElement> pages = new List<VisualElement>();
         private readonly List<CommandOutcome> ledger = new List<CommandOutcome>();
-        private readonly DropdownField routes, chargeOptions, incidents, candidates;
+        private readonly DropdownField routes, incidents, candidates;
         private readonly TextField via, routeReason, chargeReason, incidentReason;
-        private readonly Label routeStatus, routeDetails, chargingData, incidentData, incidentReport, reports, selection;
-        private readonly Button validate, approve, charge, previewIncident, approveIncident, history, debrief;
-        private readonly FleetMap routeMap, evidenceMap;
+        private readonly Label routeStatus, routeCommitted, routeAssumptions, incidentData, incidentReport, selection;
+        private readonly Button validate, approve, previewIncident, approveIncident, history, debrief;
+        private readonly FleetMap evidenceMap;
+        private readonly RouteGraph routeGraph;
+        private readonly VisualElement routeShuttles, checksTable, comparisonTable, fleetTable;
+        private readonly List<VisualElement> operationalViews;
         private readonly SliderInt historySample;
         private readonly Label evidenceStatus;
         private readonly List<FullSnapshot> historySnapshots = new List<FullSnapshot>();
@@ -44,29 +47,49 @@ namespace Formula9.UI
         private DispatcherCommand incidentPreviewCommand;
         private (string Route, long BasedOn)? approvedDraft;  // route and revision of a submitted approval
 
+        private readonly List<Button> navButtons = new List<Button>();
+        public string SelectedIncident => incidents.value;
+        public event Action IncidentSelected;
+        public event Action<string> SectionChanged;
+        private const int ReportsPage = 4, ScenariosPage = 5, MaxLedgerEntries = 200;
+        private readonly VisualElement incidentDecisions;
+        private string offersKey;
+
         public TrainingWorkspace(VisualElement root, TrainingApi api, SessionController session, WorldView world,
             Action<Task> run, Action<string> notify)
         {
             this.api = api; this.session = session; this.world = world; this.run = run; this.notify = notify;
-            var host = root.Q("fleet-panel");
-            var fleetChildren = host.Children().ToList();
-            host.Clear();
-            var nav = new VisualElement(); nav.AddToClassList("row"); nav.AddToClassList("workspace-nav"); host.Add(nav);
-            var fleet = Page(host, nav, "Fleet");
-            foreach (var child in fleetChildren) fleet.Add(child);
-            selection = Text(fleet, "Select a shuttle in the fleet or map.");
-            var cameraActions = Row(fleet);
-            ActionButton(cameraActions, "Follow selected", () => world.FollowSelected());
-            ActionButton(cameraActions, "Overview", () => world.Overview());
+            // The pages are laid out in UI/Pages/*.uxml; this binds their controls by name.
+            foreach (var (pageName, navName) in new[] { ("page-fleet", "nav-fleet"), ("page-route", "nav-route"), ("page-charging", "nav-charging"), ("page-incident", "nav-incident"), ("page-reports", "nav-reports"), ("page-scenarios", null) })
+            {
+                var index = pages.Count;
+                pages.Add(root.Q(pageName));
+                if (navName == null) continue;
+                var button = root.Q<Button>(navName);
+                button.clicked += () => { ShowPage(index); Render(); };
+                navButtons.Add(button);
+            }
+            selection = root.Q<Label>("fleet-selection");
+            Bind(root, "follow-selected", () => world.FollowSelected());
+            Bind(root, "camera-overview", () => world.Overview());
 
-            var route = Page(host, nav, "Route planning");
-            routes = new DropdownField("Route"); route.Add(routes);
-            routes.RegisterValueChangedCallback(_ => { ResetDraft(); dependencies = null; RequestContext(); });
-            ActionButton(route, "Reload route graph", RequestContext);
-            routeStatus = Text(route, "Choose a route to load its graph.");
-            routeMap = new FleetMap { name = "route-map" }; routeMap.AddToClassList("route-map"); route.Add(routeMap);
-            routeMap.NodeSelected += AppendNode;
-            via = new TextField("Via node IDs (ordered)") { maxLength = 512 }; route.Add(via);
+            routes = root.Q<DropdownField>("routes");
+            routes.RegisterValueChangedCallback(_ => { ResetDraft(); dependencies = null; RenderRouteShuttles(); RequestContext(); });
+            Bind(root, "refresh", RequestContext);
+            routeStatus = root.Q<Label>("route-status");
+            routeCommitted = root.Q<Label>("route-committed");
+            routeAssumptions = root.Q<Label>("route-assumptions");
+            routeShuttles = root.Q("route-shuttles");
+            routeGraph = root.Q<RouteGraph>("route-graph");
+            routeGraph.NodeClicked += AppendNode;
+            routeGraph.Edited += nodes => { if (Current && !routeBusy && context != null && session.Store.Snapshot.Session.Status == "READY") via.value = string.Join(", ", nodes); };
+            checksTable = Table(root.Q("route-checks-host"), "", "Backend check", "Result", "Requirement", "Explanation / feature");
+            comparisonTable = Table(root.Q("route-comparison-host"), "", "Simulation estimate", "Original", "Proposed");
+            fleetTable = Table(root.Q("route-fleet-host"), "", "Shuttle ID", "State", "Route / revision", "Battery", "Provenance");
+            Tabs(root, ("route-tab-editor", "route-editor-panel"), ("route-tab-fleet", "route-fleet-panel"));
+            Tabs(root, ("reports-tab-log", "reports-log-panel"), ("reports-tab-commands", "reports-commands-panel"));
+            operationalViews = new List<VisualElement> { root.Q("view-bar"), root.Q("world") };
+            via = root.Q<TextField>("route-via");
             via.RegisterValueChangedCallback(change =>
             {
                 if (!restoring)
@@ -78,61 +101,51 @@ namespace Formula9.UI
                 }
                 InvalidateRoute();
             });
-            var draftActions = Row(route);
-            ActionButton(draftActions, "Undo", () => RestoreDraft(-1));
-            ActionButton(draftActions, "Redo", () => RestoreDraft(1));
-            ActionButton(draftActions, "Cancel draft", () => { if (!session.HasPendingCommand) { via.value = ""; routeReason.value = ""; InvalidateRoute(); } });
-            routeReason = new TextField("Approval reason") { maxLength = 2048 }; route.Add(routeReason);
+            Bind(root, "route-undo", () => RestoreDraft(-1));
+            Bind(root, "route-redo", () => RestoreDraft(1));
+            Bind(root, "route-cancel", () => { if (!session.HasPendingCommand) { via.value = ""; routeReason.value = ""; InvalidateRoute(); } });
+            routeReason = root.Q<TextField>("route-reason");
             routeReason.RegisterValueChangedCallback(_ => UpdateActions());
-            var routeActions = Row(route);
-            validate = ActionButton(routeActions, "Validate / preview", () => run(PreviewRoute()));
-            approve = ActionButton(routeActions, "Approve for assigned shuttles", () => run(ApproveRoute()));
-            routeDetails = Text(route, "");
+            validate = Bind(root, "route-validate", () => run(PreviewRoute()));
+            approve = Bind(root, "route-approve", () => run(ApproveRoute()));
 
-            var charging = Page(host, nav, "Charging");
-            chargingData = Text(charging, "Battery and charger state are authoritative. Forecasts and decision consequences are backend estimates.");
-            batteryTable = Table(charging, "Battery state", "Shuttle", "Charge / capacity (kWh)", "Service state", "Reserve margin (kWh, est.)", "Loops (est.)", "Next depot / ETA (est.)", "Above reserve (est.)");
-            chargerTable = Table(charging, "Charger occupancy", "Charger", "Free / total ports", "Occupied shuttles", "Power (kW)");
-            offerTable = Table(charging, "Decision consequences (estimates)", "Option", "Shuttle", "Action", "Charger", "Out of service (s)", "Battery after (kWh)", "Loops after", "Min. in service", "Validation", "Assumptions");
-            chargeOptions = new DropdownField("Decision option"); charging.Add(chargeOptions);
-            chargeOptions.RegisterValueChangedCallback(_ => UpdateActions());
-            chargeReason = new TextField("Decision reason") { maxLength = 2048 }; charging.Add(chargeReason);
+            batteryTable = Table(root.Q("battery-table-host"), "", "Shuttle ID", "Charge", "Capacity", "Service state", "Reserve margin", "Loops left", "Next depot (ETA)", "Reaches depot above reserve");
+            chargerTable = Table(root.Q("charger-table-host"), "", "Charger ID", "Ports", "Free ports", "Occupied shuttles", "Power");
+            offerTable = Table(root.Q("offer-table-host"), "", "Decision", "Shuttle ID", "Action", "Charger", "Out of service", "Battery after", "Loops after", "Min. in service", "Validation", "Assumptions", "Option ID");
+            chargeReason = root.Q<TextField>("charge-reason");
             chargeReason.RegisterValueChangedCallback(_ => UpdateActions());
-            charge = ActionButton(charging, "Reserve / Continue service", () => run(SubmitCharge()));
 
-            var incident = Page(host, nav, "Incidents");
-            incidents = new DropdownField("Incident"); incident.Add(incidents);
-            incidents.RegisterValueChangedCallback(_ => { ClearIncidentPreview(); Render(); });
-            incidentData = Text(incident, "");
-            incidentTable = Table(incident, "Incident list", "Incident", "Shuttle", "State", "Detected tick");
-            candidateTable = Table(incident, "Offered options", "Candidate", "Action", "Validation", "Expires tick", "Assumptions");
-            ActionButton(incident, "Focus incident shuttle", FocusIncident);
-            candidates = new DropdownField("Option"); incident.Add(candidates);
+            incidentDecisions = root.Q("incident-decisions");
+            incidents = root.Q<DropdownField>("incidents");
+            incidents.RegisterValueChangedCallback(_ => { ClearIncidentPreview(); Render(); IncidentSelected?.Invoke(); });
+            incidentData = root.Q<Label>("incident-data");
+            incidentTable = Table(root.Q("incident-table-host"), "", "Incident ID", "Shuttle ID", "State", "Detected tick", "Options");
+            candidateTable = Table(root.Q("candidate-table-host"), "", "Candidate", "Action", "Validation", "Expires tick", "Assumptions");
+            Bind(root, "incident-focus", FocusIncident);
+            candidates = root.Q<DropdownField>("candidates");
             candidates.RegisterValueChangedCallback(_ => { ClearIncidentPreview(); UpdateActions(); });
-            incidentReason = new TextField("Decision reason") { maxLength = 2048 }; incident.Add(incidentReason);
+            incidentReason = root.Q<TextField>("incident-reason");
             incidentReason.RegisterValueChangedCallback(_ => { ClearIncidentPreview(); UpdateActions(); });
-            var incidentActions = Row(incident);
-            previewIncident = ActionButton(incidentActions, "Preview option", () => run(PreviewIncident()));
-            approveIncident = ActionButton(incidentActions, "Approve previewed option", () => run(ApproveIncident()));
-            history = ActionButton(incidentActions, "History", () => run(IncidentReport(false)));
-            debrief = ActionButton(incidentActions, "Debrief", () => run(IncidentReport(true)));
-            incidentReport = Text(incident, "Preview, historical evidence and debrief appear here. Live state stays in the fleet view.");
-            evidenceStatus = Text(incident, "");
-            evidenceMap = new FleetMap { name = "incident-evidence-map" }; evidenceMap.AddToClassList("route-map"); incident.Add(evidenceMap);
-            historySample = new SliderInt("History sample", 0, 0); incident.Add(historySample);
+            previewIncident = Bind(root, "incident-preview", () => run(PreviewIncident()));
+            approveIncident = Bind(root, "incident-approve", () => run(ApproveIncident()));
+            history = Bind(root, "incident-history", () => run(IncidentReport(false)));
+            debrief = Bind(root, "incident-debrief", () => run(IncidentReport(true)));
+            incidentReport = root.Q<Label>("incident-report");
+            evidenceStatus = root.Q<Label>("evidence-status");
+            evidenceMap = root.Q<FleetMap>("incident-evidence-map");
+            world.UseRealMap(evidenceMap);
+            historySample = root.Q<SliderInt>("history-sample");
             historySample.RegisterValueChangedCallback(_ => ShowHistorySample());
-            evidenceMap.style.display = historySample.style.display = DisplayStyle.None;
 
-            var report = Page(host, nav, "Reports"); reports = Text(report, "");
-            ledgerTable = Table(report, "Command ledger", "Command", "Target", "Status", "Failure code", "Effective tick");
-            eventsTable = Table(report, "Event log", "Event", "Sequence", "Tick", "Type", "Entity", "Data");
+            ledgerTable = Table(root.Q("ledger-table-host"), "", "Command ID", "Target", "Status", "Failure code", "Effective tick");
+            eventsTable = Table(root.Q("events-table-host"), "", "Event ID", "Sequence", "Tick", "Type", "Entity ID");
             session.SnapshotAccepted += (_, __) => { acceptedAt = Time.realtimeSinceStartup; Render(); };
             session.EventsAccepted += _ => RenderReports();
             session.AvailabilityChanged += _ => { if (!session.Available) { InvalidateRoute(); ClearIncidentPreview(); } Render(); };
             session.CommandLedgerChanged += outcome =>
             {
                 ledger.RemoveAll(o => o.CommandId == outcome.CommandId); ledger.Add(outcome);
-                if (ledger.Count > 1000) ledger.RemoveAt(0);
+                if (ledger.Count > MaxLedgerEntries) ledger.RemoveAt(0);
                 if (outcome.Status != "QUEUED" && outcome.Status != "PENDING_CONFIRMATION") { InvalidateRoute(); ClearIncidentPreview(); }
                 RenderReports(); UpdateActions();
             };
@@ -155,7 +168,7 @@ namespace Formula9.UI
                 routeReason.value = chargeReason.value = incidentReason.value = "";
                 via.value = ""; draftHistory.Clear(); draftHistory.Add(""); historyIndex = 0;
                 ClearIncidentPreview(); ClearEvidence(); incidentReport.text = "";
-                routeMap.Show(null); world.SetRouteDraft(null, null, null);
+                routeGraph.Show(null, null, null); world.SetRouteDraft(null, null, null);
             }
             if (s == null) { UpdateActions(); return; }
             // An applied approval moves its route to a new revision, which finishes the draft. A queued
@@ -171,19 +184,24 @@ namespace Formula9.UI
             if (changed != dependencies)
             {
                 dependencies = changed; context = null; InvalidateRoute();
+                RenderRouteShuttles();
                 RequestContext();
             }
-            routeMap.Show(s, context, preview);
-            Rows(batteryTable, s.Vehicles.Select(v =>
+            var committedRoute = s.Routes.FirstOrDefault(r => r.RouteId == routes.value);
+            routeCommitted.text = committedRoute == null ? "No route" : $"{committedRoute.RouteId} / revision {committedRoute.Revision} (backend snapshot {s.SnapshotId})";
+            routeGraph.Show(context, preview, ParseDraftOrEmpty());
+            Rows(fleetTable, TrainingPresenter.Fleet(s, SelectedIncident).Select(r => new[] { r.ShuttleId, r.State, r.Route, r.Battery, r.Provenance }));
+            foreach (var row in fleetTable.Children()) { var id = ((Label)row[0]).text; row.RegisterCallback<ClickEvent>(_ => SelectVehicle(id)); }
+            Rows(batteryTable, s.Vehicles.OrderBy(v => v.VehicleId, StringComparer.Ordinal).Select(v =>
             {
                 var f = s.EnergyForecasts.FirstOrDefault(e => e.VehicleId == v.VehicleId);
-                return new[] { v.VehicleId, $"{v.BatteryKwh:0.00} / {v.BatteryCapacityKwh:0.00}", v.ServiceState,
-                    f?.ReserveMarginKwh.ToString("0.00") ?? "unknown", f?.LoopsRemaining?.ToString() ?? "unknown",
-                    $"{f?.NextDepotId ?? "unknown"} / {f?.NextDepotEtaS?.ToString("0.0") ?? "unknown"} s", f?.ReachesDepotAboveReserve?.ToString() ?? "unknown" };
+                return new[] { v.VehicleId, $"{v.BatteryKwh:0.##} kWh", $"{v.BatteryCapacityKwh:0.##} kWh", v.ServiceState,
+                    f == null ? "—" : $"{f.ReserveMarginKwh:0.##} kWh", f?.LoopsRemaining?.ToString() ?? "—",
+                    string.IsNullOrEmpty(f?.NextDepotId) ? "—" : $"{f.NextDepotId} ({f.NextDepotEtaS ?? 0:0.#} s)",
+                    f?.ReachesDepotAboveReserve == null ? "—" : f.ReachesDepotAboveReserve.Value ? "Yes" : "No" };
             }));
-            Rows(chargerTable, s.Chargers.Select(c => new[] { c.ChargerId, $"{c.PortCount - c.OccupiedVehicleIds.Count} / {c.PortCount}", string.Join(", ", c.OccupiedVehicleIds), c.PowerKw.ToString("0.0") }));
-            Rows(offerTable, s.ChargeOptions.Select(o => new[] { o.OptionId, o.VehicleId, o.Action, o.ChargerId, o.OutOfServiceS.ToString("0.0"), o.BatteryAfterKwh.ToString("0.00"), o.LoopsAfter?.ToString() ?? "unknown", o.MinInServiceVehicles?.ToString() ?? "unknown", o.Validation, string.Join("; ", o.Assumptions) }));
-            Choices(chargeOptions, s.ChargeOptions.Select(o => o.OptionId));
+            Rows(chargerTable, s.Chargers.Select(c => new[] { c.ChargerId, c.PortCount.ToString(), (c.PortCount - c.OccupiedVehicleIds.Count).ToString(), string.Join(", ", c.OccupiedVehicleIds), $"{c.PowerKw:0.0} kW" }));
+            RenderOffers(s);
             Choices(incidents, s.Incidents.Select(i => i.IncidentId));
             var selectedIncident = s.Incidents.FirstOrDefault(i => i.IncidentId == incidents.value);
             var newIncidentBoundary = selectedIncident == null ? null : $"{boundary}/{selectedIncident.IncidentId}/{selectedIncident.AggregateRevision}/" +
@@ -191,9 +209,42 @@ namespace Formula9.UI
             if (incidentBoundary != newIncidentBoundary) { incidentBoundary = newIncidentBoundary; ClearIncidentPreview(); ClearEvidence(); incidentReport.text = ""; }
             Choices(candidates, selectedIncident?.CandidateIds ?? Enumerable.Empty<string>());
             incidentData.text = s.Incidents.Count == 0 ? "No incidents detected." : "Select an incident and option, enter a reason, then preview the consequences before approval.";
-            Rows(incidentTable, s.Incidents.Select(i => new[] { i.IncidentId, i.VehicleId, i.State, i.DetectedTick.ToString() }));
+            incidentDecisions.style.display = s.Incidents.Count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
+            Rows(incidentTable, s.Incidents.OrderBy(i => i.IncidentId, StringComparer.Ordinal).Select(i => new[] { i.IncidentId, i.VehicleId, i.State, i.DetectedTick.ToString(), string.Join(", ", i.CandidateIds) }));
+            foreach (var row in incidentTable.Children()) { var id = ((Label)row[0]).text; row.RegisterCallback<ClickEvent>(_ => incidents.value = id); }
             Rows(candidateTable, s.Candidates.Where(c => c.IncidentId == incidents.value).Select(c => new[] { c.CandidateId, c.Action, c.Validation, c.ExpiresAtTick.ToString(), string.Join("; ", c.Assumptions) }));
             RenderReports(); UpdateActions();
+        }
+
+        private bool AllShuttlesChecked => routeShuttles.Query<Toggle>().ToList().All(t => t.value);
+
+        // Every shuttle on the route, checked: M2 approves a route for all of them or none.
+        private void RenderRouteShuttles()
+        {
+            routeShuttles.Clear();
+            var s = session.Store.Snapshot;
+            if (s == null) return;
+            foreach (var vehicle in s.Vehicles.Where(v => v.RouteId == routes.value).OrderBy(v => v.VehicleId, StringComparer.Ordinal))
+            {
+                var toggle = new Toggle(vehicle.VehicleId) { value = true };
+                toggle.RegisterValueChangedCallback(_ => InvalidateRoute());
+                routeShuttles.Add(toggle);
+            }
+        }
+
+        // A row of tab buttons, each showing its own panel; the first starts selected.
+        private static void Tabs(VisualElement root, params (string Button, string Panel)[] tabs)
+        {
+            void Select(string chosen)
+            {
+                foreach (var (button, panel) in tabs)
+                {
+                    root.Q<Button>(button).EnableInClassList("tab-item-selected", button == chosen);
+                    root.Q(panel).style.display = button == chosen ? DisplayStyle.Flex : DisplayStyle.None;
+                }
+            }
+            foreach (var (button, _) in tabs) root.Q<Button>(button).clicked += () => Select(button);
+            Select(tabs[0].Button);
         }
 
         private bool Current => session.Available && !session.HasPendingCommand && Time.realtimeSinceStartup - acceptedAt <= 5;
@@ -204,9 +255,9 @@ namespace Formula9.UI
             var s = session.Store.Snapshot;
             var edit = Current && !routeBusy && context != null && s?.Session.Status == "READY";
             validate.SetEnabled(edit);
-            approve.SetEnabled(edit && preview != null && preview.Approvable && DecisionRules.RoutePreviewMatches(s, preview) && !string.IsNullOrWhiteSpace(routeReason.value));
+            approve.SetEnabled(edit && AllShuttlesChecked && preview != null && preview.Approvable && DecisionRules.RoutePreviewMatches(s, preview) && !string.IsNullOrWhiteSpace(routeReason.value));
             via.SetEnabled(!session.HasPendingCommand && !routeBusy); routes.SetEnabled(!session.HasPendingCommand && !routeBusy);
-            charge.SetEnabled(Current && s?.Session.Status == "RUNNING" && !string.IsNullOrWhiteSpace(chargeReason.value) && s.ChargeOptions.Any(o => o.OptionId == chargeOptions.value && o.Validation == "PASS" && o.ExpiresAtTick >= s.Tick));
+            foreach (var button in offerTable.Query<Button>().ToList()) { var option = s?.ChargeOptions.FirstOrDefault(o => o.OptionId == (string)button.userData); button.SetEnabled(option != null && OfferOpen(s, option)); }
             var candidate = s?.Candidates.FirstOrDefault(c => c.CandidateId == candidates.value && c.IncidentId == incidents.value);
             var decision = Current && !incidentBusy && s?.Session.Status == "RUNNING" && candidate?.Validation == "PASS" && candidate.ExpiresAtTick >= s.Tick &&
                 s.Incidents.Any(i => i.IncidentId == incidents.value && i.State == "OPTIONS_READY") && !string.IsNullOrWhiteSpace(incidentReason.value);
@@ -221,8 +272,8 @@ namespace Formula9.UI
         {
             draftRevision++; preview = null;
             if (routeStatus != null) routeStatus.text = "Draft needs a fresh backend preview before approval.";
-            if (routeDetails != null) routeDetails.text = "";
-            routeMap?.Show(session.Store.Snapshot, context, null);
+            if (checksTable != null) { Rows(checksTable, Enumerable.Empty<string[]>()); Rows(comparisonTable, Enumerable.Empty<string[]>()); }
+            routeGraph?.Show(context, null, ParseDraftOrEmpty());
             world.SetRouteDraft(context, ParseDraftOrEmpty(), null);
             UpdateActions();
         }
@@ -259,9 +310,9 @@ namespace Formula9.UI
                 if (result.SessionEpoch != s.SessionEpoch || result.SceneRevision != s.SceneRevision || result.RouteRevision != s.Routes.Single(r => r.RouteId == route).Revision)
                     throw new ContractException("Route graph is stale; refresh it.");
                 context = result; dependencies = stamp;
-                routeStatus.text = $"{route} / revision {result.RouteRevision} · start {result.StartNodeId} → destination {result.DestinationNodeId}\n" +
-                    "Click graph nodes to add ordered via points. Red edges are closed.\n" + string.Join("\n", result.Assumptions);
-                routeMap.Show(session.Store.Snapshot, context, null);
+                routeStatus.text = "Route graph loaded; validate a proposal before approval.";
+                routeAssumptions.text = string.Join("\n", result.Assumptions);
+                routeGraph.Show(context, null, ParseDraftOrEmpty());
                 world.SetRouteDraft(context, ParseDraftOrEmpty(), null);
             }
             finally { routeBusy = false; UpdateActions(); if (reloadContext) run(LoadContext()); }
@@ -284,10 +335,15 @@ namespace Formula9.UI
                 if (generation != requestGeneration || revision != draftRevision || stamp != DecisionRules.RouteDependencies(session.Store.Snapshot, routes.value)) return;
                 preview = result;
                 routeStatus.text = $"Backend {result.Validation} · preview {result.PreviewId} / draft {result.PreviewRevision}";
-                routeDetails.text = string.Join("\n", result.Checks.Select(c => $"{c.Check}: {c.Status} ({(c.Mandatory ? "mandatory" : "advisory")}) · {c.Message}")) +
-                    "\n\nOriginal (estimate): " + Metrics(result.Original) + "\nEdited (estimate): " + Metrics(result.Edited) +
-                    "\n\nApproval targets: " + string.Join(", ", session.Store.Snapshot.Vehicles.Where(v => v.RouteId == result.RouteId).Select(v => v.VehicleId));
-                routeMap.Show(session.Store.Snapshot, context, preview); world.SetRouteDraft(context, nodes, preview);
+                Rows(checksTable, result.Checks.Select(c => new[] { c.Check, c.Status, c.Mandatory ? "Mandatory" : "Advisory", c.Message + (string.IsNullOrEmpty(c.FeatureId) ? "" : " · " + c.FeatureId) }));
+                Rows(comparisonTable, new[]
+                {
+                    new[] { "Distance (m)", Metric(result.Original, m => m.DistanceM.ToString("0.0")), Metric(result.Edited, m => m.DistanceM.ToString("0.0")) },
+                    new[] { "Duration (s)", Metric(result.Original, m => m.DurationS.ToString("0.0")), Metric(result.Edited, m => m.DurationS.ToString("0.0")) },
+                    new[] { "Estimated energy (kWh)", Metric(result.Original, m => m.EnergyKwh.ToString("0.0000")), Metric(result.Edited, m => m.EnergyKwh.ToString("0.0000")) },
+                    new[] { "Required stops served", Metric(result.Original, Coverage), Metric(result.Edited, Coverage) },
+                });
+                routeGraph.Show(context, preview, nodes); world.SetRouteDraft(context, nodes, preview);
             }
             finally { routeBusy = false; UpdateActions(); if (reloadContext) run(LoadContext()); }
         }
@@ -304,10 +360,40 @@ namespace Formula9.UI
             Render();
         }
 
-        private async Task SubmitCharge()
+        private bool OfferOpen(FullSnapshot s, ChargeOption o) => Current && s.Session.Status == "RUNNING" && !string.IsNullOrWhiteSpace(chargeReason.value) && o.Validation == "PASS" && o.ExpiresAtTick >= s.Tick;
+
+        // A Decision button per offer. Polling refreshes every second, so the rows stay while the
+        // offers are unchanged: a refresh between press and release must not delete the button.
+        private void RenderOffers(FullSnapshot s)
+        {
+            var rows = s.ChargeOptions.OrderBy(o => o.OptionId, StringComparer.Ordinal).Select(o => (Option: o, Cells: new[]
+            {
+                o.VehicleId, o.Action, string.IsNullOrEmpty(o.ChargerId) ? "—" : o.ChargerId, $"{o.OutOfServiceS:0.#} s", $"{o.BatteryAfterKwh:0.##} kWh",
+                o.LoopsAfter?.ToString() ?? "—", o.MinInServiceVehicles?.ToString() ?? "—", o.Validation, string.Join("; ", o.Assumptions), o.OptionId,
+            })).ToList();
+            var key = boundary + string.Concat(rows.Select(r => r.Option.Revision + "|" + string.Join("|", r.Cells) + "\n"));
+            if (key == offersKey) return;
+            offersKey = key;
+            offerTable.Clear();
+            foreach (var (option, cells) in rows)
+            {
+                var line = Row(offerTable);
+                var decision = new VisualElement(); decision.AddToClassList("data-cell"); line.Add(decision);
+                var label = option.Action == "CHARGE_NOW" ? "Reserve" : option.Action == "CONTINUE" ? "Keep in service" : null;
+                if (label == null) decision.Add(new Label("—"));
+                else
+                {
+                    var id = option.OptionId;
+                    decision.Add(new Button(() => run(SubmitCharge(id))) { text = label, userData = id, tooltip = "Submit this charging decision with revision checks." });
+                }
+                foreach (var value in cells) { var cell = new Label(value) { tooltip = value }; cell.AddToClassList("data-cell"); line.Add(cell); }
+            }
+        }
+
+        private async Task SubmitCharge(string optionId)
         {
             if (!Current) return;
-            var command = DecisionRules.ChargeCommand(session.Store.Snapshot, chargeOptions.value, chargeReason.value);
+            var command = DecisionRules.ChargeCommand(session.Store.Snapshot, optionId, chargeReason.value);
             if (await session.SubmitAsync(command)) await session.RefreshAsync();
             UpdateActions();
         }
@@ -404,13 +490,13 @@ namespace Formula9.UI
 
         private void RenderReports()
         {
-            reports.text = "Latest 1,000 events and 1,000 commands observed by this client. Scroll horizontally to inspect every column.";
-            Rows(ledgerTable, ledger.AsEnumerable().Reverse().Select(o => new[] { o.CommandId, $"{o.TargetType}/{o.TargetId}", o.Status, o.FailureCode, o.AppliedTick?.ToString() ?? "unknown" }));
-            Rows(eventsTable, session.Store.Events.Reverse().Select(e => new[] { e.EventId, e.EventSequence.ToString(), e.Tick.ToString(), e.EventType, e.EntityId, e.Data?.ToString(Formatting.None) }));
+            Rows(ledgerTable, ledger.Select(o => new[] { o.CommandId, $"{o.TargetType} {o.TargetId}", o.Status, string.IsNullOrEmpty(o.FailureCode) ? "—" : o.FailureCode, o.AppliedTick?.ToString() ?? "—" }));
+            Rows(eventsTable, session.Store.Events.Select(e => new[] { e.EventId, e.EventSequence.ToString(), e.Tick.ToString(), e.EventType, e.EntityId }));
         }
 
-        private static string Metrics(RouteMetrics m) => m == null ? "UNKNOWN" :
-            $"{m.DistanceM:0.0} m · {m.DurationS:0.0} s · {m.EnergyKwh:0.0000} kWh · stops: " + string.Join(", ", m.StopCoverage.Select(s => s.Key + (s.Value ? " served" : " MISSED")));
+        private static string Metric(RouteMetrics metrics, Func<RouteMetrics, string> read) => metrics == null ? "UNKNOWN" : read(metrics);
+        private static string Coverage(RouteMetrics m) => m.StopCoverage.Count == 0 ? "None required" :
+            string.Join(", ", m.StopCoverage.OrderBy(s => s.Key, StringComparer.Ordinal).Select(s => s.Key + (s.Value ? ": served" : ": MISSED")));
 
         // Human-readable nested fields preserve the backend's assumptions, evidence and rubric.
         private static string FormatDocument(JToken token, int depth = 0)
@@ -424,17 +510,29 @@ namespace Formula9.UI
             return token.Type == JTokenType.Null ? "Unavailable" : token.ToString();
         }
 
-        private VisualElement Page(VisualElement host, VisualElement nav, string name)
+        private void ShowPage(int index)
         {
-            var index = pages.Count; var page = new ScrollView(); page.AddToClassList("workspace-page"); host.Add(page); pages.Add(page);
-            ActionButton(nav, name, () => { ShowPage(index); Render(); }); return page;
+            // Only Fleet Overview has the map beside it; the other pages take the full width, as in Qt.
+            foreach (var view in operationalViews) view.style.display = index == 0 ? DisplayStyle.Flex : DisplayStyle.None;
+            // The Fleet List button may have hidden the panel these pages live in.
+            pages[index].parent.style.display = DisplayStyle.Flex;
+            for (var i = 0; i < pages.Count; i++)
+            {
+                pages[i].style.display = i == index ? DisplayStyle.Flex : DisplayStyle.None;
+                if (i < navButtons.Count) navButtons[i].EnableInClassList("nav-item-selected", i == index);
+            }
+            // The top menu shows the page's section: Reports and Scenarios, or everything else
+            SectionChanged?.Invoke(index == ReportsPage ? "reports" : index == ScenariosPage ? "scenarios" : "operations");
         }
-        private void ShowPage(int index) { for (var i = 0; i < pages.Count; i++) pages[i].style.display = i == index ? DisplayStyle.Flex : DisplayStyle.None; }
+
+        // A refused start sends the trainee here to approve a detour first.
+        public void ShowRoutePlanning() { ShowPage(1); Render(); }
+        public void ShowSection(string section) { ShowPage(section == "reports" ? ReportsPage : section == "scenarios" ? ScenariosPage : 0); Render(); }
         private static VisualElement Row(VisualElement parent) { var row = new VisualElement(); row.AddToClassList("row"); parent.Add(row); return row; }
         private static Label Text(VisualElement parent, string text) { var label = new Label(text); label.AddToClassList("workspace-text"); parent.Add(label); return label; }
         private static VisualElement Table(VisualElement parent, string title, params string[] columns)
         {
-            Text(parent, title);
+            if (title.Length > 0) Text(parent, title);
             var scroll = new ScrollView(ScrollViewMode.Horizontal); scroll.AddToClassList("data-table"); parent.Add(scroll);
             // A horizontal scroll view lays its children out side by side, so the heading and the
             // rows share one column inside it; otherwise the rows land to the right of the heading.
@@ -452,7 +550,7 @@ namespace Formula9.UI
                 foreach (var value in row) { var cell = new Label(value ?? "—") { tooltip = value }; cell.AddToClassList("data-cell"); line.Add(cell); }
             }
         }
-        private static Button ActionButton(VisualElement parent, string text, Action action) { var button = new Button(action) { text = text }; parent.Add(button); return button; }
+        private static Button Bind(VisualElement root, string name, Action action) { var button = root.Q<Button>(name); button.clicked += action; return button; }
         private static void Choices(DropdownField field, IEnumerable<string> values)
         {
             var choices = values.OrderBy(v => v, StringComparer.Ordinal).ToList();

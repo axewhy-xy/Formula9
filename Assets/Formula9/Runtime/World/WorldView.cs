@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Formula9.Backend;
 using Formula9.Contracts;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -14,7 +15,7 @@ namespace Formula9.World
     // Qt TrainingWorldViewport it only shows what the backend says.
     public sealed class WorldView : MonoBehaviour
     {
-        public const string NoWorld = "2D fleet map · click a shuttle to select · middle-drag pan · wheel zoom";
+        public const string NoWorld = "3D unavailable · this session has no spatial capability.";
         private const float MinDistance = 5, MaxDistance = 300, MinPitch = 0.12f, MaxPitch = 1.45f;
 
         private VisualElement surface;
@@ -29,6 +30,9 @@ namespace Formula9.World
         private float yaw, pitch = 0.6f, distance = 90;
         private int dragButton = -1;
         private FleetMap map;
+        private bool preferMap;
+        private MapTiles tiles;
+        private TransitClient transit;
         private DropdownField surfaces;
         private Toggle drafting;
         private RouteEditorContext routeContext;
@@ -46,14 +50,19 @@ namespace Formula9.World
         public string Diagnostic { get; private set; } = "Join a training session to see its world.";
         public event Action<bool, string> ReadinessChanged;
 
-        public void Attach(VisualElement view, SceneLoader sceneLoader)
+        public void Attach(VisualElement view, SceneLoader sceneLoader, MapTiles basemap = null, TransitClient busStops = null)
         {
             surface = view;
             loader = sceneLoader;
+            tiles = basemap;
+            transit = busStops;
             map = new FleetMap { name = "planar-map" };
             map.style.position = UnityEngine.UIElements.Position.Absolute;
+            // Opaque, so a 3D session's frame does not show through its 2D map.
+            map.style.backgroundColor = new Color(0.10f, 0.10f, 0.12f);
             map.style.left = map.style.top = map.style.right = map.style.bottom = 0;
             surface.Insert(0, map);
+            map.UseRealMap(tiles, transit, islandWhenEmpty: true);
             map.VehicleSelected += SelectEntity;
             var actions = new VisualElement(); actions.AddToClassList("world-actions");
             actions.style.position = UnityEngine.UIElements.Position.Absolute; actions.style.left = 8; actions.style.bottom = 8;
@@ -85,6 +94,7 @@ namespace Formula9.World
         {
             loading?.Cancel();
             Clear();
+            tiles?.Dispose();
             if (lineMaterial != null)
             {
                 if (Application.isPlaying) Destroy(lineMaterial);
@@ -97,20 +107,22 @@ namespace Formula9.World
         public void Show(FullSnapshot snapshot)
         {
             var boundary = snapshot == null ? null : $"{snapshot.SessionId}/{snapshot.SessionEpoch}";
-            if (boundary != sessionBoundary) { sessionBoundary = boundary; following = false; selectedId = null; routeContext = null; DrawDraft(); }
+            if (boundary != sessionBoundary) { sessionBoundary = boundary; preferMap = false; following = false; selectedId = null; routeContext = null; DrawDraft(); }
             latest = snapshot;
             if (snapshot?.Spatial == null)
             {
                 loading?.Cancel();
                 Clear();
-                map.style.display = snapshot == null ? DisplayStyle.None : DisplayStyle.Flex;
+                // With a real map there is something to see before joining: the whole island
+                map.style.display = snapshot == null && !map.ShowsIslandWhenEmpty ? DisplayStyle.None : DisplayStyle.Flex;
                 map.Show(snapshot);
                 surfaces.parent.style.display = DisplayStyle.None;
                 SetReady(snapshot != null, snapshot == null ? "Join a training session to see its world." : NoWorld);
                 return;
             }
-            map.style.display = DisplayStyle.None;
-            surfaces.parent.style.display = DisplayStyle.Flex;
+            map.style.display = preferMap ? DisplayStyle.Flex : DisplayStyle.None;
+            if (preferMap) map.Show(snapshot);
+            surfaces.parent.style.display = preferMap ? DisplayStyle.None : DisplayStyle.Flex;
             if (!SamePins(shownPins, snapshot.Spatial))
             {
                 _ = LoadAsync(snapshot.Spatial);
@@ -277,9 +289,19 @@ namespace Formula9.World
             e.StopPropagation();
         }
 
+        // The workspace's own planar maps sit on the same real Singapore as this one.
+        public void UseRealMap(FleetMap other) => other.UseRealMap(tiles, transit);
+
+        public string SelectedId => selectedId;
+        // The 2D Map / 3D View switch. A session without a 3D world always shows its map.
+        public bool ShowingMap => latest?.Spatial == null || preferMap;
+        public void ShowMap(bool value) { preferMap = value; if (latest != null) Show(latest); }
+        public bool Offline { get; private set; }
+        public void SetOffline(bool offline) { Offline = offline; map?.SetOffline(offline); }
+
         public void SelectEntity(string id)
         {
-            selectedId = id; map.SelectedId = id; map.MarkDirtyRepaint();
+            selectedId = id; map.SelectedId = id;
             EntitySelected?.Invoke(id);
         }
 
@@ -298,6 +320,7 @@ namespace Formula9.World
         public void SetRouteDraft(RouteEditorContext context, List<long> nodes, RouteEditPreview preview)
         {
             routeContext = context; draftNodes = nodes ?? new List<long>(); routePreview = preview; DrawDraft();
+            map.SetRoadNetwork(context);
         }
 
         private string SurfaceId => (surfaces?.value ?? "").Split('|')[0].Trim();

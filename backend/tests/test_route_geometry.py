@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 from contracts.v2.models import RouteRevision
 from src.services.asset_loader import load_routes_from_json
-from src.services.integrated_actor import IntegratedSessionActor
+from src.services.integrated_actor import IntegratedSessionActor, get_workflow_definition
 from src.services.session_actor import SessionActor
 from src.services.spatial_session_actor import SpatialSessionActor
 
@@ -56,9 +56,12 @@ def test_integrated_routes_are_drawable_and_closure_is_on_the_primary_route():
 def test_integrated_primary_route_places_its_stop_on_the_route():
     snapshot = IntegratedSessionActor(seed=1000, session_id="stop-check").generate_snapshot()
     primary = snapshot.routes[0]
-    assert [stop.stop_id for stop in primary.stops_m] == primary.required_stop_ids == ["stop-terminal"]
+    # Real LTA bus stops on the loop, named by stop code, in the order the loop serves them
+    required = list(get_workflow_definition().data["route_edit"]["required_stops"])
+    assert [stop.stop_id for stop in primary.stops_m] == primary.required_stop_ids == required
+    assert required and all(stop.split("-")[0].isdigit() and len(stop.split("-")[0]) == 5 for stop in required)
     corners = {(p.x_m, p.y_m) for path in primary.edge_paths_m for p in path}
-    assert (primary.stops_m[0].position.x_m, primary.stops_m[0].position.y_m) in corners
+    assert all((stop.position.x_m, stop.position.y_m) in corners for stop in primary.stops_m)
 
 
 def test_stops_m_may_only_place_required_stops():
@@ -67,3 +70,24 @@ def test_stops_m_may_only_place_required_stops():
     data["stops_m"][0]["stop_id"] = "stop-elsewhere"
     with pytest.raises(ValueError):
         RouteRevision.model_validate(data)
+
+
+def test_every_shuttle_pulls_in_at_every_stop_on_its_route():
+    actor = IntegratedSessionActor(seed=1000, session_id="stops")
+    routes = {route.route_id: route for route in actor.domain.routes}
+    assert len(routes["route-m2-detour"].stops_m) == 3
+    for peer in ("route-peer-b", "route-peer-c"):
+        assert len(routes[peer].stops_m) == 1, "a peer route reports the stop it serves"
+    actor.is_paused = False
+    actor.modes = {index: "IN_SERVICE" for index in actor.modes}
+    visited = {shuttle.ID: set() for shuttle in actor.shuttles}
+    for _ in range(9000):
+        actor.tick()
+        for shuttle in actor.shuttles:
+            if actor.modes[shuttle.ID] != "DWELLING":
+                continue
+            for stop in routes[shuttle.route_ID].stops_m:
+                if abs(shuttle.position.x - stop.position.x_m) < 0.5 and abs(shuttle.position.y - stop.position.y_m) < 0.5:
+                    visited[shuttle.ID].add(stop.stop_id)
+    for shuttle in actor.shuttles:
+        assert visited[shuttle.ID] == {stop.stop_id for stop in routes[shuttle.route_ID].stops_m}, shuttle.ID

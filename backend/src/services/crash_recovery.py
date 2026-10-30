@@ -132,7 +132,8 @@ def prepare(output, phases):
                     result = request(client, "POST", path+"/commands", expected=202, json=body)
                     assert result["status"] == "APPLIED"
 
-                async def advance_until(predicate, limit=4400):
+                # Real Singapore trips (shuttle-05 to its bus interchange is about 2.6 km) take longer than 4400 ticks
+                async def advance_until(predicate, limit=12000):
                     for _ in range(limit//2):
                         if predicate(snapshot()):
                             return

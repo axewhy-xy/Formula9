@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Formula9.Backend;
 using Formula9.Contracts;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -8,60 +11,190 @@ using UnityEngine.UIElements;
 namespace Formula9.World
 {
     // An operational planar view, also used for the pre-trip graph. Coordinates and routes
-    // come from the backend; the client never creates substitute road geometry.
-    public sealed class FleetMap : VisualElement
+    // come from the backend; the client never creates substitute road geometry. A 2D session sits
+    // on real Singapore: OpenStreetMap tiles underneath and LTA bus stops when zoomed in. A 3D
+    // session's local frame is not a real place, so it gets neither.
+    [UxmlElement]
+    public sealed partial class FleetMap : VisualElement
     {
+        // Far enough out to see the whole island (about 50 km across) in a small window
+        private const float MinMetresPerPoint = 0.1f, MaxMetresPerPoint = 120;
+        // Bus stops only this close in, and their names closer still, where they have room
+        private const float BusStopMaxMetresPerPoint = 4, BusStopLabelMetresPerPoint = 1.2f;
+        // Bus stops are asked for over the view plus this much on each side, so short pans need no request
+        private const float BusStopAreaMargin = 0.5f;
+        private const long BusStopSettleMs = 350;
+        // Most tiles one layout may place; only reached on a huge window
+        private const int MaxTiles = 400;
+        // How many zoom levels up to look for an already loaded tile to stretch over a missing one
+        private const int ParentTileLevels = 4;
+
+        private static readonly Color BasemapBackground = new Color(0.925f, 0.945f, 0.941f);
+        private static readonly Color PlannedRoute = new Color(0.153f, 0.682f, 0.376f);
+        private static readonly Color RoadClosed = new Color(0.839f, 0.188f, 0.192f);
+        private static readonly Color StopColor = new Color(0.09f, 0.412f, 0.667f);
+        // Gold: no shuttle in the palette uses it. Its names need a darker shade to read on white.
+        private static readonly Color BusStopColor = new Color(0.96f, 0.76f, 0.05f);
+        private static readonly Color BusStopText = new Color(0.45f, 0.33f, 0);
+        private static readonly Color DotOutline = new Color(0.118f, 0.157f, 0.176f);
+        private static readonly Color Frozen = new Color(0.627f, 0.627f, 0.627f);
+        public static Color FrozenColor => Frozen;
+        private static readonly Color ApprovedDetour = new Color(0.949f, 0.6f, 0.29f);
+        private static readonly Color OtherRoads = new Color(0.588f, 0.745f, 0.902f);
+        private static readonly Color DepotColor = new Color(0.122f, 0.306f, 0.349f);
+        private static readonly Color[] ShuttlePalette =
+        {
+            new Color(0.184f, 0.502f, 0.929f), new Color(0.153f, 0.682f, 0.376f), new Color(0.949f, 0.6f, 0.29f), new Color(0.608f, 0.318f, 0.878f),
+            new Color(0, 0.639f, 0.639f), new Color(0.91f, 0.365f, 0.627f), new Color(0.51f, 0.392f, 0.235f), new Color(0.353f, 0.431f, 0.549f),
+        };
+        // The same colour for a shuttle on the map and on its fleet card.
+        public static Color ShuttleColor(int index) => ShuttlePalette[index % ShuttlePalette.Length];
+
         private FullSnapshot snapshot;
         private RouteEditorContext context;
         private RouteEditPreview preview;
+        private readonly VisualElement tileLayer = new VisualElement { pickingMode = PickingMode.Ignore };
+        private readonly VisualElement drawing = new VisualElement { pickingMode = PickingMode.Ignore };
         private readonly VisualElement labels = new VisualElement { pickingMode = PickingMode.Ignore };
+        private readonly Label credit = new Label { pickingMode = PickingMode.Ignore };
+        private readonly List<Image> tileViews = new List<Image>();
+        private readonly List<Rect> placedLabels = new List<Rect>();
         private Vector2 min, max, pan, lastPointer;
         private float zoom = 1;
-        private bool dragging;
-        public string SelectedId { get; set; }
+        private bool pressed, dragging;
+        private Vector2 pressStart;
+        private const float DragStartDistance = 4;
+        private string selectedId;
+        private bool offline;
+        private RouteEditorContext roads;
+        private readonly VisualElement legend = new VisualElement { pickingMode = PickingMode.Ignore };
+        private readonly VisualElement busStopLegend;
+        private readonly Label scale = new Label { pickingMode = PickingMode.Ignore };
+        private readonly Label banner = new Label { pickingMode = PickingMode.Ignore };
+        // Shuttles glide between snapshots instead of jumping to each one.
+        private readonly Dictionary<string, (Vector2 From, Vector2 To, float Start, float Duration)> tracks = new Dictionary<string, (Vector2, Vector2, float, float)>();
+        private float lastSnapshotAt;
+
+        private MapTiles tiles;
+        private TransitClient transit;
+        private bool islandWhenEmpty;
+        private readonly IVisualElementScheduledItem busStopTimer;
+        private CancellationTokenSource busStopRequest;
+        private List<BusStop> busStops = new List<BusStop>();
+        private List<(double X, double Y)> busStopPositions = new List<(double, double)>();
+        private string busStopNotice;
+        private Vector2 requestedCenter = new Vector2(float.NaN, float.NaN), requestedSize;
+        private float requestedScale;
+
+        public string SelectedId { get => selectedId; set { selectedId = value; drawing.MarkDirtyRepaint(); } }
+        public bool ShowsIslandWhenEmpty => islandWhenEmpty && (tiles != null || transit != null);
         public event Action<string> VehicleSelected;
         public event Action<long> NodeSelected;
 
         public FleetMap()
         {
             pickingMode = PickingMode.Position;
-            labels.style.position = UnityEngine.UIElements.Position.Absolute;
-            labels.style.left = labels.style.top = labels.style.right = labels.style.bottom = 0;
-            Add(labels);
-            generateVisualContent += Draw;
-            RegisterCallback<GeometryChangedEvent>(_ => RefreshLabels());
-            RegisterCallback<WheelEvent>(e => { zoom = Mathf.Clamp(zoom * Mathf.Exp(-e.delta.y * 0.06f), 0.5f, 12); RefreshLabels(); e.StopPropagation(); });
+            foreach (var layer in new[] { tileLayer, drawing, labels })
+            {
+                layer.style.position = UnityEngine.UIElements.Position.Absolute;
+                layer.style.left = layer.style.top = layer.style.right = layer.style.bottom = 0;
+                Add(layer);
+            }
+            credit.style.position = UnityEngine.UIElements.Position.Absolute;
+            credit.style.right = 52; credit.style.bottom = 8; credit.style.fontSize = 10;
+            credit.style.color = DotOutline; credit.style.backgroundColor = new Color(1, 1, 1, 0.8f);
+            credit.style.paddingLeft = credit.style.paddingRight = 4;
+            credit.style.display = DisplayStyle.None;
+            Add(credit);
+            scale.AddToClassList("map-scale"); Add(scale);
+            banner.AddToClassList("map-banner"); banner.style.display = DisplayStyle.None; Add(banner);
+            legend.AddToClassList("map-legend"); legend.style.display = DisplayStyle.None; Add(legend);
+            var legendTitle = new Label("Legend") { pickingMode = PickingMode.Ignore }; legendTitle.AddToClassList("map-legend-title"); legend.Add(legendTitle);
+            LegendRow(legend, "Planned route", PlannedRoute, "swatch-line");
+            LegendRow(legend, "Approved detour", ApprovedDetour, "swatch-line");
+            LegendRow(legend, "Road closed", RoadClosed, "swatch-band");
+            LegendRow(legend, "Other roads", OtherRoads, "swatch-thin");
+            LegendRow(legend, "Shuttle", ShuttlePalette[0], "swatch-square");
+            LegendRow(legend, "Incident", RoadClosed, "swatch-dot");
+            LegendRow(legend, "No recent update", Frozen, "swatch-square");
+            LegendRow(legend, "Shuttle's stop (its colour)", StopColor, "swatch-ring");
+            LegendRow(legend, "Depot", DepotColor, "swatch-dot");
+            busStopLegend = LegendRow(legend, "Other bus stop", BusStopColor, "swatch-dot");
+            var controls = new VisualElement { pickingMode = PickingMode.Ignore }; controls.AddToClassList("map-controls");
+            var compass = new VisualElement { pickingMode = PickingMode.Ignore, tooltip = "The map is always north-up" }; compass.AddToClassList("map-compass");
+            compass.Add(new Glyph(GlyphKind.Compass, RoadClosed, 14)); compass.Add(new Label("N") { pickingMode = PickingMode.Ignore }); controls.Add(compass);
+            var fit = new Button(() => { pan = Vector2.zero; zoom = 1; Refresh(); }) { tooltip = "Fit the whole fleet" }; fit.AddToClassList("map-button");
+            fit.Add(new Glyph(GlyphKind.Fit, DotOutline, 18)); controls.Add(fit);
+            foreach (var (text, factor, tip) in new[] { ("+", 1.5f, "Zoom in"), ("-", 1 / 1.5f, "Zoom out") })
+            {
+                var button = new Button(() => ZoomAt(contentRect.size / 2, factor)) { text = text, tooltip = tip };
+                button.AddToClassList("map-button"); button.AddToClassList("map-text-button"); controls.Add(button);
+            }
+            Add(controls);
+            schedule.Execute(AnimationFrame).Every(33);
+            drawing.generateVisualContent += Draw;
+            busStopTimer = schedule.Execute(RequestBusStops);
+            busStopTimer.Pause();
+            RegisterCallback<GeometryChangedEvent>(_ => Refresh());
+            RegisterCallback<AttachToPanelEvent>(_ => { if (tiles != null) tiles.TileLoaded += RefreshTiles; });
+            RegisterCallback<DetachFromPanelEvent>(_ => { if (tiles != null) tiles.TileLoaded -= RefreshTiles; busStopRequest?.Cancel(); });
+            RegisterCallback<WheelEvent>(e => { ZoomAt(e.localMousePosition, Mathf.Exp(-e.delta.y * 0.06f)); e.StopPropagation(); });
+            // Left or middle drag pans. A left press that does not travel is a click, so it selects.
             RegisterCallback<PointerDownEvent>(e =>
             {
-                if (e.button == 2) { dragging = true; lastPointer = e.localPosition; this.CapturePointer(e.pointerId); e.StopPropagation(); }
-                if (e.button != 0) return;
-                var point = new Vector2(e.localPosition.x, e.localPosition.y);
-                if (context != null)
-                {
-                    var nearest = context.Nodes.OrderBy(n => Vector2.Distance(Project(n.X, n.Y), point)).FirstOrDefault();
-                    if (nearest != null && Vector2.Distance(Project(nearest.X, nearest.Y), point) <= 14) NodeSelected?.Invoke(nearest.NodeId);
-                }
-                else if (snapshot != null)
-                {
-                    var nearest = snapshot.Vehicles.OrderBy(v => Vector2.Distance(Project(v.Position.XM, v.Position.YM), point)).FirstOrDefault();
-                    if (nearest != null && Vector2.Distance(Project(nearest.Position.XM, nearest.Position.YM), point) <= 18)
-                    { SelectedId = nearest.VehicleId; VehicleSelected?.Invoke(SelectedId); RefreshLabels(); }
-                }
+                if ((e.button != 0 && e.button != 2) || e.target != this) return;
+                pressed = true; dragging = e.button == 2; pressStart = lastPointer = e.localPosition;
+                this.CapturePointer(e.pointerId);
                 e.StopPropagation();
             });
             RegisterCallback<PointerMoveEvent>(e =>
             {
-                if (!dragging) return;
-                Vector2 next = e.localPosition; pan += next - lastPointer; lastPointer = next; RefreshLabels();
+                if (!pressed) return;
+                Vector2 next = e.localPosition;
+                if (!dragging && Vector2.Distance(next, pressStart) < DragStartDistance) return;
+                dragging = true; pan += next - lastPointer; lastPointer = next; Refresh();
             });
-            RegisterCallback<PointerUpEvent>(e => { if (e.button == 2) { dragging = false; this.ReleasePointer(e.pointerId); } });
-            RegisterCallback<PointerCaptureOutEvent>(_ => dragging = false);
+            RegisterCallback<PointerUpEvent>(e =>
+            {
+                if (!pressed || (e.button != 0 && e.button != 2)) return;
+                var clicked = !dragging;
+                pressed = dragging = false;
+                this.ReleasePointer(e.pointerId);
+                if (clicked) Click(pressStart);
+            });
+            RegisterCallback<PointerCaptureOutEvent>(_ => pressed = dragging = false);
             style.overflow = Overflow.Hidden;
+        }
+
+        private void Click(Vector2 point)
+        {
+            if (context != null)
+            {
+                var nearest = context.Nodes.OrderBy(n => Vector2.Distance(Project(n.X, n.Y), point)).FirstOrDefault();
+                if (nearest != null && Vector2.Distance(Project(nearest.X, nearest.Y), point) <= 14) NodeSelected?.Invoke(nearest.NodeId);
+            }
+            else if (snapshot != null)
+            {
+                var nearest = snapshot.Vehicles.OrderBy(v => Vector2.Distance(ShownAt(v), point)).FirstOrDefault();
+                if (nearest != null && Vector2.Distance(ShownAt(nearest), point) <= 18)
+                { SelectedId = nearest.VehicleId; VehicleSelected?.Invoke(SelectedId); Refresh(); }
+            }
+        }
+
+        // Puts the map on real Singapore. Either source may be null; with both null it stays a plain
+        // diagram. With islandWhenEmpty it shows the whole island until a session is joined.
+        public void UseRealMap(MapTiles basemap, TransitClient busStopSource, bool islandWhenEmpty = false)
+        {
+            if (panel != null && tiles != null) tiles.TileLoaded -= RefreshTiles;
+            tiles = basemap; transit = busStopSource; this.islandWhenEmpty = islandWhenEmpty;
+            if (panel != null && tiles != null) tiles.TileLoaded += RefreshTiles;
+            Show(snapshot, context, preview);
         }
 
         public void Show(FullSnapshot value, RouteEditorContext graph = null, RouteEditPreview proposal = null)
         {
             if (snapshot?.SessionId != value?.SessionId || context?.RouteId != graph?.RouteId) { pan = Vector2.zero; zoom = 1; }
+            UpdateTracks(value);
             snapshot = value; context = graph; preview = proposal;
             var points = new List<Vector2>();
             if (context != null) points.AddRange(context.Nodes.Select(n => new Vector2((float)n.X, (float)n.Y)));
@@ -71,44 +204,330 @@ namespace Formula9.World
                 points.AddRange(snapshot.Vehicles.Select(v => new Vector2((float)v.Position.XM, (float)v.Position.YM)));
                 points.AddRange(snapshot.Depots.Select(d => new Vector2((float)d.Position.XM, (float)d.Position.YM)));
             }
+            else if (ShowsIslandWhenEmpty) points.AddRange(new[] { new Vector2(-25000, -15000), new Vector2(25000, 15000) });
             min = points.Count == 0 ? Vector2.zero : new Vector2(points.Min(p => p.x), points.Min(p => p.y));
             max = points.Count == 0 ? Vector2.one : new Vector2(points.Max(p => p.x), points.Max(p => p.y));
-            RefreshLabels();
+            Refresh();
         }
+
+        // A dead backend is not a stopped fleet: say so, and show the positions as old.
+        public void SetOffline(bool value)
+        {
+            if (offline == value) return;
+            offline = value;
+            banner.text = "Backend offline · positions frozen at the last report";
+            banner.style.display = value ? DisplayStyle.Flex : DisplayStyle.None;
+            if (value) foreach (var id in tracks.Keys.ToList()) { var t = tracks[id]; tracks[id] = (t.To, t.To, t.Start, 0); }
+            Refresh();
+        }
+
+        private void UpdateTracks(FullSnapshot next)
+        {
+            var now = Time.realtimeSinceStartup;
+            var duration = Mathf.Clamp(now - lastSnapshotAt, 0, 1);
+            lastSnapshotAt = now;
+            if (next == null || next.SessionId != snapshot?.SessionId) tracks.Clear();
+            if (next == null) return;
+            foreach (var vehicle in next.Vehicles)
+            {
+                var to = new Vector2((float)vehicle.Position.XM, (float)vehicle.Position.YM);
+                tracks[vehicle.VehicleId] = tracks.ContainsKey(vehicle.VehicleId) ? (ShownMetres(vehicle.VehicleId, to), to, now, duration) : (to, to, now, 0);
+            }
+        }
+
+        private Vector2 ShownMetres(string id, Vector2 fallback)
+        {
+            if (!tracks.TryGetValue(id, out var track)) return fallback;
+            return track.Duration <= 0 ? track.To : Vector2.Lerp(track.From, track.To, (Time.realtimeSinceStartup - track.Start) / track.Duration);
+        }
+
+        private Vector2 ShownAt(FleetVehicle vehicle)
+        {
+            var at = ShownMetres(vehicle.VehicleId, new Vector2((float)vehicle.Position.XM, (float)vehicle.Position.YM));
+            return Project(at.x, at.y);
+        }
+
+        private void AnimationFrame()
+        {
+            if (snapshot == null || context != null || contentRect.width < 1 || contentRect.height < 1) return;
+            var now = Time.realtimeSinceStartup;
+            var gliding = !offline && tracks.Values.Any(t => t.Duration > 0 && now < t.Start + t.Duration && t.From != t.To);
+            if (gliding) RefreshLabels();
+            if (gliding || (!offline && snapshot.Incidents.Any(i => i.State != "RESOLVED"))) drawing.MarkDirtyRepaint();
+        }
+
+        private static VisualElement LegendRow(VisualElement legend, string text, Color color, string swatchClass)
+        {
+            var row = new VisualElement { pickingMode = PickingMode.Ignore }; row.AddToClassList("map-legend-row");
+            var key = new VisualElement { pickingMode = PickingMode.Ignore }; key.AddToClassList("map-legend-key");
+            var swatch = new VisualElement { pickingMode = PickingMode.Ignore }; swatch.AddToClassList(swatchClass);
+            if (swatchClass == "swatch-ring") swatch.style.borderTopColor = swatch.style.borderBottomColor = swatch.style.borderLeftColor = swatch.style.borderRightColor = color;
+            else swatch.style.backgroundColor = color;
+            key.Add(swatch); row.Add(key);
+            row.Add(new Label(text) { pickingMode = PickingMode.Ignore });
+            legend.Add(row);
+            return row;
+        }
+
+        // The streets of the route graph, drawn faintly under the fleet's routes.
+        public void SetRoadNetwork(RouteEditorContext graph)
+        {
+            roads = graph;
+            drawing.MarkDirtyRepaint();
+        }
+
+        private static double NiceLength(double value)
+        {
+            var power = Math.Pow(10, Math.Floor(Math.Log10(value)));
+            foreach (var step in new[] { 5.0, 2.0, 1.0 })
+                if (step * power <= value) return step * power;
+            return power;
+        }
+
+        private List<Color> ServingColors(string routeId) => snapshot.Vehicles.OrderBy(v => v.VehicleId, StringComparer.Ordinal)
+            .Select((v, index) => (v.RouteId, Color: offline ? Frozen : ShuttleColor(index)))
+            .Where(v => v.RouteId == routeId).Select(v => v.Color).ToList();
+
+        // An LTA stop one of our routes serves is drawn in that route's colours instead of gold.
+        // Route stop IDs start with the LTA stop code, such as 52449-toa-payoh-police-centre.
+        private bool ServedByARoute(string code) => snapshot != null && snapshot.Routes.SelectMany(r => r.StopsM)
+            .Any(s => s.StopId == code || s.StopId.StartsWith(code + "-", StringComparison.Ordinal));
+
+        private void RefreshOverlays()
+        {
+            legend.style.display = islandWhenEmpty ? DisplayStyle.Flex : DisplayStyle.None;
+            busStopLegend.style.display = BusStopsShown && busStops.Count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
+            var metres = NiceLength(110 * MetresPerPoint);
+            scale.text = metres >= 1000 ? $"{metres / 1000:0.#} km" : $"{metres:0.#} m";
+            scale.style.width = (float)(metres / MetresPerPoint);
+        }
+
+        private bool OnRealMap => (tiles != null || transit != null) && (snapshot != null ? snapshot.Spatial == null : context == null && islandWhenEmpty);
+        private bool BusStopsShown => transit != null && OnRealMap && MetresPerPoint <= BusStopMaxMetresPerPoint;
+
+        private float FitScale => Mathf.Min(Mathf.Max(1, contentRect.width - 60) / Mathf.Max(1, max.x - min.x),
+            Mathf.Max(1, contentRect.height - 60) / Mathf.Max(1, max.y - min.y));
+        private float Scale => FitScale * zoom;
+        private float MetresPerPoint => 1 / Scale;
 
         private Vector2 Project(double x, double y)
         {
-            var width = Mathf.Max(1, contentRect.width - 60); var height = Mathf.Max(1, contentRect.height - 60);
-            var scale = Mathf.Min(width / Mathf.Max(1, max.x - min.x), height / Mathf.Max(1, max.y - min.y)) * zoom;
             var center = (min + max) / 2;
-            return new Vector2(contentRect.width / 2 + ((float)x - center.x) * scale, contentRect.height / 2 - ((float)y - center.y) * scale) + pan;
+            return new Vector2(contentRect.width / 2 + (float)((x - center.x) * Scale), contentRect.height / 2 - (float)((y - center.y) * Scale)) + pan;
+        }
+
+        private (double X, double Y) Unproject(Vector2 point)
+        {
+            var center = (min + max) / 2;
+            return (center.x + (double)(point.x - pan.x - contentRect.width / 2) / Scale, center.y - (double)(point.y - pan.y - contentRect.height / 2) / Scale);
+        }
+
+        // Keeps the point under the pointer still.
+        private void ZoomAt(Vector2 pointer, float factor)
+        {
+            var low = OnRealMap ? 1 / (FitScale * MaxMetresPerPoint) : 0.5f;
+            var high = OnRealMap ? 1 / (FitScale * MinMetresPerPoint) : 12;
+            var next = Mathf.Clamp(zoom * factor, Mathf.Min(low, 1), Mathf.Max(high, 1));
+            var fromCenter = pointer - contentRect.size / 2;
+            pan = fromCenter - (fromCenter - pan) * (next / zoom);
+            zoom = next;
+            Refresh();
+        }
+
+        private void Refresh()
+        {
+            RefreshTiles();
+            RefreshLabels();
+            NoteViewChanged();
+            RefreshCredit();
+            RefreshOverlays();
+            drawing.MarkDirtyRepaint();
         }
 
         private void RefreshLabels()
         {
             labels.Clear();
+            placedLabels.Clear();
             if (context != null)
-                foreach (var node in context.Nodes) AddLabel(node.NodeId.ToString(), Project(node.X, node.Y));
+                foreach (var node in context.Nodes) PlaceLabel(node.NodeId.ToString(), Project(node.X, node.Y), LabelStyle.Beside, DotOutline);
             else if (snapshot != null)
             {
-                foreach (var vehicle in snapshot.Vehicles)
-                    AddLabel(vehicle.VehicleId + (snapshot.Incidents.Any(i => i.VehicleId == vehicle.VehicleId && i.State != "RESOLVED") ? " !" : ""), Project(vehicle.Position.XM, vehicle.Position.YM));
-                foreach (var depot in snapshot.Depots) AddLabel(depot.DepotId + " / " + string.Join(", ", depot.ChargerIds), Project(depot.Position.XM, depot.Position.YM));
+                // The selected shuttle first; a label that would cover another is left out, as in the Qt map
+                foreach (var vehicle in snapshot.Vehicles.OrderBy(v => v.VehicleId == SelectedId ? 0 : 1).ThenBy(v => v.VehicleId, StringComparer.Ordinal))
+                    PlaceLabel(vehicle.VehicleId + (snapshot.Incidents.Any(i => i.VehicleId == vehicle.VehicleId && i.State != "RESOLVED") ? " !" : ""), ShownAt(vehicle), LabelStyle.Below, DotOutline);
+                foreach (var route in snapshot.Routes)
+                {
+                    var colors = ServingColors(route.RouteId);
+                    foreach (var stop in route.StopsM) PlaceLabel(stop.StopId, Project(stop.Position.XM, stop.Position.YM), LabelStyle.Beside, colors.Count > 0 ? colors[0] : StopColor);
+                }
+                foreach (var depot in snapshot.Depots) PlaceLabel(depot.DepotId + " / " + string.Join(", ", depot.ChargerIds), Project(depot.Position.XM, depot.Position.YM), LabelStyle.Beside, DepotColor);
             }
-            MarkDirtyRepaint();
+            // Bus stop names last, so they never push a shuttle or session stop label off the map
+            if (BusStopsShown && MetresPerPoint <= BusStopLabelMetresPerPoint)
+                for (var i = 0; i < busStops.Count; i++)
+                {
+                    var at = Project(busStopPositions[i].X, busStopPositions[i].Y);
+                    if (contentRect.Contains(at) && busStops[i].Name.Length > 0 && !ServedByARoute(busStops[i].Code)) PlaceLabel(busStops[i].Name, at, LabelStyle.Beside, BusStopText);
+                }
         }
 
-        private void AddLabel(string text, Vector2 point)
+        private enum LabelStyle { Beside, Below }
+
+        // Label sizes are not known until layout, so the box is an estimate from the font size.
+        private void PlaceLabel(string text, Vector2 point, LabelStyle placement, Color color)
         {
+            var width = text.Length * 6.5f + 12;
+            var box = placement == LabelStyle.Below ? new Rect(point.x - width / 2, point.y + 18, width, 20) : new Rect(point.x + 10, point.y - 10, width, 20);
+            if (placedLabels.Any(other => other.Overlaps(box))) return;
+            placedLabels.Add(box);
             var label = new Label(text) { pickingMode = PickingMode.Ignore };
-            label.style.position = UnityEngine.UIElements.Position.Absolute; label.style.left = point.x + 7; label.style.top = point.y + 3;
-            label.style.fontSize = 11; label.style.color = Color.white;
+            label.style.position = UnityEngine.UIElements.Position.Absolute;
+            label.style.left = box.x; label.style.top = box.y;
+            label.style.fontSize = 12; label.style.color = color;
+            if (placement == LabelStyle.Below) label.style.unityFontStyleAndWeight = FontStyle.Bold;
+            label.style.backgroundColor = new Color(1, 1, 1, 0.92f);
+            label.style.paddingLeft = label.style.paddingRight = 6;
+            label.style.borderTopLeftRadius = label.style.borderTopRightRadius = label.style.borderBottomLeftRadius = label.style.borderBottomRightRadius = 6;
             labels.Add(label);
+        }
+
+        // Credits, as the OSM and LTA licences require, and why bus stops are missing if they are.
+        private void RefreshCredit()
+        {
+            var credits = new List<string>();
+            if (tiles != null && OnRealMap) credits.Add(tiles.Attribution);
+            if (BusStopsShown)
+            {
+                if (busStops.Count > 0) credits.Add(transit.Attribution != null && transit.Attribution.Contains("LTA") ? "Bus stops: LTA DataMall" : "Bus stops: © OpenStreetMap contributors");
+                else if (!string.IsNullOrEmpty(busStopNotice)) credits.Add(busStopNotice);
+            }
+            credit.text = string.Join(" · ", credits);
+            credit.style.display = credits.Count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
+        }
+
+        private void RefreshTiles()
+        {
+            var used = 0;
+            var shown = tiles != null && OnRealMap && contentRect.width >= 1 && contentRect.height >= 1;
+            tileLayer.style.backgroundColor = shown ? new StyleColor(BasemapBackground) : new StyleColor(StyleKeyword.Null);
+            if (shown)
+            {
+                tiles.BeginFrame();
+                var ratio = panel?.scaledPixelsPerPoint ?? 1;
+                var centerM = Unproject(contentRect.size / 2);
+                var centre = MapGeo.ToLatLon(centerM.X, centerM.Y);
+                var level = MapGeo.TileZoomFor(MetresPerPoint, centre.Latitude, ratio);
+                var northWest = Unproject(Vector2.zero); var southEast = Unproject(contentRect.size);
+                var first = MapGeo.TileAt(MapGeo.ToLatLon(northWest.X, northWest.Y), level);
+                var last = MapGeo.TileAt(MapGeo.ToLatLon(southEast.X, southEast.Y), level);
+                var count = 1 << level;
+                int left = Math.Max(0, (int)Math.Floor(first.X)), right = Math.Min(count - 1, (int)Math.Floor(last.X));
+                int top = Math.Max(0, (int)Math.Floor(first.Y)), bottom = Math.Min(count - 1, (int)Math.Floor(last.Y));
+                if (right >= left && bottom >= top && (right - left + 1) * (bottom - top + 1) <= MaxTiles)
+                {
+                    // Centre tiles first, so they are the first to be downloaded
+                    var middle = MapGeo.TileAt(centre, level);
+                    var order = Enumerable.Range(left, right - left + 1)
+                        .SelectMany(x => Enumerable.Range(top, bottom - top + 1).Select(y => (X: x, Y: y)))
+                        .OrderBy(t => Math.Pow(t.X + 0.5 - middle.X, 2) + Math.Pow(t.Y + 0.5 - middle.Y, 2));
+                    foreach (var tile in order)
+                    {
+                        var (texture, uv) = TileOrStandIn(level, tile.X, tile.Y);
+                        if (texture == null) continue;
+                        if (used == tileViews.Count)
+                        {
+                            var created = new Image { pickingMode = PickingMode.Ignore, scaleMode = ScaleMode.StretchToFill };
+                            created.style.position = UnityEngine.UIElements.Position.Absolute;
+                            tileViews.Add(created); tileLayer.Add(created);
+                        }
+                        Place(tileViews[used++], texture, uv, tile.X, tile.Y, level, ratio);
+                    }
+                }
+            }
+            for (var i = used; i < tileViews.Count; i++) tileViews[i].style.display = DisplayStyle.None;
+        }
+
+        // Until a tile arrives, the matching part of a coarser tile that is already loaded.
+        private (Texture2D, Rect) TileOrStandIn(int level, int x, int y)
+        {
+            var texture = tiles.Tile(level, x, y);
+            if (texture != null) return (texture, new Rect(0, 0, 1, 1));
+            for (var up = 1; up <= ParentTileLevels && up <= level; up++)
+            {
+                var parent = tiles.Cached(level - up, x >> up, y >> up);
+                if (parent == null) continue;
+                var part = 1f / (1 << up);
+                // Texture coordinates start at the bottom, tile rows at the top.
+                return (parent, new Rect((x - ((x >> up) << up)) * part, 1 - (y - ((y >> up) << up) + 1) * part, part, part));
+            }
+            return (null, default);
+        }
+
+        private void Place(Image view, Texture2D texture, Rect uv, int x, int y, int level, float ratio)
+        {
+            // Corners snapped to physical pixels, so neighbouring tiles share an edge with no hairline gap
+            Vector2 Corner(int cornerX, int cornerY)
+            {
+                var local = MapGeo.ToLocal(MapGeo.TileCorner(cornerX, cornerY, level));
+                var at = Project(local.X, local.Y);
+                return new Vector2(Mathf.Round(at.x * ratio) / ratio, Mathf.Round(at.y * ratio) / ratio);
+            }
+            var northWest = Corner(x, y); var southEast = Corner(x + 1, y + 1);
+            view.image = texture; view.uv = uv;
+            view.style.left = northWest.x; view.style.top = northWest.y;
+            view.style.width = southEast.x - northWest.x; view.style.height = southEast.y - northWest.y;
+            view.style.display = DisplayStyle.Flex;
+        }
+
+        // Bus stops are requested for the visible area once panning and zooming settle.
+        private void NoteViewChanged()
+        {
+            if (!BusStopsShown || contentRect.width < 1 || contentRect.height < 1) { busStopTimer.Pause(); requestedScale = 0; return; }
+            var centerM = Unproject(contentRect.size / 2);
+            var center = new Vector2((float)centerM.X, (float)centerM.Y);
+            if (center == requestedCenter && Scale == requestedScale && contentRect.size == requestedSize) return;
+            requestedCenter = center; requestedScale = Scale; requestedSize = contentRect.size;
+            busStopTimer.ExecuteLater(BusStopSettleMs);
+        }
+
+        private void RequestBusStops()
+        {
+            busStopTimer.Pause();
+            if (BusStopsShown) _ = RequestBusStopsAsync();
+        }
+
+        private async Task RequestBusStopsAsync()
+        {
+            busStopRequest?.Cancel();
+            var request = busStopRequest = new CancellationTokenSource();
+            var margin = contentRect.size * BusStopAreaMargin;
+            var northWestM = Unproject(-margin); var southEastM = Unproject(contentRect.size + margin);
+            var northWest = MapGeo.ToLatLon(northWestM.X, northWestM.Y); var southEast = MapGeo.ToLatLon(southEastM.X, southEastM.Y);
+            try
+            {
+                var stops = await transit.GetBusStopsAsync(southEast.Latitude, northWest.Longitude, northWest.Latitude, southEast.Longitude, request.Token);
+                if (request != busStopRequest) return;
+                busStops = stops;
+                busStopPositions = stops.Select(s => MapGeo.ToLocal(new LatLon(s.Latitude, s.Longitude))).ToList();
+                busStopNotice = null;
+            }
+            catch (OperationCanceledException) { return; }
+            catch (TransitUnavailableException error) { if (request != busStopRequest) return; busStopNotice = error.Message; }
+            catch (Exception) { if (request != busStopRequest) return; busStopNotice = "bus stops unavailable"; }
+            Refresh();
         }
 
         private void Draw(MeshGenerationContext mesh)
         {
             var painter = mesh.painter2D;
+            var realMap = OnRealMap;
+            if (BusStopsShown)
+                for (var i = 0; i < busStopPositions.Count; i++)
+                {
+                    var at = Project(busStopPositions[i].X, busStopPositions[i].Y);
+                    if (!contentRect.Contains(at) || ServedByARoute(busStops[i].Code)) continue;
+                    Dot(painter, at, BusStopColor, 5);
+                }
             if (context != null)
             {
                 var nodes = context.Nodes.ToDictionary(n => n.NodeId);
@@ -116,7 +535,7 @@ namespace Formula9.World
                 {
                     if (!nodes.TryGetValue(edge.Source, out var a) || !nodes.TryGetValue(edge.Target, out var b)) continue;
                     var start = Project(a.X, a.Y); var end = Project(b.X, b.Y);
-                    Line(painter, new[] { start, end }, edge.Closed ? Color.red : new Color(0.5f, 0.6f, 0.7f), 2);
+                    Line(painter, new[] { start, end }, edge.Closed ? RoadClosed : realMap ? new Color(0.25f, 0.35f, 0.5f) : new Color(0.5f, 0.6f, 0.7f), 2);
                     var direction = (end - start).normalized; var tip = Vector2.Lerp(start, end, 0.65f);
                     Line(painter, new[] { tip - direction * 7 + new Vector2(-direction.y, direction.x) * 4, tip, tip - direction * 7 - new Vector2(-direction.y, direction.x) * 4 }, Color.gray, 1);
                 }
@@ -125,12 +544,61 @@ namespace Formula9.World
             else if (snapshot != null)
             {
                 var closures = new HashSet<string>(snapshot.Disruptions.Where(d => d.ActiveFromTick <= snapshot.Tick && (d.ActiveUntilTick == null || snapshot.Tick < d.ActiveUntilTick)).SelectMany(d => d.AffectedEdgeIds));
+                if (roads != null)
+                {
+                    var nodes = roads.Nodes.ToDictionary(n => n.NodeId);
+                    foreach (var edge in roads.Edges)
+                        if (nodes.TryGetValue(edge.Source, out var a) && nodes.TryGetValue(edge.Target, out var b))
+                            Line(painter, new[] { Project(a.X, a.Y), Project(b.X, b.Y) }, OtherRoads, 2);
+                }
+                // A route is an approved detour when it was revised, or a shuttle on it is detouring
+                var detouring = new HashSet<string>(snapshot.Vehicles.Where(v => v.ServiceState == "DETOURING").Select(v => v.RouteId));
                 foreach (var route in snapshot.Routes)
+                {
+                    var routeColor = !realMap ? new Color(0.4f, 0.6f, 0.7f) : route.Revision > 1 || detouring.Contains(route.RouteId) ? ApprovedDetour : PlannedRoute;
                     for (var i = 0; i < route.EdgePathsM.Count; i++)
-                        Line(painter, route.EdgePathsM[i].Select(p => Project(p.XM, p.YM)).ToArray(), i < route.DirectedEdgeIds.Count && closures.Contains(route.DirectedEdgeIds[i]) ? Color.red : new Color(0.4f, 0.6f, 0.7f), 3);
-                foreach (var depot in snapshot.Depots) Dot(painter, Project(depot.Position.XM, depot.Position.YM), Color.yellow, 7);
-                foreach (var vehicle in snapshot.Vehicles)
-                    Dot(painter, Project(vehicle.Position.XM, vehicle.Position.YM), vehicle.VehicleId == SelectedId ? Color.yellow : Color.cyan, 6);
+                    {
+                        var path = route.EdgePathsM[i].Select(p => Project(p.XM, p.YM)).ToArray();
+                        if (i < route.DirectedEdgeIds.Count && closures.Contains(route.DirectedEdgeIds[i]))
+                        {
+                            Line(painter, path, new Color(RoadClosed.r, RoadClosed.g, RoadClosed.b, 0.35f), 20);
+                            Line(painter, path, RoadClosed, 4);
+                        }
+                        else Line(painter, path, routeColor, 6);
+                    }
+                }
+                // A stop wears the colours of the shuttles that serve it: an outer ring for the
+                // first, an inner one for a second on the same route
+                foreach (var route in snapshot.Routes)
+                {
+                    var colors = ServingColors(route.RouteId);
+                    foreach (var stop in route.StopsM)
+                    {
+                        var at = Project(stop.Position.XM, stop.Position.YM);
+                        Dot(painter, at, colors.Count > 0 ? colors[0] : StopColor, 9, false);
+                        if (colors.Count > 1) Dot(painter, at, colors[1], 6, false);
+                        Dot(painter, at, Color.white, 3, false);
+                    }
+                }
+                foreach (var depot in snapshot.Depots)
+                {
+                    var at = Project(depot.Position.XM, depot.Position.YM);
+                    Dot(painter, at, DepotColor, 9, false);
+                }
+                var ordered = snapshot.Vehicles.OrderBy(v => v.VehicleId, StringComparer.Ordinal).ToList();
+                // An incident pulses, unless the position is too old to mean anything
+                var pulse = 0.5f + 0.5f * Mathf.Sin(Time.realtimeSinceStartup * 4);
+                for (var i = 0; i < ordered.Count; i++)
+                {
+                    var vehicle = ordered[i]; var at = ShownAt(vehicle);
+                    if (!offline && snapshot.Incidents.Any(n => n.VehicleId == vehicle.VehicleId && n.State != "RESOLVED"))
+                    {
+                        painter.strokeColor = new Color(RoadClosed.r, RoadClosed.g, RoadClosed.b, 1 - 0.6f * pulse); painter.lineWidth = 3;
+                        painter.BeginPath(); painter.Arc(at, 10 + 8 * pulse, 0, 360); painter.Stroke();
+                    }
+                    if (vehicle.VehicleId == SelectedId) Dot(painter, at, new Color(0.47f, 0.8f, 0.82f, 0.7f), 22, false);
+                    Glyph.DrawBus(painter, at, 30, offline ? Frozen : ShuttleColor(i));
+                }
             }
             if (preview != null) Line(painter, preview.Polyline.Select(p => Project(p.X, p.Y)).ToArray(), Color.green, 4);
         }
@@ -142,9 +610,12 @@ namespace Formula9.World
             foreach (var point in points.Skip(1)) painter.LineTo(point);
             painter.Stroke();
         }
-        private static void Dot(Painter2D painter, Vector2 point, Color color, float radius)
+        // The outline keeps pale dots visible on the light basemap as well as the dark diagram.
+        private static void Dot(Painter2D painter, Vector2 point, Color color, float radius, bool outlined = true)
         {
             painter.fillColor = color; painter.BeginPath(); painter.Arc(point, radius, 0, 360); painter.Fill();
+            if (!outlined) return;
+            painter.strokeColor = DotOutline; painter.lineWidth = 1; painter.Stroke();
         }
     }
 }

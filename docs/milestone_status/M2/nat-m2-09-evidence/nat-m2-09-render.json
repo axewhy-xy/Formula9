@@ -1,0 +1,16 @@
+{
+    "debug_logger": true,
+    "decoded_bytes": 12864,
+    "encoded_bytes": 35811,
+    "gl_errors": 0,
+    "gl_major": 3,
+    "gl_minor": 3,
+    "mandatory_assets": 8,
+    "manifest_sha256": "f03c7ddb81a7a420075d450d92294b22cc2907c8d746864414652ff0e4b5ccef",
+    "render_ready": true,
+    "scene_revision": "scene-05090d14627653e854482814",
+    "semantic_entities": 13,
+    "snapshot_id": "snapshot-200",
+    "source": "shared immutable fixture over local HTTP; no live actor or paired web claim",
+    "tick": 200
+}
