@@ -1,3 +1,19 @@
+/*
+ * The Unity client's screens: login, the training shell and the fleet panel.
+ *
+ * Author: Choo Jian Wei
+ * Contributors: Rishika (page layout, fleet cards, map/3D switch),
+ *     Lau Xiang Yang (training workspace, session list and cleanup)
+ * Date Created: 30/10/2026
+ * Last Modified: 30/10/2026
+ *
+ * Description:
+ *     Part of the Unity client's UI. Wires the UI Toolkit screens to the login and session layers,
+ *     the 3D world, the training workspace, the alerts and the interface sounds. Decisions about
+ *     what to show live in LoginMessages and TrainingPresenter; this class only moves values on and
+ *     off screen. It polls the joined session every second while logged in.
+ */
+
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -14,8 +30,11 @@ using UnityEngine.UIElements;
 
 namespace Formula9.UI
 {
-    // Wires the UI Toolkit screens to the login and session layers. Decisions about what to show
-    // live in LoginMessages and TrainingPresenter; this class only moves values on and off screen.
+    // -----------------------------------------------------------------------------------
+    // Class: Formula9App
+    // -----------------------------------------------------------------------------------
+    // Description:
+    //     This component is the client application. It needs a UIDocument holding Formula9App.uxml.
     [RequireComponent(typeof(UIDocument))]
     public sealed class Formula9App : MonoBehaviour
     {
@@ -51,6 +70,13 @@ namespace Formula9.UI
         private WorldView world;
         private TrainingWorkspace workspace;
 
+        // -----------------------------------------------------------------------------------
+        // Function: OnEnable
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function builds the client: the backend clients and session controller, the
+        //     screens, the 3D world, the training workspace, the alerts with their saved mute
+        //     setting, and the interface sounds; then it shows the login screen and starts polling.
         private void OnEnable()
         {
             var transport = new UnityHttpTransport();
@@ -129,12 +155,25 @@ namespace Formula9.UI
             StartCoroutine(Poll());
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: OnDisable
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function stops the session controller and polling.
         private void OnDisable()
         {
             session?.Shutdown();
             StopAllCoroutines();
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: Poll
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function refreshes the session once per poll interval while logged in.
+        //
+        // Returns:
+        //     IEnumerator: The coroutine.
         private IEnumerator Poll()
         {
             var wait = new WaitForSecondsRealtime((float)SessionController.PollInterval.TotalSeconds);
@@ -145,6 +184,16 @@ namespace Formula9.UI
             }
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: BindLogin
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function connects the login page's controls. Enter submits from either field, as
+        //     in the Qt login; the text field consumes Return itself, so it is heard on the way
+        //     down the tree.
+        //
+        // Args:
+        //     root (VisualElement): The document's root.
         private void BindLogin(VisualElement root)
         {
             loginScreen = root.Q("login-host");
@@ -187,6 +236,16 @@ namespace Formula9.UI
             SetSignUp(false);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: BindTraining
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function connects the training shell's controls: session create, join and list,
+        //     the session controls, the cleanup dialog, the fleet panel and the clock in the top
+        //     bar.
+        //
+        // Args:
+        //     root (VisualElement): The document's root.
         private void BindTraining(VisualElement root)
         {
             trainingScreen = root.Q("training-host");
@@ -278,6 +337,14 @@ namespace Formula9.UI
             Render();
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: SetSignUp
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function switches the login page between logging in and creating an account.
+        //
+        // Args:
+        //     value (bool): True to create an account.
         private void SetSignUp(bool value)
         {
             signUp = value;
@@ -290,6 +357,14 @@ namespace Formula9.UI
             SetBusy(false);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: SetBusy
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function disables the submit button and changes its text while a login is sent.
+        //
+        // Args:
+        //     value (bool): True while sending.
         private void SetBusy(bool value)
         {
             busy = value;
@@ -297,6 +372,13 @@ namespace Formula9.UI
             submit.text = signUp ? (value ? "CREATING ACCOUNT..." : "CREATE ACCOUNT") : (value ? "SIGNING IN..." : "LOGIN");
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: SubmitLogin
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function checks and sends the login or sign-up, remembers the username if asked,
+        //     then shows the training screen, resumes a kept session (with any open command or
+        //     creation) and loads the session list. A wrong password is cleared.
         private async Task SubmitLogin()
         {
             if (busy) return;
@@ -330,13 +412,26 @@ namespace Formula9.UI
             await RefreshSessionList();
         }
 
-        // A logout returns to a clean login screen; an expired login explains that work is kept.
+        // -----------------------------------------------------------------------------------
+        // Function: OnLoginEnded
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function returns to the login screen when the login ends. A logout returns to a
+        //     clean login screen; an expired login explains that the work is kept.
         private void OnLoginEnded()
         {
             ShowLogin(loggingOut ? null : LoginMessages.Expired);
             loggingOut = false;
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: ShowLogin
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function shows the login screen.
+        //
+        // Args:
+        //     notice (string): A message to show on it, or null.
         private void ShowLogin(string notice)
         {
             CloseDialog();
@@ -345,6 +440,11 @@ namespace Formula9.UI
             loginError.text = notice ?? "";
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: ShowTraining
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function shows the training screen for the logged-in user.
         private void ShowTraining()
         {
             loginScreen.style.display = DisplayStyle.None;
@@ -353,8 +453,13 @@ namespace Formula9.UI
             Render();
         }
 
-        // The progress note goes once the attempt finishes; a failure has already replaced it
-        // with its own message, which stays.
+        // -----------------------------------------------------------------------------------
+        // Function: Create
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function creates a training session, showing progress meanwhile. The progress
+        //     note goes once the attempt finishes; a failure has already replaced it with its own
+        //     message, which stays.
         private async Task Create()
         {
             const string creating = "Creating a training session…";
@@ -363,6 +468,17 @@ namespace Formula9.UI
             if (message.text == creating) ShowMessage("");
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: Join
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function joins a session by ID.
+        //
+        // Args:
+        //     id (string): The session ID.
+        //
+        // Returns:
+        //     Task: The join.
         private Task Join(string id)
         {
             ShowMessage("");
@@ -372,6 +488,12 @@ namespace Formula9.UI
         private SessionListEntry SelectedEntry =>
             sessions.index >= 0 && sessions.index < listedSessions.Count ? listedSessions[sessions.index] : null;
 
+        // -----------------------------------------------------------------------------------
+        // Function: RenderCleanup
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function enables the cleanup buttons that apply: delete for a finished session,
+        //     purge, and reclaim disk space only when no session is live.
         private void RenderCleanup()
         {
             deleteSession.SetEnabled(!cleanupBusy && TrainingPresenter.CanDelete(SelectedEntry));
@@ -379,6 +501,12 @@ namespace Formula9.UI
             reclaimDisk.SetEnabled(!cleanupBusy && liveSessions == 0);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: ConfirmDeleteSession
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function asks before permanently deleting the selected session, and leaves it if
+        //     it is the joined one.
         private void ConfirmDeleteSession()
         {
             var id = SelectedEntry?.SessionId;
@@ -393,6 +521,12 @@ namespace Formula9.UI
                 }));
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: ConfirmPurgeSessions
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function asks before deleting every finished session except the most recent
+        //     ones.
         private void ConfirmPurgeSessions() => Confirm(
             $"Permanently delete every archived, completed or failed session except the {KeptByPurge} most recent? Their history is removed for everyone. This cannot be undone.",
             "Delete old sessions", () => Cleanup("Deleting old sessions…", async () =>
@@ -401,7 +535,17 @@ namespace Formula9.UI
                 return deleted == 0 ? "No old sessions to delete." : $"Deleted {deleted} old training sessions.";
             }));
 
-        // Cancel holds the focus, so the default answer to a destructive question is no.
+        // -----------------------------------------------------------------------------------
+        // Function: Confirm
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function shows the confirmation dialog. Cancel holds the focus, so the default
+        //     answer to a destructive question is no.
+        //
+        // Args:
+        //     text (string): The question.
+        //     action (string): The confirm button's text.
+        //     confirmed (Func<Task>): What to do if confirmed.
         private void Confirm(string text, string action, Func<Task> confirmed)
         {
             dialogText.text = text;
@@ -411,12 +555,28 @@ namespace Formula9.UI
             dialogCancel.Focus();
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: CloseDialog
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function closes the confirmation dialog without acting.
         private void CloseDialog()
         {
             dialogAction = null;
             dialogOverlay.style.display = DisplayStyle.None;
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: Cleanup
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function runs one cleanup action with the buttons disabled, reports its result,
+        //     and reloads the session list. If no reply arrived the action may still complete,
+        //     which the message says.
+        //
+        // Args:
+        //     progress (string): What to show meanwhile.
+        //     work (Func<Task<string>>): The action; returns its result message.
         private async Task Cleanup(string progress, Func<Task<string>> work)
         {
             cleanupBusy = true;
@@ -435,6 +595,12 @@ namespace Formula9.UI
             await RefreshSessionList();
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: RefreshSessionList
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function loads the session list into the dropdown, keeping the joined session
+        //     selected, and updates the capacity line.
         private async Task RefreshSessionList()
         {
             refreshSessions.text = "Loading…";
@@ -462,7 +628,15 @@ namespace Formula9.UI
             }
         }
 
-        // The list changes when the joined session or its status does, as in the Qt client.
+        // -----------------------------------------------------------------------------------
+        // Function: RefreshSessionListIfChanged
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function reloads the session list when the joined session or its status changed,
+        //     as in the Qt client.
+        //
+        // Returns:
+        //     Task: The reload, or a completed task when nothing changed.
         private Task RefreshSessionListIfChanged()
         {
             var current = session.Session == null ? null : $"{session.Session.SessionId}/{session.Session.Status}";
@@ -471,6 +645,12 @@ namespace Formula9.UI
             return RefreshSessionList();
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: Render
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function shows the current state: world status and view switch, session
+        //     controls, the workspace, the status line and the fleet panel.
         private void Render()
         {
             var snapshot = session.Store.Snapshot;
@@ -505,6 +685,16 @@ namespace Formula9.UI
             RenderFleet(snapshot);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: RenderFleet
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function draws the fleet cards matching the search: icon in the shuttle's map
+        //     colour, battery gauge (amber below 50 %, red below 20 %), status, incident, route,
+        //     next stop and ETA.
+        //
+        // Args:
+        //     snapshot (FullSnapshot): The accepted snapshot.
         private void RenderFleet(FullSnapshot snapshot)
         {
             fleet.Clear();
@@ -565,6 +755,18 @@ namespace Formula9.UI
             }
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: CardLabel
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function makes a styled label for a fleet card.
+        //
+        // Args:
+        //     text (string): The text.
+        //     className (string): The USS class.
+        //
+        // Returns:
+        //     Label: The label.
         private static Label CardLabel(string text, string className)
         {
             var label = new Label(text);
@@ -572,6 +774,18 @@ namespace Formula9.UI
             return label;
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: StatusColor
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function picks the status dot colour: green when moving, red when stopped, blue
+        //     at a stop, amber when charging, grey otherwise.
+        //
+        // Args:
+        //     state (string): The service state.
+        //
+        // Returns:
+        //     Color: The colour.
         private static Color StatusColor(string state)
         {
             switch (state)
@@ -585,14 +799,30 @@ namespace Formula9.UI
             }
         }
 
-        // Takes no room until there is something to say, so the map and fleet list get the space.
+        // -----------------------------------------------------------------------------------
+        // Function: ShowMessage
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function shows a message line that takes no room until there is something to
+        //     say, so the map and fleet list get the space.
+        //
+        // Args:
+        //     text (string): The message, or empty to hide it.
         private void ShowMessage(string text)
         {
             message.text = text;
             message.style.display = string.IsNullOrEmpty(text) ? DisplayStyle.None : DisplayStyle.Flex;
         }
 
-        // Runs a UI action and reports anything unexpected instead of losing it in a dropped task.
+        // -----------------------------------------------------------------------------------
+        // Function: Run
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function runs a UI action and reports anything unexpected instead of losing it
+        //     in a dropped task. An expired login returns to the login screen.
+        //
+        // Args:
+        //     task (Task): The action.
         private async void Run(Task task)
         {
             try { await task; }

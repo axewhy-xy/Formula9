@@ -1,3 +1,18 @@
+/*
+ * Unit tests for the 3D world (SceneLoader.cs, WorldBuilder.cs, WorldView.cs).
+ *
+ * Author: Choo Jian Wei
+ * Contributors: Lau Xiang Yang (route drafting and mesh picking tests)
+ * Date Created: 30/10/2026
+ * Last Modified: 30/10/2026
+ *
+ * Description:
+ *     Uses the shared M2 scene package served by a fake backend. Checks that only a package
+ *     matching the session's pins loads, that the real scene builds with every entity at its
+ *     declared size, that shuttles follow snapshot poses, that picking and drafting use the shared
+ *     golden points, and that the overview renders (with a GPU).
+ */
+
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -14,22 +29,54 @@ using UnityEngine.TestTools;
 
 namespace Formula9.Tests
 {
+    // -----------------------------------------------------------------------------------
+    // Class: WorldTests
+    // -----------------------------------------------------------------------------------
+    // Description:
+    //     This class tests loading, building, picking and rendering the 3D world.
     public class WorldTests
     {
         private static readonly string Scene = Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/m2_scene");
 
-        // Serves the shared scene package as the backend's /api/v2/scenes routes do.
+        // -----------------------------------------------------------------------------------
+        // Class: SceneBackend
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This class serves the shared scene package as the backend's /api/v2/scenes routes do.
+        //
+        //     Attributes: Files maps the manifest and each asset ID to its bytes; tests change them
+        //     to simulate tampering. Requested lists what was downloaded.
         private sealed class SceneBackend : IHttpTransport
         {
             public readonly Dictionary<string, byte[]> Files = new Dictionary<string, byte[]>();
             public readonly List<string> Requested = new List<string>();
 
+            // -----------------------------------------------------------------------------------
+            // Function: SceneBackend (constructor)
+            // -----------------------------------------------------------------------------------
+            // Description:
+            //     This function loads the manifest and its assets from the shared package.
+            //
+            // Args:
+            //     manifest (TrainingSceneRevision): The package's manifest.
             public SceneBackend(TrainingSceneRevision manifest)
             {
                 Files["manifest"] = File.ReadAllBytes(Path.Combine(Scene, "manifest.json"));
                 foreach (var asset in manifest.Assets) Files[asset.AssetId] = File.ReadAllBytes(Path.Combine(Scene, asset.Path));
             }
 
+            // -----------------------------------------------------------------------------------
+            // Function: SceneBackend.SendAsync
+            // -----------------------------------------------------------------------------------
+            // Description:
+            //     This function serves the file the request names, or a 404.
+            //
+            // Args:
+            //     request (HttpRequest): The request.
+            //     cancellation (CancellationToken): Unused.
+            //
+            // Returns:
+            //     Task<HttpResponse>: The reply.
             public Task<HttpResponse> SendAsync(HttpRequest request, CancellationToken cancellation = default)
             {
                 var name = request.Url.AbsolutePath.Split('/').Last();
@@ -40,12 +87,40 @@ namespace Formula9.Tests
             }
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: SpatialSnapshot
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function reads the shared spatial snapshot fixture.
+        //
+        // Returns:
+        //     FullSnapshot: The snapshot.
         private static FullSnapshot SpatialSnapshot() =>
             (FullSnapshot)ContractParser.ParseMessage(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/spatial_snapshot.json")));
 
+        // -----------------------------------------------------------------------------------
+        // Function: Manifest
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function reads the shared scene manifest.
+        //
+        // Returns:
+        //     TrainingSceneRevision: The manifest.
         private static TrainingSceneRevision Manifest() =>
             ContractParser.Parse<TrainingSceneRevision>(File.ReadAllText(Path.Combine(Scene, "manifest.json")));
 
+        // -----------------------------------------------------------------------------------
+        // Function: LoadFails
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function loads a scene that must fail, and returns why.
+        //
+        // Args:
+        //     backend (SceneBackend): The fake backend.
+        //     pins (SpatialReference): The pins to load.
+        //
+        // Returns:
+        //     SceneException: The failure.
         private static SceneException LoadFails(SceneBackend backend, SpatialReference pins)
         {
             try
@@ -60,6 +135,11 @@ namespace Formula9.Tests
             return null;
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: TheVerifiedPackageHoldsEveryMandatoryAsset
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A matching package loads with every mandatory asset.
         [Test]
         public void TheVerifiedPackageHoldsEveryMandatoryAsset()
         {
@@ -70,6 +150,11 @@ namespace Formula9.Tests
             Assert.IsFalse(backend.Requested.Any(name => manifest.Assets.Any(a => !a.Mandatory && a.AssetId == name)), "optional assets are not fetched");
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: AChangedManifestIsRefused
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A manifest whose bytes differ from the pinned hash is refused.
         [Test]
         public void AChangedManifestIsRefused()
         {
@@ -78,6 +163,11 @@ namespace Formula9.Tests
             Assert.AreEqual("SCENE_MANIFEST_HASH", LoadFails(backend, SpatialSnapshot().Spatial).Code);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: AChangedAssetIsRefused
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     An asset whose bytes differ from the manifest's hash is refused.
         [Test]
         public void AChangedAssetIsRefused()
         {
@@ -89,6 +179,11 @@ namespace Formula9.Tests
             Assert.AreEqual("SCENE_REQUIRED_ASSET_HASH", LoadFails(backend, SpatialSnapshot().Spatial).Code);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: AManifestForAnotherRevisionIsRefused
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A manifest for another scene revision is refused even with a matching hash.
         [Test]
         public void AManifestForAnotherRevisionIsRefused()
         {
@@ -97,6 +192,18 @@ namespace Formula9.Tests
             Assert.AreEqual("SCENE_REVISION_MISMATCH", LoadFails(new SceneBackend(Manifest()), pins).Code);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: Await
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function yields until a task finishes, failing after a minute and rethrowing its
+        //     error.
+        //
+        // Args:
+        //     task (Task): The task.
+        //
+        // Returns:
+        //     IEnumerator: The wait.
         private static IEnumerator Await(Task task)
         {
             var deadline = DateTime.UtcNow.AddSeconds(60);
@@ -108,9 +215,23 @@ namespace Formula9.Tests
             if (task.IsFaulted) throw task.Exception.InnerException;
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: Package
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function loads the shared scene package.
+        //
+        // Returns:
+        //     ScenePackage: The verified package.
         private static ScenePackage Package() =>
             new SceneLoader(new SceneBackend(Manifest()), new Uri("http://backend.test")).LoadAsync(SpatialSnapshot().Spatial).GetAwaiter().GetResult();
 
+        // -----------------------------------------------------------------------------------
+        // Function: DraftNodesMustBelongToTheChosenSurfaceAndSceneRevision
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A route node can be drafted only on the chosen road surface of the same scene
+        //     revision, not on another deck above it.
         [Test]
         public void DraftNodesMustBelongToTheChosenSurfaceAndSceneRevision()
         {
@@ -126,6 +247,12 @@ namespace Formula9.Tests
             Assert.IsFalse(WorldInteraction.NodeOnSurface(manifest, context, node, surface.SurfaceId));
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: MeshPickingMatchesTheSharedCanonicalGoldenPoints
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Picking the built scene's meshes hits the shared golden points in canonical
+        //     coordinates.
         [UnityTest]
         public IEnumerator MeshPickingMatchesTheSharedCanonicalGoldenPoints()
         {
@@ -150,6 +277,11 @@ namespace Formula9.Tests
             finally { world.Destroy(); }
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: TheRealSceneBuildsAndEveryEntityMatchesItsDimensions
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The real scene builds, and every entity fills exactly its declared dimensions.
         [UnityTest]
         public IEnumerator TheRealSceneBuildsAndEveryEntityMatchesItsDimensions()
         {
@@ -169,6 +301,12 @@ namespace Formula9.Tests
             }
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: ShuttlesFollowTheSnapshotPoses
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Shuttles move to each snapshot's poses, and a snapshot that does not fit the scene is
+        //     reported.
         [UnityTest]
         public IEnumerator ShuttlesFollowTheSnapshotPoses()
         {
@@ -196,8 +334,13 @@ namespace Formula9.Tests
             }
         }
 
-        // Renders the real scene from the manifest's overview bookmark. Needs a GPU, so it is
-        // skipped under -nographics. Set FORMULA9_RENDER_OUT to keep the PNG for a visual check.
+        // -----------------------------------------------------------------------------------
+        // Function: TheOverviewShowsTheScene
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Renders the real scene from the manifest's overview bookmark and checks the image is
+        //     not empty. Needs a GPU, so it is skipped under -nographics. Set FORMULA9_RENDER_OUT
+        //     to keep the PNG for a visual check.
         [UnityTest, Category("Render")]
         public IEnumerator TheOverviewShowsTheScene()
         {
@@ -244,6 +387,12 @@ namespace Formula9.Tests
             }
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: AWrongDeclaredSizeIsReportedNotDrawn
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     An entity whose declared size does not match its geometry fails the build with
+        //     SCENE_BODY_DIMENSIONS.
         [UnityTest]
         public IEnumerator AWrongDeclaredSizeIsReportedNotDrawn()
         {

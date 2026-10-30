@@ -1,3 +1,16 @@
+/*
+ * Unit tests for WorldMath.cs.
+ *
+ * Author: Choo Jian Wei
+ * Date Created: 30/10/2026
+ * Last Modified: 30/10/2026
+ *
+ * Description:
+ *     Checks the coordinate conventions against the backend's 3D motion fixture: placed assets land
+ *     where the backend says, placements are rigid, reflections are refused, and canonical up is
+ *     Unity up.
+ */
+
 using System.IO;
 using System.Linq;
 using Formula9.World;
@@ -7,16 +20,48 @@ using UnityEngine;
 
 namespace Formula9.Tests
 {
+    // -----------------------------------------------------------------------------------
+    // Class: WorldMathTests
+    // -----------------------------------------------------------------------------------
+    // Description:
+    //     This class tests the coordinate conversions.
     public class WorldMathTests
     {
+        // -----------------------------------------------------------------------------------
+        // Function: Fixture
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function reads a shared fixture.
+        //
+        // Args:
+        //     name (string): The fixture name, without .json.
+        //
+        // Returns:
+        //     JObject: The fixture.
         private static JObject Fixture(string name) =>
             JObject.Parse(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures", name + ".json")));
 
+        // -----------------------------------------------------------------------------------
+        // Function: Doubles
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function reads a JSON array of numbers.
+        //
+        // Args:
+        //     array (JToken): The array.
+        //
+        // Returns:
+        //     double[]: The numbers.
         private static double[] Doubles(JToken array) => array.Select(v => (double)v).ToArray();
 
-        // The backend's motion fixture records where an asymmetric asset vertex lands for every
-        // shuttle (render_marker_m, in the Qt/OpenGL render basis x, z, -y). Placing the same
-        // vertex through glTFast's import flip and PlacedAsset must land on the same point.
+        // -----------------------------------------------------------------------------------
+        // Function: PlacedAssetsMatchTheBackendsMarkerPoints
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The backend's motion fixture records where an asymmetric asset vertex lands for every
+        //     shuttle (render_marker_m, in the Qt/OpenGL render basis x, z, -y). Placing the same
+        //     vertex through glTFast's import flip and PlacedAsset must land on the same point,
+        //     within 1 mm.
         [Test]
         public void PlacedAssetsMatchTheBackendsMarkerPoints()
         {
@@ -40,6 +85,11 @@ namespace Formula9.Tests
             Assert.Greater(checkedMarkers, 10);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: PlacedAssetsAreRigid
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A placed asset's transform is rigid, so a Transform can hold it exactly.
         [Test]
         public void PlacedAssetsAreRigid()
         {
@@ -57,6 +107,11 @@ namespace Formula9.Tests
             }
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: ReflectionsAreRefused
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Apply refuses a reflected matrix.
         [Test]
         public void ReflectionsAreRefused()
         {
@@ -65,6 +120,11 @@ namespace Formula9.Tests
             finally { Object.DestroyImmediate(target.gameObject); }
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: CanonicalUpIsUnityUp
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Canonical (x, y, z) becomes Unity (x, z, y), for points and for a body's bounds.
         [Test]
         public void CanonicalUpIsUnityUp()
         {

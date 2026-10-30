@@ -1,3 +1,16 @@
+/*
+ * Builds the 3D training world from a verified scene package.
+ *
+ * Author: Choo Jian Wei
+ * Date Created: 30/10/2026
+ * Last Modified: 30/10/2026
+ *
+ * Description:
+ *     Part of the Unity client's 3D world. Decodes the package's glTF assets with glTFast and
+ *     places every entity. Each placed asset is checked against the entity's declared dimensions,
+ *     so a wrong axis or transform convention is reported instead of drawn.
+ */
+
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -8,7 +21,15 @@ using UnityEngine;
 
 namespace Formula9.World
 {
-    // The instantiated 3D world: one GameObject per semantic entity, keyed by entity_id.
+    // -----------------------------------------------------------------------------------
+    // Class: WorldScene
+    // -----------------------------------------------------------------------------------
+    // Description:
+    //     This class is the instantiated 3D world: one GameObject per semantic entity, keyed by
+    //     entity_id.
+    //
+    //     Attributes: Package; Root; Entities and Definitions, entity ID to its transform and its
+    //     manifest entry; ShuttleCount.
     public sealed class WorldScene
     {
         public ScenePackage Package;
@@ -18,8 +39,20 @@ namespace Formula9.World
 
         public int ShuttleCount => Definitions.Values.Count(e => e.Kind == "SHUTTLE");
 
-        // Moves each shuttle to its snapshot pose. Returns null, or why the snapshot does not fit
-        // this scene (the Qt client's "scene/vehicle binding mismatch").
+        // -----------------------------------------------------------------------------------
+        // Function: ApplyPoses
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function moves each shuttle to its snapshot pose, after checking the snapshot
+        //     fits this scene: the same shuttles, each bound to the same asset, dimensions and
+        //     asset_to_body.
+        //
+        // Args:
+        //     snapshot (FullSnapshot): The snapshot.
+        //
+        // Returns:
+        //     string: Null on success, otherwise why the snapshot does not fit this scene (the Qt
+        //         client's scene/vehicle binding mismatch).
         public string ApplyPoses(FullSnapshot snapshot)
         {
             if (snapshot.Spatial == null || snapshot.Spatial.ManifestSha256 == null) return "snapshot has no spatial pins";
@@ -38,26 +71,63 @@ namespace Formula9.World
             return null;
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: Destroy
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function removes the world from the scene.
         public void Destroy()
         {
             if (Root != null) WorldBuilder.Remove(Root.gameObject);
         }
     }
 
-    // Decodes a verified ScenePackage with glTFast and places every entity. Each placed asset is
-    // checked against the entity's declared dimensions, so a wrong axis or transform convention
-    // is reported instead of drawn.
+    // -----------------------------------------------------------------------------------
+    // Class: WorldBuilder
+    // -----------------------------------------------------------------------------------
+    // Description:
+    //     This class builds WorldScenes.
+    //
+    //     Attributes: DimensionTolerance, how far (in metres) placed geometry may differ from the
+    //     declared dimensions.
     public static class WorldBuilder
     {
         public const float DimensionTolerance = 1e-3f;
 
-        // Destroy is deferred and only allowed while playing; edit-mode tools and tests need it now.
+        // -----------------------------------------------------------------------------------
+        // Function: Remove
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function destroys a GameObject. Destroy is deferred and only allowed while
+        //     playing, so edit-mode tools and tests destroy it at once.
+        //
+        // Args:
+        //     target (GameObject): The object to remove.
         public static void Remove(GameObject target)
         {
             if (Application.isPlaying) Object.Destroy(target);
             else Object.DestroyImmediate(target);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: BuildAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function decodes every asset, then instantiates, places and checks each entity
+        //     and gives its meshes colliders so they can be clicked. Decoding is spread over frames
+        //     in play mode; edit-mode tools load in one go. Nothing is left behind on failure.
+        //
+        // Args:
+        //     package (ScenePackage): The verified package.
+        //     parent (Transform): Where the world is placed.
+        //     cancellation (CancellationToken): Cancels the build.
+        //
+        // Returns:
+        //     Task<WorldScene>: The built world.
+        //
+        // Throws:
+        //     SceneException: SCENE_ASSET_DECODE, SCENE_ASSET_INSTANTIATE, SCENE_BODY_POSE,
+        //         SCENE_REQUIRED_GEOMETRY or SCENE_BODY_DIMENSIONS.
         public static async Task<WorldScene> BuildAsync(ScenePackage package, Transform parent, CancellationToken cancellation = default)
         {
             var root = new GameObject($"World {package.Manifest.SceneRevision}").transform;
@@ -97,7 +167,20 @@ namespace Formula9.World
             }
         }
 
-        // The rendered geometry, seen from the body frame, must fill exactly ±dimensions/2.
+        // -----------------------------------------------------------------------------------
+        // Function: CheckDimensions
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function checks that the rendered geometry, seen from the body frame, fills
+        //     exactly plus or minus half the declared dimensions on every axis.
+        //
+        // Args:
+        //     node (Transform): The placed entity.
+        //     entity (SceneEntity): Its manifest entry.
+        //
+        // Throws:
+        //     SceneException: SCENE_REQUIRED_GEOMETRY if it has no meshes, SCENE_BODY_DIMENSIONS if
+        //         it does not fit.
         private static void CheckDimensions(Transform node, SceneEntity entity)
         {
             var bodyFromUnity = (WorldMath.CanonicalToUnity * WorldMath.BodyPose(entity.PositionM, entity.OrientationXyzw)).inverse;

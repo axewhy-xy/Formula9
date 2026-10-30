@@ -1,3 +1,16 @@
+/*
+ * Unit tests for UiSounds.cs.
+ *
+ * Author: Choo Jian Wei
+ * Date Created: 30/10/2026
+ * Last Modified: 30/10/2026
+ *
+ * Description:
+ *     Checks amee's sound review as applied to the Unity controls: which buttons play the hover
+ *     sound (including on the real layout), the Start and map point sounds, the dropdown sounds and
+ *     the values that stay silent, and that every sound is a real clip from the web app.
+ */
+
 using System.Collections.Generic;
 using System.Linq;
 using Formula9.Audio;
@@ -8,13 +21,22 @@ using UnityEngine.UIElements;
 
 namespace Formula9.Tests
 {
-    // amee's sound review applied to the Unity controls (see UiSounds).
+    // -----------------------------------------------------------------------------------
+    // Class: UiSoundTests
+    // -----------------------------------------------------------------------------------
+    // Description:
+    //     This class tests the interface sounds with a fake player and clock.
     public class UiSoundTests
     {
         private List<UiSound> played;
         private float clock;
         private UiSounds sounds;
 
+        // -----------------------------------------------------------------------------------
+        // Function: SetUp
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function gives each test a fresh list of played sounds and a clock at zero.
         [SetUp]
         public void SetUp()
         {
@@ -23,6 +45,19 @@ namespace Formula9.Tests
             sounds = new UiSounds(played.Add, () => clock);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: Button
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function makes a button.
+        //
+        // Args:
+        //     text (string): Its text.
+        //     primary (bool): True for a big primary button.
+        //     enabled (bool): False for a disabled button.
+        //
+        // Returns:
+        //     Button: The button.
         private static Button Button(string text, bool primary = false, bool enabled = true)
         {
             var button = new Button { text = text };
@@ -31,6 +66,11 @@ namespace Formula9.Tests
             return button;
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: SmallButtonsPlayTheHoverSoundAndBigOnesStaySilent
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Only enabled, non-primary buttons play the hover sound.
         [Test]
         public void SmallButtonsPlayTheHoverSoundAndBigOnesStaySilent()
         {
@@ -40,6 +80,12 @@ namespace Formula9.Tests
             CollectionAssert.AreEqual(new[] { UiSound.ButtonHover }, played);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: TheRealLayoutsBigButtonsAreTheOnesWithoutHoverSound
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     In the real simulator layout only Create and Join are silent, Start scenario plays
+        //     the hover sound, and the login page is outside it.
         [Test]
         public void TheRealLayoutsBigButtonsAreTheOnesWithoutHoverSound()
         {
@@ -51,8 +97,13 @@ namespace Formula9.Tests
             Assert.IsNull(shell.Q<Button>("submit"), "the login page is outside the simulator");
         }
 
-        // Pointer events reach the root from whatever is under the pointer: an icon or label inside
-        // a nav button, or a button the screens built after Attach.
+        // -----------------------------------------------------------------------------------
+        // Function: HoverIsResolvedToTheEnclosingButtonOncePerButton
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Pointer events reach the root from whatever is under the pointer, such as a label
+        //     inside a nav button. The hover sound plays once per entry into a button, and again
+        //     after leaving it.
         [Test]
         public void HoverIsResolvedToTheEnclosingButtonOncePerButton()
         {
@@ -66,6 +117,12 @@ namespace Formula9.Tests
             CollectionAssert.AreEqual(new[] { UiSound.ButtonHover, UiSound.ButtonHover }, played, "entering again after leaving plays again");
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: DropdownsAreFoundFromThePartPressed
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A press inside a dropdown opens it with a sound, and only a dropdown's value change
+        //     plays, not a text field's.
         [Test]
         public void DropdownsAreFoundFromThePartPressed()
         {
@@ -77,6 +134,11 @@ namespace Formula9.Tests
             CollectionAssert.AreEqual(new[] { UiSound.Dropdown, UiSound.Dropdown }, played);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: StartAndMapPointsHaveTheirOwnSounds
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Start scenario and picking a map point play their own sounds.
         [Test]
         public void StartAndMapPointsHaveTheirOwnSounds()
         {
@@ -85,6 +147,11 @@ namespace Formula9.Tests
             CollectionAssert.AreEqual(new[] { UiSound.StartClick, UiSound.MapPoint }, played);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: DropdownsSoundWhenOpenedAndWhenTheUserChooses
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A dropdown sounds when opened and when the user chooses.
         [Test]
         public void DropdownsSoundWhenOpenedAndWhenTheUserChooses()
         {
@@ -94,6 +161,12 @@ namespace Formula9.Tests
             CollectionAssert.AreEqual(new[] { UiSound.Dropdown, UiSound.Dropdown }, played);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: ValuesTheAppSetsStaySilent
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A change nobody opened the dropdown for is silent, an opening long ago does not claim
+        //     a later change, and only one choice plays per opening.
         [Test]
         public void ValuesTheAppSetsStaySilent()
         {
@@ -110,6 +183,11 @@ namespace Formula9.Tests
             Assert.AreEqual(1, played.Count, "one choice per opening");
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: ADisabledDropdownIsSilent
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Pressing a disabled dropdown plays nothing.
         [Test]
         public void ADisabledDropdownIsSilent()
         {
@@ -119,6 +197,11 @@ namespace Formula9.Tests
             Assert.IsEmpty(played);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: EverySoundIsARealClipFromTheWebApp
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Every sound loads as a real clip, and the dropdown reuses the map point clip.
         [Test]
         public void EverySoundIsARealClipFromTheWebApp()
         {

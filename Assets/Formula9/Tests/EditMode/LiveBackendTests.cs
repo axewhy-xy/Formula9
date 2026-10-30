@@ -1,3 +1,17 @@
+/*
+ * Tests UnityHttpTransport against a running backend.
+ *
+ * Author: Choo Jian Wei
+ * Date Created: 30/10/2026
+ * Last Modified: 30/10/2026
+ *
+ * Description:
+ *     Skipped when no backend is reachable. Uses no real account: only replies that need no valid
+ *     login are checked. UnityWebRequest completes on the editor's update loop, so these are
+ *     coroutine tests that yield while waiting; blocking on the task would stop the request from
+ *     ever finishing.
+ */
+
 using System;
 using System.Collections;
 using System.Threading.Tasks;
@@ -7,15 +21,28 @@ using UnityEngine.TestTools;
 
 namespace Formula9.Tests
 {
-    // Exercises UnityHttpTransport against a running Formula_9 backend. Skipped when none is
-    // reachable. Uses no real account: only replies that need no valid login are checked.
-    // UnityWebRequest completes on the editor's update loop, so these are coroutine tests that
-    // yield while waiting; blocking on the task would stop the request from ever finishing.
+    // -----------------------------------------------------------------------------------
+    // Class: LiveBackendTests
+    // -----------------------------------------------------------------------------------
+    // Description:
+    //     This class tests real HTTP replies from a running backend (category LiveBackend).
     [Category("LiveBackend")]
     public class LiveBackendTests
     {
         private readonly IHttpTransport transport = new UnityHttpTransport();
 
+        // -----------------------------------------------------------------------------------
+        // Function: Wait
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function yields until a task finishes, failing the test after a deadline.
+        //
+        // Args:
+        //     task (Task): The task.
+        //     seconds (double): The deadline.
+        //
+        // Returns:
+        //     IEnumerator: The wait.
         private static IEnumerator Wait(Task task, double seconds = 15)
         {
             var deadline = DateTime.UtcNow.AddSeconds(seconds);
@@ -26,6 +53,14 @@ namespace Formula9.Tests
             }
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: RequireBackend
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function skips the test when no backend answers at the configured address.
+        //
+        // Returns:
+        //     IEnumerator: The probe.
         private IEnumerator RequireBackend()
         {
             var probe = transport.SendAsync(new HttpRequest
@@ -37,6 +72,11 @@ namespace Formula9.Tests
             if (!probe.Result.Complete) Assert.Ignore("No Formula_9 backend at " + BackendEndpoint.ConfiguredUrl());
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: WrongPasswordIsRejectedWithItsCode
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A wrong password is refused with 401 invalid_credentials, and no login starts.
         [UnityTest]
         public IEnumerator WrongPasswordIsRejectedWithItsCode()
         {
@@ -51,6 +91,12 @@ namespace Formula9.Tests
             Assert.IsFalse(session.IsLoggedIn);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: UnknownTokenEndsTheLogin
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A training request with an unknown token is refused as not logged in, and the login
+        //     ends.
         [UnityTest]
         public IEnumerator UnknownTokenEndsTheLogin()
         {

@@ -1,3 +1,19 @@
+/*
+ * End-to-end tests of the whole Unity client against a real backend.
+ *
+ * Author: Choo Jian Wei
+ * Contributors: Lau Xiang Yang (detour, charging and incident decisions)
+ * Date Created: 30/10/2026
+ * Last Modified: 30/10/2026
+ *
+ * Description:
+ *     Runs only when FORMULA9_E2E_BACKEND_URL points at an isolated backend with throwaway accounts
+ *     (Tools/isolated_backend.py: in-memory accounts, temporary training database). Each test signs
+ *     up a random user, so never point it at the team's shared backend. The tests go over real
+ *     HTTP: log in, create, start, pause, resume and archive sessions, approve the integrated
+ *     detour, reserve a charger, decide an incident, and load and place a live 3D world.
+ */
+
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -14,9 +30,11 @@ using UnityEngine.TestTools;
 
 namespace Formula9.Tests
 {
-    // The whole client against a real backend. Runs only when FORMULA9_E2E_BACKEND_URL points at an
-    // isolated backend with throwaway accounts (in-memory store, temporary training database);
-    // it signs up a random user, so never point it at the team's shared backend.
+    // -----------------------------------------------------------------------------------
+    // Class: EndToEndTests
+    // -----------------------------------------------------------------------------------
+    // Description:
+    //     This class drives the real client layers against an isolated backend (category EndToEnd).
     [Category("EndToEnd")]
     public class EndToEndTests
     {
@@ -28,6 +46,13 @@ namespace Formula9.Tests
         private readonly List<CommandOutcome> outcomes = new List<CommandOutcome>();
         private readonly List<string> alerts = new List<string>();
 
+        // -----------------------------------------------------------------------------------
+        // Function: SetUp
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function skips the test unless an isolated backend is configured, and builds a
+        //     fresh login and session controller. NUnit reuses the fixture instance, so each test
+        //     starts with empty records of errors, outcomes and alerts.
         [SetUp]
         public void SetUp()
         {
@@ -47,9 +72,27 @@ namespace Formula9.Tests
             session.EventsAccepted += events => trainingAlerts.OnEvents(events, true);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: TearDown
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function stops the session controller.
         [TearDown]
         public void TearDown() => session?.Shutdown();
 
+        // -----------------------------------------------------------------------------------
+        // Function: Await
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function yields until a task finishes, failing on timeout and rethrowing its
+        //     error.
+        //
+        // Args:
+        //     task (Task): The task.
+        //     seconds (double): The deadline.
+        //
+        // Returns:
+        //     IEnumerator: The wait.
         private static IEnumerator Await(Task task, double seconds = 30)
         {
             var deadline = DateTime.UtcNow.AddSeconds(seconds);
@@ -61,7 +104,20 @@ namespace Formula9.Tests
             if (task.IsFaulted) throw task.Exception.InnerException;
         }
 
-        // Polls once a second, as the app does, until the condition holds.
+        // -----------------------------------------------------------------------------------
+        // Function: PollUntil
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function polls the session about twice a second, as the app does, until a
+        //     condition holds.
+        //
+        // Args:
+        //     done (Func<bool>): The condition.
+        //     what (string): What is awaited, for the failure message.
+        //     seconds (double): The deadline.
+        //
+        // Returns:
+        //     IEnumerator: The wait.
         private IEnumerator PollUntil(Func<bool> done, string what, double seconds = 30)
         {
             var deadline = DateTime.UtcNow.AddSeconds(seconds);
@@ -74,6 +130,19 @@ namespace Formula9.Tests
             }
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: Control
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function sends a session control, waits until it is applied, then until the
+        //     session reaches the expected status.
+        //
+        // Args:
+        //     command (string): START, PAUSE, RESUME or ARCHIVE.
+        //     expectedStatus (string): The status it leads to.
+        //
+        // Returns:
+        //     IEnumerator: The step.
         private IEnumerator Control(string command, string expectedStatus)
         {
             var before = outcomes.Count;
@@ -86,6 +155,14 @@ namespace Formula9.Tests
             yield return PollUntil(() => session.Session.Status == expectedStatus, $"{expectedStatus} after {command}");
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: SignUpAndLogIn
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function signs up a random throwaway user, then logs in as it.
+        //
+        // Returns:
+        //     IEnumerator: The step.
         private IEnumerator SignUpAndLogIn()
         {
             var name = "e2e-" + Guid.NewGuid().ToString("N").Substring(0, 12);
@@ -98,9 +175,13 @@ namespace Formula9.Tests
             Assert.AreEqual(name, auth.Username);
         }
 
-        // The integrated exercise opens with a shuttle on a closed road; the backend refuses START
-        // until a detour is approved. The client must predict that (Start disabled) and, if sent
-        // anyway, report the refusal. Approving the detour needs the route planning screen.
+        // -----------------------------------------------------------------------------------
+        // Function: IntegratedExerciseWaitsForADetourBeforeStarting
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The integrated exercise opens with a shuttle on a closed road, and the backend
+        //     refuses START until a detour is approved. The client must predict that (Start
+        //     disabled) and, if sent anyway, report the refusal.
         [UnityTest]
         public IEnumerator IntegratedExerciseWaitsForADetourBeforeStarting()
         {
@@ -123,6 +204,13 @@ namespace Formula9.Tests
             yield return Control("ARCHIVE", "ARCHIVED");
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: IntegratedExerciseApprovesDetourChargingAndIncidentDecisions
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The integrated exercise runs after a detour is approved, then a charger reservation
+        //     and an incident decision are applied, and the incident's history and debrief can be
+        //     read.
         [UnityTest]
         public IEnumerator IntegratedExerciseApprovesDetourChargingAndIncidentDecisions()
         {
@@ -172,6 +260,12 @@ namespace Formula9.Tests
             yield return Control("ARCHIVE", "ARCHIVED");
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: PlanarExerciseRunsThroughItsLifecycle
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A planar session is listed, created, started, paused, resumed and archived, with
+        //     alerts and outcomes reported along the way.
         [UnityTest]
         public IEnumerator PlanarExerciseRunsThroughItsLifecycle()
         {
@@ -202,6 +296,12 @@ namespace Formula9.Tests
             Debug.Log($"E2E: lifecycle done at tick {session.Store.Snapshot.Tick}; {session.Store.Events.Count} events; alerts [{string.Join(", ", alerts)}]");
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: SpatialExerciseLoadsAndPlacesItsWorld
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A 3D session's scene downloads and verifies against its pins, builds, and places
+        //     every shuttle at its snapshot pose.
         [UnityTest]
         public IEnumerator SpatialExerciseLoadsAndPlacesItsWorld()
         {

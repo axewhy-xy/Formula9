@@ -1,3 +1,16 @@
+/*
+ * Builds the Unity client's scene and UI panel settings from code.
+ *
+ * Author: Choo Jian Wei
+ * Date Created: 30/10/2026
+ * Last Modified: 30/10/2026
+ *
+ * Description:
+ *     Editor tool, so the scene and panel settings never need hand edits. Run it from the menu
+ *     (Formula 9 > Rebuild client scene), or headless: Unity.exe -batchmode -quit -projectPath .
+ *     -executeMethod Formula9.EditorTools.SceneBuilder.Build
+ */
+
 using Formula9.UI;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -6,9 +19,13 @@ using UnityEngine.UIElements;
 
 namespace Formula9.EditorTools
 {
-    // Builds the client scene and its UI panel settings from code, so they never need hand edits.
-    // Run from the menu, or headless:
-    //   Unity.exe -batchmode -quit -projectPath . -executeMethod Formula9.EditorTools.SceneBuilder.Build
+    // -----------------------------------------------------------------------------------
+    // Class: SceneBuilder
+    // -----------------------------------------------------------------------------------
+    // Description:
+    //     This class rebuilds the client scene.
+    //
+    //     Attributes: ScenePath is where the scene is saved.
     public static class SceneBuilder
     {
         public const string ScenePath = "Assets/Scenes/Formula9.unity";
@@ -16,6 +33,18 @@ namespace Formula9.EditorTools
         private const string ThemePath = "Assets/Formula9/UI/Formula9Theme.tss";
         private const string LayoutPath = "Assets/Formula9/UI/Formula9App.uxml";
 
+        // -----------------------------------------------------------------------------------
+        // Function: Build
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function creates or updates the panel settings (theme, scaling to a 1600 x 900
+        //     reference), builds a scene with a camera that draws nothing (the UI covers the screen
+        //     and the world view renders into its own texture) and the Formula 9 App object, saves
+        //     it as the only build scene, switches to Linear colour space (glTF colours are linear;
+        //     Gamma washes the blockout materials out) and includes the glTFast shaders.
+        //
+        // Throws:
+        //     InvalidOperationException: If the theme or the layout is missing.
         [MenuItem("Formula 9/Rebuild client scene")]
         public static void Build()
         {
@@ -58,8 +87,16 @@ namespace Formula9.EditorTools
             Debug.Log($"Formula 9: built {ScenePath}");
         }
 
-        // glTFast creates its materials at runtime, so a player build only has its shaders when they
-        // are always included; otherwise imported models render magenta.
+        // -----------------------------------------------------------------------------------
+        // Function: IncludeGltfShaders
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function adds glTFast's shaders to Always Included Shaders. glTFast creates its
+        //     materials at runtime, so a player build only has its shaders when they are always
+        //     included; otherwise imported models render magenta.
+        //
+        // Throws:
+        //     InvalidOperationException: If a glTFast shader cannot be found.
         private static void IncludeGltfShaders()
         {
             var settings = new SerializedObject(AssetDatabase.LoadAssetAtPath<Object>("ProjectSettings/GraphicsSettings.asset"));
