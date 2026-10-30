@@ -40,6 +40,8 @@ crashlytics-buildid.txt
 # Local-only secrets and test output
 .env
 *.env
+# Committed on purpose: the team shares this connection in a private repository.
+!backend/.env
 TestResults*.xml
 /.tools/
 
@@ -53,6 +55,8 @@ htmlcov/
 /data/
 /state/
 *.sqlite
+# The imported LTA bus data is shared, so nobody else needs a DataMall key.
+!backend/fixtures/transit/transit.sqlite
 *.sqlite3
 *.sqlite-wal
 *.sqlite-shm

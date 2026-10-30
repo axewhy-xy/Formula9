@@ -1,0 +1,14 @@
+{
+  "date": "2026-10-29",
+  "configuration": "Release",
+  "compiler": "MSVC 2022",
+  "qt": "6.10.2",
+  "base_commit": "167b1d1dcc75b96f6186f86de8b3a45387730569",
+  "source": "Working tree changes for NAT-M2-10",
+  "app_sha256": "b8568ce4dbfa7c9e3ccab15d2c4f8f7bd653404e8a2dc9e24d931fa9beb6ef7b",
+  "smoke_sha256": "79278c003c5b29ad5b2938bc4011625358e77126c1d2af81a59253658b7fe1df",
+  "scene_revision": "scene-05090d14627653e854482814",
+  "spatial_revision": "spatial-05090d14627653e854482814",
+  "transform_revision": "canonical-enu-r1",
+  "scope": "Local fixture adapter and desktop rendering; connected task acceptance remains open"
+}

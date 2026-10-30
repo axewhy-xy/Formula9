@@ -1,0 +1,29 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:f9="Formula9.World" xmlns:f9ui="Formula9.UI">
+    <Style src="project://database/Assets/Formula9/UI/Formula9App.uss" />
+    <ui:VisualElement name="login" class="login">
+        <f9ui:LoginBackdrop />
+        <ui:VisualElement class="login-card">
+            <ui:Label name="signup-hint" class="hint" />
+            <ui:VisualElement name="username-row" class="login-field">
+                <ui:VisualElement class="login-icon" picking-mode="Ignore"><f9:Glyph kind="User" tint="#FFFFFFF2" size="24" /></ui:VisualElement>
+                <ui:TextField name="username" placeholder-text="Username" max-length="64" class="login-input" />
+            </ui:VisualElement>
+            <ui:VisualElement name="password-row" class="login-field">
+                <ui:VisualElement class="login-icon" picking-mode="Ignore"><f9:Glyph kind="Lock" tint="#FFFFFFF2" size="24" /></ui:VisualElement>
+                <ui:TextField name="password" placeholder-text="Password" password="true" max-length="256" class="login-input" />
+                <ui:Button name="show-password" class="show-password" tooltip="Show password"><f9:Glyph kind="Eye" tint="#406673" size="24" /></ui:Button>
+            </ui:VisualElement>
+            <ui:VisualElement name="confirm-row" class="login-field" style="display: none;">
+                <ui:VisualElement class="login-icon" picking-mode="Ignore"><f9:Glyph kind="Lock" tint="#FFFFFFF2" size="24" /></ui:VisualElement>
+                <ui:TextField name="confirm" placeholder-text="Confirm password" password="true" max-length="256" class="login-input" />
+            </ui:VisualElement>
+            <ui:VisualElement class="login-options">
+                <ui:Toggle name="remember" label="Remember me" class="remember" />
+                <ui:Button name="forgot" text="Forgot password?" class="link" />
+            </ui:VisualElement>
+            <ui:Label name="login-error" class="error" />
+            <ui:Button name="submit" text="LOGIN" class="login-button" />
+            <ui:Button name="mode-switch" text="Create account" class="link" />
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

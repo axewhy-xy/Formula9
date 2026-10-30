@@ -92,9 +92,45 @@ def test_launcher_drops_an_old_checkout_from_the_python_environment(tmp_path, mo
     assert environment["PYTHONNOUSERSITE"] == "1"
 
 
-def test_launcher_requires_local_dependencies_instead_of_using_an_old_environment(tmp_path, monkeypatch, capsys):
+def test_first_run_sets_up_its_own_environment_instead_of_using_an_old_one(tmp_path, monkeypatch):
+    local_python = tmp_path / "missing-python.exe"
     monkeypatch.setattr(sys, "argv", ["run_backend.py"])
-    monkeypatch.setattr(run_backend, "environment_python", lambda: tmp_path / "missing-python.exe")
-    monkeypatch.setattr(run_backend.subprocess, "call", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Must not start a fallback interpreter")))
-    assert run_backend.main() == 1
-    assert "--setup first" in capsys.readouterr().err
+    monkeypatch.setattr(run_backend, "environment_python", lambda: local_python)
+    commands = []
+    monkeypatch.setattr(run_backend.subprocess, "call", lambda command, **kwargs: commands.append(command) or 0)
+    monkeypatch.setattr(run_backend, "set_up", lambda environment: 7)
+    assert run_backend.main() == 7, "a failed setup stops the launcher"
+    assert commands == []
+    monkeypatch.setattr(run_backend, "set_up", lambda environment: 0)
+    assert run_backend.main() == 0
+    assert commands[0][0] == str(local_python), "the server only runs on the local environment"
+
+
+def test_the_bus_data_import_never_prompts(monkeypatch, capsys):
+    monkeypatch.delenv("LTA_ACCOUNT_KEY", raising=False)
+    monkeypatch.setattr(run_backend, "saved_value", lambda name, path: "")
+    monkeypatch.setattr("builtins.input", lambda *_: (_ for _ in ()).throw(AssertionError("Must not prompt")))
+    assert run_backend.import_bus_data("python", {}) == 2
+    assert "LTA_ACCOUNT_KEY" in capsys.readouterr().err
+
+
+def test_the_project_is_opened_in_its_pinned_unity_version(tmp_path):
+    version_file = tmp_path / "ProjectVersion.txt"
+    version_file.write_text("m_EditorVersion: 6000.1.12f1\nm_EditorVersionWithRevision: 6000.1.12f1 (da0c3ee78ee0)\n", encoding="utf-8")
+    assert run_backend.project_unity_version(version_file) == ("6000.1.12f1", "da0c3ee78ee0")
+    assert run_backend.find_editor("6000.1.12f1", [tmp_path]) is None
+    other_version = tmp_path / "2022.3.1f1" / "Editor"
+    other_version.mkdir(parents=True)
+    (other_version / "Unity.exe").write_text("")
+    assert run_backend.find_editor("6000.1.12f1", [tmp_path]) is None, "another version never stands in"
+    pinned = tmp_path / "6000.1.12f1" / "Editor"
+    pinned.mkdir(parents=True)
+    (pinned / "Unity.exe").write_text("")
+    assert run_backend.find_editor("6000.1.12f1", [tmp_path]) == pinned / "Unity.exe"
+
+
+def test_a_leftover_unity_lockfile_does_not_count_as_open(tmp_path):
+    lock = tmp_path / "UnityLockfile"
+    assert not run_backend.project_open_in_unity(lock)
+    lock.write_text("")
+    assert not run_backend.project_open_in_unity(lock)

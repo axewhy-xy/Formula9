@@ -65,31 +65,37 @@ namespace Formula9.UI
         }
     }
 
-    public readonly struct FleetRow
+    // One shuttle's card in the fleet panel.
+    public sealed class FleetRow
     {
-        public readonly string ShuttleId, State, Route, Battery, Provenance;
-        public FleetRow(string shuttleId, string state, string route, string battery, string provenance)
-        {
-            ShuttleId = shuttleId; State = state; Route = route; Battery = battery; Provenance = provenance;
-        }
+        public string ShuttleId, State, Status, Route, RouteLine, Battery, Provenance, NextStop, Eta;
+        // A line for the shuttle's open incident; null when it has none.
+        public string Incident;
+        public double BatteryPercent;
+        // Its position among the sorted shuttles, which picks its colour on the map and the card.
+        public int Index;
     }
 
     // Everything the training screen shows, derived from the accepted snapshot. Port of the Qt
     // TrainingWorkspace's refreshStatus, refreshViews and showCommandResult.
     public static class TrainingPresenter
     {
-        // The integrated exercise is first: it is the one with incidents, detours and charging.
+        // The 3D exercise is first, as in the Qt client.
         public static readonly IReadOnlyList<ScenarioChoice> Scenarios = new[]
         {
-            new ScenarioChoice("Integrated exercise (2D)", SessionController.IntegratedScenario, "Incidents, detours and charging."),
             new ScenarioChoice("3D fleet exercise", "scenario-m2-road-3d-r1", "Five shuttles on a road and ramp."),
+            new ScenarioChoice("Singapore, real streets (2D)", SessionController.IntegratedScenario, "Real streets and LTA bus stops, shuttles running from a bus interchange, with incidents, detours and charging."),
         };
+
+        public static string ScenarioTitle(string scenarioId) => scenarioId == SessionController.IntegratedScenario
+            ? "Singapore, real streets · incidents, detours, charging"
+            : "3D fleet exercise · road, ramp and obstruction";
 
         public const string NoSession = "No training session selected";
 
         public static string Title(FullSnapshot snapshot) => snapshot.Spatial != null
             ? "3D fleet exercise · road, ramp and obstruction"
-            : "2D training scenario · incidents, detours, charging";
+            : "Singapore, real streets · incidents, detours, charging";
 
         public static string StatusLine(FullSnapshot snapshot, bool available) =>
             $"Session {snapshot.Session.SessionId} · epoch {snapshot.Session.SessionEpoch} · snapshot {snapshot.SnapshotId} · " +
@@ -123,13 +129,106 @@ namespace Formula9.UI
                                               && route.DirectedEdgeIds.Any(closed.Contains));
         }
 
-        public static IReadOnlyList<FleetRow> Fleet(FullSnapshot snapshot) => snapshot.Vehicles
+        public static IReadOnlyList<FleetRow> Fleet(FullSnapshot snapshot, string selectedIncident = null) => snapshot.Vehicles
             .OrderBy(v => v.VehicleId, StringComparer.Ordinal)
-            .Select(v => new FleetRow(v.VehicleId, v.ServiceState,
-                v.RouteId == null ? "—" : $"{v.RouteId} / {v.RouteRevision}",
-                $"{Number(v.BatteryKwh)} / {Number(v.BatteryCapacityKwh)} kWh",
-                v.Provenance.Kind))
+            .Select((v, index) =>
+            {
+                var route = snapshot.Routes.FirstOrDefault(r => r.RouteId == v.RouteId);
+                return new FleetRow
+                {
+                    ShuttleId = v.VehicleId,
+                    State = v.ServiceState,
+                    Status = StatusText(v.ServiceState),
+                    Route = v.RouteId == null ? "—" : $"{v.RouteId} / {v.RouteRevision}",
+                    RouteLine = v.RouteId == null ? "No route assigned" : $"Route {v.RouteId} · rev {v.RouteRevision}",
+                    Battery = $"{Number(v.BatteryKwh)} / {Number(v.BatteryCapacityKwh)} kWh",
+                    BatteryPercent = v.BatteryCapacityKwh > 0 ? Math.Max(0, Math.Min(100, 100 * v.BatteryKwh / v.BatteryCapacityKwh)) : 0,
+                    Provenance = v.Provenance.Kind,
+                    NextStop = NextStopLine(v, route),
+                    Eta = EtaLine(snapshot.EnergyForecasts?.FirstOrDefault(f => f.VehicleId == v.VehicleId)),
+                    Incident = IncidentLine(snapshot, v.VehicleId, selectedIncident),
+                    Index = index,
+                };
+            })
             .ToList();
+
+        // An unknown state is shown as sent, not guessed.
+        public static string StatusText(string state)
+        {
+            switch (state)
+            {
+                case "IN_SERVICE": return "Moving";
+                case "DETOURING": return "Detouring";
+                case "RETURNING_TO_DEPOT": return "Returning to depot";
+                case "BLOCKED": return "Stopped";
+                case "AWAITING_GUIDANCE": return "Awaiting guidance";
+                case "DWELLING": return "At stop";
+                case "QUEUED_FOR_CHARGE": return "Queued to charge";
+                case "CHARGING": return "Charging";
+                case "STANDBY": return "Standby";
+                case "OUT_OF_SERVICE": return "Out of service";
+                default: return state;
+            }
+        }
+
+        private static string NextStopLine(FleetVehicle vehicle, RouteRevision route)
+        {
+            if (vehicle.RouteId == null) return "Next stop —";
+            if (route == null) return "Next stop unknown";
+            if (route.StopsM.Count == 0) return "No stops on this route";
+            var next = NextStop(route, vehicle.Position.XM, vehicle.Position.YM);
+            return next == null ? "Next stop unknown" : $"Next stop {next}";
+        }
+
+        // The first stop ahead along the route, or the route's first stop once past them all.
+        public static string NextStop(RouteRevision route, double x, double y)
+        {
+            var path = route.EdgePathsM.SelectMany(p => p).ToList();
+            if (path.Count < 2) return null;
+            // Within this distance behind the shuttle, a stop still counts as reached next (it is there)
+            const double reachedM = 1;
+            var shuttleAt = DistanceAlong(path, x, y);
+            var ordered = route.StopsM.Select(s => (s.StopId, At: DistanceAlong(path, s.Position.XM, s.Position.YM))).OrderBy(s => s.At).ToList();
+            if (ordered.Count == 0) return null;
+            foreach (var stop in ordered)
+                if (stop.At + reachedM >= shuttleAt) return stop.StopId;
+            return ordered[0].StopId;
+        }
+
+        private static double DistanceAlong(List<Position> path, double x, double y)
+        {
+            double travelled = 0, best = double.MaxValue, bestAt = 0;
+            for (var i = 0; i + 1 < path.Count; i++)
+            {
+                double dx = path[i + 1].XM - path[i].XM, dy = path[i + 1].YM - path[i].YM;
+                var length = Math.Sqrt(dx * dx + dy * dy);
+                var share = length > 0 ? Math.Max(0, Math.Min(1, ((x - path[i].XM) * dx + (y - path[i].YM) * dy) / (length * length))) : 0;
+                double offX = path[i].XM + dx * share - x, offY = path[i].YM + dy * share - y;
+                var distance = Math.Sqrt(offX * offX + offY * offY);
+                if (distance < best) { best = distance; bestAt = travelled + length * share; }
+                travelled += length;
+            }
+            return bestAt;
+        }
+
+        private static string EtaLine(EnergyForecast forecast)
+        {
+            if (forecast?.NextDepotEtaS == null) return "ETA —";
+            var seconds = forecast.NextDepotEtaS.Value;
+            return $"Depot {forecast.NextDepotId} ETA {(seconds < 60 ? $"{Math.Round(seconds)} s" : $"{Math.Round(seconds / 60)} min")}";
+        }
+
+        // The selected incident when it is on this shuttle, otherwise the most recent one.
+        private static string IncidentLine(FullSnapshot snapshot, string vehicleId, string selected)
+        {
+            var open = snapshot.Incidents.Where(i => i.VehicleId == vehicleId && i.State != "RESOLVED").ToList();
+            if (open.Count == 0) return null;
+            var shown = open.FirstOrDefault(i => i.IncidentId == selected) ?? open.OrderByDescending(i => i.DetectedTick).First();
+            var state = shown.State.ToLowerInvariant().Replace('_', ' ');
+            var text = $"! Incident {shown.IncidentId} · {char.ToUpperInvariant(state[0])}{state.Substring(1)}";
+            if (open.Count > 1) text += $" (+{open.Count - 1} more)";
+            return shown.IncidentId == selected ? text + " · selected" : text;
+        }
 
         public static string SessionLabel(SessionListEntry entry) => $"{entry.Status} · {entry.SessionId}";
 

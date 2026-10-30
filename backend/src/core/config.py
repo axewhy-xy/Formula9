@@ -42,6 +42,8 @@ class Settings(BaseModel):
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     map_database_path: Path
     training_database_path: Path
+    # LTA DataMall bus stops/services/routes, written by src.transit.import_lta
+    transit_database_path: Path
     # Accounts are stored in MongoDB; without a URI the /auth endpoints answer 503
     mongodb_uri: str | None = None
     mongodb_database: str = "formula9"
@@ -82,11 +84,18 @@ def get_settings() -> Settings:
         if configured_training
         else (project_root / "state" / "training.sqlite").resolve()
     )
+    configured_transit = getenv("TRANSIT_DATABASE_PATH")
+    transit_database_path = (
+        Path(configured_transit).expanduser().resolve()
+        if configured_transit
+        else (project_root / "backend" / "fixtures" / "transit" / "transit.sqlite").resolve()
+    )
     return Settings(
         environment=getenv("ENVIRONMENT", "development"),
         cors_origins=[origin for origin in origins if origin],
         map_database_path=map_database_path,
         training_database_path=training_database_path,
+        transit_database_path=transit_database_path,
         mongodb_uri=getenv("MONGODB_URI") or None,
         mongodb_database=getenv("MONGODB_DATABASE", "formula9"),
     )

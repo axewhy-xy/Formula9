@@ -29,10 +29,44 @@ from contracts.v2.models import DispatcherCommand
 from src.api.routes.training_v2 import get_actor_id, get_training_store
 from src.app import app
 from src.persistence.training_store import TrainingStore, TrainingStoreError
-from src.services.integrated_actor import IntegratedSessionActor, SCENARIO_SELECTOR
+from src.routing.build_singapore_fleet_fixture import low_battery_kwh
+from src.services.integrated_actor import IntegratedSessionActor, SCENARIO_SELECTOR, get_workflow_definition
 from src.schemas.shuttle_data import ShuttleState
 from src.services.training_sessions import TrainingSessionService, checkpoint
 from src.services.training_workflow import publish_workflow
+
+
+def bay(charger_id="charger-1"):
+    x, y = get_workflow_definition().data["bay_positions_m"][charger_id]
+    return {"x_m": float(x), "y_m": float(y), "z_m": 0.}
+
+
+def parking(index):
+    x, y = get_workflow_definition().parking_positions[index]
+    return {"x_m": float(x), "y_m": float(y), "z_m": 0.}
+
+
+def on_branch(position, branch):
+    """On the fixture's named road chain (e.g. bypass-b), and past the loop entrance they share."""
+    definition = get_workflow_definition()
+    start = definition.data["nodes"][str(definition.data["route_edit"]["start_node_id"])]
+    away = (position["x_m"], position["y_m"]) != tuple(start)
+    return away and definition.lies_on(position["x_m"], position["y_m"], branch)
+
+
+def only_on(branch):
+    """A node no other road chain uses, to ask the route editor for that branch."""
+    edges = get_workflow_definition().data["edges"]
+    def nodes(prefix):
+        return {n for identifier, pair in edges.items() if identifier.startswith(prefix + ":") for n in pair}
+    others = set().union(*(nodes(p) for p in ("main", "bypass-b", "bypass-c", "return") if p != branch))
+    return min(nodes(branch) - others)
+
+
+def make_low(index):
+    """Low enough for a charge offer, still able to reach the real depot."""
+    return lambda actor: setattr(actor.shuttles[index], "battery",
+                                 low_battery_kwh(actor, index)*100/actor.BATTERY_CAPACITY_KWH)
 
 
 async def manual_clock(self, session):
@@ -106,7 +140,7 @@ def advance(runtime, steps):
     client.portal.call(run)
 
 
-def advance_until(runtime, predicate, limit=4400):
+def advance_until(runtime, predicate, limit=12000):
     client, store, service, session_id = runtime
     async def run():
         for _ in range(limit//2):
@@ -162,12 +196,12 @@ def test_one_live_session_runs_route_incident_depot_and_charging(runtime):
     advance(runtime, 240)
     continued = read(runtime)
     assert continued["incidents"][0]["state"] == "RESOLVED"
-    assert continued["vehicles"][0]["position"]["y_m"] > 0  # Actor follows bypass B, not the closed main road.
+    assert on_branch(continued["vehicles"][0]["position"], "bypass-b")  # Actor follows bypass B, not the closed main road.
     assert continued["vehicles"][4]["service_state"] == "RETURNING_TO_DEPOT"
     assert continued["vehicles"][4]["position"] != initial["vehicles"][4]["position"]
     advance_until(runtime, lambda s: s.vehicles[4].service_state == "CHARGING")
     charging = read(runtime)
-    assert charging["vehicles"][4]["position"] == {"x_m": -20., "y_m": -300., "z_m": 0.}
+    assert charging["vehicles"][4]["position"] == bay()
     before_charge = charging["vehicles"][4]["battery_kwh"]
     advance_until(runtime, lambda s: s.vehicles[4].service_state == "STANDBY", limit=1600)
     finished = read(runtime)
@@ -213,8 +247,9 @@ def test_other_incident_choices_execute_in_the_same_actor(runtime, action):
     assert incident_decision(runtime, action)["status"] == "APPLIED"
     if action == "ROAD_DETOUR":
         advance(runtime, 20)
-        assert read(runtime)["vehicles"][0]["position"]["y_m"] < 0  # Physical bypass C execution.
-    advance_until(runtime, lambda s: s.incidents[0].state == "RESOLVED", limit=1200)
+        assert on_branch(read(runtime)["vehicles"][0]["position"], "bypass-c")  # Physical bypass C execution.
+    # ROAD_DETOUR resolves once shuttle-01 has driven the real bypass round the block
+    advance_until(runtime, lambda s: s.incidents[0].state == "RESOLVED", limit=8000)
     assert read(runtime)["incidents"][0]["state"] == "RESOLVED"
 
 
@@ -302,7 +337,7 @@ def test_decision_after_obstruction_clearance_is_durably_rejected(runtime):
 
 
 def test_alternative_pretrip_path_gets_a_matching_obstruction_and_real_detour(runtime):
-    draft = preview(runtime, via_node_ids=[4])
+    draft = preview(runtime, via_node_ids=[only_on("bypass-c")])
     assert draft["approvable"] and draft["directed_edge_ids"][0] == "bypass-c:0:forward"
     approve(runtime, draft)
     send(runtime, "START")
@@ -312,7 +347,7 @@ def test_alternative_pretrip_path_gets_a_matching_obstruction_and_real_detour(ru
     assert obstruction["affected_edge_ids"] == ["bypass-c:0:forward"]
     assert incident_decision(runtime, "ROAD_DETOUR")["status"] == "APPLIED"
     advance(runtime, 20)
-    assert read(runtime)["vehicles"][0]["position"]["y_m"] > 0
+    assert on_branch(read(runtime)["vehicles"][0]["position"], "bypass-b")
 
 
 def test_unknown_mandatory_route_metadata_prevents_live_approval(runtime, monkeypatch):
@@ -446,7 +481,7 @@ def test_recovery_preserves_route_hold_and_depot_execution_and_reconfirms_queued
                 assert read(runtime)["vehicles"][4]["position"] != before["vehicles"][4]["position"]
                 advance_until(runtime, lambda s: s.vehicles[4].service_state == "CHARGING")
                 charge_snapshot = read(runtime)
-                assert charge_snapshot["vehicles"][4]["position"]["x_m"] == -20
+                assert charge_snapshot["vehicles"][4]["position"] == bay()
                 advance(runtime, 20)
         with TrainingStore(database) as store:
             app.dependency_overrides[get_training_store] = lambda: store
@@ -561,14 +596,16 @@ def test_pretrip_recovery_stays_ready_and_can_approve_and_start(tmp_path, monkey
 def test_reserving_a_port_keeps_other_offers_on_the_integrated_energy_model(runtime):
     approve(runtime)
     send(runtime, "START")
-    stage_boundary(runtime, lambda actor: setattr(actor.shuttles[3], "battery", 6.45*100/actor.BATTERY_CAPACITY_KWH))
+    stage_boundary(runtime, make_low(3))
     assert reserve(runtime)["status"] == "APPLIED"
     snapshot = read(runtime)
     offer = next(o for o in snapshot["charge_options"] if o["vehicle_id"] == "shuttle-04" and o["action"] == "CHARGE_NOW")
     forecast = next(f for f in snapshot["energy_forecasts"] if f["vehicle_id"] == "shuttle-04")
     assert offer["charger_id"] == "charger-2"
-    # Bay 2 to shuttle-04's parking space is 90 m at the authored 10 m/s.
-    assert offer["out_of_service_s"] == pytest.approx(forecast["next_depot_eta_s"]+60+9)
+    # Plus the drive from bay 2 to shuttle-04's parking space in the interchange yard
+    actor = runtime[2].sessions[runtime[3]].actor
+    yard_s = actor._path_distance(actor._parking_points(3, "charger-2"))/actor.definition.data["speed_mps"]
+    assert offer["out_of_service_s"] == pytest.approx(forecast["next_depot_eta_s"]+60+yard_s)
     assert 6 < offer["battery_after_kwh"] < 8
     assert any("Charge for 60 s" in assumption for assumption in offer["assumptions"])
     assert reserve(runtime, "shuttle-04", "second-battery-choice")["status"] == "APPLIED"
@@ -593,8 +630,8 @@ def test_a_finished_shuttle_clears_its_bay_before_the_port_is_reused(runtime):
     advance_until(runtime, lambda s: s.vehicles[4].service_state == "STANDBY", limit=400)
     parked = read(runtime)
     assert not parked["chargers"][0]["occupied_vehicle_ids"]
-    assert parked["vehicles"][4]["position"] == {"x_m": 60., "y_m": -380., "z_m": 0.}
-    stage_boundary(runtime, lambda actor: setattr(actor.shuttles[3], "battery", 6.45*100/actor.BATTERY_CAPACITY_KWH))
+    assert parked["vehicles"][4]["position"] == parking(4)
+    stage_boundary(runtime, make_low(3))
     assert reserve(runtime, "shuttle-04", "reuse-bay")["status"] == "APPLIED"
     assert read(runtime)["chargers"][0]["occupied_vehicle_ids"] == ["shuttle-04"]
     def approach_bay(actor):
@@ -603,7 +640,7 @@ def test_a_finished_shuttle_clears_its_bay_before_the_port_is_reused(runtime):
         shuttle.position = actor._route_evaluation(shuttle.route_ID, shuttle.progress)
     stage_boundary(runtime, approach_bay)
     advance_until(runtime, lambda s: s.vehicles[3].service_state == "CHARGING", limit=100)
-    assert read(runtime)["vehicles"][3]["position"] == {"x_m": -20., "y_m": -300., "z_m": 0.}
+    assert read(runtime)["vehicles"][3]["position"] == bay()
 
 
 def test_repeat_charging_uses_yard_distance_and_enforces_the_reserve(runtime):
@@ -664,7 +701,7 @@ def test_recovery_mid_parking_retains_the_bay_reservation_until_standby(runtime,
                 finished = store.snapshot(runtime[3])
                 assert finished.vehicles[4].service_state == "STANDBY"
                 assert not finished.chargers[0].occupied_vehicle_ids and not session.actor.parking_chargers
-                assert finished.vehicles[4].position.model_dump() == {"x_m": 60., "y_m": -380., "z_m": 0.}
+                assert finished.vehicles[4].position.model_dump() == parking(4)
             finally:
                 await service.close()
     asyncio.run(recover())
@@ -693,7 +730,7 @@ def test_a_legacy_parked_shuttle_clears_without_releasing_the_next_reservation(r
         actor.modes[4] = "STANDBY"
         actor.domain.chargers[0].occupied_vehicle_ids = []
         actor.domain.chargers[0].aggregate_revision += 1
-        actor.shuttles[3].battery = 6.45*100/actor.BATTERY_CAPACITY_KWH
+        actor.shuttles[3].battery = low_battery_kwh(actor, 3)*100/actor.BATTERY_CAPACITY_KWH
     stage_boundary(runtime, legacy_finish)
     assert reserve(runtime, "shuttle-04", "legacy-bay-reuse")["status"] == "APPLIED"
     def approach(actor):
@@ -704,7 +741,7 @@ def test_a_legacy_parked_shuttle_clears_without_releasing_the_next_reservation(r
     advance_until(runtime, lambda s: s.vehicles[3].service_state == "CHARGING", limit=100)
     advance_until(runtime, lambda s: s.vehicles[4].service_state == "STANDBY", limit=400)
     parked = read(runtime)
-    assert parked["vehicles"][4]["position"] == {"x_m": 60., "y_m": -380., "z_m": 0.}
+    assert parked["vehicles"][4]["position"] == parking(4)
     assert parked["chargers"][0]["occupied_vehicle_ids"] == ["shuttle-04"]
 
 
@@ -712,7 +749,7 @@ def test_simultaneous_opposing_bay_departures_both_reach_parking(runtime):
     approve(runtime)
     send(runtime, "START")
     reserve(runtime)
-    stage_boundary(runtime, lambda actor: setattr(actor.shuttles[0], "battery", 6.45*100/actor.BATTERY_CAPACITY_KWH))
+    stage_boundary(runtime, make_low(0))
     assert reserve(runtime, "shuttle-01", "other-bay")["status"] == "APPLIED"
     finish_charge(runtime, (0, 4))
     client, store, service, session_id = runtime

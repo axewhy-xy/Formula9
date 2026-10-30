@@ -1,145 +1,316 @@
-/* Light theme close to the Qt client's app.qss: neutral greys, one teal accent. */
+/* The Qt client's app.qss in USS: teal shell, white cards, one accent. */
 .app {
     flex-grow: 1;
-    background-color: rgb(244, 246, 248);
-    color: rgb(28, 34, 40);
+    background-color: rgb(238, 244, 244);
+    color: rgb(30, 42, 46);
     font-size: 14px;
 }
 
+.app Button {
+    height: 34px;
+    padding: 0 14px;
+    margin: 0 8px 0 0;
+    color: rgb(30, 42, 46);
+    background-color: rgb(230, 238, 238);
+    border-width: 1px;
+    border-color: rgb(211, 222, 222);
+    border-radius: 8px;
+}
+
+.app Button:hover { background-color: rgb(220, 232, 232); }
+.app Button:disabled { color: rgb(154, 168, 170); background-color: rgb(238, 243, 243); }
+
+.app .unity-text-field__input, .app .unity-base-popup-field__input {
+    min-height: 32px;
+    padding: 0 10px;
+    color: rgb(30, 42, 46);
+    background-color: rgb(255, 255, 255);
+    border-width: 1px;
+    border-color: rgb(211, 222, 222);
+    border-radius: 8px;
+}
+
+.grow { flex-grow: 1; }
+
+/* The file each page is instanced from: it must fill its slot like the page inside it. */
+.page-host { flex-grow: 1; flex-basis: 0; min-height: 0; }
+.page-host > * { flex-grow: 1; }
+
+.primary, .app Button.primary {
+    color: rgb(255, 255, 255);
+    background-color: rgb(31, 122, 122);
+    border-width: 0;
+    -unity-font-style: bold;
+}
+
+.primary:hover, .app Button.primary:hover { background-color: rgb(26, 106, 106); }
+
+/* Login */
 .login {
     flex-grow: 1;
     align-items: center;
     justify-content: center;
-    background-color: rgb(28, 40, 48);
+    background-color: rgb(40, 90, 104);
 }
 
-.login-card {
-    width: 420px;
-    padding: 28px;
-    border-radius: 10px;
-    background-color: rgb(255, 255, 255);
-}
-
-.brand {
-    font-size: 26px;
-    -unity-font-style: bold;
-    color: rgb(18, 110, 120);
-}
-
-.subtitle {
-    margin-bottom: 14px;
-    color: rgb(96, 106, 116);
-}
+.login-card { width: 380px; }
 
 .hint {
     white-space: normal;
     margin-bottom: 8px;
-    color: rgb(96, 106, 116);
+    color: rgb(255, 255, 255);
 }
+
+.login-field {
+    flex-direction: row;
+    height: 48px;
+    margin-bottom: 14px;
+}
+
+.login-icon {
+    width: 48px;
+    height: 48px;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    background-color: rgba(255, 255, 255, 0.2);
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
+.login-input { flex-grow: 1; flex-basis: 0; margin: 0; }
+
+.app .login-input .unity-text-field__input {
+    height: 48px;
+    padding: 0 14px;
+    border-width: 0;
+    border-radius: 0;
+    font-size: 16px;
+}
+
+.app Button.show-password {
+    width: 48px;
+    height: 48px;
+    margin: 0;
+    padding: 12px;
+    border-width: 0;
+    border-radius: 0;
+    background-color: rgb(255, 255, 255);
+}
+
+.login-options {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+/* Checkbox first, then its label, as in the Qt login. */
+.remember { flex-direction: row-reverse; }
+.remember, .remember Label { color: rgb(255, 255, 255); }
+.remember .unity-label { min-width: 0; margin-left: 6px; }
 
 .error {
     white-space: normal;
     min-height: 20px;
-    margin: 6px 0;
-    color: rgb(190, 40, 40);
+    margin: 4px 0;
+    color: rgb(255, 214, 214);
 }
 
-.primary {
-    background-color: rgb(18, 110, 120);
+.app Button.login-button {
+    height: 52px;
+    margin: 4px 0 8px 0;
+    font-size: 18px;
+    letter-spacing: 2px;
     color: rgb(255, 255, 255);
-    -unity-font-style: bold;
+    background-color: rgb(28, 72, 90);
     border-width: 0;
+    border-radius: 0;
 }
 
-.primary:hover {
-    background-color: rgb(14, 92, 100);
-}
+.app Button.login-button:hover { background-color: rgb(22, 60, 76); }
+.app Button.login-button:disabled { color: rgb(210, 224, 228); background-color: rgb(70, 110, 124); }
 
-.primary:disabled {
-    background-color: rgb(160, 176, 180);
-}
-
-.link {
+.app Button.link {
+    height: auto;
+    margin: 0;
+    padding: 2px 0;
+    color: rgb(255, 255, 255);
     background-color: rgba(0, 0, 0, 0);
     border-width: 0;
-    color: rgb(18, 110, 120);
+    -unity-text-align: middle-center;
 }
 
-.training {
+.app Button.link:hover { background-color: rgba(0, 0, 0, 0); color: rgb(190, 235, 240); }
+
+/* Shell */
+.training { flex-grow: 1; flex-direction: row; }
+
+.nav-panel {
+    width: 190px;
+    flex-shrink: 0;
+    padding: 18px 0 18px 14px;
+    background-color: rgb(16, 84, 100);
+}
+
+.brand-row { flex-direction: row; align-items: center; padding: 0 14px 18px 6px; }
+.brand-names { margin-left: 8px; }
+.brand-name { font-size: 22px; -unity-font-style: bold; color: rgb(255, 255, 255); }
+.brand-tagline { font-size: 10px; letter-spacing: 3px; color: rgb(185, 216, 218); }
+
+.app Button.nav-item {
+    height: 44px;
+    margin: 0 0 6px 0;
+    padding: 0 0 0 12px;
+    flex-direction: row;
+    align-items: center;
+    color: rgb(230, 242, 242);
+    background-color: rgba(0, 0, 0, 0);
+    border-width: 0;
+    border-left-width: 4px;
+    border-color: rgba(0, 0, 0, 0);
+    border-radius: 10px 0 0 10px;
+    -unity-text-align: middle-left;
+}
+
+.app Button.nav-item:hover { background-color: rgba(255, 255, 255, 0.07); }
+
+.app Button.nav-item-selected, .app Button.nav-item-selected:hover {
+    color: rgb(255, 255, 255);
+    -unity-font-style: bold;
+    background-color: rgba(255, 255, 255, 0.14);
+    border-left-color: rgb(120, 205, 210);
+}
+
+.nav-item-icon { margin-right: 10px; }
+
+.training-body {
     flex-grow: 1;
+    flex-basis: 0;
+    min-width: 0;
     padding: 12px 16px;
 }
 
 .top-bar {
     flex-direction: row;
     align-items: center;
-    margin-bottom: 8px;
+    flex-shrink: 0;
+    margin-bottom: 10px;
+    padding: 8px 16px 8px 10px;
+    border-width: 1px;
+    border-radius: 12px;
+    border-color: rgb(220, 230, 230);
+    background-color: rgb(255, 255, 255);
 }
 
-.title {
-    flex-grow: 1;
-    font-size: 20px;
+.app Button.section-item {
+    height: 40px;
+    padding: 0 18px;
+    color: rgb(51, 71, 75);
+    background-color: rgba(0, 0, 0, 0);
+    border-width: 0;
+    border-radius: 10px;
+}
+
+.app Button.section-item:hover { background-color: rgb(238, 244, 244); }
+
+.app Button.section-item-selected, .app Button.section-item-selected:hover {
+    color: rgb(15, 76, 92);
     -unity-font-style: bold;
+    background-color: rgb(220, 239, 239);
+    border-bottom-width: 3px;
+    border-color: rgb(31, 122, 122);
 }
 
-.mute {
-    margin-right: 16px;
+.user { margin: 0 18px 0 6px; font-size: 14px; }
+
+.content-card {
+    flex-grow: 1;
+    min-height: 0;
+    padding: 12px;
+    border-width: 1px;
+    border-radius: 12px;
+    border-color: rgb(220, 230, 230);
+    background-color: rgb(255, 255, 255);
 }
 
-.user {
-    margin-right: 8px;
-    color: rgb(96, 106, 116);
-}
+.title { flex-grow: 1; -unity-font-style: bold; }
+.mute { margin: 0 0 0 4px; }
 
 .row {
     flex-direction: row;
     align-items: center;
     flex-wrap: wrap;
-    margin-bottom: 6px;
-}
-
-.scenario {
-    min-width: 300px;
-}
-
-/* Fixed width, so typing an ID does not push Join and Refresh along. */
-.session-id {
-    width: 420px;
     flex-shrink: 0;
+    margin-bottom: 8px;
 }
 
-.sessions {
-    min-width: 420px;
-}
-
-.muted {
-    color: rgb(96, 106, 116);
-    white-space: normal;
-}
-
-.status {
-    margin-top: 4px;
-    -unity-font-style: bold;
-}
+.scenario { min-width: 240px; margin-right: 8px; }
+.session-id { flex-grow: 1; flex-basis: 200px; min-width: 200px; margin-right: 8px; }
+.sessions { flex-grow: 1; flex-basis: 300px; margin-right: 8px; }
+.muted { color: rgb(74, 93, 97); white-space: normal; }
 
 .message {
     white-space: normal;
-    min-height: 20px;
-    margin-bottom: 8px;
-    color: rgb(18, 90, 100);
+    margin-bottom: 6px;
+    color: rgb(15, 76, 92);
+    -unity-font-style: bold;
 }
 
-.body {
-    flex-grow: 1;
-    min-height: 0;
+.status { white-space: normal; margin-bottom: 10px; }
+
+.view-bar {
     flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+    margin-bottom: 8px;
 }
 
-/* flex-basis 0 on both panels keeps the 3:2 split whatever their content. */
+.app Button.segment {
+    height: 40px;
+    color: rgb(30, 42, 46);
+    background-color: rgb(255, 255, 255);
+}
+
+.app Button.segment-selected, .app Button.segment-selected:hover {
+    color: rgb(255, 255, 255);
+    -unity-font-style: bold;
+    background-color: rgb(15, 76, 92);
+    border-color: rgb(15, 76, 92);
+}
+
+.info-banner {
+    flex-grow: 1;
+    flex-basis: 0;
+    min-width: 0;
+    flex-direction: row;
+    align-items: center;
+    min-height: 40px;
+    margin-right: 8px;
+    padding: 0 10px;
+    border-width: 1px;
+    border-radius: 8px;
+    border-color: rgb(207, 227, 227);
+    background-color: rgb(232, 243, 243);
+}
+
+.info-text { margin-left: 6px; white-space: normal; color: rgb(51, 71, 75); flex-shrink: 1; }
+
+.app Button.segment-round {
+    height: 40px;
+    margin: 0;
+    color: rgb(15, 76, 92);
+    background-color: rgb(232, 243, 243);
+    border-color: rgb(31, 122, 122);
+    border-radius: 20px;
+}
+
+.body { flex-grow: 1; flex-direction: row; min-height: 0; }
+
 .world {
     flex-grow: 3;
     flex-basis: 0;
-    margin-right: 12px;
+    margin-right: 8px;
     border-radius: 8px;
     background-color: rgb(26, 26, 30);
     align-items: center;
@@ -148,24 +319,20 @@
     overflow: hidden;
 }
 
-.world .muted {
-    color: rgb(200, 206, 212);
-}
-
 .fleet-panel {
     flex-grow: 2;
     flex-basis: 0;
-    padding: 10px;
+    padding: 12px;
+    border-width: 1px;
     border-radius: 8px;
+    border-color: rgb(220, 230, 230);
     background-color: rgb(255, 255, 255);
     min-width: 340px;
     min-height: 0;
 }
 
-.workspace-page {
-    flex-grow: 1;
-    min-height: 0;
-}
+.workspace-page { flex-grow: 1; min-height: 0; }
+.login, .training { flex-grow: 1; }
 
 .workspace-text {
     white-space: normal;
@@ -187,53 +354,222 @@
     border-radius: 4px;
 }
 
-.data-table { flex-shrink: 0; margin-bottom: 10px; }
+.data-table { flex-shrink: 0; min-height: 170px; margin-bottom: 10px; }
 .data-table-body { flex-direction: column; flex-shrink: 0; }
 /* The page switcher keeps its size; a tall page scrolls under it instead of squeezing it. */
 .workspace-nav { flex-shrink: 0; }
-.data-cell { width: 145px; flex-shrink: 0; white-space: normal; padding: 4px; border-bottom-width: 1px; border-color: rgb(228, 232, 236); }
-.data-heading { -unity-font-style: bold; background-color: rgb(236, 242, 244); }
+.data-cell { flex-grow: 1; flex-basis: 0; min-width: 110px; white-space: normal; padding: 6px 12px; border-bottom-width: 1px; border-color: rgb(228, 232, 236); }
+.data-table .unity-scroll-view__content-container { flex-grow: 1; min-width: 100%; }
+.data-table-body { flex-grow: 1; }
+.data-cell Button { margin: 0; height: 28px; padding: 0 8px; }
+.data-heading { color: rgb(51, 71, 75); -unity-font-style: bold; background-color: rgb(243, 247, 247); }
 .data-table .row { flex-wrap: nowrap; align-items: stretch; margin-bottom: 0; }
 
-.panel-title {
-    font-size: 16px;
+.panel-title { font-size: 17px; -unity-font-style: bold; margin-bottom: 8px; flex-shrink: 0; }
+.fleet-search { flex-shrink: 0; margin: 0 0 8px 0; }
+.fleet { flex-grow: 1; min-height: 240px; }
+
+.map-controls { position: absolute; right: 8px; bottom: 8px; width: 38px; }
+
+.app Button.map-button, .map-compass {
+    width: 38px;
+    height: 38px;
+    margin: 0 0 6px 0;
+    padding: 9px;
+    align-items: center;
+    justify-content: center;
+    -unity-text-align: middle-center;
     -unity-font-style: bold;
-    margin-bottom: 6px;
+    font-size: 18px;
+    color: rgb(30, 42, 46);
+    border-width: 0;
+    border-radius: 8px;
+    background-color: rgb(255, 255, 255);
 }
 
-.fleet {
-    flex-grow: 1;
+.app Button.map-text-button { padding: 0; }
+
+.map-compass { padding: 4px 0 0 0; border-radius: 19px; }
+.map-compass Label { font-size: 11px; -unity-font-style: normal; padding: 0; margin: 0; }
+
+.map-legend {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    background-color: rgba(255, 255, 255, 0.94);
 }
 
-.fleet-row {
+.map-legend-title { -unity-font-style: bold; font-size: 12px; margin-bottom: 4px; color: rgb(30, 42, 46); }
+.map-legend-row { flex-direction: row; align-items: center; margin-bottom: 3px; }
+.map-legend-key { width: 26px; align-items: center; justify-content: center; }
+.map-legend-row Label { font-size: 12px; color: rgb(30, 42, 46); }
+.swatch-line { width: 22px; height: 4px; border-radius: 2px; }
+.swatch-thin { width: 22px; height: 2px; }
+.swatch-band { width: 22px; height: 9px; }
+.swatch-square { width: 10px; height: 10px; border-radius: 2px; }
+.swatch-dot { width: 11px; height: 11px; border-radius: 6px; }
+.swatch-ring { width: 11px; height: 11px; border-radius: 6px; border-width: 3px; background-color: rgb(255, 255, 255); }
+
+.map-banner {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    color: rgb(255, 255, 255);
+    background-color: rgba(190, 40, 40, 0.92);
+}
+
+.map-scale {
+    position: absolute;
+    left: 14px;
+    bottom: 12px;
+    font-size: 12px;
+    padding: 0 3px;
+    color: rgb(30, 42, 46);
+    border-left-width: 2px;
+    border-right-width: 2px;
+    border-bottom-width: 2px;
+    border-color: rgb(30, 42, 46);
+}
+
+.fleet-card {
     flex-direction: row;
-    padding: 4px 0;
-    border-bottom-width: 1px;
+    flex-shrink: 0;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    border-width: 1px;
+    border-radius: 6px;
     border-color: rgb(228, 232, 236);
+    background-color: rgb(255, 255, 255);
 }
 
-.fleet-header {
-    -unity-font-style: bold;
+.fleet-card-selected {
+    border-color: rgb(18, 110, 120);
+    background-color: rgb(232, 244, 245);
 }
 
-.fleet-cell {
+.fleet-card-incident {
+    border-color: rgb(214, 48, 49);
+}
+
+.bus-icon {
+    width: 36px;
+    height: 36px;
+    margin-right: 10px;
+    flex-shrink: 0;
+}
+
+.fleet-card-text {
     flex-grow: 1;
     flex-basis: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    padding-right: 8px;
+    min-width: 0;
 }
 
-/* Shuttle, State, Route / revision, Battery, Provenance */
-.fleet-col-2 {
-    flex-grow: 1.8;
+.fleet-card-top {
+    flex-direction: row;
+    align-items: center;
 }
 
-.fleet-col-3 {
-    flex-grow: 1.3;
+.fleet-card-id {
+    flex-grow: 1;
+    -unity-font-style: bold;
 }
 
-.fleet-col-4 {
-    flex-grow: 1.6;
+.battery-gauge {
+    width: 24px;
+    height: 12px;
+    padding: 1px;
+    margin-right: 4px;
+    border-width: 1px;
+    border-radius: 2px;
+    border-color: rgb(28, 34, 40);
 }
+
+.battery-fill {
+    height: 100%;
+}
+
+.fleet-card-status {
+    flex-direction: row;
+    align-items: center;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    margin-right: 5px;
+    border-radius: 4px;
+}
+
+.fleet-card-line {
+    font-size: 12px;
+    white-space: normal;
+    color: rgb(96, 106, 116);
+}
+
+.fleet-incident {
+    color: rgb(214, 48, 49);
+    font-size: 12px;
+    white-space: normal;
+}
+
+/* Full-width pages: Route Planning, Incident Monitor, Charging, Reports, Scenarios */
+.page-title { font-size: 22px; -unity-font-style: bold; margin-bottom: 10px; flex-shrink: 0; }
+.tabs { flex-direction: row; flex-shrink: 0; margin-bottom: 10px; }
+
+.app Button.tab-item {
+    height: 40px;
+    padding: 0 18px;
+    color: rgb(51, 71, 75);
+    background-color: rgba(0, 0, 0, 0);
+    border-width: 0;
+    border-radius: 20px;
+}
+
+.app Button.tab-item:hover { background-color: rgb(238, 244, 244); }
+
+.app Button.tab-item-selected, .app Button.tab-item-selected:hover {
+    color: rgb(15, 76, 92);
+    -unity-font-style: bold;
+    background-color: rgb(232, 243, 243);
+    border-width: 1px;
+    border-color: rgb(31, 122, 122);
+}
+
+.page-form .unity-base-field { margin: 0 0 8px 0; flex-shrink: 0; }
+.page-form .unity-base-field__label { min-width: 130px; width: 130px; }
+.form-row { flex-direction: row; flex-shrink: 0; margin-bottom: 8px; }
+.form-label { min-width: 130px; width: 130px; flex-shrink: 0; padding-left: 2px; }
+.form-value { flex-grow: 1; flex-basis: 0; white-space: normal; }
+
+.shuttle-list {
+    flex-grow: 1;
+    flex-basis: 0;
+    height: 110px;
+    padding: 4px 8px;
+    border-width: 1px;
+    border-color: rgb(211, 222, 222);
+    background-color: rgb(255, 255, 255);
+}
+
+.draft-actions { flex-direction: row; flex-shrink: 0; margin-bottom: 8px; }
+.app .draft-actions Button { flex-grow: 1; flex-basis: 0; }
+.app .draft-actions Button.draft-last { margin-right: 0; }
+.app Button.wide-button { margin: 8px 0; flex-shrink: 0; }
+
+.route-graph {
+    height: 420px;
+    min-height: 320px;
+    flex-shrink: 0;
+    margin: 8px 0;
+    border-width: 1px;
+    border-color: rgb(220, 230, 230);
+    background-color: rgb(255, 255, 255);
+}
+
+.fleet-empty { flex-grow: 1; align-items: center; justify-content: center; padding: 30px 0; }
+.fleet-empty-icon { width: 120px; height: 120px; align-items: center; justify-content: center; margin-bottom: 18px; border-radius: 60px; background-color: rgb(220, 232, 232); }
+.fleet-empty-title { font-size: 17px; -unity-font-style: bold; margin-bottom: 8px; }

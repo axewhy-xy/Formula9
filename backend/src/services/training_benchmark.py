@@ -284,7 +284,7 @@ def run(output: Path, *, ticks=None, validation_samples=None, reconnect_samples=
         if manual_clock:
             app.state.training_services = {store: _ManualSessionService(store)}
 
-    def wait_for(client, store, session_id, predicate, phase, max_ticks=4400):
+    def wait_for(client, store, session_id, predicate, phase, max_ticks=12000):
         start = store.snapshot(session_id).tick
         deadline = monotonic() + max(10, max_ticks * .15)
 
@@ -425,7 +425,9 @@ def run(output: Path, *, ticks=None, validation_samples=None, reconnect_samples=
                     check("resume_hold", send(client, current, command(current, "RESUME"))["status"] == "APPLIED")
                     wait_for(client, store, session_id,
                         lambda s: s.incidents[0].state == "RESOLVED", "incident_resolved", max_ticks=400)
-                    moved = wait_for(client, store, session_id, lambda s: s.vehicles[0].position.y_m > 0,
+                    start = definition.data["nodes"][str(definition.data["route_edit"]["start_node_id"])]
+                    moved = wait_for(client, store, session_id, lambda s: (s.vehicles[0].position.x_m, s.vehicles[0].position.y_m) != tuple(start)
+                                     and definition.lies_on(s.vehicles[0].position.x_m, s.vehicles[0].position.y_m, "bypass-b"),
                                      "approved_bypass_executing", max_ticks=120)
                     check("route_executes_after_hold", moved.vehicles[0].route_revision == 2)
                     charging = wait_for(client, store, session_id,

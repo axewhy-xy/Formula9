@@ -45,6 +45,13 @@ The backend remains Python/FastAPI; Unity remains its HTTP client. The public
 API and simulation algorithms are preserved. This migration does not rewrite
 the server into Unity C#.
 
+## Later source changes
+
+Commit `7fdccb4` of the source repository, the real Singapore street fixture and LTA transit
+backend, was ported after the migration; its Qt map work became the Unity `FleetMap`,
+`MapGeo`, `MapTiles` and `TransitClient`. `backend-migration-source.json` still records the
+migration commit, so its hashes for the files that commit changed no longer match.
+
 ## Local data and accounts
 
 Private `.env` files, virtual environments, generated caches, downloaded KITTI

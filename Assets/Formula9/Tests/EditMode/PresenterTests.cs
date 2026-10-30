@@ -56,7 +56,7 @@ namespace Formula9.Tests
             Assert.AreEqual("Session session-001 · epoch 1 · snapshot snapshot-200 · tick 200 · RUNNING · current",
                 TrainingPresenter.StatusLine(snapshot, true));
             StringAssert.EndsWith("stale/offline", TrainingPresenter.StatusLine(snapshot, false));
-            StringAssert.StartsWith("2D training scenario", TrainingPresenter.Title(snapshot));
+            StringAssert.StartsWith("Singapore, real streets", TrainingPresenter.Title(snapshot));
         }
 
         [TestCase("READY", true, false, false, true)]
@@ -119,9 +119,11 @@ namespace Formula9.Tests
         }
 
         [Test]
-        public void TheIntegratedExerciseIsTheDefaultScenario()
+        public void TheScenariosAreOfferedInTheQtOrder()
         {
-            Assert.AreEqual(SessionController.IntegratedScenario, TrainingPresenter.Scenarios[0].Id);
+            Assert.AreEqual("scenario-m2-road-3d-r1", TrainingPresenter.Scenarios[0].Id);
+            Assert.AreEqual(SessionController.IntegratedScenario, TrainingPresenter.Scenarios[1].Id);
+            StringAssert.StartsWith("Singapore", TrainingPresenter.ScenarioTitle(SessionController.IntegratedScenario));
         }
     }
 }

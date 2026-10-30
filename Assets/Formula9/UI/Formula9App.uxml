@@ -1,64 +1,10 @@
 <ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <!-- Each page is its own file in Pages/. Open Formula 9 > Pages to preview or edit one. -->
+    <ui:Template name="LoginPage" src="project://database/Assets/Formula9/UI/Pages/LoginPage.uxml" />
+    <ui:Template name="MainShell" src="project://database/Assets/Formula9/UI/Pages/MainShell.uxml" />
     <Style src="Formula9App.uss" />
     <ui:VisualElement name="app" class="app">
-
-        <ui:VisualElement name="login" class="login">
-            <ui:VisualElement class="login-card">
-                <ui:Label text="FORMULA 9" class="brand" />
-                <ui:Label text="AV shuttle fleet training" class="subtitle" />
-                <ui:Label name="signup-hint" class="hint" />
-                <ui:TextField name="username" label="Username" max-length="64" />
-                <ui:TextField name="password" label="Password" password="true" max-length="256" />
-                <ui:TextField name="confirm" label="Confirm password" password="true" max-length="256" />
-                <ui:Label name="login-error" class="error" />
-                <ui:Button name="submit" text="LOGIN" class="primary" />
-                <ui:Button name="mode-switch" text="Create account" class="link" />
-            </ui:VisualElement>
-        </ui:VisualElement>
-
-        <ui:VisualElement name="training" class="training">
-            <ui:VisualElement class="top-bar">
-                <ui:Label name="title" text="Fleet training" class="title" />
-                <ui:Toggle name="mute" label="Mute alerts" class="mute" tooltip="Mute training audio alerts" />
-                <ui:Label name="user" class="user" />
-                <ui:Button name="logout" text="Log out" />
-            </ui:VisualElement>
-
-            <ui:VisualElement class="row">
-                <ui:DropdownField name="scenario" label="Scenario" class="scenario" />
-                <ui:Button name="create" text="Create training session" class="primary" />
-                <ui:TextField name="session-id" label="Session ID" class="session-id" max-length="128" />
-                <ui:Button name="join" text="Join" />
-                <ui:Button name="refresh" text="Refresh" />
-            </ui:VisualElement>
-
-            <ui:VisualElement class="row">
-                <ui:DropdownField name="sessions" label="Existing sessions" class="sessions" />
-                <ui:Button name="refresh-sessions" text="Refresh list" />
-                <ui:Label name="capacity" text="Session list not loaded" class="muted" />
-            </ui:VisualElement>
-
-            <ui:VisualElement class="row">
-                <ui:Button name="start" text="Start scenario" class="primary" />
-                <ui:Button name="pause" text="Pause" />
-                <ui:Button name="resume" text="Resume" />
-                <ui:Button name="archive" text="Archive session" tooltip="End this attempt and release its runtime slot. History remains available." />
-            </ui:VisualElement>
-
-            <ui:Label name="status" text="No training session selected" class="status" />
-            <ui:Label name="message" class="message" />
-
-            <ui:VisualElement class="body">
-                <ui:VisualElement name="world" class="world">
-                    <ui:Label name="world-status" text="Join a training session to see its world." class="muted" />
-                </ui:VisualElement>
-                <ui:VisualElement name="fleet-panel" class="fleet-panel">
-                    <ui:Label text="Fleet" class="panel-title" />
-                    <ui:VisualElement name="fleet-header" class="fleet-row fleet-header" />
-                    <ui:ScrollView name="fleet" class="fleet" />
-                </ui:VisualElement>
-            </ui:VisualElement>
-        </ui:VisualElement>
-
+        <ui:Instance template="LoginPage" name="login-host" class="page-host" />
+        <ui:Instance template="MainShell" name="training-host" class="page-host" style="display: none;" />
     </ui:VisualElement>
 </ui:UXML>

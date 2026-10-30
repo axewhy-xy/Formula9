@@ -5,24 +5,24 @@ simulator. The backend, shared contracts, fixtures, static map and support scrip
 been migrated from [Formula_9](https://github.com/axewhy-xy/Formula_9). This repository runs
 independently of that checkout. See [migration details](docs/backend-migration.md).
 
-## Requirements
+## Getting started
 
-- Unity **6000.1.4f1** (open the repository root in Unity Hub)
-- Git LFS (`git lfs install`), for models, images and audio
-- Python **3.12 or newer**; the backend dependency lock targets Python 3.12
-- MongoDB for persistent team accounts (`MONGODB_URI` in private `backend/.env`);
-  the isolated test server uses in-memory accounts
+Clone the repository and double-click **`run.bat`**. It asks for nothing. It installs whatever is
+missing (Python 3.12, Git LFS, Unity Hub and Unity **6000.1.12f1**), downloads the large files, sets
+up the backend, opens the project in Unity and serves the backend in its window. Keep that window open
+while you work, then press Play in Unity. Unity versions install side by side, so other versions you
+have are left alone.
+
+The first run needs internet and takes a while, because Unity alone is several GB. Windows may ask
+you to allow an installer, and Unity may ask you to sign in with a free account; those two cannot be
+automated.
 
 ## Running the backend
 
-From the repository root, set up the Python environment once:
-
-```powershell
-python Tools/run_backend.py --setup
-if (!(Test-Path backend/.env)) { Copy-Item backend/.env.example backend/.env }
-```
-
-Edit `backend/.env` to configure your private MongoDB connection, then start the server:
+From the repository root, start the server by double-clicking `run.bat`. It asks for nothing: the
+first run sets up its Python environment, which takes a few minutes and needs internet.
+`backend/.env` is committed for the team, so the shared MongoDB connection works on a fresh clone of
+this private repository.
 
 ```powershell
 python Tools/run_backend.py
@@ -109,8 +109,32 @@ recovery, backing off to at most 5 s, and the command waits for its own account 
 `SessionStore` refuses older epochs, stale or reused snapshots and event gaps, and keeps the
 latest 1,000 events.
 
-New sessions default to `scenario-m2-integrated-r1`, the exercise with incidents, detours and
-charging.
+New sessions default to the 3D fleet exercise, as in the Qt client. Choose **Singapore, real streets
+(2D)** for the exercise with incidents, detours and charging.
+
+## Editing the pages
+
+The **Pages** tab beside the Inspector lists every page (reopen it from **Formula 9 > Pages**). Click
+a page to show it in the Game view, or **Edit** to open it in UI Builder. Your choice stays on screen
+outside Play mode; pressing Play always starts at Login. The files are in `Assets/Formula9/UI/Pages`, and
+colours and spacing are in `Assets/Formula9/UI/Formula9App.uss`. Live content such as the map, fleet
+cards and table rows comes from the backend at runtime, so it only appears in Play mode. Controls
+are found by `name`, so keep a control's name when you move or restyle it.
+
+## Real Singapore map
+
+The 2D scenario, **Singapore, real streets**, runs on real Toa Payoh roads and sits on an
+OpenStreetMap basemap. Tiles are cached in memory and on disk. `FORMULA9_TILE_URL` selects another
+`{z}/{x}/{y}` tile server; `none` turns the basemap off for tests and offline demos. The 3D
+scenario's local frame is not a real place, so it has no basemap.
+
+Real bus stops appear when zoomed in. They come from OpenStreetMap, with their LTA stop codes, and
+are committed in `backend/fixtures/transit/transit.sqlite`, so nobody needs a key. To refresh them, run
+`python -m src.transit.import_osm` from `backend/`. Bus services and routes are not in OSM; those
+need a free [DataMall key](https://datamall.lta.gov.sg) in `backend/.env` as `LTA_ACCOUNT_KEY=...` and
+`run.bat --import-bus-data`, which replaces the file.
+`python -m src.routing.build_singapore_fleet_fixture` rebuilds the scenario from the committed
+extract in `backend/fixtures/osm`.
 
 ## Training workspace
 
@@ -133,7 +157,7 @@ the world view are **Fleet**, **Route planning**, **Charging**, **Incidents** an
   samples with a sample slider and reports missing evidence; **Debrief** shows the backend's
   provisional rubric, decisions and outcomes. These views never replace the live fleet or
   replay alert sounds. **Focus incident shuttle** selects and focuses its 3D vehicle.
-- **Reports:** inspect the latest 1,000 events and 1,000 commands observed in the selected
+- **Reports:** inspect the latest 1,000 events and 200 commands observed in the selected
   session by this running client, including pending confirmation, refusal and final status.
   These are bounded client records; they are not a server-wide ledger or an export.
 - **3D interaction:** click rendered geometry to select an entity; select a fleet row and use
@@ -197,7 +221,7 @@ suite, including real process crash/recovery tests, is retained.
 Run EditMode tests in the Test Runner window, or headless:
 
 ```
-"C:\Program Files\Unity\Hub\Editor\6000.1.4f1\Editor\Unity.exe" -batchmode -nographics -projectPath . -runTests -testPlatform EditMode -testResults TestResults.xml
+"C:\Program Files\Unity\Hub\Editor\6000.1.12f1\Editor\Unity.exe" -batchmode -nographics -projectPath . -runTests -testPlatform EditMode -testResults TestResults.xml
 ```
 
 Tests in the `LiveBackend` category call a running backend and are skipped when none is

@@ -78,9 +78,11 @@ class WorkflowDefinition:
                 raise ValueError("Integrated route geometry is discontinuous")
             path = geometry(self.data["route_edit"]["route_id"], [self.data["nodes"][str(n)] for n in nodes])
             self.paths[tuple(ids)] = path
-            stop = nodes.index(self.data["route_edit"]["default_via_node_ids"][0])
-            self.terminals[tuple(ids)] = sum(math.dist((a.x, a.y), (b.x, b.y))
-                                           for a, b in zip(path["waypoints"][:stop], path["waypoints"][1:stop+1]))
+            # How far along this path each required stop is: the shuttle pulls in at every one
+            self.terminals[tuple(ids)] = sorted(
+                sum(math.dist((a.x, a.y), (b.x, b.y))
+                    for a, b in zip(path["waypoints"][:nodes.index(node)], path["waypoints"][1:nodes.index(node)+1]))
+                for node in self.data["route_edit"]["required_stops"].values() if node in nodes)
         original = self.paths[tuple(self.data["route_edit"]["original_directed_edge_ids"])]
         self.actor_routes = [original, *self.data["peer_patterns"]]
         # Separate exit aisles avoid opposing bay departures meeting head-on.
@@ -100,6 +102,19 @@ class WorkflowDefinition:
 
     def get(self):
         return self.graph
+
+    def lies_on(self, x: float, y: float, branch: str, tolerance_m: float = 0.01) -> bool:
+        """Whether a point is on a named road chain of the fixture (main, bypass-b, bypass-c, return)."""
+        nodes = self.data["nodes"]
+        for identifier, (u, v) in self.data["edges"].items():
+            if not identifier.startswith(branch + ":"):
+                continue
+            (ax, ay), (bx, by) = nodes[str(u)], nodes[str(v)]
+            dx, dy = bx-ax, by-ay
+            share = max(0.0, min(1.0, ((x-ax)*dx + (y-ay)*dy) / (dx*dx + dy*dy)))
+            if math.hypot(ax + dx*share - x, ay + dy*share - y) <= tolerance_m:
+                return True
+        return False
 
     def __deepcopy__(self, memo):
         # The actor never mutates the definition. Domain preview caches have
@@ -166,6 +181,14 @@ class IntegratedSessionActor(SessionActor):
         primary.stops_m = [RouteStop(stop_id=stop, position=Position(x_m=float(data["nodes"][str(node)][0]),
                                                                      y_m=float(data["nodes"][str(node)][1]), z_m=0))
                            for stop, node in data["route_edit"]["required_stops"].items()]
+        # A peer loop starts and ends at the foot of its stop, so the shuttle already pulls in there
+        # each time round; say so, so clients can show it.
+        starts = {pattern["route_ID"]: pattern["waypoints"][0] for pattern in data["peer_patterns"]}
+        for route in self.domain.routes:
+            stop = data["peer_stops"].get(route.route_id)
+            if stop is not None:
+                route.required_stop_ids = [stop]
+                route.stops_m = [RouteStop(stop_id=stop, position=Position(x_m=starts[route.route_id]["x"], y_m=starts[route.route_id]["y"], z_m=0))]
         for route in self.domain.routes:
             route.estimated_duration_s = route.distance_m / data["speed_mps"] + self.DWELL_S
         primary.estimated_duration_s += data["route_edit"]["loop_end_dwell_s"]
@@ -368,10 +391,8 @@ class IntegratedSessionActor(SessionActor):
             shuttle.curr_vel = 0
             return shuttle.progress
         end = min(self._routes[shuttle.route_ID]["total_length"], shuttle.progress+shuttle.cruise_vel*self.STEP_S)
-        terminal = self.stop_progress.get(shuttle.route_ID)
-        if terminal is not None and shuttle.progress < terminal-EPSILON:
-            end = min(end, terminal)
-        return end
+        ahead = [stop for stop in self.stop_progress.get(shuttle.route_ID, []) if stop > shuttle.progress+EPSILON]
+        return min([end, *ahead])
 
     def tick(self):
         self.command_tick += 1
@@ -433,7 +454,7 @@ class IntegratedSessionActor(SessionActor):
                 self._event(shuttle, "CHARGING_FINISHED", charger_id=port.charger_id,
                     charged_s=self.charge_elapsed[shuttle.ID], energy_added_kwh=level-self.charge_started_kwh[shuttle.ID], battery_kwh=level)
             elif distance > 0 and (shuttle.progress >= self._routes[shuttle.route_ID]["total_length"]-EPSILON
-                    or abs(shuttle.progress-self.stop_progress.get(shuttle.route_ID, -1)) < EPSILON):
+                    or any(abs(shuttle.progress-stop) < EPSILON for stop in self.stop_progress.get(shuttle.route_ID, []))):
                 self._set_mode(shuttle, "DWELLING")
                 shuttle.dwell_timer, shuttle.curr_vel, shuttle.state = self.DWELL_S, 0, ShuttleState.STOP_DWELL
             if level <= 0 and self.modes[shuttle.ID] in {"IN_SERVICE", "DETOURING", "RETURNING_TO_DEPOT"}:
@@ -462,7 +483,8 @@ class IntegratedSessionActor(SessionActor):
         self.charge_elapsed = {int(k): v for k, v in state["charge_elapsed"].items()}
         self.charge_started_kwh = {int(k): v for k, v in state["charge_started_kwh"].items()}
         self.parking_chargers = {int(k): v for k, v in state.get("parking_chargers", {}).items()}
-        self.stop_progress = state["stop_progress"]
+        # Checkpoints from before every stop was served hold a single number per route
+        self.stop_progress = {route: stops if isinstance(stops, list) else [stops] for route, stops in state["stop_progress"].items()}
         self.pending_events = []
         self.domain = snapshot.model_copy(deep=True)
         if set(self.modes) != set(range(5)) or [s.ID for s in self.shuttles] != list(range(5)):
