@@ -82,6 +82,10 @@
     -unity-font-style: bold;
 }
 
+.mute {
+    margin-right: 16px;
+}
+
 .user {
     margin-right: 8px;
     color: rgb(96, 106, 116);

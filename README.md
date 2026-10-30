@@ -32,7 +32,7 @@ If the scene or its UI panel settings go missing, rebuild them with
 | `Assets/Formula9/Runtime/Session` | Joined session, polling, events and commands |
 | `Assets/Formula9/Runtime/UI` | Screens (`Formula9App`) and their presenters |
 | `Assets/Formula9/Runtime/World` | Verified scene loading, glTFast placement and the 3D view |
-| `Assets/Formula9/Runtime/Audio` | Alerts, still to be ported |
+| `Assets/Formula9/Runtime/Audio` | Training alerts and the Mute alerts setting |
 | `Assets/Formula9/UI` | UI Toolkit layout, styles, theme and panel settings |
 | `Assets/Formula9/Editor` | Editor tools, including the scene builder |
 | `Assets/Formula9/Tests/EditMode` | EditMode tests and the shared contract fixtures |
@@ -95,6 +95,15 @@ against the backend's own marker points in `m2_3d_motion.json`.
 
 The project uses Linear colour space (glTF colours are linear), and the scene builder adds
 glTFast's shaders to *Always Included Shaders* so player builds render them.
+
+## Alerts
+
+`AlertGate` and `TrainingAlerts` port the Qt client's NAT-M2-07 rules: only events listed in
+the shared `contracts/v2/alert_cues.json` (embedded by the generator as `AlertCues`) play a
+sound; each event ID plays at most once, even when a reconnect replays it; history never plays;
+and muting still marks events as seen, so unmuting causes no burst. The sounds in
+`Resources/Formula9/Audio` are the Qt client's `alert_*.wav`. **Mute alerts** is kept across
+restarts in `PlayerPrefs` (`training.muteAlerts`); tests use in-memory preferences.
 
 ## Tests
 

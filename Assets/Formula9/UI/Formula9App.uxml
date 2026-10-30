@@ -19,6 +19,7 @@
         <ui:VisualElement name="training" class="training">
             <ui:VisualElement class="top-bar">
                 <ui:Label name="title" text="Fleet training" class="title" />
+                <ui:Toggle name="mute" label="Mute alerts" class="mute" tooltip="Mute training audio alerts" />
                 <ui:Label name="user" class="user" />
                 <ui:Button name="logout" text="Log out" />
             </ui:VisualElement>

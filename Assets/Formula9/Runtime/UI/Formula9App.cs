@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Formula9.Audio;
 using Formula9.Backend;
 using Formula9.Contracts;
 using Formula9.Session;
@@ -64,6 +65,18 @@ namespace Formula9.UI
             world.transform.SetParent(transform, false);
             world.Attach(GetComponent<UIDocument>().rootVisualElement.Q("world"), new SceneLoader(transport));
             world.ReadinessChanged += (ready, diagnostic) => Render();
+
+            // Alerts play for live events the store accepted, and for events a recovery appended.
+            var player = new GameObject("Alerts").AddComponent<AlertPlayer>();
+            player.transform.SetParent(transform, false);
+            var alerts = new TrainingAlerts(player.Play);
+            var mute = new MuteSetting(new PlayerPreferences(), alerts);
+            var muteToggle = GetComponent<UIDocument>().rootVisualElement.Q<Toggle>("mute");
+            muteToggle.SetValueWithoutNotify(mute.Muted);
+            muteToggle.RegisterValueChangedCallback(change => mute.Muted = change.newValue);
+            session.EventsAccepted += events => alerts.OnEvents(events, true);
+            session.RecoveryEventsReceived += events => alerts.OnEvents(events, true);
+
             ShowLogin(null);
             StartCoroutine(Poll());
         }
