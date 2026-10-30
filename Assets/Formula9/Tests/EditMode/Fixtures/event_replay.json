@@ -1,0 +1,48 @@
+{
+  "after_sequence": 6,
+  "contract_version": "2.0",
+  "event_sequence": 7,
+  "events": [
+    {
+      "data": {
+        "candidate_ids": [
+          "candidate-wait-1"
+        ]
+      },
+      "entity_id": "incident-1",
+      "entity_revision": 2,
+      "entity_type": "INCIDENT",
+      "event_id": "event-7",
+      "event_sequence": 7,
+      "event_type": "OPTIONS_READY",
+      "source": {
+        "authored": true,
+        "branch_tick": null,
+        "kind": "TRAINING_SIMULATION",
+        "recording_id": null,
+        "sequence_id": null,
+        "source_frame": null,
+        "source_timestamp": null
+      },
+      "tick": 200
+    }
+  ],
+  "has_more": false,
+  "message_type": "EVENT_REPLAY",
+  "next_sequence": 7,
+  "scene_revision": "scene-r1",
+  "session_epoch": 1,
+  "session_id": "session-001",
+  "simulation_time_s": 10.0,
+  "source": {
+    "authored": true,
+    "branch_tick": null,
+    "kind": "TRAINING_SIMULATION",
+    "recording_id": null,
+    "sequence_id": null,
+    "source_frame": null,
+    "source_timestamp": null
+  },
+  "tick": 200,
+  "transform_revision": "transform-r1"
+}

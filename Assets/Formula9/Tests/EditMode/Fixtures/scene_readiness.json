@@ -1,0 +1,23 @@
+{
+  "asset_hashes": {
+    "asset-building": "4629ef0daab7739c481d4e90979b5c2a29962c6bb830d317c2486ef39a4cebe7",
+    "asset-charger": "eb9d61bddec0065409ff5e4072b6a3e842325547161653ebf89df5fc0e9edaed",
+    "asset-depot": "7672b3e0eaa7d101fb1566d84008730fe124ccc5f1995eb6e100a41abad07e40",
+    "asset-obstruction": "dbe29f1cfc0400e5a5d64707b7e8b9b0faf2fec59c1a6f868a446b164834f1e9",
+    "asset-ramp": "00a6c6c0b93d930b6756860b71afde03896b0f0b75a2a000992d99a2ce27e9cc",
+    "asset-road": "23215ff3165583101812d1af3fa87fcc1534d84a5b4cf567a478634bc7c51e1b",
+    "asset-shuttle": "88d4d223cddbdfe4c95a51548a7ed60682f012d9e98a27b450882b60e4590865",
+    "asset-stop": "d6ffec0747fc1e4011d07b9268b690ebf79f0abf373c44fb3a78dcd2d705111f"
+  },
+  "asset_profile": "formula9-gltf2-r1",
+  "manifest_sha256": "f03c7ddb81a7a420075d450d92294b22cc2907c8d746864414652ff0e4b5ccef",
+  "render_ready": true,
+  "required_capabilities": [
+    "world_3d"
+  ],
+  "scene_id": "m2-blockout",
+  "scene_revision": "scene-05090d14627653e854482814",
+  "spatial_revision": "spatial-05090d14627653e854482814",
+  "spatial_schema_version": "1.0",
+  "transform_revision": "canonical-enu-r1"
+}

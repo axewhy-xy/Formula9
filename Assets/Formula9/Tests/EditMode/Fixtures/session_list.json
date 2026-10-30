@@ -1,0 +1,18 @@
+{
+  "capacity": 16,
+  "live_count": 1,
+  "sessions": [
+    {
+      "occupies_capacity": true,
+      "scenario_revision_id": "scenario-r1",
+      "session_id": "session-001",
+      "status": "RUNNING"
+    },
+    {
+      "occupies_capacity": false,
+      "scenario_revision_id": "scenario-r1",
+      "session_id": "session-old",
+      "status": "ARCHIVED"
+    }
+  ]
+}
