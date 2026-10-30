@@ -99,6 +99,16 @@ namespace Formula9.UI
             session.EventsAccepted += events => alerts.OnEvents(events, true);
             session.RecoveryEventsReceived += events => alerts.OnEvents(events, true);
 
+            // Interface sounds from amee's review.
+            var root = GetComponent<UIDocument>().rootVisualElement;
+            var uiPlayer = new GameObject("Interface sounds").AddComponent<UiSoundPlayer>();
+            uiPlayer.transform.SetParent(transform, false);
+            var uiSounds = new UiSounds(uiPlayer.Play);
+            // amee's hover buttons are all on the main simulator, so the login page stays silent.
+            uiSounds.Attach(root.Q("training-host"));
+            start.clicked += uiSounds.StartClicked;
+            world.RouteNodeSelected += _ => uiSounds.PointPicked();
+
             ShowLogin(null);
             StartCoroutine(Poll());
         }
