@@ -42,6 +42,7 @@ namespace Formula9.UI
         private RouteEditorContext context;
         private RouteEditPreview preview;
         private DispatcherCommand incidentPreviewCommand;
+        private (string Route, long BasedOn)? approvedDraft;  // route and revision of a submitted approval
 
         public TrainingWorkspace(VisualElement root, TrainingApi api, SessionController session, WorldView world,
             Action<Task> run, Action<string> notify)
@@ -149,7 +150,7 @@ namespace Formula9.UI
             var currentBoundary = s == null ? null : $"{s.SessionId}/{s.SessionEpoch}";
             if (boundary != currentBoundary)
             {
-                boundary = currentBoundary; dependencies = null; context = null; requestGeneration++;
+                boundary = currentBoundary; dependencies = null; context = null; requestGeneration++; approvedDraft = null;
                 if (ledgerSession != s?.SessionId) { ledger.Clear(); ledgerSession = s?.SessionId; }
                 routeReason.value = chargeReason.value = incidentReason.value = "";
                 via.value = ""; draftHistory.Clear(); draftHistory.Add(""); historyIndex = 0;
@@ -157,6 +158,14 @@ namespace Formula9.UI
                 routeMap.Show(null); world.SetRouteDraft(null, null, null);
             }
             if (s == null) { UpdateActions(); return; }
+            // An applied approval moves its route to a new revision, which finishes the draft. A queued
+            // or rejected one never does, so its draft stays for another try.
+            if (approvedDraft is (string approvedRoute, long basedOn) && s.Routes.Any(r => r.RouteId == approvedRoute && r.Revision > basedOn))
+            {
+                approvedDraft = null;
+                via.value = ""; routeReason.value = "";
+                draftHistory.Clear(); draftHistory.Add(""); historyIndex = 0;
+            }
             Choices(routes, s.Routes.Select(r => r.RouteId));
             var changed = DecisionRules.RouteDependencies(s, routes.value);
             if (changed != dependencies)
@@ -286,18 +295,13 @@ namespace Formula9.UI
         private async Task ApproveRoute()
         {
             if (!Current || preview == null) return;
-            var routeId = preview.RouteId;
-            var basedOn = preview.RouteRevision;
+            var approved = (preview.RouteId, preview.RouteRevision);
             if (!await session.ApproveRouteAsync(preview, routeReason.value)) return;
+            // Render clears the draft once a snapshot shows the route's new revision; a refresh may
+            // return before that snapshot arrives, so it cannot be checked here.
+            approvedDraft = approved;
             InvalidateRoute(); await session.RefreshAsync();
-            // Once applied, the route has a new revision and this draft is finished: start clean on
-            // the new graph. A queued or rejected approval keeps the draft for another try.
-            var route = session.Store.Snapshot?.Routes.FirstOrDefault(r => r.RouteId == routeId);
-            if (route != null && route.Revision > basedOn)
-            {
-                ResetDraft();
-                RequestContext();
-            }
+            Render();
         }
 
         private async Task SubmitCharge()
