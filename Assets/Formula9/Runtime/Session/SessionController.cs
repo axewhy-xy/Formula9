@@ -39,6 +39,7 @@ namespace Formula9.Session
         private sealed class PendingCommand
         {
             public DispatcherCommand Command;
+            public RouteApprovalRequest Approval;
             public bool StatusOnly;
             public string Owner;
         }
@@ -72,6 +73,9 @@ namespace Formula9.Session
         public event Action<IReadOnlyList<Event>> RecoveryEventsReceived;
         public event Action<bool> AvailabilityChanged;
         public event Action<CommandOutcome> CommandFinished;
+        // Includes submissions with an unknown outcome and complete HTTP refusals, so the
+        // report does not silently omit commands that never produced a journaled receipt.
+        public event Action<CommandOutcome> CommandLedgerChanged;
         public event Action<string> ErrorOccurred;
 
         public SessionController(TrainingApi api, AuthSession auth, SessionStore store = null,
@@ -188,6 +192,37 @@ namespace Formula9.Session
             if (command.SessionId != SessionId) throw new ArgumentException("Command is for another session", nameof(command));
             ContractParser.Serialize(command); // reject a malformed command before it becomes pending
             pending = new PendingCommand { Command = command };
+            RecordPending("PENDING_CONFIRMATION");
+            await RunPendingAsync(0);
+            return true;
+        }
+
+        // Route approvals use a separate endpoint, with the same identity, owner and recovery
+        // machinery as all other commands. A lost reply must never create a second approval.
+        public async Task<bool> ApproveRouteAsync(RouteEditPreview preview, string reason)
+        {
+            if (Session == null || !Available || resyncPending || joiningSessionId != null || pending != null) return await Refuse();
+            var snapshot = Store.Snapshot;
+            if (!DecisionRules.RoutePreviewMatches(snapshot, preview) || !preview.Approvable || string.IsNullOrWhiteSpace(reason))
+                throw new ArgumentException("Validate a fresh route proposal and enter a reason before approving.");
+            var approval = new RouteApprovalRequest
+            {
+                CommandId = Guid.NewGuid().ToString(), IdempotencyKey = Guid.NewGuid().ToString(),
+                PreviewId = preview.PreviewId, PreviewRevision = preview.PreviewRevision, Reason = reason.Trim(),
+                TargetVehicleIds = snapshot.Vehicles.Where(v => v.RouteId == preview.RouteId).Select(v => v.VehicleId).OrderBy(v => v).ToList(),
+            };
+            ContractParser.Serialize(approval);
+            pending = new PendingCommand
+            {
+                Approval = approval,
+                Command = new DispatcherCommand
+                {
+                    CommandId = approval.CommandId, IdempotencyKey = approval.IdempotencyKey, SessionId = SessionId,
+                    ExpectedEpoch = Session.SessionEpoch, ExpectedRevision = preview.RouteRevision,
+                    TargetId = preview.RouteId, TargetType = "ROUTE",
+                },
+            };
+            RecordPending("PENDING_CONFIRMATION");
             await RunPendingAsync(0);
             return true;
         }
@@ -346,7 +381,9 @@ namespace Formula9.Session
             {
                 reply = statusOnly
                     ? await api.GetCommandStatusAsync(command.Command.SessionId, command.Command.IdempotencyKey, lifetime.Token)
-                    : await api.SubmitCommandAsync(command.Command, lifetime.Token);
+                    : command.Approval != null
+                        ? await api.ApproveRouteAsync(command.Command.SessionId, command.Approval, lifetime.Token)
+                        : await api.SubmitCommandAsync(command.Command, lifetime.Token);
             }
             catch (Exception error) { failure = error; }
             if (commandRequest == token) commandRequest = null;
@@ -365,6 +402,7 @@ namespace Formula9.Session
                     RetryLater(command, attempt, statusOnly);
                     return;
                 }
+                CommandLedgerChanged?.Invoke(CommandOutcome.From(reply));
                 CommandFinished?.Invoke(CommandOutcome.From(reply));
                 if (reply.Status == "QUEUED") RetryLater(command, attempt, statusOnly);
                 else FinishPending(null);
@@ -395,10 +433,12 @@ namespace Formula9.Session
                         return;
                     }
                     // A complete error to a submission means the command was not journaled; it is final.
+                    RecordPending("NOT_ACCEPTED", code);
                     FinishPending(null);
                     Error($"Training command failed: {backend.Message}");
                     return;
                 default:
+                    RecordPending("UNCONFIRMED", failure?.Message);
                     FinishPending(null);
                     Error($"Training command failed: {failure?.Message}");
                     return;
@@ -438,7 +478,14 @@ namespace Formula9.Session
         {
             pending = null;
             commandRequest = null;
-            if (outcome != null) CommandFinished?.Invoke(outcome);
+            if (outcome != null) { CommandLedgerChanged?.Invoke(outcome); CommandFinished?.Invoke(outcome); }
+        }
+
+        private void RecordPending(string status, string failure = null)
+        {
+            var outcome = Unconfirmed(failure);
+            outcome.Status = status; outcome.FailureCode = failure;
+            CommandLedgerChanged?.Invoke(outcome);
         }
 
         private void SetAvailable(bool available)

@@ -111,6 +111,45 @@ namespace Formula9.Tests
         private static ScenePackage Package() =>
             new SceneLoader(new SceneBackend(Manifest()), new Uri("http://backend.test")).LoadAsync(SpatialSnapshot().Spatial).GetAwaiter().GetResult();
 
+        [Test]
+        public void DraftNodesMustBelongToTheChosenSurfaceAndSceneRevision()
+        {
+            var manifest = Manifest(); var surface = manifest.RoadSurfaces[0]; var point = surface.PathSamplesM[0];
+            var node = new RouteEditorNode { NodeId = 1, X = point[0], Y = point[1], Z = point[2] };
+            var context = new RouteEditorContext { SceneRevision = manifest.SceneRevision,
+                Nodes = new List<RouteEditorNode> { node },
+                Edges = new List<RouteEditorEdge> { new RouteEditorEdge { EdgeId = surface.DirectedEdgeId, Source = 1, Target = 2 } } };
+            Assert.IsTrue(WorldInteraction.NodeOnSurface(manifest, context, node, surface.SurfaceId));
+            node.Z += 5;
+            Assert.IsFalse(WorldInteraction.NodeOnSurface(manifest, context, node, surface.SurfaceId), "another deck is not the same road support");
+            node.Z -= 5; context.SceneRevision = "other-scene";
+            Assert.IsFalse(WorldInteraction.NodeOnSurface(manifest, context, node, surface.SurfaceId));
+        }
+
+        [UnityTest]
+        public IEnumerator MeshPickingMatchesTheSharedCanonicalGoldenPoints()
+        {
+            var build = WorldBuilder.BuildAsync(Package(), null); yield return Await(build);
+            var world = build.Result;
+            try
+            {
+                Assert.IsNull(world.ApplyPoses(SpatialSnapshot()));
+                var fixture = Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/native_world_interaction.json")));
+                foreach (var pick in fixture["picks"])
+                {
+                    var origin = pick["origin_m"].ToObject<List<double>>(); var direction = pick["direction"].ToObject<List<double>>();
+                    var found = WorldInteraction.TryPick(world, new Ray(WorldMath.ToUnity(origin), WorldMath.ToUnity(direction)), out var id, out var canonical);
+                    Assert.AreEqual((string)pick["entity_id"], id);
+                    if (found)
+                    {
+                        var expected = pick["point_m"].ToObject<List<float>>();
+                        Assert.Less(Vector3.Distance(canonical, new Vector3(expected[0], expected[1], expected[2])), 0.02f);
+                    }
+                }
+            }
+            finally { world.Destroy(); }
+        }
+
         [UnityTest]
         public IEnumerator TheRealSceneBuildsAndEveryEntityMatchesItsDimensions()
         {

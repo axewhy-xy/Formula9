@@ -52,7 +52,7 @@
                 <ui:VisualElement name="world" class="world">
                     <ui:Label name="world-status" text="Join a training session to see its world." class="muted" />
                 </ui:VisualElement>
-                <ui:VisualElement class="fleet-panel">
+                <ui:VisualElement name="fleet-panel" class="fleet-panel">
                     <ui:Label text="Fleet" class="panel-title" />
                     <ui:VisualElement name="fleet-header" class="fleet-row fleet-header" />
                     <ui:ScrollView name="fleet" class="fleet" />

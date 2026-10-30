@@ -144,7 +144,7 @@ namespace Formula9.Backend
     }
 
     // /api/v2/sessions: every call needs a login and returns validated contract objects.
-    public sealed class TrainingApi : BackendClientBase
+    public sealed partial class TrainingApi : BackendClientBase
     {
         private readonly AuthSession session;
 

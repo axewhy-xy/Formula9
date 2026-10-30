@@ -124,6 +124,55 @@ namespace Formula9.Tests
         }
 
         [UnityTest]
+        public IEnumerator IntegratedExerciseApprovesDetourChargingAndIncidentDecisions()
+        {
+            yield return SignUpAndLogIn();
+            session.Scenario = SessionController.IntegratedScenario;
+            yield return Await(session.CreateAsync());
+            var api = new TrainingApi(transport, auth, backend);
+            var s = session.Store.Snapshot;
+            var route = s.Vehicles[0].RouteId;
+            var context = api.GetRouteEditorAsync(s.SessionId, route);
+            yield return Await(context);
+            var preview = api.PreviewRouteAsync(s.SessionId, new RouteEditRequest
+            { RouteId = route, ExpectedRouteRevision = context.Result.RouteRevision, DraftRevision = 1 });
+            yield return Await(preview);
+            Assert.IsTrue(preview.Result.Approvable, string.Join("; ", preview.Result.Checks.Select(c => c.Message)));
+            var before = outcomes.Count;
+            yield return Await(session.ApproveRouteAsync(preview.Result, "Use validated bypass before departure"));
+            yield return PollUntil(() => outcomes.Skip(before).Any(o => o.Status == "APPLIED"), "detour approval");
+            yield return Await(session.RefreshAsync());
+            Assert.IsFalse(UI.TrainingPresenter.AssignedRouteIsClosed(session.Store.Snapshot));
+            yield return Control("START", "RUNNING");
+
+            yield return PollUntil(() => session.Store.Snapshot.ChargeOptions.Any(o => o.Action == "CHARGE_NOW" && o.Validation == "PASS"), "charging offers");
+            s = session.Store.Snapshot;
+            var offer = s.ChargeOptions.First(o => o.Action == "CHARGE_NOW" && o.Validation == "PASS");
+            before = outcomes.Count;
+            yield return Await(session.SubmitAsync(DecisionRules.ChargeCommand(s, offer.OptionId, "Reserve a bay to preserve battery reserve")));
+            yield return PollUntil(() => outcomes.Skip(before).Any(o => o.Status == "APPLIED"), "charger reservation");
+
+            yield return PollUntil(() => session.Store.Snapshot.Incidents.Any(i => i.State == "OPTIONS_READY"), "incident options", 45);
+            s = session.Store.Snapshot;
+            var incident = s.Incidents.First(i => i.State == "OPTIONS_READY");
+            var candidate = s.Candidates.First(c => c.IncidentId == incident.IncidentId && c.Action == "WAIT" && c.Validation == "PASS");
+            var command = DecisionRules.IncidentCommand(s, incident.IncidentId, candidate.CandidateId, "Hold safely until the obstruction clears");
+            var branch = api.PreviewIncidentAsync(command); yield return Await(branch);
+            Assert.IsTrue((bool)branch.Result["source"]["authored"]);
+            Assert.AreNotEqual((string)branch.Result["base_checkpoint_id"], (string)branch.Result["branch_id"]);
+            Assert.AreEqual("OPTIONS_READY", session.Store.Snapshot.Incidents.Single(i => i.IncidentId == incident.IncidentId).State);
+            var history = api.GetIncidentReportAsync(s.SessionId, incident.IncidentId, false); yield return Await(history);
+            Assert.AreEqual("HISTORICAL_SIMULATION", (string)history.Result["source_mode"]);
+            before = outcomes.Count;
+            yield return Await(session.SubmitAsync(command));
+            yield return PollUntil(() => outcomes.Skip(before).Any(o => o.Status == "APPLIED"), "incident decision");
+            var debrief = api.GetIncidentReportAsync(s.SessionId, incident.IncidentId, true); yield return Await(debrief);
+            Assert.IsNotEmpty((Newtonsoft.Json.Linq.JArray)debrief.Result["decisions"]);
+            Assert.IsTrue(session.Store.Events.Any(e => e.EventType == "ROUTE_APPROVED"));
+            yield return Control("ARCHIVE", "ARCHIVED");
+        }
+
+        [UnityTest]
         public IEnumerator PlanarExerciseRunsThroughItsLifecycle()
         {
             yield return SignUpAndLogIn();

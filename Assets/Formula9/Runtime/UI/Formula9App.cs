@@ -35,6 +35,7 @@ namespace Formula9.UI
         private DropdownField scenario, sessions;
 
         private WorldView world;
+        private TrainingWorkspace workspace;
 
         private void OnEnable()
         {
@@ -65,6 +66,7 @@ namespace Formula9.UI
             world.transform.SetParent(transform, false);
             world.Attach(GetComponent<UIDocument>().rootVisualElement.Q("world"), new SceneLoader(transport));
             world.ReadinessChanged += (ready, diagnostic) => Render();
+            workspace = new TrainingWorkspace(GetComponent<UIDocument>().rootVisualElement, api, session, world, Run, text => message.text = text);
 
             // Alerts play for live events the store accepted, and for events a recovery appended.
             var player = new GameObject("Alerts").AddComponent<AlertPlayer>();
@@ -295,6 +297,7 @@ namespace Formula9.UI
             pause.SetEnabled(controls.Pause);
             resume.SetEnabled(controls.Resume);
             archive.SetEnabled(controls.Archive);
+            workspace?.Render();
             if (snapshot == null)
             {
                 status.text = TrainingPresenter.NoSession;
@@ -308,6 +311,8 @@ namespace Formula9.UI
             {
                 var line = new VisualElement();
                 line.AddToClassList("fleet-row");
+                var id = row.ShuttleId;
+                line.RegisterCallback<ClickEvent>(_ => workspace?.SelectVehicle(id));
                 var values = new[] { row.ShuttleId, row.State, row.Route, row.Battery, row.Provenance };
                 for (var column = 0; column < values.Length; column++) line.Add(Cell(values[column], column));
                 fleet.Add(line);

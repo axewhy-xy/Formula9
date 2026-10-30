@@ -77,6 +77,47 @@ latest 1,000 events.
 New sessions default to `scenario-m2-integrated-r1`, the exercise with incidents, detours and
 charging.
 
+## Training workspace
+
+All seven remaining Qt client workflows are available in Unity. The workspace tabs beside
+the world view are **Fleet**, **Route planning**, **Charging**, **Incidents** and **Reports**.
+
+- **Route planning:** choose a route while the session is READY. Its backend graph shows
+  directed edges, closures and endpoint node IDs. Click intermediate nodes in order, or enter
+  their IDs; Undo, Redo and Cancel draft edit the proposal. **Validate / preview** displays
+  mandatory checks, the proposed path, stop coverage, distance, duration and energy estimates.
+  Enter an approval reason and approve for every assigned shuttle. An empty via list asks
+  the backend for its configured detour. Start becomes available once the assigned route
+  avoids the closure. A revision, closure, epoch or draft change requires a fresh preview.
+- **Charging:** review battery state, reserve forecasts, charger occupancy and offered
+  consequences. Select a passing, unexpired option, enter a reason, then use
+  **Reserve / Continue service**. The backend applies the decision and determines all motion
+  and energy consequences.
+- **Incidents:** select an incident and offered option, enter a reason, preview, then approve.
+  The hypothetical branch has its own labelled map. **History** shows committed historical
+  samples with a sample slider and reports missing evidence; **Debrief** shows the backend's
+  provisional rubric, decisions and outcomes. These views never replace the live fleet or
+  replay alert sounds. **Focus incident shuttle** selects and focuses its 3D vehicle.
+- **Reports:** inspect the latest 1,000 events and 1,000 commands observed in the selected
+  session by this running client, including pending confirmation, refusal and final status.
+  These are bounded client records; they are not a server-wide ledger or an export.
+- **3D interaction:** click rendered geometry to select an entity; select a fleet row and use
+  **Follow selected** or **Overview**. Right-drag orbits, middle-drag pans and the wheel zooms.
+  For route drafting, select **Draft in 3D** and the road surface/lane/deck, then click a node
+  marker on that surface. A draft can cross multiple surfaces; clicks respect height and
+  occlusion. The backend validates the resulting route.
+- **2D fleet map:** planar sessions show authoritative route paths, active closures,
+  shuttles, depots, charger IDs and incident markers. Click a shuttle to select it,
+  middle-drag to pan and use the wheel to zoom.
+- **Scene readiness:** after verifying, placing and rendering mandatory 3D geometry, Unity
+  posts `/api/v2/scenes/{scene_revision}/readiness` with the pinned manifest and asset hashes.
+  Start remains disabled until that report succeeds; use **Retry 3D** after a load failure.
+
+For the default integrated exercise: create a session, open Route planning, validate the
+default detour, enter a reason, approve, then start. Charging and incident decisions become
+available as the exercise runs. Unsupported route metadata and failed or unknown mandatory
+checks are shown as such; Unity does not fabricate a feasible path.
+
 ## 3D world
 
 A spatial session's snapshot pins its scene revision and manifest hash. `SceneLoader` fetches
@@ -117,7 +158,8 @@ Tests in the `LiveBackend` category call a running backend and are skipped when 
 reachable. They use no real account.
 
 The `EndToEnd` tests run the whole client over real HTTP: sign up, log in, create, start, pause,
-resume and archive sessions, and load and place a live 3D world. They sign up throwaway users,
+resume and archive sessions, approve the integrated detour, reserve a charger, preview and
+approve an incident, read its history/debrief, and load and place a live 3D world. They sign up throwaway users,
 so they only run against an isolated backend and are skipped unless
 `FORMULA9_E2E_BACKEND_URL` is set:
 
@@ -129,3 +171,8 @@ set FORMULA9_E2E_BACKEND_URL=http://127.0.0.1:8010
 Never point `FORMULA9_E2E_BACKEND_URL` at the team's shared backend. The `Render` test draws the real scene and needs a GPU,
 so it is skipped under `-nographics`; set `FORMULA9_RENDER_OUT` to a `.png` path to keep the
 image.
+
+The workflow tests also cover stale route graph replies, inclusive offer expiry ticks,
+lost approval replies, readiness payloads, and canonical mesh picks against the shared
+interaction fixture. Keep Git LFS assets hydrated before running Unity: GLB/WAV pointer
+files cannot be loaded as models or audio.

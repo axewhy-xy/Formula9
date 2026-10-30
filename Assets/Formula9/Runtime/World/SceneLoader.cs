@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Formula9.Backend;
 using Formula9.Contracts;
+using Newtonsoft.Json.Linq;
 
 namespace Formula9.World
 {
@@ -14,6 +15,7 @@ namespace Formula9.World
     public sealed class ScenePackage
     {
         public TrainingSceneRevision Manifest;
+        public string ManifestSha256;
         public readonly Dictionary<string, byte[]> Assets = new Dictionary<string, byte[]>();
     }
 
@@ -33,6 +35,27 @@ namespace Formula9.World
 
         public SceneLoader(IHttpTransport transport, Uri baseUrl = null) : base(transport, baseUrl) { }
 
+        public async Task ReportReadyAsync(ScenePackage package, CancellationToken cancellation = default)
+        {
+            var manifest = package.Manifest;
+            var request = new ReadinessRequest
+            {
+                SceneId = manifest.SceneId, SceneRevision = manifest.SceneRevision,
+                SpatialRevision = manifest.SpatialRevision, SpatialSchemaVersion = manifest.SpatialSchemaVersion,
+                TransformRevision = manifest.TransformRevision,
+                AssetProfile = manifest.AssetProfile, RequiredCapabilities = new System.Collections.Generic.List<string> { "world_3d" },
+                AssetHashes = package.Assets.ToDictionary(a => a.Key, a => Sha256(a.Value)), RenderReady = true,
+            };
+            // The hash is over the received bytes, not a reserialisation of the parsed manifest.
+            request.ManifestSha256 = package.ManifestSha256;
+            var json = await SendAsync(Request("POST", $"/api/v2/scenes/{Uri.EscapeDataString(manifest.SceneRevision)}/readiness", ContractParser.Serialize(request)), cancellation);
+            JObject reply;
+            try { reply = JObject.Parse(json); }
+            catch (Newtonsoft.Json.JsonException) { throw new SceneException("SCENE_READINESS_REPLY"); }
+            if ((bool?)reply["ready"] != true || (string)reply["scene_revision"] != manifest.SceneRevision ||
+                (string)reply["manifest_sha256"] != request.ManifestSha256) throw new SceneException("SCENE_READINESS_REPLY");
+        }
+
         public async Task<ScenePackage> LoadAsync(SpatialReference pins, CancellationToken cancellation = default)
         {
             if (pins == null) throw new SceneException("SCENE_NOT_SPATIAL", "this session has no 3D world");
@@ -48,7 +71,7 @@ namespace Formula9.World
                 throw new SceneException("SCENE_REVISION_MISMATCH");
             if (manifestBytes.Length + manifest.Assets.Sum(a => a.ByteLength) > MaxPackageBytes) throw new SceneException("SCENE_PACKAGE_LIMIT");
 
-            var package = new ScenePackage { Manifest = manifest };
+            var package = new ScenePackage { Manifest = manifest, ManifestSha256 = pins.ManifestSha256 };
             // The mandatory tier only, one at a time; optional assets fall back as the manifest says.
             foreach (var asset in manifest.Assets.Where(a => a.Mandatory))
             {

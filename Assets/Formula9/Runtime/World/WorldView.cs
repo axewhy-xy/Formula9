@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Formula9.Contracts;
@@ -12,7 +14,7 @@ namespace Formula9.World
     // Qt TrainingWorldViewport it only shows what the backend says.
     public sealed class WorldView : MonoBehaviour
     {
-        public const string NoWorld = "This 2D exercise has no 3D world; the fleet list shows its shuttles.";
+        public const string NoWorld = "2D fleet map · click a shuttle to select · middle-drag pan · wheel zoom";
         private const float MinDistance = 5, MaxDistance = 300, MinPitch = 0.12f, MaxPitch = 1.45f;
 
         private VisualElement surface;
@@ -26,6 +28,19 @@ namespace Formula9.World
         private Vector3 target;
         private float yaw, pitch = 0.6f, distance = 90;
         private int dragButton = -1;
+        private FleetMap map;
+        private DropdownField surfaces;
+        private Toggle drafting;
+        private RouteEditorContext routeContext;
+        private List<long> draftNodes = new List<long>();
+        private RouteEditPreview routePreview;
+        private Transform draftRoot;
+        private Material lineMaterial;
+        private bool following;
+        private string selectedId, sessionBoundary;
+        public bool RouteEditing { get; set; }
+        public event Action<string> EntitySelected;
+        public event Action<long> RouteNodeSelected;
 
         public bool Ready { get; private set; }
         public string Diagnostic { get; private set; } = "Join a training session to see its world.";
@@ -35,6 +50,19 @@ namespace Formula9.World
         {
             surface = view;
             loader = sceneLoader;
+            map = new FleetMap { name = "planar-map" };
+            map.style.position = UnityEngine.UIElements.Position.Absolute;
+            map.style.left = map.style.top = map.style.right = map.style.bottom = 0;
+            surface.Insert(0, map);
+            map.VehicleSelected += SelectEntity;
+            var actions = new VisualElement(); actions.AddToClassList("world-actions");
+            actions.style.position = UnityEngine.UIElements.Position.Absolute; actions.style.left = 8; actions.style.bottom = 8;
+            drafting = new Toggle("Draft in 3D"); actions.Add(drafting);
+            surfaces = new DropdownField("Road surface / lane / deck"); actions.Add(surfaces);
+            surfaces.RegisterValueChangedCallback(_ => DrawDraft());
+            drafting.RegisterValueChangedCallback(_ => DrawDraft());
+            actions.Add(new Button(Retry) { text = "Retry 3D" });
+            surface.Add(actions);
             var cameraObject = new GameObject("World Camera");
             cameraObject.transform.SetParent(transform, false);
             viewCamera = cameraObject.AddComponent<Camera>();
@@ -56,19 +84,33 @@ namespace Formula9.World
         private void OnDestroy()
         {
             loading?.Cancel();
+            Clear();
+            if (lineMaterial != null)
+            {
+                if (Application.isPlaying) Destroy(lineMaterial);
+                else DestroyImmediate(lineMaterial);
+            }
             if (texture != null) texture.Release();
         }
 
         // Called for every accepted snapshot of the selected session.
         public void Show(FullSnapshot snapshot)
         {
+            var boundary = snapshot == null ? null : $"{snapshot.SessionId}/{snapshot.SessionEpoch}";
+            if (boundary != sessionBoundary) { sessionBoundary = boundary; following = false; selectedId = null; routeContext = null; DrawDraft(); }
             latest = snapshot;
             if (snapshot?.Spatial == null)
             {
+                loading?.Cancel();
                 Clear();
-                SetReady(false, snapshot == null ? "Join a training session to see its world." : NoWorld);
+                map.style.display = snapshot == null ? DisplayStyle.None : DisplayStyle.Flex;
+                map.Show(snapshot);
+                surfaces.parent.style.display = DisplayStyle.None;
+                SetReady(snapshot != null, snapshot == null ? "Join a training session to see its world." : NoWorld);
                 return;
             }
+            map.style.display = DisplayStyle.None;
+            surfaces.parent.style.display = DisplayStyle.Flex;
             if (!SamePins(shownPins, snapshot.Spatial))
             {
                 _ = LoadAsync(snapshot.Spatial);
@@ -77,7 +119,7 @@ namespace Formula9.World
             if (world == null) return; // still loading; the latest snapshot is applied when it finishes
             var mismatch = world.ApplyPoses(snapshot);
             if (mismatch != null) SetReady(false, $"3D unavailable · scene/vehicle binding mismatch: {mismatch}");
-            else if (!Ready) SetReady(true, $"3D ready · {world.Entities.Count} objects · {world.Package.Manifest.SceneRevision}");
+            if (following) FocusSelected(false);
         }
 
         public void Retry()
@@ -104,15 +146,29 @@ namespace Formula9.World
                     return;
                 }
                 world = built;
+                var mismatch = world.ApplyPoses(latest);
+                if (mismatch != null) throw new SceneException("SCENE_VEHICLE_BINDING", mismatch);
                 Frame(package.Manifest);
                 viewCamera.enabled = true;
-                Show(latest);
+                Resize();
+                // Render once before reporting the actual renderer/asset readiness to the backend.
+                viewCamera.Render();
+                await loader.ReportReadyAsync(package, cancellation.Token);
+                if (cancellation.IsCancellationRequested || !SamePins(shownPins, pins)) return;
+                surfaces.choices = package.Manifest.RoadSurfaces.Select(s => $"{s.SurfaceId} | {s.LaneId} | {s.DeckId}").ToList();
+                surfaces.SetValueWithoutNotify(surfaces.choices.FirstOrDefault() ?? "");
+                SetReady(true, $"3D ready · {world.Entities.Count} objects · {package.Manifest.SceneRevision}");
+                DrawDraft(); Show(latest);
             }
             catch (OperationCanceledException) { }
             catch (SceneException error)
             {
                 if (cancellation.IsCancellationRequested) return;
                 SetReady(false, $"3D unavailable · {error.Message}");
+            }
+            catch (Exception error)
+            {
+                if (!cancellation.IsCancellationRequested) SetReady(false, $"3D unavailable · {error.Message}");
             }
         }
 
@@ -121,6 +177,8 @@ namespace Formula9.World
             world?.Destroy();
             world = null;
             shownPins = null;
+            if (draftRoot != null) WorldBuilder.Remove(draftRoot.gameObject);
+            draftRoot = null;
             if (viewCamera != null) viewCamera.enabled = false;
         }
 
@@ -176,7 +234,10 @@ namespace Formula9.World
         // Right-drag orbits, middle-drag pans and the wheel zooms, as in the Qt client.
         private void OnPointerDown(PointerDownEvent e)
         {
+            if (e.target != surface) return;
+            if (e.button == 0) { Pick(e.localPosition); e.StopPropagation(); return; }
             if (e.button != 1 && e.button != 2) return;
+            following = false;
             dragButton = e.button;
             surface.CapturePointer(e.pointerId);
             e.StopPropagation();
@@ -210,9 +271,83 @@ namespace Formula9.World
 
         private void OnWheel(WheelEvent e)
         {
+            if (e.target != surface) return;
             distance = Mathf.Clamp(distance * Mathf.Exp(e.delta.y * 0.03f), MinDistance, MaxDistance);
             PlaceCamera();
             e.StopPropagation();
+        }
+
+        public void SelectEntity(string id)
+        {
+            selectedId = id; map.SelectedId = id; map.MarkDirtyRepaint();
+            EntitySelected?.Invoke(id);
+        }
+
+        public void FollowSelected() { following = true; FocusSelected(); }
+        public void FocusSelected() => FocusSelected(true);
+        private void FocusSelected(bool zoom)
+        {
+            if (world == null || !world.Entities.TryGetValue(selectedId ?? "", out var entity)) return;
+            var renderers = entity.GetComponentsInChildren<Renderer>();
+            target = renderers.Length > 0 ? renderers[0].bounds.center : entity.position;
+            if (zoom) distance = 24;
+            PlaceCamera();
+        }
+        public void Overview() { following = false; if (world != null) Frame(world.Package.Manifest); }
+
+        public void SetRouteDraft(RouteEditorContext context, List<long> nodes, RouteEditPreview preview)
+        {
+            routeContext = context; draftNodes = nodes ?? new List<long>(); routePreview = preview; DrawDraft();
+        }
+
+        private string SurfaceId => (surfaces?.value ?? "").Split('|')[0].Trim();
+        public bool CanDraftNode(long id) => world != null && routeContext != null && routeContext.Nodes.Any(n => n.NodeId == id &&
+            WorldInteraction.NodeOnSurface(world.Package.Manifest, routeContext, n, SurfaceId));
+
+        // A draft can cross several surfaces. The surface selector only disambiguates a click;
+        // changing it must not invalidate nodes already chosen on another lane or deck.
+        public bool HasDraftSupport(long id) => Ready && world != null && routeContext != null &&
+            routeContext.Nodes.Any(n => n.NodeId == id && world.Package.Manifest.RoadSurfaces.Any(s =>
+                WorldInteraction.NodeOnSurface(world.Package.Manifest, routeContext, n, s.SurfaceId)));
+
+        private void DrawDraft()
+        {
+            if (draftRoot != null) WorldBuilder.Remove(draftRoot.gameObject);
+            draftRoot = null;
+            if (world == null || routeContext == null || !drafting.value) return;
+            draftRoot = new GameObject("Route draft overlays").transform; draftRoot.SetParent(transform, false);
+            if (lineMaterial == null) lineMaterial = new Material(Shader.Find("Sprites/Default"));
+            foreach (var node in routeContext.Nodes.Where(n => CanDraftNode(n.NodeId)))
+            {
+                var center = WorldMath.ToUnity(new List<double> { node.X, node.Y, node.Z }) + Vector3.up * 0.08f;
+                DrawLine(new[] { center - Vector3.right * 0.4f, center + Vector3.right * 0.4f }, draftNodes.Contains(node.NodeId) ? Color.yellow : Color.cyan);
+                DrawLine(new[] { center - Vector3.forward * 0.4f, center + Vector3.forward * 0.4f }, Color.cyan);
+            }
+            if (routePreview != null) DrawLine(routePreview.Polyline.Select(p => WorldMath.ToUnity(new List<double> { p.X, p.Y, p.Z }) + Vector3.up * 0.1f).ToArray(), Color.green);
+        }
+
+        private void DrawLine(Vector3[] points, Color color)
+        {
+            if (points.Length < 2) return;
+            var line = new GameObject("Draft line").AddComponent<LineRenderer>(); line.transform.SetParent(draftRoot, false);
+            line.sharedMaterial = lineMaterial; line.positionCount = points.Length; line.SetPositions(points);
+            line.startWidth = line.endWidth = 0.15f; line.startColor = line.endColor = color;
+        }
+
+        private void Pick(Vector2 pixel)
+        {
+            if (world == null || !Ready) return;
+            var rect = surface.contentRect;
+            var ray = viewCamera.ViewportPointToRay(new Vector3(pixel.x / rect.width, 1 - pixel.y / rect.height, 0));
+            if (!WorldInteraction.TryPick(world, ray, out var id, out var canonical)) return;
+            SelectEntity(id);
+            if (!RouteEditing || !drafting.value || routeContext == null) return;
+            var support = world.Package.Manifest.RoadSurfaces.FirstOrDefault(s => s.SurfaceId == SurfaceId);
+            if (support == null || world.Definitions[id].Kind != "ROAD" || !WorldInteraction.OnSurface(support, canonical)) return;
+            var node = routeContext.Nodes.Where(n => CanDraftNode(n.NodeId))
+                .OrderBy(n => Vector3.Distance(canonical, new Vector3((float)n.X, (float)n.Y, (float)n.Z))).FirstOrDefault();
+            if (node != null && Vector3.Distance(canonical, new Vector3((float)node.X, (float)node.Y, (float)node.Z)) < 1)
+                RouteNodeSelected?.Invoke(node.NodeId);
         }
     }
 }

@@ -83,6 +83,8 @@ namespace Formula9.World
                     if (!WorldMath.Apply(node, WorldMath.PlacedAsset(entity.PositionM, entity.OrientationXyzw, entity.AssetToBody)))
                         throw new SceneException("SCENE_BODY_POSE", entity.EntityId);
                     CheckDimensions(node, entity);
+                    foreach (var filter in node.GetComponentsInChildren<MeshFilter>())
+                        filter.gameObject.AddComponent<MeshCollider>().sharedMesh = filter.sharedMesh;
                     world.Entities[entity.EntityId] = node;
                     world.Definitions[entity.EntityId] = entity;
                 }

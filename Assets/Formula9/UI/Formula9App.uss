@@ -131,6 +131,7 @@
 
 .body {
     flex-grow: 1;
+    min-height: 0;
     flex-direction: row;
 }
 
@@ -143,6 +144,8 @@
     background-color: rgb(26, 26, 30);
     align-items: center;
     justify-content: center;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .world .muted {
@@ -155,7 +158,39 @@
     padding: 10px;
     border-radius: 8px;
     background-color: rgb(255, 255, 255);
+    min-width: 340px;
+    min-height: 0;
 }
+
+.workspace-page {
+    flex-grow: 1;
+    min-height: 0;
+}
+
+.workspace-text {
+    white-space: normal;
+    margin-top: 6px;
+    margin-bottom: 10px;
+}
+
+.route-map {
+    height: 260px;
+    min-height: 260px;
+    background-color: rgb(26, 34, 42);
+    border-radius: 4px;
+    margin-bottom: 8px;
+}
+
+.world-actions {
+    background-color: rgba(244, 246, 248, 0.94);
+    padding: 6px;
+    border-radius: 4px;
+}
+
+.data-table { flex-shrink: 0; margin-bottom: 10px; }
+.data-cell { width: 145px; flex-shrink: 0; white-space: normal; padding: 4px; border-bottom-width: 1px; border-color: rgb(228, 232, 236); }
+.data-heading { -unity-font-style: bold; background-color: rgb(236, 242, 244); }
+.data-table .row { flex-wrap: nowrap; align-items: stretch; margin-bottom: 0; }
 
 .panel-title {
     font-size: 16px;
