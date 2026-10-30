@@ -19,7 +19,13 @@ namespace Formula9.Backend
         {
             if (baseUrl == null) throw new ArgumentNullException(nameof(baseUrl));
             if (string.IsNullOrEmpty(path) || path[0] != '/') throw new ArgumentException("API paths start with '/'.", nameof(path));
-            var builder = new UriBuilder(baseUrl) { Path = baseUrl.AbsolutePath.TrimEnd('/') + path };
+            // A query must not become part of the path, where UriBuilder would escape its '?'.
+            var query = path.IndexOf('?');
+            var builder = new UriBuilder(baseUrl)
+            {
+                Path = baseUrl.AbsolutePath.TrimEnd('/') + (query < 0 ? path : path.Substring(0, query)),
+                Query = query < 0 ? "" : path.Substring(query + 1),
+            };
             return builder.Uri;
         }
     }

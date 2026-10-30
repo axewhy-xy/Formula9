@@ -16,6 +16,14 @@ namespace Formula9.Tests
         }
 
         [Test]
+        public void ApiUrlKeepsTheQueryOutOfThePath()
+        {
+            var url = BackendEndpoint.ApiUrl(new Uri("http://host:9000/proxy"), "/api/v2/sessions/s-1/events?after=7&limit=100");
+            Assert.AreEqual("/proxy/api/v2/sessions/s-1/events", url.AbsolutePath);
+            Assert.AreEqual("?after=7&limit=100", url.Query);
+        }
+
+        [Test]
         public void ApiUrlRejectsRelativePaths()
         {
             Assert.Throws<ArgumentException>(() => BackendEndpoint.ApiUrl(new Uri(BackendEndpoint.DefaultUrl), "api/v2"));

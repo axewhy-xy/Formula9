@@ -36,6 +36,16 @@ After the contracts change in Formula_9 (with both repositories side by side):
 python Tools/generate_contracts.py
 ```
 
+## Backend access
+
+`Runtime/Backend` holds the HTTP layer. `AuthClient` logs in against the team's shared
+accounts and `AuthSession` keeps the token in memory only. `TrainingApi` calls
+`/api/v2/sessions` and returns validated contract objects. Every failure is one of three
+kinds: `BackendErrorException` (a complete error reply, for example `SESSION_RECOVERING`),
+`NoReplyException` (no complete reply; the request may still have taken effect, so commands
+must be confirmed, never re-created) or `NotLoggedInException`. Training requests are never
+sent without a login.
+
 ## Tests
 
 Run EditMode tests in the Test Runner window, or headless:
@@ -43,3 +53,6 @@ Run EditMode tests in the Test Runner window, or headless:
 ```
 "C:\Program Files\Unity\Hub\Editor\6000.1.4f1\Editor\Unity.exe" -batchmode -nographics -projectPath . -runTests -testPlatform EditMode -testResults TestResults.xml
 ```
+
+Tests in the `LiveBackend` category call a running backend and are skipped when none is
+reachable. They use no real account.
