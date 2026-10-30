@@ -153,14 +153,12 @@ namespace Formula9.UI
     //     This class derives everything the training screen shows from the accepted snapshot. A
     //     port of the Qt TrainingWorkspace's refreshStatus, refreshViews and showCommandResult.
     //
-    //     Attributes: Scenarios lists what can be created, the 3D exercise first as in the Qt
-    //     client; NoSession is shown when nothing is joined.
+    //     Attributes: Scenarios lists what can be created; NoSession is shown when nothing is
+    //     joined.
     public static class TrainingPresenter
     {
-        // The 3D exercise is first, as in the Qt client.
         public static readonly IReadOnlyList<ScenarioChoice> Scenarios = new[]
         {
-            new ScenarioChoice("3D fleet exercise", "scenario-m2-road-3d-r1", "Five shuttles on a road and ramp."),
             new ScenarioChoice("Singapore, real streets (2D)", SessionController.IntegratedScenario, "Real streets and LTA bus stops, shuttles running from a bus interchange, with incidents, detours and charging."),
         };
 

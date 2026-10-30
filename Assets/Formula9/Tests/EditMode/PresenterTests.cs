@@ -202,15 +202,15 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: TheScenariosAreOfferedInTheQtOrder
+        // Function: OnlyTheSingaporeExerciseIsOffered
         // -----------------------------------------------------------------------------------
         // Description:
-        //     The scenarios are offered in the Qt client's order, the 3D exercise first.
+        //     New sessions offer only the Singapore exercise.
         [Test]
-        public void TheScenariosAreOfferedInTheQtOrder()
+        public void OnlyTheSingaporeExerciseIsOffered()
         {
-            Assert.AreEqual("scenario-m2-road-3d-r1", TrainingPresenter.Scenarios[0].Id);
-            Assert.AreEqual(SessionController.IntegratedScenario, TrainingPresenter.Scenarios[1].Id);
+            Assert.AreEqual(1, TrainingPresenter.Scenarios.Count);
+            Assert.AreEqual(SessionController.IntegratedScenario, TrainingPresenter.Scenarios[0].Id);
             StringAssert.StartsWith("Singapore", TrainingPresenter.ScenarioTitle(SessionController.IntegratedScenario));
         }
 

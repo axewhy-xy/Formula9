@@ -109,8 +109,7 @@ recovery, backing off to at most 5 s, and the command waits for its own account 
 `SessionStore` refuses older epochs, stale or reused snapshots and event gaps, and keeps the
 latest 1,000 events.
 
-New sessions default to the 3D fleet exercise, as in the Qt client. Choose **Singapore, real streets
-(2D)** for the exercise with incidents, detours and charging.
+New sessions use **Singapore, real streets (2D)**, the exercise with incidents, detours and charging.
 
 ## Editing the pages
 
@@ -125,8 +124,8 @@ are found by `name`, so keep a control's name when you move or restyle it.
 
 The 2D scenario, **Singapore, real streets**, runs on real Toa Payoh roads and sits on an
 OpenStreetMap basemap. Tiles are cached in memory and on disk. `FORMULA9_TILE_URL` selects another
-`{z}/{x}/{y}` tile server; `none` turns the basemap off for tests and offline demos. The 3D
-scenario's local frame is not a real place, so it has no basemap.
+`{z}/{x}/{y}` tile server; `none` turns the basemap off for tests and offline demos. Existing 3D
+sessions use a local frame rather than a real place, so they have no basemap.
 
 Real bus stops appear when zoomed in. They come from OpenStreetMap, with their LTA stop codes, and
 are committed in `backend/fixtures/transit/transit.sqlite`, so nobody needs a key. To refresh them, run
