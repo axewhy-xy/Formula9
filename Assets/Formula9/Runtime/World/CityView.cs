@@ -9,8 +9,8 @@ using UnityEngine;
 
 namespace Formula9.World
 {
-    // The real streets in 3D: extruded OSM buildings on a ground of map tiles, with the session's
-    // routes, stops and shuttles from the backend's snapshots. It adds no road geometry of its own.
+    // The real streets in 3D: extruded OSM buildings and asphalt roads on a ground of map tiles, with
+    // the session's routes, stops and shuttles from the backend's snapshots.
     public sealed class CityView : IDisposable
     {
         // Sharp tiles around the buildings, over coarser ones out to the horizon
@@ -19,6 +19,8 @@ namespace Formula9.World
         private static readonly Vector3 ShuttleSize = new Vector3(5, 5, 12);
         // Routes are cut through buildings a little wider than they are drawn, so a shuttle fits
         private const float RouteWidthM = 5, RouteClearanceM = 1.5f;
+        private static readonly Color KerbColor = new Color(0.66f, 0.66f, 0.64f), AsphaltColor = new Color(0.17f, 0.17f, 0.19f), MarkingColor = new Color(0.95f, 0.95f, 0.92f);
+        private const int GrainSize = 128, GrainSeed = 9;
 
         private readonly Transform root;
         private readonly MapTiles tiles;
@@ -32,6 +34,7 @@ namespace Formula9.World
         private Mesh buildingMesh;
 
         public int BuildingCount { get; private set; }
+        public int RoadCount { get; private set; }
         public Bounds Bounds { get; private set; }
 
         public CityView(Transform parent, MapTiles tiles)
@@ -58,9 +61,54 @@ namespace Formula9.World
             city.GetComponent<MeshFilter>().sharedMesh = buildingMesh;
             city.GetComponent<MeshRenderer>().sharedMaterial = buildingMaterial;
             BuildGround();
+            await LoadRoadsAsync(client, area, cancellation);
         }
 
         public void SetVisible(bool visible) { if (root != null) root.gameObject.SetActive(visible); }
+
+        // Roads only dress the ground, which already shows them: without their data the city still stands
+        private async Task LoadRoadsAsync(CityClient client, string area, CancellationToken cancellation)
+        {
+            List<CityRoad> roads;
+            try { roads = await client.GetRoadsAsync(area, cancellation); }
+            catch (Exception error) when (!(error is OperationCanceledException))
+            {
+                Debug.LogWarning("No road surfaces, so the map's roads show instead: " + error.Message);
+                return;
+            }
+            cancellation.ThrowIfCancellationRequested();
+            RoadCount = roads.Count;
+            var surface = Shader.Find("Formula9/CityRoad");
+            var grain = Own(AsphaltGrain());
+            var materials = new Material[RoadMesh.LayerCount];
+            materials[RoadMesh.KerbLayer] = Own(new Material(surface) { color = KerbColor, mainTexture = grain });
+            materials[RoadMesh.AsphaltLayer] = Own(new Material(surface) { color = AsphaltColor, mainTexture = grain });
+            materials[RoadMesh.MarkingLayer] = Own(new Material(Shader.Find("Formula9/CityRoadMarkings")) { color = MarkingColor });
+            // In this order, after the ground and buildings have written their depth
+            for (var i = 0; i < materials.Length; i++) materials[i].renderQueue = (int)UnityEngine.Rendering.RenderQueue.Geometry + 1 + i;
+            var road = new GameObject("Roads", typeof(MeshFilter), typeof(MeshRenderer));
+            road.transform.SetParent(root, false);
+            road.GetComponent<MeshFilter>().sharedMesh = Own(RoadMesh.Build(roads));
+            var renderer = road.GetComponent<MeshRenderer>();
+            renderer.sharedMaterials = materials;
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        }
+
+        // Pale speckle that the road colours tint. Its mipmaps average out to flat colour far away.
+        private static Texture2D AsphaltGrain()
+        {
+            var texture = new Texture2D(GrainSize, GrainSize, TextureFormat.RGB24, true) { name = "Asphalt grain", wrapMode = TextureWrapMode.Repeat, anisoLevel = 4 };
+            var random = new System.Random(GrainSeed);
+            var pixels = new Color32[GrainSize * GrainSize];
+            for (var i = 0; i < pixels.Length; i++)
+            {
+                var shade = (byte)random.Next(170, 256);
+                pixels[i] = new Color32(shade, shade, shade, 255);
+            }
+            texture.SetPixels32(pixels);
+            texture.Apply(true, true);
+            return texture;
+        }
 
         private void BuildGround()
         {

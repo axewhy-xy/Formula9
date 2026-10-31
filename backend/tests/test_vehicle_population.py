@@ -171,3 +171,18 @@ def test_the_committed_traffic_matches_a_rebuild_and_represents_every_type(tmp_p
     assert sum(row["count"] for row in data["types"]) == len(data["vehicles"])
     expected = data["sampling"]["national_population"] * data["sampling"]["percent"] / 100
     assert math.isclose(len(data["vehicles"]), expected, rel_tol=0.02)
+
+
+def test_the_api_serves_the_prepared_roads():
+    from fastapi.testclient import TestClient
+
+    from src.app import app
+
+    client = TestClient(app)
+    answer = client.get("/api/roads/toa-payoh").json()
+    assert len(answer["roads"]) > 1000 and "OpenStreetMap" in answer["attribution"]
+    road = answer["roads"][0]
+    assert road["lanes"] >= 1 and len(road["points_m"]) >= 2
+    assert client.get("/api/roads/nowhere").status_code == 404
+    assert client.get("/api/roads/vehicle-population").status_code == 404, "another file in the folder, not an area"
+    assert client.get("/api/roads/..%2F..%2Fsecret").status_code == 404

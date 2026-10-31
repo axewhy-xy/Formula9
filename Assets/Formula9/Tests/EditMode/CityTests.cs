@@ -160,10 +160,163 @@ namespace Formula9.Tests
             finally { UnityEngine.Object.DestroyImmediate(mesh); }
         }
 
+        private static CityRoad Road(string kind, bool oneway, int lanes, long from, long to, params (double X, double Y)[] points) =>
+            new CityRoad { Id = $"way/{from}/{to}", Class = kind, FromNode = from, ToNode = to, Oneway = oneway, Lanes = lanes, Points = points.ToList() };
+
+        private static Bounds BoundsOf(Mesh mesh, int layer)
+        {
+            var vertices = mesh.vertices; var triangles = mesh.GetTriangles(layer);
+            var bounds = new Bounds(vertices[triangles[0]], Vector3.zero);
+            foreach (var index in triangles) bounds.Encapsulate(vertices[index]);
+            return bounds;
+        }
+
+        [Test]
+        public void ARoadIsAsWideAsItsLanesWithAKerbAndFacesUp()
+        {
+            var mesh = RoadMesh.Build(new[] { Road("residential", false, 2, 1, 2, (0, 0), (0, 100)) });
+            try
+            {
+                Assert.AreEqual(RoadMesh.LayerCount, mesh.subMeshCount);
+                var half = 2 * RoadMesh.LaneWidthM + RoadMesh.ShoulderM;
+                Assert.AreEqual(half, BoundsOf(mesh, RoadMesh.AsphaltLayer).max.x, 1e-3f, "two lanes each way");
+                Assert.AreEqual(half + RoadMesh.KerbM, BoundsOf(mesh, RoadMesh.KerbLayer).max.x, 1e-3f);
+                Assert.AreEqual(half, BoundsOf(mesh, RoadMesh.MarkingLayer).max.x, 1e-3f);
+                Assert.AreEqual(100, BoundsOf(mesh, RoadMesh.MarkingLayer).max.z, 1e-3f, "lines run the whole way when nothing joins");
+                foreach (var normal in mesh.normals) Assert.Greater(normal.y, 0.99f);
+                Assert.AreEqual(RoadMesh.SurfaceY, mesh.bounds.center.y, 1e-3f, "flat, over the ground");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
+        public void AOneWayRoadSitsOnItsLineAndCountsLanesFromItsEdge()
+        {
+            var mesh = RoadMesh.Build(new[] { Road("primary", true, 3, 1, 2, (0, 0), (100, 0)) });
+            try
+            {
+                var bounds = BoundsOf(mesh, RoadMesh.MarkingLayer);
+                var half = 1.5f * RoadMesh.LaneWidthM + RoadMesh.ShoulderM;
+                Assert.AreEqual(half, bounds.max.z, 1e-3f);
+                Assert.AreEqual(-half, bounds.min.z, 1e-3f);
+                var uvs = new List<Vector4>(); mesh.GetUVs(0, uvs);
+                var triangles = mesh.GetTriangles(RoadMesh.MarkingLayer);
+                var lanes = triangles.Select(i => uvs[i].x).ToList();
+                var overhang = RoadMesh.ShoulderM / RoadMesh.LaneWidthM;
+                Assert.AreEqual(-overhang, lanes.Min(), 1e-3f, "lane 0 is one edge");
+                Assert.AreEqual(3 + overhang, lanes.Max(), 1e-3f, "lane 3 the other");
+                Assert.AreEqual(3, uvs[triangles[0]].z);
+                Assert.AreEqual(0, uvs[triangles[0]].w, "one-way");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
+        public void LinesStopShortOfAJunctionButCarryOnWhereOneRoadBecomesTheNext()
+        {
+            var mesh = RoadMesh.Build(new[]
+            {
+                Road("primary", true, 2, 1, 2, (-100, 0), (0, 0)),
+                Road("primary", true, 2, 2, 3, (0, 0), (100, 0)),
+                Road("residential", false, 1, 2, 4, (0, 0), (0, 100)),
+                Road("residential", false, 1, 5, 6, (500, 0), (500, 100)),
+                Road("residential", false, 1, 6, 7, (500, 100), (500, 200)),
+            });
+            try
+            {
+                var vertices = mesh.vertices;
+                var lined = mesh.GetTriangles(RoadMesh.MarkingLayer).Select(i => vertices[i]).ToList();
+                var asphaltHalf = RoadMesh.LaneWidthM + RoadMesh.ShoulderM;
+                Assert.IsFalse(lined.Any(v => Mathf.Abs(v.x) < asphaltHalf && Mathf.Abs(v.z) < asphaltHalf), "the junction is plain asphalt");
+                Assert.IsTrue(lined.Any(v => v.x > 490 && Mathf.Approximately(v.z, 100)), "two roads alone just meet, so their lines reach the shared point");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
+        public void AServiceRoadHasNoLinesAndABrokenRoadIsLeftOut()
+        {
+            var mesh = RoadMesh.Build(new[]
+            {
+                Road("service", false, 1, 1, 2, (0, 0), (50, 0)),
+                Road("residential", false, 1, 3, 4, (7, 7), (7, 7)),
+            });
+            try
+            {
+                Assert.Greater(mesh.GetTriangles(RoadMesh.AsphaltLayer).Length, 0);
+                Assert.AreEqual(0, mesh.GetTriangles(RoadMesh.MarkingLayer).Length);
+                Assert.Less(mesh.bounds.max.z, 6, "nothing at the broken road's point");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
+        public void ASharpBendGetsARoundCornerAndNoSpike()
+        {
+            var mesh = RoadMesh.Build(new[] { Road("service", true, 1, 1, 2, (0, 0), (50, 0), (50, 50)) });
+            try
+            {
+                var half = RoadMesh.LaneWidthM / 2 + RoadMesh.ShoulderM;
+                var corner = new Vector3(50, RoadMesh.SurfaceY, 0);
+                var vertices = mesh.vertices; var asphalt = mesh.GetTriangles(RoadMesh.AsphaltLayer);
+                Assert.IsTrue(asphalt.Any(i => vertices[i] == corner), "a cap centred on the bend");
+                Assert.IsFalse(asphalt.Any(i => vertices[i].x > 50 + half * 2.01f || vertices[i].z < -half * 2.01f), "the mitre is limited");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
         private sealed class OneBuilding : IHttpTransport
         {
+            public string Roads = "{\"roads\":[{\"id\":\"way/9/1\",\"class\":\"primary\",\"from_node\":1,\"to_node\":2,\"oneway\":true,\"lanes\":2,\"speed_kph\":50,\"points_m\":[[0,0],[0,40]]}]}";
+            public int RoadStatus = 200;
+
             public Task<HttpResponse> SendAsync(HttpRequest request, CancellationToken cancellation = default) =>
-                Task.FromResult(new HttpResponse { Status = 200, Body = "{\"buildings\":[{\"id\":\"way/1\",\"type\":\"retail\",\"name\":\"\",\"height_m\":30,\"rings_m\":[[[0,0],[10,0],[10,10],[0,10],[0,0]]]}]}" });
+                Task.FromResult(request.Url.AbsolutePath.StartsWith("/api/roads/")
+                    ? new HttpResponse { Status = RoadStatus, Body = Roads }
+                    : new HttpResponse { Status = 200, Body = "{\"buildings\":[{\"id\":\"way/1\",\"type\":\"retail\",\"name\":\"\",\"height_m\":30,\"rings_m\":[[[0,0],[10,0],[10,10],[0,10],[0,0]]]}]}" });
+        }
+
+        [Test]
+        public void TheCityLaysItsRoadsOverTheGround()
+        {
+            var rig = new GameObject("City road rig");
+            var view = new CityView(rig.transform, null);
+            try
+            {
+                Assert.IsTrue(view.LoadAsync(new CityClient(new OneBuilding(), new Uri("http://localhost")), "toa-payoh", CancellationToken.None).IsCompleted);
+                Assert.AreEqual(1, view.RoadCount);
+                var materials = rig.GetComponentsInChildren<MeshRenderer>().First(r => r.name == "Roads").sharedMaterials;
+                Assert.AreEqual(RoadMesh.LayerCount, materials.Length);
+                Assert.Less(materials[RoadMesh.KerbLayer].renderQueue, materials[RoadMesh.AsphaltLayer].renderQueue);
+                Assert.Less(materials[RoadMesh.AsphaltLayer].renderQueue, materials[RoadMesh.MarkingLayer].renderQueue);
+                Assert.Greater(materials[RoadMesh.KerbLayer].renderQueue, (int)RenderQueue.Geometry, "after the ground and buildings");
+            }
+            finally
+            {
+                view.Dispose();
+                UnityEngine.Object.DestroyImmediate(rig);
+            }
+        }
+
+        [TestCase(404, "{\"detail\":\"No road data\"}")]
+        [TestCase(200, "{\"roads\":[{\"id\":\"way/9/1\"}]}")]
+        public void ACityWithoutRoadDataStillStands(int status, string body)
+        {
+            var rig = new GameObject("City road failure rig");
+            var view = new CityView(rig.transform, null);
+            try
+            {
+                var load = view.LoadAsync(new CityClient(new OneBuilding { RoadStatus = status, Roads = body }, new Uri("http://localhost")), "toa-payoh", CancellationToken.None);
+                Assert.IsTrue(load.IsCompleted && !load.IsFaulted);
+                Assert.AreEqual(1, view.BuildingCount);
+                Assert.AreEqual(0, view.RoadCount);
+                Assert.IsFalse(rig.GetComponentsInChildren<MeshRenderer>().Any(r => r.name == "Roads"));
+            }
+            finally
+            {
+                view.Dispose();
+                UnityEngine.Object.DestroyImmediate(rig);
+            }
         }
 
         [Test]
@@ -250,27 +403,36 @@ namespace Formula9.Tests
                 Assert.IsTrue(load.IsCompleted, "buildings loaded");
                 if (load.IsFaulted) throw load.Exception;
                 Assert.Greater(view.BuildingCount, 1000);
+                Assert.Greater(view.RoadCount, 1000);
                 // Time for the ground tiles to arrive
                 deadline = Time.realtimeSinceStartup + 45;
                 while (Time.realtimeSinceStartup < deadline) yield return null;
                 var camera = new GameObject("Camera", typeof(Camera)).GetComponent<Camera>();
                 camera.transform.SetParent(rig.transform, true);
                 camera.clearFlags = CameraClearFlags.SolidColor; camera.backgroundColor = new Color(0.72f, 0.84f, 0.92f);
-                camera.fieldOfView = 50; camera.farClipPlane = 8000; camera.nearClipPlane = 1;
+                camera.fieldOfView = 50; camera.farClipPlane = 8000; camera.nearClipPlane = 0.1f;
                 var center = view.Bounds.center;
                 var focus = new Vector3(center.x, 0, center.z);
-                camera.transform.position = focus + new Vector3(Mathf.Sin(Mathf.PI - 0.35f) * Mathf.Cos(0.3f), Mathf.Sin(0.3f), Mathf.Cos(Mathf.PI - 0.35f) * Mathf.Cos(0.3f)) * 2200;
-                camera.transform.LookAt(focus, Vector3.up);
                 camera.targetTexture = texture;
-                camera.Render();
-                RenderTexture.active = texture;
-                var image = new Texture2D(texture.width, texture.height, TextureFormat.RGB24, false);
-                image.ReadPixels(new Rect(0, 0, texture.width, texture.height), 0, 0);
-                image.Apply();
-                RenderTexture.active = null;
                 var output = Environment.GetEnvironmentVariable("FORMULA9_CITY_RENDER_OUT");
-                if (!string.IsNullOrEmpty(output)) File.WriteAllBytes(output, image.EncodeToPNG());
-                UnityEngine.Object.DestroyImmediate(image);
+                void Shoot(Vector3 at, float distance, float pitch, string path)
+                {
+                    camera.transform.position = at + new Vector3(Mathf.Sin(Mathf.PI - 0.35f) * Mathf.Cos(pitch), Mathf.Sin(pitch), Mathf.Cos(Mathf.PI - 0.35f) * Mathf.Cos(pitch)) * distance;
+                    camera.transform.LookAt(at, Vector3.up);
+                    camera.Render();
+                    RenderTexture.active = texture;
+                    var image = new Texture2D(texture.width, texture.height, TextureFormat.RGB24, false);
+                    image.ReadPixels(new Rect(0, 0, texture.width, texture.height), 0, 0);
+                    image.Apply();
+                    RenderTexture.active = null;
+                    if (!string.IsNullOrEmpty(output)) File.WriteAllBytes(path, image.EncodeToPNG());
+                    UnityEngine.Object.DestroyImmediate(image);
+                }
+                Shoot(focus, 2200, 0.3f, output);
+                // Where the view opens, then close enough on Lorong 2 Toa Payoh to see the road's lines
+                Shoot(focus, 1200, 0.75f, Path.ChangeExtension(output ?? "", ".opening.png"));
+                Shoot(new Vector3(2988, 0, -2604), 90, 0.7f, Path.ChangeExtension(output ?? "", ".street.png"));
+                Shoot(new Vector3(2988, 0, -2604), 350, 1.1f, Path.ChangeExtension(output ?? "", ".junctions.png"));
             }
             finally
             {

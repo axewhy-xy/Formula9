@@ -1,4 +1,4 @@
-// The map tiles laid on the ground: unlit, so roads keep their map colours.
+// The map tiles laid on the ground: unlit, so the map keeps its colours.
 Shader "Formula9/CityGround"
 {
     Properties { _MainTex ("Tile", 2D) = "gray" {} }
