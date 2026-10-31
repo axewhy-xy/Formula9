@@ -43,7 +43,7 @@ namespace Formula9.World
         private RouteDraftView shownDraft;
         private RouteEditPreview shownPreview;
         private string shownHighlights, shownWaypoints, shownClosures;
-        private string routesKey;
+        private string routesKey, hiddenShuttle;
         private Material buildingMaterial, lineMaterial;
         private List<CityBuilding> buildings;
         private Mesh buildingMesh;
@@ -172,6 +172,12 @@ namespace Formula9.World
         {
             var ordered = snapshot.Vehicles.OrderBy(v => v.VehicleId, StringComparer.Ordinal).ToList();
             var routes = ShuttleMotion.Routes(snapshot);
+            foreach (var gone in shuttles.Keys.Where(id => ordered.All(v => v.VehicleId != id)).ToList())
+            {
+                WorldBuilder.Remove(shuttles[gone].gameObject);
+                shuttles.Remove(gone);
+                motion.Forget(gone);
+            }
             for (var i = 0; i < ordered.Count; i++)
             {
                 var vehicle = ordered[i];
@@ -356,6 +362,16 @@ namespace Formula9.World
             position = shuttle.position;
             rotation = shuttle.rotation;
             return true;
+        }
+
+        // Hides the shuttle the driver camera sits in, or none: from inside, the back of its own
+        // windscreen would fill the view. A hidden shuttle still moves, so the camera can follow it.
+        public void HideShuttle(string id)
+        {
+            if (id == hiddenShuttle) return;
+            if (hiddenShuttle != null && shuttles.TryGetValue(hiddenShuttle, out var shown)) shown.gameObject.SetActive(true);
+            hiddenShuttle = id;
+            if (id != null && shuttles.TryGetValue(id, out var hidden)) hidden.gameObject.SetActive(false);
         }
 
         public void Dispose()

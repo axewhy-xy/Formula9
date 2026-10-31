@@ -190,7 +190,7 @@ namespace Formula9.World
         public void Show(FullSnapshot snapshot)
         {
             var boundary = snapshot == null ? null : $"{snapshot.SessionId}/{snapshot.SessionEpoch}";
-            if (boundary != sessionBoundary) { sessionBoundary = boundary; preferMap = snapshot?.Spatial == null; following = false; driving = false; selectedId = null; routeContext = null; motion.Clear(); DrawDraft(); }
+            if (boundary != sessionBoundary) { sessionBoundary = boundary; preferMap = snapshot?.Spatial == null; following = false; LeaveDriverView(); selectedId = null; routeContext = null; motion.Clear(); DrawDraft(); }
             latest = snapshot;
             if (snapshot != null) motion.BeginSnapshot(snapshot.Tick, Time.unscaledTime);
             if (snapshot?.Spatial == null)
@@ -304,6 +304,7 @@ namespace Formula9.World
             {
                 // Forget it, so going back to 3D View tries again
                 city?.Dispose(); city = null; cityLoad = null;
+                LeaveDriverView();
                 preferMap = true;
                 viewCamera.enabled = false;
                 if (latest != null) { map.style.display = DisplayStyle.Flex; map.Show(latest); }
@@ -634,7 +635,7 @@ namespace Formula9.World
         {
             ShowMap(false);
             SelectEntity(id);
-            driving = false;
+            LeaveDriverView();
             following = true;
             // Steep enough that the blocks along the road don't hide the shuttle
             distance = 170; pitch = 1.2f; yaw = Mathf.PI - 0.35f;
@@ -671,7 +672,7 @@ namespace Formula9.World
             if (!CityShown || city == null || draft == null) return;
             var points = ids.SelectMany(id => draft.TryRoad(id, out var road) ? road.Points : Array.Empty<Vector2>()).ToList();
             if (points.Count == 0) return;
-            following = false; driving = false;
+            following = false; LeaveDriverView();
             target = new Vector3(points.Average(p => p.x), 0, points.Average(p => p.y));
             distance = Mathf.Clamp(Mathf.Max(points.Max(p => p.x) - points.Min(p => p.x), points.Max(p => p.y) - points.Min(p => p.y)) * 1.6f, 120, CityMaxDistance);
             PlaceCamera();
@@ -724,34 +725,54 @@ namespace Formula9.World
         // Description:
         //     This function focuses the camera on the selected entity and keeps it there as it
         //     moves.
-        public void FollowSelected() { following = true; FocusSelected(); }
+        public void FollowSelected() { LeaveDriverView(); following = true; FocusSelected(); }
 
         // -----------------------------------------------------------------------------------
         // Function: DriveSelected
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function puts the camera in the selected shuttle's driver seat, looking where
-        //     it is heading, until Overview is chosen. It does nothing without a selection.
+        //     This function goes to the 3D city and puts the camera in the selected shuttle's
+        //     driver seat, looking where it is heading, until Overview is chosen. It does nothing
+        //     without a selected shuttle or in a session that has no 3D city.
         public void DriveSelected()
         {
-            if (selectedId == null) return;
+            if (latest == null || latest.Spatial != null || cityClient == null || latest.Vehicles.All(v => v.VehicleId != selectedId)) return;
             driving = true;
             lookYaw = lookPitch = 0;
             following = false;
+            ShowMap(false);
         }
+
+        // -----------------------------------------------------------------------------------
+        // Function: LeaveDriverView
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function takes the camera out of the shuttle and back over the city, and shows
+        //     the shuttle again.
+        private void LeaveDriverView()
+        {
+            if (!driving) return;
+            driving = false;
+            city?.HideShuttle(null);
+            if (city != null && city.BuildingCount > 0) FrameCity(city);
+        }
+
         // -----------------------------------------------------------------------------------
         // Function: PlaceDriverCamera
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function puts the camera at the selected shuttle's eye point, facing the way
-        //     the shuttle faces. If the shuttle is gone, it leaves driver view.
+        //     the shuttle faces, and hides that shuttle from it. While the city loads there is no
+        //     shuttle yet, so it waits. If the shuttle is gone, it leaves driver view.
         private void PlaceDriverCamera()
         {
-            if (city == null || city.TryGetShuttlePose(selectedId, out var position, out var rotation) == false)
-            { 
-              driving = false; 
-              return; 
-            }  
+            if (cityLoad != null && !cityLoad.IsCompleted) return;
+            if (!CityShown || city == null || !city.TryGetShuttlePose(selectedId, out var position, out var rotation))
+            {
+                LeaveDriverView();
+                return;
+            }
+            city.HideShuttle(selectedId);
             var eye = position + rotation * new Vector3(0, EyeHeightM, EyeForwardM);
             viewCamera.transform.position = eye;
             viewCamera.transform.rotation = rotation * Quaternion.Euler(lookPitch, lookYaw, 0);
@@ -793,7 +814,7 @@ namespace Formula9.World
         public void Overview()
         {
             following = false;
-            driving = false;
+            LeaveDriverView();
             if (world != null) Frame(world.Package.Manifest);
             else if (CityShown && city != null && city.BuildingCount > 0) FrameCity(city);
         }

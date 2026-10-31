@@ -140,6 +140,16 @@ namespace Formula9.World
         public void Clear() => tracks.Clear();
 
         // -----------------------------------------------------------------------------------
+        // Function: Forget
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function forgets one shuttle's glide, for a shuttle no longer in the snapshot.
+        //
+        // Args:
+        //     id (string): The shuttle.
+        public void Forget(string id) => tracks.Remove(id);
+
+        // -----------------------------------------------------------------------------------
         // Function: Routes
         // -----------------------------------------------------------------------------------
         // Description:
