@@ -189,6 +189,17 @@ namespace Formula9.World
             return true;
         }
 
+        // The shuttle's smoothed position and facing, for the driver camera.
+        public bool TryGetShuttlePose(string id, out Vector3 position, out Quaternion rotation)
+        {
+            position = default;
+            rotation = default;
+            if (id == null || !shuttles.TryGetValue(id, out var shuttle)) return false;
+            position = shuttle.position;
+            rotation = shuttle.rotation;
+            return true;
+        }
+
         public void Dispose()
         {
             if (tiles != null) tiles.TileLoaded -= RefreshTiles;

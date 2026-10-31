@@ -76,6 +76,10 @@ namespace Formula9.World
         private Transform draftRoot;
         private Material lineMaterial;
         private bool following;
+        private bool driving;
+        private float lookYaw, lookPitch;
+        private const float LookDegreesPerPixel = 0.2f, MaxLookPitchDeg = 30f;
+        private const float EyeHeightM = 1.5f, EyeForwardM = 5.5f;
         private string selectedId, sessionBoundary;
         public bool RouteEditing { get; set; }
         public event Action<string> EntitySelected;
@@ -174,7 +178,7 @@ namespace Formula9.World
         public void Show(FullSnapshot snapshot)
         {
             var boundary = snapshot == null ? null : $"{snapshot.SessionId}/{snapshot.SessionEpoch}";
-            if (boundary != sessionBoundary) { sessionBoundary = boundary; preferMap = snapshot?.Spatial == null; following = false; selectedId = null; routeContext = null; motion.Clear(); DrawDraft(); }
+            if (boundary != sessionBoundary) { sessionBoundary = boundary; preferMap = snapshot?.Spatial == null; following = false; driving = false; selectedId = null; routeContext = null; motion.Clear(); DrawDraft(); }
             latest = snapshot;
             if (snapshot != null) motion.BeginSnapshot(snapshot.Tick, Time.unscaledTime);
             if (snapshot?.Spatial == null)
@@ -304,7 +308,8 @@ namespace Formula9.World
             if (CityShown && city != null) city.Tick(motion, Time.unscaledTime);
             else if (world != null) world.Advance(motion, Time.unscaledTime);
             else return;
-            if (following) FocusSelected(false);
+            if (driving) PlaceDriverCamera();
+            else if (following) FocusSelected(false);
         }
 
         // -----------------------------------------------------------------------------------
@@ -469,7 +474,8 @@ namespace Formula9.World
         private void Resize()
         {
             var rect = surface.contentRect;
-            if (rect.width < 1 || rect.height < 1) return;
+            // Not on screen yet (no panel), or too small to draw into
+            if (surface.panel == null || rect.width < 1 || rect.height < 1) return;
             // UI Toolkit lays out in points; the texture needs physical pixels to stay sharp.
             var root = surface.panel.visualTree.layout;
             var scale = root.width > 0 ? Screen.width / root.width : 1;
@@ -515,6 +521,12 @@ namespace Formula9.World
         {
             if (dragButton < 0 || !surface.HasPointerCapture(e.pointerId)) return;
             var delta = e.deltaPosition;
+            if (driving)
+            {
+                lookYaw += delta.x * LookDegreesPerPixel;
+                lookPitch = Mathf.Clamp(lookPitch + delta.y * LookDegreesPerPixel, -MaxLookPitchDeg, MaxLookPitchDeg);
+                return;
+            }
             if (dragButton == 1)
             {
                 yaw += delta.x * 0.006f;
@@ -556,6 +568,7 @@ namespace Formula9.World
         private void OnWheel(WheelEvent e)
         {
             if (e.target != surface) return;
+            if (driving) { e.StopPropagation(); return; }
             distance = Mathf.Clamp(distance * Mathf.Exp(e.delta.y * 0.03f), MinDistance, maxDistance);
             PlaceCamera();
             e.StopPropagation();
@@ -616,6 +629,37 @@ namespace Formula9.World
         //     This function focuses the camera on the selected entity and keeps it there as it
         //     moves.
         public void FollowSelected() { following = true; FocusSelected(); }
+
+        // -----------------------------------------------------------------------------------
+        // Function: DriveSelected
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function puts the camera in the selected shuttle's driver seat, looking where
+        //     it is heading, until Overview is chosen. It does nothing without a selection.
+        public void DriveSelected()
+        {
+            if (selectedId == null) return;
+            driving = true;
+            lookYaw = lookPitch = 0;
+            following = false;
+        }
+        // -----------------------------------------------------------------------------------
+        // Function: PlaceDriverCamera
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function puts the camera at the selected shuttle's eye point, facing the way
+        //     the shuttle faces. If the shuttle is gone, it leaves driver view.
+        private void PlaceDriverCamera()
+        {
+            if (city == null || city.TryGetShuttlePose(selectedId, out var position, out var rotation) == false)
+            { 
+              driving = false; 
+              return; 
+            }  
+            var eye = position + rotation * new Vector3(0, EyeHeightM, EyeForwardM);
+            viewCamera.transform.position = eye;
+            viewCamera.transform.rotation = rotation * Quaternion.Euler(lookPitch, lookYaw, 0);
+        }
         // -----------------------------------------------------------------------------------
         // Function: FocusSelected
         // -----------------------------------------------------------------------------------
@@ -653,6 +697,7 @@ namespace Formula9.World
         public void Overview()
         {
             following = false;
+            driving = false;
             if (world != null) Frame(world.Package.Manifest);
             else if (CityShown && city != null && city.BuildingCount > 0) FrameCity(city);
         }
