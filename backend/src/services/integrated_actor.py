@@ -387,10 +387,13 @@ class IntegratedSessionActor(SessionActor):
                 self._adopt_route(route.route_id, route.directed_edge_ids)
         for shuttle, vehicle in zip(self.shuttles, snapshot.vehicles):
             prior = old[vehicle.vehicle_id]
-            if (vehicle.route_id, vehicle.route_revision) != (prior.route_id, prior.route_revision):
+            if ((vehicle.route_id, vehicle.route_revision) != (prior.route_id, prior.route_revision)
+                    or abs(shuttle.position.x-vehicle.position.x_m) > EPSILON
+                    or abs(shuttle.position.y-vehicle.position.y_m) > EPSILON):
                 if vehicle.route_id not in self._routes:
                     raise TrainingStoreError("UNKNOWN_CONSTRAINT", "Route has no admitted actor path")
-                shuttle.progress = self._project(self._routes[vehicle.route_id], shuttle.position)
+                shuttle.progress = self._project(self._routes[vehicle.route_id],
+                    Vector2D(x=vehicle.position.x_m, y=vehicle.position.y_m))
                 shuttle.route_ID = vehicle.route_id
             if starting:
                 vehicle.service_state = "DWELLING" if shuttle.ID == 0 else "IN_SERVICE"
@@ -479,7 +482,7 @@ class IntegratedSessionActor(SessionActor):
             return
         # Network incidents can coexist. Avoid a second *guidance* incident
         # on Shuttle 01 while it is already handling a direct obstruction.
-        active_guidance = any(i.vehicle_id == self.domain.vehicles[0].vehicle_id and
+        active_guidance = any(i.vehicle_id == self.domain.vehicles[0].vehicle_id and i.candidate_ids and
                               i.state not in {"RESOLVED", "UNRESOLVED"}
                               for i in self.domain.incidents)
         shuttle = self.shuttles[0]
@@ -499,12 +502,17 @@ class IntegratedSessionActor(SessionActor):
                    if d.active_from_tick <= self.current_tick
                    and (d.active_until_tick is None or self.current_tick < d.active_until_tick)
                    for edge in d.affected_edge_ids}
-        remaining, walked = [], 0.0
+        remaining, upcoming, walked = [], [], 0.0
         for edge_id, path in zip(route.directed_edge_ids, route.edge_paths_m):
+            start_distance = walked
             walked += sum(math.hypot(b.x_m-a.x_m, b.y_m-a.y_m)
                           for a, b in zip(path, path[1:]))
             if walked > shuttle.progress + EPSILON and edge_id not in blocked:
                 remaining.append(edge_id)
+                # Never close the occupied road. Leave enough distance for the
+                # next publication boundary to hold the shuttle before the closure.
+                if start_distance > shuttle.progress + 2*shuttle.cruise_vel*self.STEP_S + EPSILON:
+                    upcoming.append(edge_id)
         # Real graph edges only. Peer route hash IDs are not road graph edges.
         network_edges = sorted(set(self.definition.data["edges"]) - blocked)
         if not network_edges:
@@ -514,11 +522,28 @@ class IntegratedSessionActor(SessionActor):
         if first_incident:
             # Deterministic TEST requirement: road closure ahead on the approved route.
             # Do not use a permanently closed edge or a segment already passed.
-            eligible = [candidate for candidate in remaining if candidate in network_edges]
+            eligible = [candidate for candidate in upcoming if candidate in network_edges]
             if not eligible:
                 print("[INCIDENT DEBUG] first incident delayed: no usable upcoming edge", flush=True)
                 return
             edge = eligible[0]
+            # Prefer a closure with a usable live detour. A road reachable only
+            # through the occupied segment may have no way round from here.
+            routes = self.definition.routes
+            if vehicle.route_id != routes._fixture["route_id"]:
+                routes = RouteEditService(self.definition,
+                    fixture={**routes._fixture, "route_id": vehicle.route_id})
+            for candidate in eligible:
+                hypothetical = self.generate_snapshot()
+                hypothetical.disruptions.append(Disruption(
+                    disruption_id="incident-selection-preview", aggregate_revision=1,
+                    affected_edge_ids=[candidate], active_from_tick=self.current_tick,
+                    active_until_tick=self.current_tick+1, reason="Check upcoming incident detour",
+                    provenance=hypothetical.source,
+                ))
+                if routes.continuation_preview(hypothetical, vehicle.vehicle_id).approvable:
+                    edge = candidate
+                    break
             print("[INCIDENT DEBUG] TYPE_SELECTED first=True kind=ROAD_BLOCK", flush=True)
             template = next((t for t in self.incident_catalog.templates if t.kind == "ROAD_BLOCK"), None)
             if template is None:
@@ -552,7 +577,7 @@ class IntegratedSessionActor(SessionActor):
                 u0, v0 = adjacency[route_edge]
                 route_neighbors.update(candidate for candidate, (a, b) in adjacency.items()
                                        if a in (u0, v0) or b in (u0, v0))
-            direct_candidates = [e for e in remaining if e in network_edges]
+            direct_candidates = [e for e in upcoming if e in network_edges]
             indirect_candidates = [e for e in network_edges if e in route_neighbors and e not in remaining]
             unrelated_candidates = [e for e in network_edges if e not in route_neighbors]
             wants_impact = self.rng.random() < impact_probability
@@ -648,7 +673,7 @@ class IntegratedSessionActor(SessionActor):
             if shuttle.ID in blocked and mode in {"IN_SERVICE", "DETOURING", "RETURNING_TO_DEPOT"}:
                 shuttle.state, shuttle.curr_vel = ShuttleState.BLOCKED, 0.0
             elif mode in {"IN_SERVICE", "DETOURING", "RETURNING_TO_DEPOT"}:
-                shuttle.state, shuttle.curr_vel = ShuttleState.ROUTE_LOOP, shuttle.cruise_vel
+                shuttle.state, shuttle.curr_vel = ShuttleState.ROUTE_LOOP, distance/self.STEP_S
             level = shuttle.battery*self.BATTERY_CAPACITY_KWH/100
             if shuttle.ID in charging:
                 port = next(c for c in self.domain.chargers if self.domain.vehicles[shuttle.ID].vehicle_id in c.occupied_vehicle_ids)

@@ -171,7 +171,8 @@ def publish_workflow(store, actor, snapshot, checkpoint):
         existing = next((i for i in result.incidents if i.incident_id == incident_id), None)
         # Historical, settled incidents have no remaining state transitions.
         # Avoid needlessly reprocessing and committing them every simulation tick.
-        if existing is not None and existing.state in {"RESOLVED", "UNRESOLVED"}:
+        if existing is not None and (existing.state == "RESOLVED" or
+                (existing.state == "UNRESOLVED" and item.get("requires_guidance", True))):
             disruption = next((d for d in result.disruptions
                                if d.disruption_id == item.get("disruption_id")), None)
             if disruption is None or (disruption.active_until_tick is not None

@@ -10,6 +10,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from functools import lru_cache
 import json
+import math
 from pathlib import Path
 from threading import RLock
 from uuid import uuid4
@@ -199,6 +200,41 @@ class RouteEditService:
             if self._candidate(draft, edges, closed | {identifier}):
                 return identifier
         return route.directed_edge_ids[0]
+
+    def continuation_preview(self, snapshot: FullSnapshot, vehicle_id: str) -> RouteEditPreview:
+        """Validate a detour that still contains the shuttle's current road and driven prefix."""
+        vehicle = next(v for v in snapshot.vehicles if v.vehicle_id == vehicle_id)
+        route = next(r for r in snapshot.routes if r.route_id == vehicle.route_id)
+        request = dict(route_id=route.route_id, expected_route_revision=route.revision, draft_revision=1)
+        if self._network is None:
+            return self.preview(snapshot, RouteEditRequest(**request), retain=False)
+        # The public position is authoritative, including a hold rolled back to
+        # the previous presentation boundary. Find its occupied road geometrically.
+        nearest = (math.inf, 0)
+        for index, path in enumerate(route.edge_paths_m):
+            for a, b in zip(path, path[1:]):
+                dx, dy = b.x_m-a.x_m, b.y_m-a.y_m
+                length_sq = dx*dx + dy*dy
+                if not length_sq:
+                    continue
+                t = max(0, min(1, ((vehicle.position.x_m-a.x_m)*dx +
+                                  (vehicle.position.y_m-a.y_m)*dy) / length_sq))
+                distance = math.hypot(vehicle.position.x_m-a.x_m-t*dx, vehicle.position.y_m-a.y_m-t*dy)
+                if distance < nearest[0]:
+                    nearest = (distance, index)
+        prefix = route.directed_edge_ids[:nearest[1]+1]
+        visited = self._stop_visits(prefix, self._walk(prefix, self._edges()))
+        remaining_stops = [self._fixture["stop_approach_edge_ids"][stop]
+                           for stop in route.required_stop_ids if not visited.get(stop)]
+        ids = self._network.continuation(prefix, self._fixture["destination_node_id"], remaining_stops,
+                                         self._closed(snapshot), self._fixture) if nearest[0] <= 0.01 else []
+        result = self.preview(snapshot, RouteEditRequest(**request,
+                              directed_edge_ids=ids or route.directed_edge_ids), retain=False)
+        if not ids:
+            result.checks.append(RouteCheck(check="GEOMETRY", status="FAIL",
+                                           message="No detour connects to the shuttle's current road"))
+            result.validation, result.approvable = "FAIL", False
+        return result
 
     def preview(self, snapshot: FullSnapshot, request: RouteEditRequest, *, retain: bool = True) -> RouteEditPreview:
         route = next((r for r in snapshot.routes if r.route_id == request.route_id), None)

@@ -197,7 +197,9 @@ def incident_preview(session_id: str, command: DispatcherCommand,
                      actor_id: str = Depends(get_actor_id),
                      store: TrainingStore = Depends(get_training_store),
                      incidents: IncidentService = Depends(get_incident_service)) -> dict:
-    _, incidents = services_for(store.snapshot(session_id), incidents=incidents)
+    snapshot = store.snapshot(session_id)
+    _, incidents = services_for(snapshot, incidents=incidents)
+    incidents = incidents.for_incident(store, snapshot, command.target_id)
     return incidents.preview(store, session_id, command)
 
 
@@ -206,7 +208,9 @@ def incident_history(session_id: str, incident_id: str,
                      actor_id: str = Depends(get_actor_id),
                      store: TrainingStore = Depends(get_training_store),
                      incidents: IncidentService = Depends(get_incident_service)) -> dict:
-    _, incidents = services_for(store.snapshot(session_id), incidents=incidents)
+    snapshot = store.snapshot(session_id)
+    _, incidents = services_for(snapshot, incidents=incidents)
+    incidents = incidents.for_incident(store, snapshot, incident_id)
     return incidents.history(store, session_id, incident_id)
 
 
@@ -215,7 +219,9 @@ def incident_debrief(session_id: str, incident_id: str,
                      actor_id: str = Depends(get_actor_id),
                      store: TrainingStore = Depends(get_training_store),
                      incidents: IncidentService = Depends(get_incident_service)) -> dict:
-    _, incidents = services_for(store.snapshot(session_id), incidents=incidents)
+    snapshot = store.snapshot(session_id)
+    _, incidents = services_for(snapshot, incidents=incidents)
+    incidents = incidents.for_incident(store, snapshot, incident_id)
     return incidents.debrief(store, session_id, incident_id)
 
 

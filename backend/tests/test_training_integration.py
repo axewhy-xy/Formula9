@@ -188,11 +188,13 @@ def test_one_live_session_runs_route_incident_depot_and_charging(runtime):
     advance(runtime, 240)
     detected = read(runtime)
     assert detected["vehicles"][0]["service_state"] == "AWAITING_GUIDANCE"
-    assert detected["vehicles"][0]["position"] == initial["vehicles"][0]["position"]
+    assert detected["vehicles"][0]["position"] != initial["vehicles"][0]["position"]
     assert detected["vehicles"][1]["position"] != initial["vehicles"][1]["position"]
-    history = client.get(f"/api/v2/sessions/{session_id}/incidents/incident-m2-obstruction/history").json()
-    assert history["complete"] and history["source_mode"] == "HISTORICAL_SIMULATION" and history["camera"] is None
-    assert incident_decision(runtime, "WAIT")["status"] == "APPLIED"
+    incident_id = detected["incidents"][0]["incident_id"]
+    history = client.get(f"/api/v2/sessions/{session_id}/incidents/{incident_id}/history").json()
+    assert not history["complete"] and history["unavailable_reason"]  # Detection precedes ten seconds of history.
+    assert history["source_mode"] == "HISTORICAL_SIMULATION" and history["camera"] is None
+    assert incident_decision(runtime, "ESCALATE")["status"] == "APPLIED"
     advance(runtime, 240)
     continued = read(runtime)
     assert continued["incidents"][0]["state"] == "RESOLVED"
@@ -207,7 +209,7 @@ def test_one_live_session_runs_route_incident_depot_and_charging(runtime):
     finished = read(runtime)
     assert finished["vehicles"][4]["battery_kwh"] > before_charge
     assert all("shuttle-05" not in c["occupied_vehicle_ids"] for c in finished["chargers"])
-    debrief = client.get(f"/api/v2/sessions/{session_id}/incidents/incident-m2-obstruction/debrief").json()
+    debrief = client.get(f"/api/v2/sessions/{session_id}/incidents/{incident_id}/debrief").json()
     assert debrief["state"] == "RESOLVED" and debrief["assessment"]["provisional"]
     events = []
     cursor = 0
@@ -247,7 +249,17 @@ def test_other_incident_choices_execute_in_the_same_actor(runtime, action):
     assert incident_decision(runtime, action)["status"] == "APPLIED"
     if action == "ROAD_DETOUR":
         advance(runtime, 20)
-        assert on_branch(read(runtime)["vehicles"][0]["position"], "bypass-c")  # Physical bypass C execution.
+        after = read(runtime)
+        assert after["vehicles"][0]["position"] != before["vehicles"][0]["position"]
+        route = next(r for r in after["routes"] if r["route_id"] == after["vehicles"][0]["route_id"])
+        assert route["directed_edge_ids"] == branch.json()["snapshot"]["routes"][-1]["directed_edge_ids"]
+        # Isolate this decision's outcome from subsequent random incidents and
+        # accelerate physical travel without changing its approved geometry.
+        def accelerate(actor):
+            actor.incident_due_tick = 10**12
+            for shuttle in actor.shuttles:
+                shuttle.cruise_vel *= 8
+        stage_boundary(runtime, accelerate)
     # ROAD_DETOUR resolves once shuttle-01 has driven the real bypass round the block
     advance_until(runtime, lambda s: s.incidents[0].state == "RESOLVED", limit=8000)
     assert read(runtime)["incidents"][0]["state"] == "RESOLVED"
@@ -329,7 +341,11 @@ def test_decision_after_obstruction_clearance_is_durably_rejected(runtime):
     before = read(runtime)
     option = next(c for c in before["candidates"] if c["action"] == "WAIT")
     incident = before["incidents"][0]
-    advance(runtime, 200)
+    def expire(actor):
+        closure = next(d for d in actor.domain.disruptions
+                       if d.disruption_id == actor.random_incident["disruption_id"])
+        actor.current_tick = closure.active_until_tick-2
+    stage_boundary(runtime, expire)
     result = send(runtime, "APPROVE_INCIDENT_OPTION", snapshot=before, target_type="INCIDENT",
         target_id=incident["incident_id"], revision=incident["aggregate_revision"], payload={"candidate_id": option["candidate_id"]})
     assert result["status"] == "REJECTED" and result["failure_code"] == "STALE_REVISION"
@@ -344,13 +360,15 @@ def test_alternative_pretrip_path_gets_a_matching_obstruction_and_real_detour(ru
     send(runtime, "START")
     advance(runtime, 240)
     snapshot = read(runtime)
-    obstruction = next(d for d in snapshot["disruptions"] if d["disruption_id"] == "obstruction-m2")
-    # The first road only bypass C uses: the entrance it shares with bypass B leaves no way round
-    own_road = next(edge for edge in chains["bypass-c"] if edge not in chains["bypass-b"])
-    assert obstruction["affected_edge_ids"] == [own_road]
+    selection = runtime[2].sessions[runtime[3]].actor.random_incident
+    obstruction = next(d for d in snapshot["disruptions"] if d["disruption_id"] == selection["disruption_id"])
+    assert set(obstruction["affected_edge_ids"]).issubset(snapshot["routes"][0]["directed_edge_ids"])
     assert incident_decision(runtime, "ROAD_DETOUR")["status"] == "APPLIED"
     advance(runtime, 20)
-    assert on_branch(read(runtime)["vehicles"][0]["position"], "bypass-b")
+    after = read(runtime)
+    assert after["vehicles"][0]["position"] != snapshot["vehicles"][0]["position"]
+    detour = next(r for r in after["routes"] if r["route_id"] == after["vehicles"][0]["route_id"])
+    assert not set(obstruction["affected_edge_ids"]).intersection(detour["directed_edge_ids"])
 
 
 @pytest.mark.parametrize("missing", ["vehicle", "road"])
@@ -465,7 +483,7 @@ def test_recovery_preserves_route_hold_and_depot_execution_and_reconfirms_queued
                 send(runtime, "START")
                 reserve(runtime)
                 advance(runtime, 260)
-                incident_decision(runtime, "WAIT")
+                incident_decision(runtime, "ESCALATE")
                 before = read(runtime)
                 pending = DispatcherCommand(contract_version="2.0", command_id="queued-pause", idempotency_key="queued-pause",
                     session_id=session_id, command_type="PAUSE", expected_epoch=before["session_epoch"],

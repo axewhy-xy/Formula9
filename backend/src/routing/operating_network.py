@@ -115,6 +115,16 @@ class OperatingNetwork:
                 placed = (result, candidate)
         return placed
 
+    def continuation(self, prefix: list[str], end_node: int, stops: list[list[str]],
+                     closed: set[str], config: dict) -> list[str]:
+        """Keep the driven prefix and plan from its last road, respecting its next turn."""
+        if not prefix or any(edge not in self.edges or edge in closed for edge in prefix):
+            return []
+        usable = {key for key in self.edges if key not in closed and self.fit_status(key, config) == FITS}
+        result = _Planner(self, usable).route(self.edges[prefix[-1]]["target"], end_node, stops,
+                                              incoming_edge=prefix[-1])
+        return prefix + result[1] if result else []
+
 
 class _Planner:
     """One plan's searches. The same few roads start every leg, so each search runs once."""
@@ -167,11 +177,13 @@ class _Planner:
         path.reverse()
         return path
 
-    def route(self, start_node: int, end_node: int, sequence: list[list[str]]) -> tuple[float, list[str]] | None:
-        best, previous = self._from_node(start_node)
+    def route(self, start_node: int, end_node: int, sequence: list[list[str]],
+              *, incoming_edge: str | None = None) -> tuple[float, list[str]] | None:
+        best, previous = (self._from_node(start_node) if incoming_edge is None else
+                          self._search(incoming_edge, {incoming_edge: 0.0}))
         if not sequence:
-            return self._finish([(0.0, None, [], best, previous)], end_node)
-        reached = {option: (best[option], self._walk_back(previous, option, None))
+            return self._finish([(0.0, incoming_edge, [], best, previous)], end_node)
+        reached = {option: (best[option], self._walk_back(previous, option, incoming_edge))
                    for option in sequence[0] if option in best}
         for options in sequence[1:]:
             following = {}

@@ -240,7 +240,7 @@ namespace Formula9.World
         {
             if (snapshot?.SessionId != value?.SessionId)
                 incidentMarkers.Clear();
-            if (snapshot?.SessionId != value?.SessionId || context?.RouteId != graph?.RouteId) { pan = Vector2.zero; zoom = 1; }
+            if (snapshot?.SessionId != value?.SessionId) { pan = Vector2.zero; zoom = 1; }
             UpdateTracks(value);
             snapshot = value;
             var points = new List<Vector2>();
