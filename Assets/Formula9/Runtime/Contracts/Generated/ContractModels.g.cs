@@ -604,6 +604,8 @@ namespace Formula9.Contracts
     {
         [JsonProperty("check", Required = Required.Always)]
         public string Check { get; set; }
+        [JsonProperty("edge_ids", Required = Required.Default)]
+        public List<string> EdgeIds { get; set; } = new List<string>();
         [JsonProperty("feature_id", Required = Required.Default)]
         public string FeatureId { get; set; }
         [JsonProperty("mandatory", Required = Required.Default)]
@@ -629,6 +631,8 @@ namespace Formula9.Contracts
         public string ContractVersion { get; set; } = "2.0";
         [JsonProperty("directed_edge_ids", Required = Required.Always)]
         public List<string> DirectedEdgeIds { get; set; }
+        [JsonProperty("edge_paths", Required = Required.Default)]
+        public List<List<RoutePolylinePoint>> EdgePaths { get; set; } = new List<List<RoutePolylinePoint>>();
         [JsonProperty("edited", Required = Required.AllowNull)]
         public RouteMetrics Edited { get; set; }
         [JsonProperty("fixture_id", Required = Required.Always)]
@@ -649,6 +653,8 @@ namespace Formula9.Contracts
         public long RouteRevision { get; set; }
         [JsonProperty("scene_revision", Required = Required.Always)]
         public string SceneRevision { get; set; }
+        [JsonProperty("service_impact", Required = Required.Default)]
+        public List<RouteServiceImpact> ServiceImpact { get; set; } = new List<RouteServiceImpact>();
         [JsonProperty("session_epoch", Required = Required.Always)]
         public long SessionEpoch { get; set; }
         [JsonProperty("session_id", Required = Required.Always)]
@@ -674,6 +680,8 @@ namespace Formula9.Contracts
         public string RouteId { get; set; }
         [JsonProperty("via_node_ids", Required = Required.Default)]
         public List<long> ViaNodeIds { get; set; } = new List<long>();
+        [JsonProperty("waypoint_edge_ids", Required = Required.Default)]
+        public List<string> WaypointEdgeIds { get; set; } = new List<string>();
         // Additive 2.x fields from a newer backend are kept, not rejected.
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
@@ -707,6 +715,8 @@ namespace Formula9.Contracts
         public string SessionId { get; set; }
         [JsonProperty("start_node_id", Required = Required.Always)]
         public long StartNodeId { get; set; }
+        [JsonProperty("stops", Required = Required.Default)]
+        public List<RouteEditorStop> Stops { get; set; } = new List<RouteEditorStop>();
         // Additive 2.x fields from a newer backend are kept, not rejected.
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
@@ -718,6 +728,14 @@ namespace Formula9.Contracts
         public bool Closed { get; set; }
         [JsonProperty("edge_id", Required = Required.Always)]
         public string EdgeId { get; set; }
+        [JsonProperty("fit", Required = Required.Default)]
+        public string Fit { get; set; }
+        [JsonProperty("fit_note", Required = Required.Default)]
+        public string FitNote { get; set; }
+        [JsonProperty("path", Required = Required.Default)]
+        public List<RoutePolylinePoint> Path { get; set; } = new List<RoutePolylinePoint>();
+        [JsonProperty("road_name", Required = Required.Default)]
+        public string RoadName { get; set; }
         [JsonProperty("source", Required = Required.Always)]
         public long Source { get; set; }
         [JsonProperty("target", Required = Required.Always)]
@@ -741,6 +759,23 @@ namespace Formula9.Contracts
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
+    /// <summary>RouteEditorStop from the shared v2 contract.</summary>
+    public sealed partial class RouteEditorStop
+    {
+        [JsonProperty("name", Required = Required.Always)]
+        public string Name { get; set; }
+        [JsonProperty("node_id", Required = Required.Always)]
+        public long NodeId { get; set; }
+        [JsonProperty("stop_id", Required = Required.Always)]
+        public string StopId { get; set; }
+        [JsonProperty("x", Required = Required.Always)]
+        public double X { get; set; }
+        [JsonProperty("y", Required = Required.Always)]
+        public double Y { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
     /// <summary>RouteMetrics from the shared v2 contract.</summary>
     public sealed partial class RouteMetrics
     {
@@ -752,6 +787,83 @@ namespace Formula9.Contracts
         public double EnergyKwh { get; set; }
         [JsonProperty("stop_coverage", Required = Required.Always)]
         public Dictionary<string, bool> StopCoverage { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>What an approved route did once it ran: measured by the actor, never inferred by a client.</summary>
+    public sealed partial class RouteOutcome
+    {
+        [JsonProperty("battery_kwh", Required = Required.Default)]
+        public double? BatteryKwh { get; set; }
+        [JsonProperty("contract_version", Required = Required.Default)]
+        public string ContractVersion { get; set; } = "2.0";
+        [JsonProperty("delay_vs_original_s", Required = Required.Default)]
+        public double? DelayVsOriginalS { get; set; }
+        [JsonProperty("delay_vs_plan_s", Required = Required.Default)]
+        public double? DelayVsPlanS { get; set; }
+        [JsonProperty("extra_energy_vs_original_kwh", Required = Required.Default)]
+        public double? ExtraEnergyVsOriginalKwh { get; set; }
+        [JsonProperty("extra_energy_vs_plan_kwh", Required = Required.Default)]
+        public double? ExtraEnergyVsPlanKwh { get; set; }
+        [JsonProperty("held_for_incident", Required = Required.Default)]
+        public bool HeldForIncident { get; set; } = false;
+        [JsonProperty("loops", Required = Required.Default)]
+        public List<RouteOutcomeLoop> Loops { get; set; } = new List<RouteOutcomeLoop>();
+        [JsonProperty("loops_left_on_charge", Required = Required.Default)]
+        public long? LoopsLeftOnCharge { get; set; }
+        [JsonProperty("original", Required = Required.Default)]
+        public RouteMetrics Original { get; set; }
+        [JsonProperty("planned", Required = Required.Default)]
+        public RouteMetrics Planned { get; set; }
+        [JsonProperty("reason", Required = Required.Default)]
+        public string Reason { get; set; }
+        [JsonProperty("route_id", Required = Required.Always)]
+        public string RouteId { get; set; }
+        [JsonProperty("route_revision", Required = Required.Always)]
+        public long RouteRevision { get; set; }
+        [JsonProperty("service_preserved", Required = Required.Default)]
+        public bool? ServicePreserved { get; set; }
+        [JsonProperty("session_id", Required = Required.Always)]
+        public string SessionId { get; set; }
+        [JsonProperty("state", Required = Required.Always)]
+        public string State { get; set; }
+        [JsonProperty("stops", Required = Required.Default)]
+        public List<RouteOutcomeStop> Stops { get; set; } = new List<RouteOutcomeStop>();
+        [JsonProperty("summary", Required = Required.Default)]
+        public List<string> Summary { get; set; } = new List<string>();
+        [JsonProperty("vehicle_id", Required = Required.Default)]
+        public string VehicleId { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>RouteOutcomeLoop from the shared v2 contract.</summary>
+    public sealed partial class RouteOutcomeLoop
+    {
+        [JsonProperty("all_stops_served", Required = Required.Always)]
+        public bool AllStopsServed { get; set; }
+        [JsonProperty("duration_s", Required = Required.Always)]
+        public double DurationS { get; set; }
+        [JsonProperty("energy_kwh", Required = Required.Always)]
+        public double EnergyKwh { get; set; }
+        [JsonProperty("finished_tick", Required = Required.Always)]
+        public long FinishedTick { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>RouteOutcomeStop from the shared v2 contract.</summary>
+    public sealed partial class RouteOutcomeStop
+    {
+        [JsonProperty("name", Required = Required.Always)]
+        public string Name { get; set; }
+        [JsonProperty("served_this_loop", Required = Required.Always)]
+        public bool ServedThisLoop { get; set; }
+        [JsonProperty("stop_id", Required = Required.Always)]
+        public string StopId { get; set; }
+        [JsonProperty("times_served", Required = Required.Always)]
+        public long TimesServed { get; set; }
         // Additive 2.x fields from a newer backend are kept, not rejected.
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
@@ -790,6 +902,21 @@ namespace Formula9.Contracts
         public string SceneRevision { get; set; }
         [JsonProperty("stops_m", Required = Required.Default)]
         public List<RouteStop> StopsM { get; set; } = new List<RouteStop>();
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>RouteServiceImpact from the shared v2 contract.</summary>
+    public sealed partial class RouteServiceImpact
+    {
+        [JsonProperty("battery_kwh", Required = Required.Always)]
+        public double BatteryKwh { get; set; }
+        [JsonProperty("loops_on_edited", Required = Required.Default)]
+        public long? LoopsOnEdited { get; set; }
+        [JsonProperty("loops_on_original", Required = Required.Default)]
+        public long? LoopsOnOriginal { get; set; }
+        [JsonProperty("vehicle_id", Required = Required.Always)]
+        public string VehicleId { get; set; }
         // Additive 2.x fields from a newer backend are kept, not rejected.
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
