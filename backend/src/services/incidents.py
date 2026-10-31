@@ -21,6 +21,7 @@ from contracts.v2.models import (
 from contracts.v2.route_edit import RouteEditRequest
 from src.persistence.training_store import TrainingStore, TrainingStoreError
 from src.services.route_edit import RouteEditService, get_route_edit_service
+from src.services.incident_scenarios.simulated_catalog import SimulatedIncidentCatalog
 
 
 FIXTURE_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "m2_incident.json"
@@ -30,6 +31,8 @@ class IncidentService:
     def __init__(self, routes: RouteEditService, fixture_path: Path = FIXTURE_PATH, *, fixture: dict | None = None):
         self.routes = routes
         self.config = deepcopy(fixture) if fixture is not None else json.loads(fixture_path.read_text(encoding="utf-8"))
+        # Template catalog is read-only; the existing authored incident workflow is unchanged.
+        self.simulated_catalog = SimulatedIncidentCatalog()
 
     def owns(self, snapshot: FullSnapshot) -> bool:
         return snapshot.scenario.scenario_id == self.config["scenario_id"]

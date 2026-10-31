@@ -35,6 +35,7 @@ from src.routing.road_graph import RoadGraphSnapshot
 from src.schemas.shuttle_data import ShuttleState, Vector2D
 from src.services.asset_loader import validate_routes
 from src.services.incidents import FIXTURE_PATH as INCIDENT_FIXTURE, IncidentService
+from src.services.incident_scenarios.simulated_catalog import SimulatedIncidentCatalog
 from src.services.route_edit import RouteEditService
 from src.services.session_actor import SessionActor
 
@@ -141,6 +142,14 @@ class IntegratedSessionActor(SessionActor):
     def __init__(self, seed: int, *, session_id: str):
         self.definition = get_workflow_definition()
         super().__init__(seed, self.definition.actor_routes, session_id=session_id)
+        # Session-local, deterministic incident instance. Do not mutate the shared
+        # WorkflowDefinition/IncidentService (used by all concurrent sessions).
+        self.incident_catalog = self.definition.incidents.simulated_catalog
+        self.incident_due_tick = round(self.rng.uniform(
+            self.incident_catalog.policy["first_min_s"],
+            self.incident_catalog.policy["first_max_s"]) / self.STEP_S)
+        self.random_incident = None
+        print(f"[INCIDENT DEBUG] session={session_id} first_due_tick={self.incident_due_tick}", flush=True)
         data = self.definition.data
         pin = hashlib.sha256(f"{self.definition.signature}:{seed}".encode()).hexdigest()[:24]
         self.scenario_revision = f"fleet-scenario-{pin}"
@@ -342,7 +351,7 @@ class IntegratedSessionActor(SessionActor):
             if starting:
                 vehicle.service_state = "DWELLING" if shuttle.ID == 0 else "IN_SERVICE"
                 vehicle.aggregate_revision += 1
-                shuttle.dwell_timer = self.definition.incidents.config["trigger_tick"]*self.STEP_S if shuttle.ID == 0 else 0
+                shuttle.dwell_timer = 0
             mode = vehicle.service_state
             if mode == "RETURNING_TO_DEPOT" and self.modes[shuttle.ID] != mode:
                 port = next(c for c in snapshot.chargers if vehicle.vehicle_id in c.occupied_vehicle_ids)
@@ -394,12 +403,61 @@ class IntegratedSessionActor(SessionActor):
         ahead = [stop for stop in self.stop_progress.get(shuttle.route_ID, []) if stop > shuttle.progress+EPSILON]
         return min([end, *ahead])
 
+    def _schedule_first_incident(self):
+        """Only the first shuttle, on its already approved live detour."""
+        if self.random_incident is not None:
+            return
+        if self.current_tick < self.incident_due_tick:
+            return
+        shuttle = self.shuttles[0]
+        vehicle = self.domain.vehicles[0]
+        route = next((r for r in self.domain.routes if r.route_id == vehicle.route_id), None)
+        if self.current_tick == self.incident_due_tick or self.current_tick % 20 == 0:
+            print(f"[INCIDENT DEBUG] tick={self.current_tick} session={self.session_id} "
+                  f"status={self.domain.session.status} shuttle0_mode={self.modes[shuttle.ID]} "
+                  f"route={vehicle.route_id} revision={vehicle.route_revision} "
+                  f"progress={shuttle.progress:.2f} route_found={route is not None}", flush=True)
+        if self.modes[shuttle.ID] not in {"IN_SERVICE", "DETOURING"} or route is None:
+            return
+        if not route.directed_edge_ids or len(route.directed_edge_ids) != len(route.edge_paths_m):
+            print("[INCIDENT DEBUG] no usable directed edge geometry for approved route", flush=True)
+            return
+        blocked = {edge for d in self.domain.disruptions
+                   if d.active_from_tick <= self.current_tick
+                   and (d.active_until_tick is None or self.current_tick < d.active_until_tick)
+                   for edge in d.affected_edge_ids}
+        remaining, walked = [], 0.0
+        for edge_id, path in zip(route.directed_edge_ids, route.edge_paths_m):
+            length = sum(math.hypot(b.x_m-a.x_m, b.y_m-a.y_m)
+                         for a, b in zip(path, path[1:]))
+            walked += length
+            if walked > shuttle.progress + EPSILON and edge_id not in blocked:
+                remaining.append(edge_id)
+        if not remaining:
+            print("[INCIDENT DEBUG] no unpassed, unblocked edges on shuttle0 route", flush=True)
+            return
+        template = self.rng.choice(self.incident_catalog.templates)
+        edge = self.rng.choice(remaining)
+        self.random_incident = {
+            "incident_id": f"random-{template.kind.lower()}-{self.current_tick}",
+            "disruption_id": f"random-disruption-{self.current_tick}",
+            "kind": template.kind, "vehicle_id": vehicle.vehicle_id,
+            "route_id": vehicle.route_id, "affected_edge_ids": [edge],
+            "block_current_route_entrance": False,
+            "assumptions": [*self.definition.incidents.config["assumptions"],
+                            f"Synthetic JSON incident type: {template.kind}; affected edge: {edge}."],
+            "trigger_tick": self.current_tick,
+            "clear_after_ticks": max(1, round(template.duration_s/self.STEP_S)),
+        }
+        print(f"[INCIDENT DEBUG] SELECTED {self.random_incident}", flush=True)
+
     def tick(self):
         self.command_tick += 1
         if self.is_paused:
             return
         self.current_tick += 1
         self.timestamp_second = self.current_tick*self.STEP_S
+        self._schedule_first_incident()
         # Older checkpoints released a port while leaving its finished shuttle
         # in the bay. Clear that shuttle physically on resume, without releasing
         # a reservation that may now belong to another vehicle.
@@ -468,7 +526,8 @@ class IntegratedSessionActor(SessionActor):
             "charge_started_kwh": {str(k): v for k, v in self.charge_started_kwh.items()},
             "parking_chargers": {str(k): v for k, v in self.parking_chargers.items()},
             "paths": [{"route_ID": key, "waypoints": [p.model_dump() for p in path["waypoints"]]} for key, path in self._routes.items()],
-            "stop_progress": self.stop_progress, "pending_events": [e.model_dump(mode="json") for e in self.pending_events]}
+            "stop_progress": self.stop_progress, "incident_due_tick": self.incident_due_tick,
+            "random_incident": self.random_incident, "pending_events": [e.model_dump(mode="json") for e in self.pending_events]}
 
     def restore_workflow(self, state, snapshot):
         """Restore checkpointed execution; reject disagreement with durable public state."""
@@ -486,6 +545,8 @@ class IntegratedSessionActor(SessionActor):
         # Checkpoints from before every stop was served hold a single number per route
         self.stop_progress = {route: stops if isinstance(stops, list) else [stops] for route, stops in state["stop_progress"].items()}
         self.pending_events = []
+        self.incident_due_tick = state.get("incident_due_tick", self.incident_due_tick)
+        self.random_incident = state.get("random_incident")
         self.domain = snapshot.model_copy(deep=True)
         if set(self.modes) != set(range(5)) or [s.ID for s in self.shuttles] != list(range(5)):
             raise TrainingStoreError("CORRUPT_CHECKPOINT", "Workflow roster is invalid")

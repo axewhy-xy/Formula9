@@ -19,6 +19,23 @@ from uuid import uuid4
 from contracts.v2.models import Event
 from src.persistence.training_store import TrainingStoreError
 from src.services.battery_decision import submit_battery_decision
+from src.services.incidents import IncidentService
+
+
+def session_incidents(actor):
+    """Keep random incident configuration isolated to the session actor."""
+    service = actor.definition.incidents
+    selection = getattr(actor, "random_incident", None)
+    if not selection:
+        # Disable the original authored incident: wait for the random event
+        # on the first shuttle's approved route instead.
+        config = deepcopy(service.config)
+        config["trigger_tick"] = 10**12
+        return IncidentService(actor.definition.routes, fixture=config)
+    config = deepcopy(service.config)
+    config.update(selection)
+    # Existing decision and option machinery remains the authoritative writer.
+    return IncidentService(actor.definition.routes, fixture=config)
 
 
 class ActorCommit:
@@ -109,7 +126,7 @@ def submit_workflow(store, actor, actor_id, command, checkpoint):
             data={"status": snapshot.session.status})
         result = unit.apply(accepted.command_id, snapshot, (event,))
     elif kind == "APPROVE_INCIDENT_OPTION":
-        result = staged.definition.incidents.decide(unit, actor_id, command)
+        result = session_incidents(staged).decide(unit, actor_id, command)
     elif kind in {"RESERVE_CHARGER", "CONTINUE_SERVICE"}:
         # Preserve final-outcome retries, but never execute a fresh operational
         # decision against paused/ready state or a changed depot reachability.
@@ -139,4 +156,19 @@ def approve_workflow_route(store, actor, actor_id, request, checkpoint):
 
 def publish_workflow(store, actor, snapshot, checkpoint):
     unit = ActorCommit(store, actor, checkpoint, current=False)
-    return actor.definition.incidents.publish(unit, snapshot)
+    service = session_incidents(actor)
+    selected = getattr(actor, "random_incident", None)
+    if selected and snapshot.tick <= selected["trigger_tick"] + 2:
+        print(f"[INCIDENT DEBUG] PUBLISH attempt tick={snapshot.tick} "
+              f"id={selected['incident_id']} route={selected['route_id']} "
+              f"edge={selected['affected_edge_ids']}", flush=True)
+    try:
+        committed = service.publish(unit, snapshot)
+    except Exception as error:
+        print(f"[INCIDENT DEBUG] PUBLISH FAILED tick={snapshot.tick}: "
+              f"{type(error).__name__}: {error}", flush=True)
+        raise
+    if selected and snapshot.tick <= selected["trigger_tick"] + 2:
+        print(f"[INCIDENT DEBUG] PUBLISHED tick={committed.tick} "
+              f"incidents={[(i.incident_id, i.state) for i in committed.incidents]}", flush=True)
+    return committed
