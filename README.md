@@ -153,6 +153,54 @@ heading in local metres. The file also has the model sizes and the road network,
 The counts come from the dataset. The sizes, colours and how much busier each road class is are illustrative
 assumptions, and the mix of types is national, because the dataset has no location data.
 
+## Traffic lights, crossings and road markings
+
+Toa Payoh's traffic lights, crossings and road markings are ready for the 3D view to draw. The view does not
+draw them yet. Positions are local metres in the same frame as the buildings: `x_m` east and `y_m` north.
+
+| File in `backend/fixtures/traffic/` | API, under `/api` | Holds |
+|---|---|---|
+| `toa-payoh-signals.json` | `GET /road-features/toa-payoh/signals` | `junctions` with their `approaches`, signal heads in `signals`, cycle in `timing` |
+| (worked out live) | `GET /road-features/toa-payoh/signals/state?t=SECONDS` | Each junction's colour and `seconds_left` per phase; `t` defaults to now |
+| `toa-payoh-crossings.json` | `GET /road-features/toa-payoh/crossings` | `crossings`: a `line_m` across the road, a `render_as`, and `stripes_m` (zebra bars, four corners each) or `edges_m` (a signal crossing's two lines) |
+| `toa-payoh-markings.json` | `GET /road-features/toa-payoh/markings` | `lane_lines`, `arrows`, `words`, `road_humps` |
+
+To colour a head, take its `junction` and `phase` and look up that phase's colour in `/signals/state`. To run
+without polling, work it out from the same numbers, with `P = green_s + yellow_s + all_red_s` and
+`u = (t + offset_s - phase * P) mod cycle_s`: green while `u < green_s`, then yellow while `u < green_s + yellow_s`, then red.
+
+To rebuild them, run this from `backend/`. It downloads LTA's public files, and needs no key:
+
+```powershell
+python -m src.traffic.import_road_features [--release Sep2026] [--source-dir FOLDER]
+```
+
+Headings are degrees anticlockwise from east, like the vehicles'. A head's `traffic_heading_deg` is the way the traffic
+it controls is going, and `facing_heading_deg` is the way its lights point, back at that traffic. Each junction's
+`approaches` are the roads leading in, with where traffic stops (`stop_x_m`, `stop_y_m`) and its `phase`. `arrows` are
+points with their own `heading_deg`, and are not among the `lane_lines`.
+
+DataMall names its files by release and updates them quarterly, so a later release needs `--release`.
+
+What is real and what is not:
+
+- **Real, from LTA:** where each head, crossing, line, arrow, word and hump is, and each bearing, road code and word.
+  An arrow's bearing is its direction of travel, within 2 degrees on a typical one-way road.
+- **Simulated:** the colours and timings. LTA does not publish them; every junction runs the same 70 s two-phase
+  cycle (30 s green, 3 s yellow, 2 s all red). Show this as a simulation, not as what the junction really does.
+- **Worked out here:** junctions are heads within 60 m of each other. Approaches come from the OpenStreetMap roads, and
+  each head is given the nearest, preferring one with the head on its kerb side, so a head on the far side of a junction
+  may get the wrong one. `direction_source` says where a head's direction came from: `road_map`, or `lta_bearing` if no
+  mapped road is near. Phases come from the road axes, so turning phases are not modelled. `render_as` is `zebra` for a
+  crossing with no signal head within 15 m. LTA does not label zebras, so that is a good guess, not a fact.
+- **Chosen sizes:** crossings' 3 m width and zebra bars' 0.5 m thickness and gap, listed in `crossing_shape`.
+- **Unknown:** LTA does not explain `type_code`, so it is passed on as is. It is not a colour. Nor does LTA say whether
+  a head's `bearing_deg` (clockwise from north) is the way it faces. It often does not line up with the road, so it
+  is kept for reference and the direction fields are what to use.
+
+Any screen showing this data must credit LTA with the `attribution` in each file, under the
+[Singapore Open Data Licence](https://datamall.lta.gov.sg/content/datamall/en/SingaporeOpenDataLicence.html).
+
 ## Training workspace
 
 All seven remaining Qt client workflows are available in Unity. The workspace tabs beside
