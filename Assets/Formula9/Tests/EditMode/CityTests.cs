@@ -2,7 +2,9 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using Formula9.Backend;
 using Formula9.Contracts;
 using Formula9.World;
@@ -65,6 +67,132 @@ namespace Formula9.Tests
             var mesh = CityMesh.Build(new[] { broken });
             try { Assert.AreEqual(0, mesh.vertexCount); }
             finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        private static List<Corridor> CutAlong(params Vector2[] path) => CityMesh.Corridors(new[] { path }, 1);
+
+        private static float RoofArea(Mesh mesh)
+        {
+            var vertices = mesh.vertices; var triangles = mesh.triangles; var area = 0f;
+            for (var i = 0; i < triangles.Length; i += 3)
+            {
+                Vector3 a = vertices[triangles[i]], b = vertices[triangles[i + 1]], c = vertices[triangles[i + 2]];
+                var normal = Vector3.Cross(b - a, c - a);
+                Assert.GreaterOrEqual(normal.y, -1e-3f, "nothing faces down");
+                if (normal.y > 1e-3f) area += normal.magnitude / 2;
+            }
+            return area;
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void ARouteThroughABuildingIsCutOutFromGroundToRoof(bool reversed)
+        {
+            var mesh = CityMesh.Build(new[] { Square("way/1", 30, reversed) }, CutAlong(new Vector2(5, -5), new Vector2(5, 15)));
+            try
+            {
+                Assert.AreEqual(80, RoofArea(mesh), 1e-2f, "a 2 m slot is gone from the 10 m square");
+                var vertices = mesh.vertices; var normals = mesh.normals; var triangles = mesh.triangles;
+                for (var i = 0; i < triangles.Length; i += 3)
+                {
+                    var middle = (vertices[triangles[i]] + vertices[triangles[i + 1]] + vertices[triangles[i + 2]]) / 3;
+                    Assert.IsFalse(middle.x > 4.01f && middle.x < 5.99f, "nothing is left over the route");
+                }
+                int west = 0, east = 0;
+                for (var i = 0; i < vertices.Length; i++)
+                {
+                    if (Mathf.Approximately(vertices[i].x, 4) && normals[i].x > 0.9f) west++;
+                    if (Mathf.Approximately(vertices[i].x, 6) && normals[i].x < -0.9f) east++;
+                }
+                Assert.AreEqual(4, west, "one new wall facing the route from the west");
+                Assert.AreEqual(4, east, "and one from the east");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
+        public void ARouteClearOfABuildingLeavesItWhole()
+        {
+            var mesh = CityMesh.Build(new[] { Square("way/1", 30) }, CutAlong(new Vector2(20, -5), new Vector2(20, 15)));
+            try { Assert.AreEqual(4 * 4 + 4, mesh.vertexCount); }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
+        public void ACanopyOverARouteGoesRatherThanLeavingStrips()
+        {
+            var canopy = Square("way/4", 15);
+            canopy.Rings[0] = new List<(double X, double Y)> { (0, 0), (2.5, 0), (2.5, 10), (0, 10), (0, 0) };
+            var mesh = CityMesh.Build(new[] { canopy }, CutAlong(new Vector2(1.25f, -5), new Vector2(1.25f, 15)));
+            try { Assert.AreEqual(0, mesh.vertexCount, "only 0.25 m strips would be left of it"); }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
+        public void ARouteTurningInsideABuildingLeavesNothingInTheBend()
+        {
+            // In from the south, out through the east, turning at the middle
+            var mesh = CityMesh.Build(new[] { Square("way/1", 30) }, CutAlong(new Vector2(5, -5), new Vector2(5, 5), new Vector2(15, 5)));
+            try
+            {
+                Assert.AreEqual(100 - 12 - 12 + 4, RoofArea(mesh), 1e-2f, "both arms are gone, their overlap counted once");
+                var vertices = mesh.vertices;
+                for (var i = 0; i < vertices.Length; i++)
+                    Assert.IsFalse(vertices[i].x > 4.01f && vertices[i].x < 5.99f && vertices[i].z > 0.01f && vertices[i].z < 5.99f, "nothing stands in the bend");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
+        public void ARouteAcrossAConcaveBuildingOnlyWallsWhatIsBuilt()
+        {
+            // A U open to the north; the route runs east across both arms and the gap between them
+            var building = Square("way/3", 30);
+            building.Rings[0] = new List<(double X, double Y)> { (0, 0), (30, 0), (30, 30), (20, 30), (20, 10), (10, 10), (10, 30), (0, 30), (0, 0) };
+            var mesh = CityMesh.Build(new[] { building }, CutAlong(new Vector2(-5, 20), new Vector2(35, 20)));
+            try
+            {
+                Assert.AreEqual(700 - 20 - 20, RoofArea(mesh), 1e-2f);
+                var vertices = mesh.vertices;
+                for (var i = 0; i < vertices.Length; i++)
+                    Assert.IsFalse(vertices[i].x > 10.01f && vertices[i].x < 19.99f && vertices[i].z > 10.01f, "no new wall across the open gap");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        private sealed class OneBuilding : IHttpTransport
+        {
+            public Task<HttpResponse> SendAsync(HttpRequest request, CancellationToken cancellation = default) =>
+                Task.FromResult(new HttpResponse { Status = 200, Body = "{\"buildings\":[{\"id\":\"way/1\",\"type\":\"retail\",\"name\":\"\",\"height_m\":30,\"rings_m\":[[[0,0],[10,0],[10,10],[0,10],[0,0]]]}]}" });
+        }
+
+        [Test]
+        public void TheCityCutsItsBuildingsForTheRoutesItShowsAndForTheirNewRevisions()
+        {
+            var rig = new GameObject("City route rig");
+            var view = new CityView(rig.transform, null);
+            try
+            {
+                var load = view.LoadAsync(new CityClient(new OneBuilding(), new Uri("http://localhost")), "toa-payoh", CancellationToken.None);
+                Assert.IsTrue(load.IsCompleted, "the fake replies at once");
+                var mesh = rig.GetComponentsInChildren<MeshFilter>().First(f => f.name == "Buildings").sharedMesh;
+                Assert.AreEqual(100, RoofArea(mesh), 1e-2f, "whole until a route is shown");
+                var snapshot = (FullSnapshot)ContractParser.ParseMessage(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/snapshot.json")));
+                Position At(double x, double y) => new Position { XM = x, YM = y };
+                snapshot.Routes[0].EdgePathsM = new List<List<Position>> { new List<Position> { At(3, -20), At(3, 30) } };
+                view.Show(snapshot, new ShuttleMotion(), 0);
+                Assert.AreEqual(100 - 70, RoofArea(mesh), 1e-2f, "the route clears 4 m each side, so only x from 7 to 10 stands");
+                snapshot.Routes[0].Revision++;
+                snapshot.Routes[0].EdgePathsM = new List<List<Position>> { new List<Position> { At(100, -20), At(100, 30) } };
+                view.Show(snapshot, new ShuttleMotion(), 1);
+                Assert.AreEqual(100, RoofArea(mesh), 1e-2f, "a route that moves away gives the building back");
+                Assert.AreEqual(30, view.Bounds.max.y, 1e-3f);
+            }
+            finally
+            {
+                view.Dispose();
+                UnityEngine.Object.DestroyImmediate(rig);
+            }
         }
 
         [Test]

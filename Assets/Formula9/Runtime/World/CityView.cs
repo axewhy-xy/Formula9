@@ -17,6 +17,8 @@ namespace Formula9.World
         private const int TileZoom = 17, FarTileZoom = 14;
         private const float GroundMarginM = 250, FarGroundMarginM = 6000, FarGroundDrop = 2;
         private static readonly Vector3 ShuttleSize = new Vector3(5, 5, 12);
+        // Routes are cut through buildings a little wider than they are drawn, so a shuttle fits
+        private const float RouteWidthM = 5, RouteClearanceM = 1.5f;
 
         private readonly Transform root;
         private readonly MapTiles tiles;
@@ -26,6 +28,8 @@ namespace Formula9.World
         private readonly List<GameObject> routeObjects = new List<GameObject>();
         private string routesKey;
         private Material buildingMaterial, lineMaterial;
+        private List<CityBuilding> buildings;
+        private Mesh buildingMesh;
 
         public int BuildingCount { get; private set; }
         public Bounds Bounds { get; private set; }
@@ -44,14 +48,14 @@ namespace Formula9.World
 
         public async Task LoadAsync(CityClient client, string area, CancellationToken cancellation)
         {
-            var buildings = await client.GetBuildingsAsync(area, cancellation);
+            buildings = await client.GetBuildingsAsync(area, cancellation);
             cancellation.ThrowIfCancellationRequested();
-            var mesh = Own(CityMesh.Build(buildings));
+            buildingMesh = Own(CityMesh.Build(buildings));
             BuildingCount = buildings.Count;
-            Bounds = mesh.bounds;
+            Bounds = buildingMesh.bounds;
             var city = new GameObject("Buildings", typeof(MeshFilter), typeof(MeshRenderer));
             city.transform.SetParent(root, false);
-            city.GetComponent<MeshFilter>().sharedMesh = mesh;
+            city.GetComponent<MeshFilter>().sharedMesh = buildingMesh;
             city.GetComponent<MeshRenderer>().sharedMaterial = buildingMaterial;
             BuildGround();
         }
@@ -126,6 +130,7 @@ namespace Formula9.World
         {
             foreach (var item in routeObjects) WorldBuilder.Remove(item);
             routeObjects.Clear();
+            CutRoutesThroughBuildings(snapshot);
             foreach (var route in snapshot.Routes)
             {
                 var serving = ordered.Select((v, index) => (v, index)).Where(p => p.v.RouteId == route.RouteId).Select(p => p.index).ToList();
@@ -136,7 +141,7 @@ namespace Formula9.World
                     var line = new GameObject("Route " + route.RouteId).AddComponent<LineRenderer>();
                     line.transform.SetParent(root, false);
                     line.useWorldSpace = true; line.sharedMaterial = lineMaterial; line.positionCount = points.Length; line.SetPositions(points);
-                    line.startWidth = line.endWidth = 5; line.startColor = line.endColor = new Color(color.r, color.g, color.b, 0.9f);
+                    line.startWidth = line.endWidth = RouteWidthM; line.startColor = line.endColor = new Color(color.r, color.g, color.b, 0.9f);
                     routeObjects.Add(line.gameObject);
                 }
                 foreach (var stop in route.StopsM)
@@ -146,6 +151,14 @@ namespace Formula9.World
                     routeObjects.Add(marker.gameObject);
                 }
             }
+        }
+
+        // A building's outline takes no account of a road under it, which would hide the route inside
+        private void CutRoutesThroughBuildings(FullSnapshot snapshot)
+        {
+            if (buildingMesh == null) return;
+            var paths = snapshot.Routes.Select(r => (IReadOnlyList<Vector2>)r.EdgePathsM.SelectMany(p => p).Select(p => new Vector2((float)p.XM, (float)p.YM)).ToList());
+            CityMesh.Fill(buildingMesh, buildings, CityMesh.Corridors(paths, RouteWidthM / 2 + RouteClearanceM));
         }
 
         private Transform Marker(PrimitiveType shape, Vector3 size, Color color, string name)
