@@ -3,37 +3,57 @@
     <ui:ScrollView class="workspace-page page-form">
         <ui:Label text="Route Planning" class="page-title" />
         <ui:VisualElement class="tabs">
-            <ui:Button name="route-tab-editor" text="Pre-trip routes" class="tab-item" />
+            <ui:Button name="route-tab-editor" text="Exercise" class="tab-item" />
             <ui:Button name="route-tab-fleet" text="Fleet table" class="tab-item" />
         </ui:VisualElement>
 
         <ui:VisualElement name="route-editor-panel">
+            <ui:VisualElement name="route-stages" class="route-stages" />
             <ui:DropdownField name="routes" label="Route" />
-            <ui:VisualElement class="form-row">
-                <ui:Label text="Committed route" class="form-label" />
-                <ui:Label name="route-committed" text="No route" class="form-value" />
+
+            <ui:VisualElement class="route-card route-card-problem">
+                <ui:Label text="The problem" class="route-card-title" />
+                <ui:Label name="route-problem" text="Join a session to see its routes." class="route-card-text" />
+                <ui:Button name="route-show-closure" text="Show the closure" class="route-link" />
             </ui:VisualElement>
-            <ui:VisualElement class="form-row">
-                <ui:Label text="Affected shuttles" class="form-label" />
-                <ui:ScrollView name="route-shuttles" class="shuttle-list" />
+
+            <ui:VisualElement name="route-decide" class="route-card">
+                <ui:Label text="Your route" class="route-card-title" />
+                <ui:Label text="Click roads on the map to send the shuttle along them. It still serves its stops in order. Click a pin to remove it." class="route-card-text" />
+                <ui:VisualElement name="route-waypoints" class="route-waypoints" />
+                <ui:VisualElement class="draft-actions">
+                    <ui:Button name="route-undo" text="Undo" />
+                    <ui:Button name="route-redo" text="Redo" />
+                    <ui:Button name="route-cancel" text="Clear" />
+                    <ui:Button name="route-suggest" text="Suggest a detour" tooltip="Show the scenario's own way round the closure." class="draft-last" />
+                </ui:VisualElement>
             </ui:VisualElement>
-            <ui:TextField name="route-via" label="Via nodes" max-length="512" placeholder-text="Optional node IDs separated by commas; empty finds a detour around closures" />
-            <ui:VisualElement class="draft-actions">
-                <ui:Button name="route-undo" text="Undo draft" />
-                <ui:Button name="route-redo" text="Redo draft" />
-                <ui:Button name="route-cancel" text="Cancel draft" class="draft-last" />
+
+            <ui:VisualElement name="route-feedback" class="route-card">
+                <ui:Label text="What this route does" class="route-card-title" />
+                <ui:Label name="route-verdict" class="route-verdict" />
+                <ui:VisualElement name="route-issues" />
+                <ui:VisualElement name="route-metrics" class="route-metrics" />
+                <ui:Foldout name="route-basis" text="How this is worked out" value="false" class="route-basis">
+                    <ui:Label name="route-assumptions" class="route-card-text" />
+                </ui:Foldout>
             </ui:VisualElement>
-            <ui:Label text="M2 applies the route pattern to every assigned shuttle. All affected shuttles must be checked for approval." class="workspace-text" />
-            <ui:Label text="Drag a node onto an interior graph node to set a waypoint, click an interior node to add it, or enter up to 16 node IDs above. Arrows show direction; thick lines show the committed route; × CLOSED marks closures; dash-dot shows the proposal." class="workspace-text" />
-            <f9:RouteGraph name="route-graph" class="route-graph" />
-            <ui:Button name="route-validate" text="Validate detour" class="wide-button" />
-            <ui:Label name="route-status" text="Join a READY session to edit a pre-trip route." class="workspace-text" />
-            <!-- The tables' headings and columns are set in TrainingWorkspace.cs; their rows come from the backend. -->
-            <ui:VisualElement name="route-checks-host" />
-            <ui:VisualElement name="route-comparison-host" />
-            <ui:Label name="route-assumptions" class="workspace-text" />
-            <ui:TextField name="route-reason" max-length="512" placeholder-text="Reason for approving this detour (required)" />
-            <ui:Button name="route-approve" text="Approve validated revision" class="wide-button" />
+
+            <ui:VisualElement name="route-apply" class="route-card">
+                <ui:Label text="Approve it" class="route-card-title" />
+                <ui:TextField name="route-reason" max-length="512" multiline="true" placeholder-text="Why this route?" />
+                <ui:Label name="route-apply-note" class="route-card-text" />
+                <ui:Button name="route-approve" text="Approve route" class="wide-button route-action" />
+            </ui:VisualElement>
+
+            <ui:VisualElement name="route-outcome" class="route-card">
+                <ui:Label text="What happened" class="route-card-title" />
+                <ui:Label name="route-outcome-headline" class="route-verdict" />
+                <ui:VisualElement name="route-outcome-rows" class="route-metrics" />
+                <ui:Label name="route-outcome-notes" class="route-card-text" />
+                <ui:Button name="route-start" text="Start and watch in 3D" class="wide-button route-action" />
+                <ui:Button name="route-watch" text="Watch in 3D" class="wide-button" />
+            </ui:VisualElement>
         </ui:VisualElement>
 
         <ui:VisualElement name="route-fleet-panel" style="display: none;">
