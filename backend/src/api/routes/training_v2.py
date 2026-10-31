@@ -13,13 +13,14 @@ from starlette.authentication import UnauthenticatedUser
 
 from contracts.v2.models import DispatcherCommand, Id, TrainingSession
 from contracts.v2.sessions import CreateSessionRequest, SessionListResponse
-from contracts.v2.route_edit import RouteApprovalRequest, RouteEditPreview, RouteEditRequest, RouteEditorContext
+from contracts.v2.route_edit import RouteApprovalRequest, RouteEditPreview, RouteEditRequest, RouteEditorContext, RouteOutcome
 from src.core.config import get_settings
 from src.core.training_telemetry import boundary
 from src.persistence.training_store import TrainingStore, TrainingStoreError
 from src.services.battery_decision import submit_battery_decision
 from src.services.incidents import IncidentService, get_incident_service
 from src.services.route_edit import RouteEditService, get_route_edit_service
+from src.services.route_outcome import route_outcome
 from src.services.training_sessions import TrainingSessionService
 from src.services.integrated_actor import SCENARIO_ID, services_for
 
@@ -124,6 +125,13 @@ def route_editor(session_id: str, route_id: str,
     baseline = store.snapshot(session_id)
     service, _ = services_for(baseline, routes=service)
     return service.editor_context(baseline, route_id)
+
+
+@router.get("/{session_id}/routes/{route_id}/outcome", response_model=RouteOutcome)
+def route_outcome_report(session_id: str, route_id: str,
+                         actor_id: str = Depends(get_actor_id),
+                         store: TrainingStore = Depends(get_training_store)) -> RouteOutcome:
+    return route_outcome(store, session_id, route_id)
 
 
 @router.post("/{session_id}/route-previews", response_model=RouteEditPreview)
