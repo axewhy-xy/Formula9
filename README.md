@@ -138,7 +138,8 @@ extract in `backend/fixtures/osm`.
 ## Background traffic data
 
 `backend/fixtures/traffic/toa-payoh.json` holds the background traffic prepared for the 3D view. The 3D
-view does not draw it yet, and no API serves it yet. To rebuild it, run this from `backend/`:
+view draws its roads, served by `/api/roads/<area>`, as asphalt with lane lines over the map tiles; it
+does not draw the vehicles yet. To rebuild it, run this from `backend/`:
 
 ```powershell
 python -m src.traffic.import_vehicle_population [--percent 0.1] [--year YYYY] [--seed N] [--offline]
