@@ -7,7 +7,7 @@ from pathlib import Path
 from pydantic import TypeAdapter
 
 from contracts.v2.models import DispatcherCommand, Message, parse_message
-from contracts.v2.route_edit import RouteApprovalRequest, RouteEditPreview, RouteEditRequest, RouteEditorContext
+from contracts.v2.route_edit import RouteApprovalRequest, RouteEditPreview, RouteEditRequest, RouteEditorContext, RouteOutcome
 from contracts.v2.sessions import CreateSessionRequest, SessionListResponse
 
 ROOT = Path(__file__).parent
@@ -43,7 +43,8 @@ command_schema["$id"] = "https://formula9.local/contracts/v2/command.schema.json
 for name, model in (("route_edit_request", RouteEditRequest),
                     ("route_editor_context", RouteEditorContext),
                     ("route_edit_preview", RouteEditPreview),
-                    ("route_approval", RouteApprovalRequest)):
+                    ("route_approval", RouteApprovalRequest),
+                    ("route_outcome", RouteOutcome)):
     route_schema = model.model_json_schema()
     route_schema["$id"] = f"https://formula9.local/contracts/v2/{name}.schema.json"
     (ROOT / f"{name}.schema.json").write_text(

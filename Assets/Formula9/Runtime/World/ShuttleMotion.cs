@@ -38,6 +38,9 @@ namespace Formula9.World
         // A pose this far from the route is not on it, and a route this much longer than the straight
         // line is the wrong part of it (it passes here twice)
         private const float MaxOffRouteM = 8, MaxPathStretch = 3, PathStretchAllowanceM = 2;
+        // Through a corner the shuttle points along the road, looking this far ahead and behind, so it
+        // swings round the junction instead of sliding through it and turning on the spot
+        private const float CornerSpanM = 5, BlendShare = 0.15f;
 
         private sealed class Track
         {
@@ -124,7 +127,7 @@ namespace Formula9.World
             if (!tracks.TryGetValue(id, out var track)) return false;
             var progress = track.Duration <= 0 ? 1 : Mathf.Clamp01((now - track.Start) / track.Duration);
             position = PointAlong(track.Path, progress);
-            rotation = Quaternion.Slerp(track.FromRotation, track.TargetRotation, progress);
+            rotation = track.Path.Length >= 3 ? AlongCorners(track, progress) : Quaternion.Slerp(track.FromRotation, track.TargetRotation, progress);
             return true;
         }
 
@@ -135,6 +138,16 @@ namespace Formula9.World
         //     This function forgets every glide, so the next pose of each shuttle is placed at once.
         //     For a new session or epoch, a rebuilt world or a view that was not being updated.
         public void Clear() => tracks.Clear();
+
+        // -----------------------------------------------------------------------------------
+        // Function: Forget
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function forgets one shuttle's glide, for a shuttle no longer in the snapshot.
+        //
+        // Args:
+        //     id (string): The shuttle.
+        public void Forget(string id) => tracks.Remove(id);
 
         // -----------------------------------------------------------------------------------
         // Function: Routes
@@ -195,6 +208,20 @@ namespace Formula9.World
         }
 
         private static Vector3 Flat(Vector3 point) => new Vector3(point.x, 0, point.z);
+
+        private static Quaternion AlongCorners(Track track, float progress)
+        {
+            var total = 0f;
+            for (var i = 1; i < track.Path.Length; i++) total += Vector3.Distance(track.Path[i - 1], track.Path[i]);
+            if (total <= 0) return track.TargetRotation;
+            var span = CornerSpanM / total;
+            var facing = PointAlong(track.Path, Mathf.Clamp01(progress + span)) - PointAlong(track.Path, Mathf.Clamp01(progress - span));
+            var along = Flat(facing).sqrMagnitude > 0 ? Quaternion.LookRotation(Flat(facing)) : track.TargetRotation;
+            // Meets the poses at each end of the glide exactly
+            if (progress < BlendShare) return Quaternion.Slerp(track.FromRotation, along, progress / BlendShare);
+            if (progress > 1 - BlendShare) return Quaternion.Slerp(along, track.TargetRotation, (progress - (1 - BlendShare)) / BlendShare);
+            return along;
+        }
 
         private static (int Segment, float Distance) Nearest(IReadOnlyList<Vector2> route, Vector2 point)
         {

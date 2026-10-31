@@ -15,180 +15,392 @@
       -1479.31
     ],
     "2": [
+      3407.52,
+      -1471.57
+    ],
+    "3": [
+      3414.83,
+      -1458.84
+    ],
+    "4": [
+      3425.36,
+      -1441.2
+    ],
+    "5": [
+      3456.39,
+      -1390.59
+    ],
+    "6": [
       3482.23,
       -1347.82
     ],
-    "3": [
-      3480.74,
-      -1531.77
-    ],
-    "4": [
-      3530.54,
-      -1572.01
-    ],
-    "5": [
-      3632.48,
-      -1670.25
-    ],
-    "6": [
-      3676.69,
-      -1720.07
-    ],
     "7": [
-      3702.36,
-      -1704.61
-    ],
-    "8": [
-      3720.58,
-      -1677.52
-    ],
-    "9": [
-      3753.82,
-      -1607.83
-    ],
-    "10": [
-      3774.62,
-      -1578.34
-    ],
-    "11": [
-      3742.84,
-      -1556.56
-    ],
-    "12": [
-      3621.74,
-      -1445.03
-    ],
-    "13": [
-      3564.98,
-      -1397.3
-    ],
-    "14": [
       3410.33,
       -1483.8
     ],
+    "8": [
+      3527.31,
+      -1570.96
+    ],
+    "9": [
+      3532.81,
+      -1575.68
+    ],
+    "10": [
+      3541.75,
+      -1583.56
+    ],
+    "11": [
+      3562.95,
+      -1603.14
+    ],
+    "12": [
+      3663.82,
+      -1705.39
+    ],
+    "13": [
+      3676.69,
+      -1720.07
+    ],
+    "14": [
+      3702.36,
+      -1704.61
+    ],
     "15": [
-      3365.44,
-      -1556.82
+      3712.37,
+      -1690.15
     ],
     "16": [
-      3345.64,
-      -1595.23
+      3730.33,
+      -1658.21
     ],
     "17": [
-      3343.79,
-      -1607.82
+      3734.58,
+      -1649.8
     ],
     "18": [
-      3206.84,
-      -1581.1
+      3747.05,
+      -1625.1
     ],
     "19": [
-      3154.84,
-      -1567.24
+      3774.62,
+      -1578.34
     ],
     "20": [
-      3093.38,
-      -1547.01
+      3742.84,
+      -1556.56
     ],
     "21": [
-      2958.26,
-      -1496.8
+      3692.49,
+      -1511.91
     ],
     "22": [
-      3023.72,
-      -1324.73
+      3672.49,
+      -1492.04
     ],
     "23": [
-      3031.7,
-      -1285.19
+      3639.31,
+      -1461.48
     ],
     "24": [
-      3034.11,
-      -1234.07
+      3621.74,
+      -1445.03
     ],
     "25": [
-      3231.03,
-      -1241.37
+      3609.84,
+      -1435.06
     ],
     "26": [
-      3312.48,
-      -1248.34
+      3579.59,
+      -1408.89
     ],
     "27": [
-      3359.79,
-      -1264.41
+      3532.89,
+      -1377.24
     ],
     "28": [
-      3497.49,
-      -1339.1
-    ],
-    "29": [
       3490.08,
       -1351.98
     ],
+    "29": [
+      3405.78,
+      -1491.37
+    ],
     "30": [
+      3347.44,
+      -1591.15
+    ],
+    "31": [
+      3344.19,
+      -1598.97
+    ],
+    "32": [
+      3343.79,
+      -1607.82
+    ],
+    "33": [
+      3337.27,
+      -1607.61
+    ],
+    "34": [
+      3264.96,
+      -1591.64
+    ],
+    "35": [
+      3206.84,
+      -1581.1
+    ],
+    "36": [
+      3178.61,
+      -1573.58
+    ],
+    "37": [
+      3154.84,
+      -1567.24
+    ],
+    "38": [
+      3142.23,
+      -1563.12
+    ],
+    "39": [
+      3129.8,
+      -1559.07
+    ],
+    "40": [
+      3108.6,
+      -1552.14
+    ],
+    "41": [
+      3093.38,
+      -1547.01
+    ],
+    "42": [
+      3047.65,
+      -1529.86
+    ],
+    "43": [
+      3035.89,
+      -1525.59
+    ],
+    "44": [
+      2967.04,
+      -1501.01
+    ],
+    "45": [
+      2958.26,
+      -1496.8
+    ],
+    "46": [
+      2962.45,
+      -1487.88
+    ],
+    "47": [
+      2969.34,
+      -1469.82
+    ],
+    "48": [
+      2972.56,
+      -1459.03
+    ],
+    "49": [
+      2998.07,
+      -1391.22
+    ],
+    "50": [
+      3008.4,
+      -1367.48
+    ],
+    "51": [
+      3012.55,
+      -1356.2
+    ],
+    "52": [
+      3019.5,
+      -1337.6
+    ],
+    "53": [
+      3027.39,
+      -1309.91
+    ],
+    "54": [
+      3033.59,
+      -1245.2
+    ],
+    "55": [
+      3034.11,
+      -1234.07
+    ],
+    "56": [
+      3042.8,
+      -1234.4
+    ],
+    "57": [
+      3096.0,
+      -1236.05
+    ],
+    "58": [
+      3186.23,
+      -1239.83
+    ],
+    "59": [
+      3194.93,
+      -1239.99
+    ],
+    "60": [
+      3215.68,
+      -1240.78
+    ],
+    "61": [
+      3268.94,
+      -1243.82
+    ],
+    "62": [
+      3288.19,
+      -1245.07
+    ],
+    "63": [
+      3312.48,
+      -1248.34
+    ],
+    "64": [
+      3404.09,
+      -1288.41
+    ],
+    "65": [
+      3462.26,
+      -1320.42
+    ],
+    "66": [
+      3489.72,
+      -1334.98
+    ],
+    "67": [
+      3497.49,
+      -1339.1
+    ],
+    "68": [
       3447.64,
       -1328.3
     ],
-    "31": [
-      3381.59,
-      -1285.54
-    ],
-    "32": [
+    "69": [
       3365.21,
       -1278.75
     ],
-    "33": [
+    "70": [
       3312.34,
       -1260.79
     ],
-    "34": [
+    "71": [
       3285.81,
       -1256.43
     ],
-    "35": [
+    "72": [
+      3210.05,
+      -1253.21
+    ],
+    "73": [
+      3194.66,
+      -1252.73
+    ],
+    "74": [
+      3186.06,
+      -1252.56
+    ],
+    "75": [
       3145.95,
       -1250.55
     ],
-    "36": [
+    "76": [
+      3119.06,
+      -1249.14
+    ],
+    "77": [
+      3095.7,
+      -1247.42
+    ],
+    "78": [
       3042.42,
       -1245.42
     ],
-    "37": [
-      3040.76,
-      -1288.31
+    "79": [
+      3040.81,
+      -1280.46
     ],
-    "38": [
-      3036.44,
-      -1314.29
+    "80": [
+      3031.45,
+      -1331.01
     ],
-    "39": [
-      3025.93,
-      -1348.26
+    "81": [
+      3014.42,
+      -1373.54
     ],
-    "40": [
+    "82": [
+      3009.24,
+      -1388.12
+    ],
+    "83": [
       2996.59,
       -1421.33
     ],
-    "41": [
+    "84": [
+      2982.83,
+      -1457.45
+    ],
+    "85": [
       2971.44,
       -1491.63
     ],
-    "42": [
-      3042.2,
-      -1520.81
+    "86": [
+      3000.64,
+      -1504.1
     ],
-    "43": [
-      3154.49,
-      -1559.31
+    "87": [
+      3010.67,
+      -1508.14
     ],
-    "44": [
+    "88": [
+      3058.66,
+      -1526.65
+    ],
+    "89": [
+      3070.07,
+      -1530.71
+    ],
+    "90": [
+      3098.83,
+      -1540.92
+    ],
+    "91": [
+      3209.71,
+      -1571.18
+    ],
+    "92": [
+      3265.8,
+      -1583.01
+    ],
+    "93": [
+      3286.5,
+      -1587.27
+    ],
+    "94": [
       3337.89,
       -1598.31
     ],
-    "45": [
-      3360.98,
-      -1548.06
+    "95": [
+      3351.4,
+      -1567.29
+    ],
+    "96": [
+      3359.41,
+      -1551.02
+    ],
+    "97": [
+      3366.54,
+      -1538.95
+    ],
+    "98": [
+      3398.44,
+      -1486.83
     ]
   },
   "edges": {
@@ -196,188 +408,400 @@
       1,
       2
     ],
-    "bypass-b:0:forward": [
-      1,
+    "main:1:forward": [
+      2,
       3
     ],
-    "bypass-b:1:forward": [
+    "main:2:forward": [
       3,
       4
     ],
-    "bypass-b:2:forward": [
+    "main:3:forward": [
       4,
       5
     ],
-    "bypass-b:3:forward": [
+    "main:4:forward": [
       5,
       6
     ],
-    "bypass-b:4:forward": [
-      6,
+    "bypass-b:0:forward": [
+      1,
       7
     ],
-    "bypass-b:5:forward": [
+    "bypass-b:1:forward": [
       7,
       8
     ],
-    "bypass-b:6:forward": [
+    "bypass-b:2:forward": [
       8,
       9
     ],
-    "bypass-b:7:forward": [
+    "bypass-b:3:forward": [
       9,
       10
     ],
-    "bypass-b:8:forward": [
+    "bypass-b:4:forward": [
       10,
       11
     ],
-    "bypass-b:9:forward": [
+    "bypass-b:5:forward": [
       11,
       12
     ],
-    "bypass-b:10:forward": [
+    "bypass-b:6:forward": [
       12,
       13
     ],
-    "bypass-b:11:forward": [
+    "bypass-b:7:forward": [
       13,
-      2
-    ],
-    "bypass-c:0:forward": [
-      1,
       14
     ],
-    "bypass-c:1:forward": [
+    "bypass-b:8:forward": [
       14,
       15
     ],
-    "bypass-c:2:forward": [
+    "bypass-b:9:forward": [
       15,
       16
     ],
-    "bypass-c:3:forward": [
+    "bypass-b:10:forward": [
       16,
       17
     ],
-    "bypass-c:4:forward": [
+    "bypass-b:11:forward": [
       17,
       18
     ],
-    "bypass-c:5:forward": [
+    "bypass-b:12:forward": [
       18,
       19
     ],
-    "bypass-c:6:forward": [
+    "bypass-b:13:forward": [
       19,
       20
     ],
-    "bypass-c:7:forward": [
+    "bypass-b:14:forward": [
       20,
       21
     ],
-    "bypass-c:8:forward": [
+    "bypass-b:15:forward": [
       21,
       22
     ],
-    "bypass-c:9:forward": [
+    "bypass-b:16:forward": [
       22,
       23
     ],
-    "bypass-c:10:forward": [
+    "bypass-b:17:forward": [
       23,
       24
     ],
-    "bypass-c:11:forward": [
+    "bypass-b:18:forward": [
       24,
       25
     ],
-    "bypass-c:12:forward": [
+    "bypass-b:19:forward": [
       25,
       26
     ],
-    "bypass-c:13:forward": [
+    "bypass-b:20:forward": [
       26,
       27
     ],
-    "bypass-c:14:forward": [
+    "bypass-b:21:forward": [
       27,
       28
     ],
-    "bypass-c:15:forward": [
+    "bypass-b:22:forward": [
       28,
+      6
+    ],
+    "bypass-c:0:forward": [
+      7,
       29
     ],
-    "bypass-c:16:forward": [
+    "bypass-c:1:forward": [
       29,
-      2
-    ],
-    "return:0:forward": [
-      2,
       30
     ],
-    "return:1:forward": [
+    "bypass-c:2:forward": [
       30,
       31
     ],
-    "return:2:forward": [
+    "bypass-c:3:forward": [
       31,
       32
     ],
-    "return:3:forward": [
+    "bypass-c:4:forward": [
       32,
       33
     ],
-    "return:4:forward": [
+    "bypass-c:5:forward": [
       33,
       34
     ],
-    "return:5:forward": [
+    "bypass-c:6:forward": [
       34,
       35
     ],
-    "return:6:forward": [
+    "bypass-c:7:forward": [
       35,
       36
     ],
-    "return:7:forward": [
+    "bypass-c:8:forward": [
       36,
       37
     ],
-    "return:8:forward": [
+    "bypass-c:9:forward": [
       37,
       38
     ],
-    "return:9:forward": [
+    "bypass-c:10:forward": [
       38,
       39
     ],
-    "return:10:forward": [
+    "bypass-c:11:forward": [
       39,
       40
     ],
-    "return:11:forward": [
+    "bypass-c:12:forward": [
       40,
       41
     ],
-    "return:12:forward": [
+    "bypass-c:13:forward": [
       41,
       42
     ],
-    "return:13:forward": [
+    "bypass-c:14:forward": [
       42,
       43
     ],
-    "return:14:forward": [
+    "bypass-c:15:forward": [
       43,
       44
     ],
-    "return:15:forward": [
+    "bypass-c:16:forward": [
       44,
       45
     ],
-    "return:16:forward": [
+    "bypass-c:17:forward": [
       45,
+      46
+    ],
+    "bypass-c:18:forward": [
+      46,
+      47
+    ],
+    "bypass-c:19:forward": [
+      47,
+      48
+    ],
+    "bypass-c:20:forward": [
+      48,
+      49
+    ],
+    "bypass-c:21:forward": [
+      49,
+      50
+    ],
+    "bypass-c:22:forward": [
+      50,
+      51
+    ],
+    "bypass-c:23:forward": [
+      51,
+      52
+    ],
+    "bypass-c:24:forward": [
+      52,
+      53
+    ],
+    "bypass-c:25:forward": [
+      53,
+      54
+    ],
+    "bypass-c:26:forward": [
+      54,
+      55
+    ],
+    "bypass-c:27:forward": [
+      55,
+      56
+    ],
+    "bypass-c:28:forward": [
+      56,
+      57
+    ],
+    "bypass-c:29:forward": [
+      57,
+      58
+    ],
+    "bypass-c:30:forward": [
+      58,
+      59
+    ],
+    "bypass-c:31:forward": [
+      59,
+      60
+    ],
+    "bypass-c:32:forward": [
+      60,
+      61
+    ],
+    "bypass-c:33:forward": [
+      61,
+      62
+    ],
+    "bypass-c:34:forward": [
+      62,
+      63
+    ],
+    "bypass-c:35:forward": [
+      63,
+      64
+    ],
+    "bypass-c:36:forward": [
+      64,
+      65
+    ],
+    "bypass-c:37:forward": [
+      65,
+      66
+    ],
+    "bypass-c:38:forward": [
+      66,
+      67
+    ],
+    "bypass-c:39:forward": [
+      67,
+      28
+    ],
+    "return:0:forward": [
+      6,
+      68
+    ],
+    "return:1:forward": [
+      68,
+      69
+    ],
+    "return:2:forward": [
+      69,
+      70
+    ],
+    "return:3:forward": [
+      70,
+      71
+    ],
+    "return:4:forward": [
+      71,
+      72
+    ],
+    "return:5:forward": [
+      72,
+      73
+    ],
+    "return:6:forward": [
+      73,
+      74
+    ],
+    "return:7:forward": [
+      74,
+      75
+    ],
+    "return:8:forward": [
+      75,
+      76
+    ],
+    "return:9:forward": [
+      76,
+      77
+    ],
+    "return:10:forward": [
+      77,
+      78
+    ],
+    "return:11:forward": [
+      78,
+      79
+    ],
+    "return:12:forward": [
+      79,
+      80
+    ],
+    "return:13:forward": [
+      80,
+      81
+    ],
+    "return:14:forward": [
+      81,
+      82
+    ],
+    "return:15:forward": [
+      82,
+      83
+    ],
+    "return:16:forward": [
+      83,
+      84
+    ],
+    "return:17:forward": [
+      84,
+      85
+    ],
+    "return:18:forward": [
+      85,
+      86
+    ],
+    "return:19:forward": [
+      86,
+      87
+    ],
+    "return:20:forward": [
+      87,
+      88
+    ],
+    "return:21:forward": [
+      88,
+      89
+    ],
+    "return:22:forward": [
+      89,
+      90
+    ],
+    "return:23:forward": [
+      90,
+      91
+    ],
+    "return:24:forward": [
+      91,
+      92
+    ],
+    "return:25:forward": [
+      92,
+      93
+    ],
+    "return:26:forward": [
+      93,
+      94
+    ],
+    "return:27:forward": [
+      94,
+      95
+    ],
+    "return:28:forward": [
+      95,
+      96
+    ],
+    "return:29:forward": [
+      96,
+      97
+    ],
+    "return:30:forward": [
+      97,
+      98
+    ],
+    "return:31:forward": [
+      98,
       1
     ]
   },
@@ -387,12 +811,12 @@
     "start_node_id": 1,
     "destination_node_id": 1,
     "default_via_node_ids": [
-      32
+      69
     ],
     "required_stops": {
-      "52449-toa-payoh-police-centre": 32,
-      "52179-braddell-station-blk-106": 35,
-      "52209-blk-101c-carpark": 40
+      "52449-toa-payoh-police-centre": 69,
+      "52179-braddell-station-blk-106": 75,
+      "52209-blk-101c-carpark": 83
     },
     "operating_node_ids": [
       1,
@@ -439,10 +863,67 @@
       42,
       43,
       44,
-      45
+      45,
+      46,
+      47,
+      48,
+      49,
+      50,
+      51,
+      52,
+      53,
+      54,
+      55,
+      56,
+      57,
+      58,
+      59,
+      60,
+      61,
+      62,
+      63,
+      64,
+      65,
+      66,
+      67,
+      68,
+      69,
+      70,
+      71,
+      72,
+      73,
+      74,
+      75,
+      76,
+      77,
+      78,
+      79,
+      80,
+      81,
+      82,
+      83,
+      84,
+      85,
+      86,
+      87,
+      88,
+      89,
+      90,
+      91,
+      92,
+      93,
+      94,
+      95,
+      96,
+      97,
+      98
     ],
     "original_directed_edge_ids": [
       "main:0:forward",
+      "main:1:forward",
+      "main:2:forward",
+      "main:3:forward",
+      "main:4:forward",
       "return:0:forward",
       "return:1:forward",
       "return:2:forward",
@@ -459,10 +940,29 @@
       "return:13:forward",
       "return:14:forward",
       "return:15:forward",
-      "return:16:forward"
+      "return:16:forward",
+      "return:17:forward",
+      "return:18:forward",
+      "return:19:forward",
+      "return:20:forward",
+      "return:21:forward",
+      "return:22:forward",
+      "return:23:forward",
+      "return:24:forward",
+      "return:25:forward",
+      "return:26:forward",
+      "return:27:forward",
+      "return:28:forward",
+      "return:29:forward",
+      "return:30:forward",
+      "return:31:forward"
     ],
     "closed_directed_edge_ids": [
-      "main:0:forward"
+      "main:0:forward",
+      "main:1:forward",
+      "main:2:forward",
+      "main:3:forward",
+      "main:4:forward"
     ],
     "detour_directed_edge_ids": [
       "bypass-b:0:forward",
@@ -477,6 +977,17 @@
       "bypass-b:9:forward",
       "bypass-b:10:forward",
       "bypass-b:11:forward",
+      "bypass-b:12:forward",
+      "bypass-b:13:forward",
+      "bypass-b:14:forward",
+      "bypass-b:15:forward",
+      "bypass-b:16:forward",
+      "bypass-b:17:forward",
+      "bypass-b:18:forward",
+      "bypass-b:19:forward",
+      "bypass-b:20:forward",
+      "bypass-b:21:forward",
+      "bypass-b:22:forward",
       "return:0:forward",
       "return:1:forward",
       "return:2:forward",
@@ -493,10 +1004,26 @@
       "return:13:forward",
       "return:14:forward",
       "return:15:forward",
-      "return:16:forward"
+      "return:16:forward",
+      "return:17:forward",
+      "return:18:forward",
+      "return:19:forward",
+      "return:20:forward",
+      "return:21:forward",
+      "return:22:forward",
+      "return:23:forward",
+      "return:24:forward",
+      "return:25:forward",
+      "return:26:forward",
+      "return:27:forward",
+      "return:28:forward",
+      "return:29:forward",
+      "return:30:forward",
+      "return:31:forward"
     ],
     "alternative_directed_edge_paths": [
       [
+        "bypass-b:0:forward",
         "bypass-c:0:forward",
         "bypass-c:1:forward",
         "bypass-c:2:forward",
@@ -514,6 +1041,30 @@
         "bypass-c:14:forward",
         "bypass-c:15:forward",
         "bypass-c:16:forward",
+        "bypass-c:17:forward",
+        "bypass-c:18:forward",
+        "bypass-c:19:forward",
+        "bypass-c:20:forward",
+        "bypass-c:21:forward",
+        "bypass-c:22:forward",
+        "bypass-c:23:forward",
+        "bypass-c:24:forward",
+        "bypass-c:25:forward",
+        "bypass-c:26:forward",
+        "bypass-c:27:forward",
+        "bypass-c:28:forward",
+        "bypass-c:29:forward",
+        "bypass-c:30:forward",
+        "bypass-c:31:forward",
+        "bypass-c:32:forward",
+        "bypass-c:33:forward",
+        "bypass-c:34:forward",
+        "bypass-c:35:forward",
+        "bypass-c:36:forward",
+        "bypass-c:37:forward",
+        "bypass-c:38:forward",
+        "bypass-c:39:forward",
+        "bypass-b:22:forward",
         "return:0:forward",
         "return:1:forward",
         "return:2:forward",
@@ -530,7 +1081,22 @@
         "return:13:forward",
         "return:14:forward",
         "return:15:forward",
-        "return:16:forward"
+        "return:16:forward",
+        "return:17:forward",
+        "return:18:forward",
+        "return:19:forward",
+        "return:20:forward",
+        "return:21:forward",
+        "return:22:forward",
+        "return:23:forward",
+        "return:24:forward",
+        "return:25:forward",
+        "return:26:forward",
+        "return:27:forward",
+        "return:28:forward",
+        "return:29:forward",
+        "return:30:forward",
+        "return:31:forward"
       ]
     ],
     "vehicle_width_m": 2.2,
@@ -542,7 +1108,19 @@
     "stop_dwell_s": 2.0,
     "loop_end_dwell_s": 2.0,
     "travel_kwh_per_km": 0.25,
-    "auxiliary_kw": 1.5
+    "auxiliary_kw": 1.5,
+    "network_fixture": "m2_operating_network.json",
+    "stop_approach_edge_ids": {
+      "52449-toa-payoh-police-centre": [
+        "return:1:forward"
+      ],
+      "52179-braddell-station-blk-106": [
+        "return:7:forward"
+      ],
+      "52209-blk-101c-carpark": [
+        "return:15:forward"
+      ]
+    }
   },
   "peer_patterns": [
     {

@@ -27,7 +27,7 @@ namespace Formula9.Tests
         }
 
         [Test]
-        public async Task ARouteGraphArrivingAfterARevisionChangeReloadsBeforeEnablingPreview()
+        public async Task RoadsArrivingAfterARevisionChangeReloadBeforeEnablingTheEditor()
         {
             var raw = Fixture("snapshot"); raw["session"]["status"] = "READY";
             var routeId = (string)raw["routes"][0]["route_id"];
@@ -58,8 +58,8 @@ namespace Formula9.Tests
                 world.Attach(root.Q("world"), new SceneLoader(backend, new Uri("http://backend.test")));
                 var workspace = new TrainingWorkspace(root, api, session, world, Run, _ => { });
                 await session.JoinAsync((string)raw["session_id"]);
-                var validate = root.Query<Button>().ToList().Single(b => b.text == "Validate detour");
-                Assert.IsFalse(validate.enabledSelf, "the first graph is still in flight");
+                var suggest = root.Q<Button>("route-suggest");
+                Assert.IsFalse(suggest.enabledSelf, "the first graph is still in flight");
                 Assert.AreEqual(1, graphs);
 
                 raw["snapshot_id"] = Guid.NewGuid().ToString();
@@ -71,7 +71,7 @@ namespace Formula9.Tests
                 // The stale response cannot install a graph; the queued reload obtains the new one.
                 for (var i = 0; i < 30 && graphs < 2; i++) await Task.Delay(10);
                 Assert.AreEqual(2, graphs);
-                Assert.IsTrue(validate.enabledSelf, string.Join("; ", errors.Select(e => e.Message)));
+                Assert.IsTrue(suggest.enabledSelf, string.Join("; ", errors.Select(e => e.Message)));
                 Assert.IsEmpty(errors);
                 CollectionAssert.AreEqual(new[] { "Fleet Overview", "Route Planning", "Incident Monitor", "Charging", "Reports" }, root.Q("nav-items").Query<Label>().ToList().Select(l => l.text).ToList());
             }

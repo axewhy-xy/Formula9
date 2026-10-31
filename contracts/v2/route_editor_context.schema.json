@@ -11,6 +11,56 @@
           "title": "Edge Id",
           "type": "string"
         },
+        "fit": {
+          "anyOf": [
+            {
+              "enum": [
+                "PASS",
+                "WARN",
+                "FAIL",
+                "UNKNOWN"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fit"
+        },
+        "fit_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fit Note"
+        },
+        "path": {
+          "items": {
+            "$ref": "#/$defs/RoutePolylinePoint"
+          },
+          "maxItems": 1024,
+          "title": "Path",
+          "type": "array"
+        },
+        "road_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Road Name"
+        },
         "source": {
           "title": "Source",
           "type": "integer"
@@ -57,6 +107,64 @@
       ],
       "title": "RouteEditorNode",
       "type": "object"
+    },
+    "RouteEditorStop": {
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "node_id": {
+          "title": "Node Id",
+          "type": "integer"
+        },
+        "stop_id": {
+          "title": "Stop Id",
+          "type": "string"
+        },
+        "x": {
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "title": "Y",
+          "type": "number"
+        }
+      },
+      "required": [
+        "stop_id",
+        "name",
+        "node_id",
+        "x",
+        "y"
+      ],
+      "title": "RouteEditorStop",
+      "type": "object"
+    },
+    "RoutePolylinePoint": {
+      "additionalProperties": true,
+      "properties": {
+        "x": {
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "title": "Y",
+          "type": "number"
+        },
+        "z": {
+          "title": "Z",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "title": "RoutePolylinePoint",
+      "type": "object"
     }
   },
   "$id": "https://formula9.local/contracts/v2/route_editor_context.schema.json",
@@ -84,7 +192,7 @@
       "items": {
         "$ref": "#/$defs/RouteEditorEdge"
       },
-      "maxItems": 256,
+      "maxItems": 8192,
       "title": "Edges",
       "type": "array"
     },
@@ -99,7 +207,7 @@
       "items": {
         "$ref": "#/$defs/RouteEditorNode"
       },
-      "maxItems": 256,
+      "maxItems": 8192,
       "title": "Nodes",
       "type": "array"
     },
@@ -144,6 +252,14 @@
     "start_node_id": {
       "title": "Start Node Id",
       "type": "integer"
+    },
+    "stops": {
+      "items": {
+        "$ref": "#/$defs/RouteEditorStop"
+      },
+      "maxItems": 64,
+      "title": "Stops",
+      "type": "array"
     }
   },
   "required": [

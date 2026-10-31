@@ -207,13 +207,18 @@ Any screen showing this data must credit LTA with the `attribution` in each file
 All seven remaining Qt client workflows are available in Unity. The workspace tabs beside
 the world view are **Fleet**, **Route planning**, **Charging**, **Incidents** and **Reports**.
 
-- **Route planning:** choose a route while the session is READY. Its backend graph shows
-  directed edges, closures and endpoint node IDs. Click intermediate nodes in order, or enter
-  their IDs; Undo, Redo and Cancel draft edit the proposal. **Validate / preview** displays
-  mandatory checks, the proposed path, stop coverage, distance, duration and energy estimates.
-  Enter an approval reason and approve for every assigned shuttle. An empty via list asks
-  the backend for its configured detour. Start becomes available once the assigned route
-  avoids the closure. A revision, closure, epoch or draft change requires a fresh preview.
+- **Route planning:** the exercise runs Problem, Detour, Check, Approve, Outcome. The map shows
+  the closure and every road of the operating network. Click roads to send the shuttle along
+  them; the backend plans the loop through them and the stops, and each change is checked
+  straight away. A failed check says why in plain words and highlights the road (**Show** brings
+  it into view). A road with no recorded width or headroom can't be cleared, so it blocks
+  approval. Time, energy, distance, stop coverage and loops on charge are shown against the closed
+  route. Click a pin or use ×, Undo, Redo or Clear to change the proposal; **Suggest a detour**
+  asks for the scenario's own way round. Give a reason and approve for every assigned shuttle.
+  **Start and watch in 3D** then follows the shuttle as it drives that exact geometry, and
+  **What happened** reports the stops served, each loop's measured time and energy, and whether
+  service was preserved. A revision, closure, epoch or draft change requires a fresh check.
+  The map data has no turn restrictions, so U-turns are the only turns refused.
 - **Charging:** review battery state, reserve forecasts, charger occupancy and offered
   consequences. Select a passing, unexpired option, enter a reason, then use
   **Reserve / Continue service**. The backend applies the decision and determines all motion
@@ -238,8 +243,8 @@ the world view are **Fleet**, **Route planning**, **Charging**, **Incidents** an
   posts `/api/v2/scenes/{scene_revision}/readiness` with the pinned manifest and asset hashes.
   Start remains disabled until that report succeeds; use **Retry 3D** after a load failure.
 
-For the default integrated exercise: create a session, open Route planning, validate the
-default detour, enter a reason, approve, then start. Charging and incident decisions become
+For the default integrated exercise: create a session, open Route planning, click roads round
+the closure (or ask for a suggestion), enter a reason, approve, then start. Charging and incident decisions become
 available as the exercise runs. Unsupported route metadata and failed or unknown mandatory
 checks are shown as such; Unity does not fabricate a feasible path.
 
@@ -279,8 +284,8 @@ The clips in `Resources/Formula9/Audio` are copies of the web app's files:
 | Sound | Clip | Plays when |
 |---|---|---|
 | Button hover | `ui_button_hover.wav` (TileHover 2) | the pointer enters an enabled button of the main simulator, including Start scenario; never on click |
-| Start | `ui_start_click.wav` (UI_Hover 6) | **Start scenario** is clicked |
-| Map point | `ui_map_point.wav` (UI Hover New 1) | a node is picked for a route on the map |
+| Start | `ui_start_click.wav` (UI_Hover 6) | **Start scenario** or **Start and watch in 3D** is clicked |
+| Map point | `ui_map_point.wav` (UI Hover New 1) | a road is picked for a route on the map |
 | Dropdown | `ui_map_point.wav` at 1.15× pitch | a dropdown is opened, and when the user chooses an option |
 
 The big primary buttons (**Create training session**, **Join**) and the login page stay silent
@@ -325,7 +330,9 @@ set FORMULA9_E2E_BACKEND_URL=http://127.0.0.1:8010
 
 Never point `FORMULA9_E2E_BACKEND_URL` at the team's shared backend. The `Render` test draws the real scene and needs a GPU,
 so it is skipped under `-nographics`; set `FORMULA9_RENDER_OUT` to a `.png` path to keep the
-image.
+image. `RouteWalkthrough`, in the same category, plays the routing exercise through the real UI in Play
+mode and keeps a picture and a log line per step in `FORMULA9_WALKTHROUGH_OUT`; it also needs
+`FORMULA9_BACKEND_URL` at the isolated backend.
 
 The workflow tests also cover stale route graph replies, inclusive offer expiry ticks,
 lost approval replies, readiness payloads, and canonical mesh picks against the shared
