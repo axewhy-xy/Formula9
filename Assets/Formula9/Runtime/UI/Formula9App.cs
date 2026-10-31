@@ -847,7 +847,6 @@ namespace Formula9.UI
                 if (reply.NextSequence <= cursor) break;
                 cursor = reply.NextSequence;
             }
-            Debug.Log($"[INCIDENT MAP] Historical event replay finished: session={targetSessionId}, cursor={cursor}, through={throughSequence}");
         }
 
         // -----------------------------------------------------------------------------------

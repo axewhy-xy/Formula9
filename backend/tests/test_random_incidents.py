@@ -16,7 +16,7 @@ def test_random_incident_preview_and_approval_share_the_checkpointed_instance(ru
     client, store, service, session_id = runtime
     approve(runtime)
     send(runtime, "START")
-    advance(runtime, 100)
+    advance(runtime, 240)
     before = read(runtime)
     incident = before["incidents"][0]
     candidate = next(c for c in before["candidates"] if c["action"] == action)
@@ -130,3 +130,47 @@ def test_a_closure_on_the_occupied_road_cannot_offer_a_passing_detour(runtime):
     for field in ("tick", "vehicles", "routes", "incidents", "candidates", "disruptions"):
         assert after[field] == before[field]
     assert after["event_sequence"] == before["event_sequence"]+1  # The denied attempt is journaled.
+
+
+def test_settled_incidents_leave_the_checkpoint_but_keep_their_evidence(runtime):
+    client, store, service, session_id = runtime
+    approve(runtime)
+    send(runtime, "START")
+    advance(runtime, 240)
+    before = read(runtime)
+    incident = before["incidents"][0]
+    candidate = next(c for c in before["candidates"] if c["action"] == "WAIT")
+    command = dict(contract_version="2.0", command_id=uuid4().hex, idempotency_key=uuid4().hex,
+                   session_id=session_id, command_type="APPROVE_INCIDENT_OPTION",
+                   expected_epoch=before["session_epoch"], expected_revision=incident["aggregate_revision"],
+                   target_type="INCIDENT", target_id=incident["incident_id"],
+                   payload={"candidate_id": candidate["candidate_id"]}, reason="Hold until the road clears")
+    decision = client.post(f"/api/v2/sessions/{session_id}/commands", json=command)
+    assert decision.json()["status"] == "APPLIED", decision.text
+
+    def expire(actor):
+        closure = next(d for d in actor.domain.disruptions
+                       if d.disruption_id == actor.random_incident["disruption_id"])
+        actor.current_tick = closure.active_until_tick-2
+        actor.incident_due_tick = 10**9
+
+    stage_boundary(runtime, expire)
+    advance(runtime, 4)
+    assert read(runtime)["incidents"][0]["state"] == "RESOLVED"
+    assert service.sessions[session_id].actor.random_incidents == []
+    assert store.runtime(session_id)[1]["workflow"]["random_incidents"] == []
+
+    # A retry after pruning still returns the original receipt, and evidence stays readable.
+    retried = client.post(f"/api/v2/sessions/{session_id}/commands", json=command).json()
+    for key in ("command_id", "status", "applied_tick", "result_event_id", "target_revision"):
+        assert retried[key] == decision.json()[key]
+    for view in ("history", "debrief"):
+        response = client.get(f"/api/v2/sessions/{session_id}/incidents/{incident['incident_id']}/{view}")
+        assert response.status_code == 200, response.text
+
+    # An empty active list must not restart the scripted first-incident path.
+    stage_boundary(runtime, lambda actor: setattr(actor, "incident_due_tick", actor.current_tick))
+    advance(runtime, 2)
+    actor = service.sessions[session_id].actor
+    assert actor.random_incident["incident_id"] != incident["incident_id"]
+    assert actor.random_incident["clear_after_ticks"] == round(30/actor.STEP_S)

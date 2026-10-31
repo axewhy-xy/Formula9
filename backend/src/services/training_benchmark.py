@@ -390,8 +390,13 @@ def run(output: Path, *, ticks=None, validation_samples=None, reconnect_samples=
                     mark("charger_reserved", store.snapshot(session_id))
 
                     detected = wait_for(client, store, session_id, lambda s: bool(s.incidents), "incident_detected")
+                    # Random incidents fire mid-route, so the hold is measured from detection.
+                    held = wait_for(client, store, session_id, lambda s: any(a.position != b.position
+                        for a, b in zip(s.vehicles[1:], detected.vehicles[1:])), "incident_hold_observed")
                     check("incident_stops_only_affected_vehicle", detected.vehicles[0].service_state == "AWAITING_GUIDANCE"
-                          and detected.vehicles[0].position == initial.vehicles[0].position
+                          and held.vehicles[0].service_state == "AWAITING_GUIDANCE"
+                          and detected.vehicles[0].position != initial.vehicles[0].position
+                          and held.vehicles[0].position == detected.vehicles[0].position
                           and detected.vehicles[1].position != initial.vehicles[1].position)
                     check("depot_return_executes", detected.vehicles[4].service_state == "RETURNING_TO_DEPOT"
                           and detected.vehicles[4].position != initial.vehicles[4].position)
@@ -401,7 +406,8 @@ def run(output: Path, *, ticks=None, validation_samples=None, reconnect_samples=
                           and history["source_mode"] == "HISTORICAL_SIMULATION")
                     current = store.snapshot(session_id)
                     incident = current.incidents[0]
-                    option = next(c for c in current.candidates if c.action == "WAIT")
+                    # WAIT would hold for the first random closure's full 300 s.
+                    option = next(c for c in current.candidates if c.action == "ESCALATE")
                     decision = command(current, "APPROVE_INCIDENT_OPTION", target_type="INCIDENT",
                         target_id=incident.incident_id, revision=incident.aggregate_revision,
                         payload={"candidate_id": option.candidate_id})

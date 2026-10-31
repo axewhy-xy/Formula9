@@ -20,6 +20,7 @@ from dataclasses import asdict
 from functools import lru_cache
 import hashlib
 import json
+import logging
 import math
 from pathlib import Path
 from uuid import uuid4
@@ -38,6 +39,8 @@ from src.services.incidents import FIXTURE_PATH as INCIDENT_FIXTURE, IncidentSer
 from src.services.incident_scenarios.simulated_catalog import SimulatedIncidentCatalog
 from src.services.route_edit import RouteEditService
 from src.services.session_actor import SessionActor
+
+logger = logging.getLogger(__name__)
 
 FIXTURE_PATH = Path(__file__).resolve().parents[2] / "fixtures/m2_integrated.json"
 SCENARIO_SELECTOR = "scenario-m2-integrated-r1"
@@ -163,7 +166,7 @@ class IntegratedSessionActor(SessionActor):
             self.incident_catalog.policy["first_max_s"]) / self.STEP_S)
         self.random_incident = None
         self.random_incidents = []
-        print(f"[INCIDENT DEBUG] session={session_id} first_due_tick={self.incident_due_tick}", flush=True)
+        logger.debug("[INCIDENT DEBUG] session=%s first_due_tick=%s", session_id, self.incident_due_tick)
         self.stop_names = {}
         self.loop_started = {}
         data = self.definition.data
@@ -416,11 +419,11 @@ class IntegratedSessionActor(SessionActor):
             if traffic_hold:
                 mode = self.modes[shuttle.ID]  # Preserve the intended service mode during traffic holds.
             if shuttle.ID == 0 and mode != self.modes[shuttle.ID] and mode == "AWAITING_GUIDANCE":
-                print(f"[INCIDENT HOLD] shuttle-01 entering AWAITING_GUIDANCE at tick={self.current_tick}, "
-                      f"progress={shuttle.progress:.2f}m; current incident must be reviewed", flush=True)
+                logger.debug("[INCIDENT HOLD] shuttle-01 entering AWAITING_GUIDANCE at tick=%s, "
+                             "progress=%.2fm; current incident must be reviewed", self.current_tick, shuttle.progress)
             if shuttle.ID == 0 and self.modes[shuttle.ID] == "AWAITING_GUIDANCE" and mode == "IN_SERVICE":
-                print(f"[INCIDENT HOLD] shuttle-01 released at tick={self.current_tick}; "
-                      "check incident expiry or operator decision", flush=True)
+                logger.debug("[INCIDENT HOLD] shuttle-01 released at tick=%s; "
+                             "check incident expiry or operator decision", self.current_tick)
             changed = mode != self.modes[shuttle.ID] or starting
             self.modes[shuttle.ID] = mode
             if changed:
@@ -488,15 +491,10 @@ class IntegratedSessionActor(SessionActor):
         shuttle = self.shuttles[0]
         vehicle = self.domain.vehicles[0]
         route = next((r for r in self.domain.routes if r.route_id == vehicle.route_id), None)
-        if self.current_tick == self.incident_due_tick or self.current_tick % 20 == 0:
-            print(f"[INCIDENT DEBUG] tick={self.current_tick} next_due={self.incident_due_tick} remaining_s={max(0, (self.incident_due_tick-self.current_tick)*self.STEP_S):.1f} session={self.session_id} "
-                  f"status={self.domain.session.status} shuttle0_mode={self.modes[shuttle.ID]} "
-                  f"route={vehicle.route_id} revision={vehicle.route_revision} "
-                  f"progress={shuttle.progress:.2f} route_found={route is not None}", flush=True)
         if self.modes[shuttle.ID] not in {"IN_SERVICE", "DETOURING"} or route is None:
             return
         if not route.directed_edge_ids or len(route.directed_edge_ids) != len(route.edge_paths_m):
-            print("[INCIDENT DEBUG] no usable directed edge geometry for approved route", flush=True)
+            logger.debug("[INCIDENT DEBUG] no usable directed edge geometry for approved route")
             return
         blocked = {edge for d in self.domain.disruptions
                    if d.active_from_tick <= self.current_tick
@@ -516,15 +514,16 @@ class IntegratedSessionActor(SessionActor):
         # Real graph edges only. Peer route hash IDs are not road graph edges.
         network_edges = sorted(set(self.definition.data["edges"]) - blocked)
         if not network_edges:
-            print("[INCIDENT DEBUG] no available network edges", flush=True)
+            logger.debug("[INCIDENT DEBUG] no available network edges")
             return
-        first_incident = len(self.random_incidents) == 0
+        # Settled incidents leave random_incidents, so an empty list is not "first".
+        first_incident = self.random_incident is None
         if first_incident:
             # Deterministic TEST requirement: road closure ahead on the approved route.
             # Do not use a permanently closed edge or a segment already passed.
             eligible = [candidate for candidate in upcoming if candidate in network_edges]
             if not eligible:
-                print("[INCIDENT DEBUG] first incident delayed: no usable upcoming edge", flush=True)
+                logger.debug("[INCIDENT DEBUG] first incident delayed: no usable upcoming edge")
                 return
             edge = eligible[0]
             # Prefer a closure with a usable live detour. A road reachable only
@@ -544,10 +543,10 @@ class IntegratedSessionActor(SessionActor):
                 if routes.continuation_preview(hypothetical, vehicle.vehicle_id).approvable:
                     edge = candidate
                     break
-            print("[INCIDENT DEBUG] TYPE_SELECTED first=True kind=ROAD_BLOCK", flush=True)
+            logger.debug("[INCIDENT DEBUG] TYPE_SELECTED first=True kind=ROAD_BLOCK")
             template = next((t for t in self.incident_catalog.templates if t.kind == "ROAD_BLOCK"), None)
             if template is None:
-                print("[INCIDENT DEBUG] first incident delayed: ROAD_BLOCK template missing", flush=True)
+                logger.debug("[INCIDENT DEBUG] first incident delayed: ROAD_BLOCK template missing")
                 return
         else:
             # Weighted type selection, using the session's checkpointed RNG.
@@ -557,11 +556,11 @@ class IntegratedSessionActor(SessionActor):
             chosen_kind = "ROAD_ACCIDENT" if self.rng.random() < accident_probability else "ROAD_BLOCK"
             matching = [item for item in self.incident_catalog.templates if item.kind == chosen_kind]
             if not matching:
-                print(f"[INCIDENT DEBUG] no template for {chosen_kind}", flush=True)
+                logger.debug("[INCIDENT DEBUG] no template for %s", chosen_kind)
                 return
             template = self.rng.choice(matching)
-            print(f"[INCIDENT DEBUG] TYPE_SELECTED first=False kind={template.kind} "
-                  f"accident_probability={accident_probability:.2f}", flush=True)
+            logger.debug("[INCIDENT DEBUG] TYPE_SELECTED first=False kind=%s accident_probability=%.2f",
+                         template.kind, accident_probability)
             # Explicit impact policy, not a uniformly random network edge.
             # 65% of incidents are intentionally relevant to Shuttle 01;
             # the remainder are intentionally off its remaining route and
@@ -593,11 +592,11 @@ class IntegratedSessionActor(SessionActor):
             elif indirect_candidates:
                 pool = indirect_candidates
             else:
-                print("[INCIDENT DEBUG] no eligible road for a new incident", flush=True)
+                logger.debug("[INCIDENT DEBUG] no eligible road for a new incident")
                 return
             edge = self.rng.choice(pool)
-            print(f"[INCIDENT DEBUG] IMPACT_POLICY target={wants_impact} probability={impact_probability:.2f} "
-                  f"pool={len(pool)} chosen={edge} active_guidance={active_guidance}", flush=True)
+            logger.debug("[INCIDENT DEBUG] IMPACT_POLICY target=%s probability=%.2f pool=%s chosen=%s active_guidance=%s",
+                         wants_impact, impact_probability, len(pool), edge, active_guidance)
         adjacency = self.definition.data["edges"]
         u, v = adjacency[edge]
         neighbors = {candidate for candidate, (a, b) in adjacency.items()
@@ -644,7 +643,9 @@ class IntegratedSessionActor(SessionActor):
         self.random_incident = selection
         self.random_incidents.append(selection)
         self.incident_due_tick = self.current_tick + self.incident_catalog.next_interval_ticks(self.rng, self.STEP_S)
-        print(f"[INCIDENT DEBUG] SELECTED first={first_incident} id={selection['incident_id']} edge={edge} impact={impacted} guidance={requires_guidance} next_due={self.incident_due_tick} marker={selection['map_marker']}", flush=True)
+        logger.debug("[INCIDENT DEBUG] SELECTED first=%s id=%s edge=%s impact=%s guidance=%s next_due=%s marker=%s",
+                     first_incident, selection["incident_id"], edge, impacted, requires_guidance,
+                     self.incident_due_tick, selection["map_marker"])
 
     def tick(self):
         self.command_tick += 1

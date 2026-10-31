@@ -435,10 +435,6 @@ class TrainingSessionService:
                 staged = deepcopy(actor)
             with self.store.trace.span("tick.actor", **tags):
                 staged.tick()
-                if isinstance(staged, IntegratedSessionActor) and staged.current_tick % 20 == 0:
-                    print(f"[INCIDENT DEBUG] ACTOR tick={staged.current_tick} "
-                          f"paused={staged.is_paused} modes={staged.modes} "
-                          f"selected={staged.random_incident is not None}", flush=True)
         if staged.should_emit_snapshot():
             if baseline is None:
                 baseline = self.store.snapshot(actor.session_id)

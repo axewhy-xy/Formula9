@@ -41,14 +41,19 @@ class IncidentService:
         """Resolve the same checkpointed instance for previews, history and decisions."""
         if incident_id == self.config["incident_id"]:
             return self
-        if not self.owns(snapshot) or not any(i.incident_id == incident_id for i in snapshot.incidents):
+        incident = next((i for i in snapshot.incidents if i.incident_id == incident_id), None)
+        if not self.owns(snapshot) or incident is None:
             raise TrainingStoreError("INVALID_REFERENCE", "Incident has not been detected")
         _, state = store.runtime(snapshot.session_id)
         workflow = state.get("workflow", {})
         selections = workflow.get("random_incidents") or [workflow.get("random_incident")]
         selection = next((item for item in selections if item and item["incident_id"] == incident_id), None)
         if selection is None:
-            raise TrainingStoreError("INVALID_REFERENCE", "Incident configuration is unavailable")
+            # Settled incidents leave the checkpoint. Their evidence reads use the
+            # event log and shared rubric, not the per-incident selection.
+            if incident.state not in {"RESOLVED", "UNRESOLVED"}:
+                raise TrainingStoreError("INVALID_REFERENCE", "Incident configuration is unavailable")
+            return IncidentService(self.routes, fixture={**self.config, "incident_id": incident_id})
         return IncidentService(self.routes, fixture={**self.config, **selection})
 
     def _incident(self, snapshot: FullSnapshot, incident_id: str) -> Incident:

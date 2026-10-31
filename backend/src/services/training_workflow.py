@@ -14,13 +14,15 @@ Description:
 """
 
 from copy import deepcopy
-import traceback
+import logging
 from uuid import uuid4
 
 from contracts.v2.models import Event
 from src.persistence.training_store import TrainingStoreError
 from src.services.battery_decision import submit_battery_decision
 from src.services.incidents import IncidentService
+
+logger = logging.getLogger(__name__)
 
 
 def session_incidents(actor, incident_id=None):
@@ -33,9 +35,24 @@ def session_incidents(actor, incident_id=None):
     config = deepcopy(service.config)
     if selection is None:
         config["trigger_tick"] = 10**12
+        # A settled incident left the active list; a retried or late decision still targets it.
+        if incident_id:
+            config["incident_id"] = incident_id
     else:
         config.update(selection)
     return IncidentService(actor.definition.routes, fixture=config)
+
+
+def _settled(item, snapshot):
+    """A settled incident with an expired closure has no remaining state transitions."""
+    incident = next((i for i in snapshot.incidents if i.incident_id == item["incident_id"]), None)
+    if incident is None or not (incident.state == "RESOLVED" or
+            (incident.state == "UNRESOLVED" and item.get("requires_guidance", True))):
+        return False
+    disruption = next((d for d in snapshot.disruptions
+                       if d.disruption_id == item.get("disruption_id")), None)
+    return disruption is None or (disruption.active_until_tick is not None
+                                  and snapshot.tick >= disruption.active_until_tick)
 
 
 class ActorCommit:
@@ -165,38 +182,30 @@ def publish_workflow(store, actor, snapshot, checkpoint):
             ActorCommit(store, actor, checkpoint, current=False), snapshot
         )
 
+    # Keep only live selections in every checkpoint and actor copy. The durable
+    # event log keeps each settled incident's evidence.
+    actor.random_incidents = [item for item in selections if not _settled(item, snapshot)]
     result = snapshot
-    for item in selections:
+    for item in actor.random_incidents:
         incident_id = item["incident_id"]
         existing = next((i for i in result.incidents if i.incident_id == incident_id), None)
-        # Historical, settled incidents have no remaining state transitions.
-        # Avoid needlessly reprocessing and committing them every simulation tick.
-        if existing is not None and (existing.state == "RESOLVED" or
-                (existing.state == "UNRESOLVED" and item.get("requires_guidance", True))):
-            disruption = next((d for d in result.disruptions
-                               if d.disruption_id == item.get("disruption_id")), None)
-            if disruption is None or (disruption.active_until_tick is not None
-                                     and result.tick >= disruption.active_until_tick):
-                continue
         try:
             if result.tick >= item.get("trigger_tick", 10**12) and (
                 existing is None or result.tick % 100 == 0
             ):
-                print(f"[INCIDENT FLOW] BEGIN tick={result.tick} id={incident_id} "
-                      f"state={getattr(existing, 'state', None)} "
-                      f"guidance={item.get('requires_guidance')} ", flush=True)
+                logger.debug("[INCIDENT FLOW] BEGIN tick=%s id=%s state=%s guidance=%s", result.tick, incident_id,
+                             getattr(existing, "state", None), item.get("requires_guidance"))
             unit = ActorCommit(store, actor, checkpoint, current=False)
             result = session_incidents(actor, incident_id).publish(unit, result)
             if result.tick >= item.get("trigger_tick", 10**12) and (
                 existing is None or result.tick % 100 == 0
             ):
                 updated = next((i for i in result.incidents if i.incident_id == incident_id), None)
-                print(f"[INCIDENT FLOW] COMMITTED tick={result.tick} id={incident_id} "
-                      f"state={getattr(updated, 'state', None)} "
-                      f"snapshot={result.snapshot_id} event_sequence={result.event_sequence}", flush=True)
+                logger.debug("[INCIDENT FLOW] COMMITTED tick=%s id=%s state=%s snapshot=%s event_sequence=%s",
+                             result.tick, incident_id, getattr(updated, "state", None),
+                             result.snapshot_id, result.event_sequence)
         except Exception:
-            print(f"[INCIDENT FLOW] FAILED tick={result.tick} id={incident_id}", flush=True)
-            traceback.print_exc()
+            logger.exception("[INCIDENT FLOW] FAILED tick=%s id=%s", result.tick, incident_id)
             raise
     # If all incidents were settled/skipped, the actor still needs a committed
     # movement snapshot and checkpoint for this presentation boundary.

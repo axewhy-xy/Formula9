@@ -192,8 +192,7 @@ def test_one_live_session_runs_route_incident_depot_and_charging(runtime):
     assert detected["vehicles"][1]["position"] != initial["vehicles"][1]["position"]
     incident_id = detected["incidents"][0]["incident_id"]
     history = client.get(f"/api/v2/sessions/{session_id}/incidents/{incident_id}/history").json()
-    assert not history["complete"] and history["unavailable_reason"]  # Detection precedes ten seconds of history.
-    assert history["source_mode"] == "HISTORICAL_SIMULATION" and history["camera"] is None
+    assert history["complete"] and history["source_mode"] == "HISTORICAL_SIMULATION" and history["camera"] is None
     assert incident_decision(runtime, "ESCALATE")["status"] == "APPLIED"
     advance(runtime, 240)
     continued = read(runtime)

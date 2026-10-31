@@ -117,8 +117,6 @@ namespace Formula9.World
                     incidentMarkers[evt.EntityId] = (new Vector2(x.Value, y.Value), a, b,
                         marker.Value<string>("edge_id") ?? "", evt.Data.Value<string>("incident_type") ?? "INCIDENT", impact);
                 }
-            if (snapshot != null && snapshot.Incidents.Count > 0 && incidentMarkers.Count == 0)
-                Debug.LogWarning($"[INCIDENT MAP] {snapshot.Incidents.Count} incidents in snapshot, but no map_marker in {events?.Count() ?? 0} retained events. Check event replay / map_marker payload.");
             drawing.MarkDirtyRepaint();
         }
         public event Action<string> VehicleSelected;
