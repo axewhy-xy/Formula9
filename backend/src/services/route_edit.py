@@ -19,8 +19,12 @@ import networkx as nx
 from contracts.v2.models import DispatcherCommand, Event, FullSnapshot
 from contracts.v2.route_edit import (
     RouteApprovalRequest, RouteCheck, RouteEditPreview, RouteEditRequest, RouteMetrics, RouteEditorContext,
+    RouteServiceImpact,
 )
+from src.energy.forecast import reserve_kwh
+from src.energy.model import ENERGY_R1
 from src.persistence.training_store import TrainingStore, TrainingStoreError
+from src.routing.operating_network import OperatingNetwork, capitalised
 from src.routing.road_graph import RoadGraphRepository, get_road_graph_repository
 
 
@@ -31,6 +35,13 @@ def edge_id(key: tuple[int | str, int, str]) -> str:
     return f"{key[0]}:{key[1]}:{key[2]}"
 
 
+def stop_label(stop_id: str) -> str:
+    """A stop's name for people. Scenario stops are named <LTA code>-<slug of its name>."""
+    code, _, name = stop_id.partition("-")
+    words = (name if code.isdigit() and name else stop_id).replace("-", " ")
+    return " ".join(word.upper() if len(word) <= 3 and any(c.isdigit() for c in word) else word.capitalize() for word in words.split())
+
+
 class RouteEditService:
     def __init__(self, graph_repository: RoadGraphRepository, fixture_path: Path = FIXTURE_PATH,
                  *, fixture: dict | None = None) -> None:
@@ -38,6 +49,9 @@ class RouteEditService:
         self._fixture = deepcopy(fixture) if fixture is not None else json.loads(fixture_path.read_text(encoding="utf-8"))
         self._previews: OrderedDict[str, tuple[RouteEditRequest, RouteEditPreview]] = OrderedDict()
         self._lock = RLock()
+        # Routes with no operating network keep to their curated paths and curated metadata.
+        network = self._fixture.get("network")
+        self._network = OperatingNetwork(network) if network is not None else None
 
     def _curated_paths(self) -> list[list[str]]:
         return [self._fixture["original_directed_edge_ids"], self._fixture["detour_directed_edge_ids"],
@@ -55,10 +69,8 @@ class RouteEditService:
             raise TrainingStoreError("INVALID_REFERENCE", "No curated operating metadata for this route")
         graph = self._graph_repository.get().graph
         edges = self._edges()
-        identifiers = sorted({edge for path in self._curated_paths() for edge in path})
-        closed = {edge for d in snapshot.disruptions if d.active_from_tick <= snapshot.tick and
-                  (d.active_until_tick is None or snapshot.tick < d.active_until_tick)
-                  for edge in d.affected_edge_ids}
+        identifiers = sorted(self._network.edges) if self._network else sorted({edge for path in self._curated_paths() for edge in path})
+        closed = self._closed(snapshot)
         # Missing metadata stays unknown in preview checks; the display must not invent it.
         assumptions = ["Simulation estimates; configuration-dependent training rules."]
         for key, label, unit in (("cruise_speed_kph", "Cruise speed cap", "km/h"),
@@ -68,6 +80,11 @@ class RouteEditService:
             assumptions.append(f"{label}: {config.get(key, 'UNKNOWN')} {unit}")
         assumptions.append("Duration uses the lower of cruise cap and graph speed estimate, plus stop dwell; "
                            "energy uses distance × travel energy + duration × auxiliary load.")
+        if self._network:
+            assumptions.append("Road width, height limits and access come from OpenStreetMap tags where mapped; a lane is "
+                               f"otherwise assumed {self._network.rules['default_lane_width_m']} m wide and an open road "
+                               f"{self._network.rules['open_road_headroom_m']} m clear. Roads with no basis are unknown and "
+                               "block approval. Mapped turn restrictions are not in this extract; only U-turns are refused.")
         return RouteEditorContext(session_id=snapshot.session_id, session_epoch=snapshot.session_epoch,
             route_id=route_id, route_revision=route.revision, scene_revision=snapshot.scene_revision,
             fixture_id=config["fixture_id"], start_node_id=config["start_node_id"],
@@ -75,9 +92,35 @@ class RouteEditService:
             nodes=[dict(node_id=node, x=graph.nodes[node]["x"], y=graph.nodes[node]["y"],
                         z=graph.nodes[node].get("z", 0.0))
                    for node in config["operating_node_ids"] if node in graph],
-            edges=[dict(edge_id=edge, source=edges[edge][0], target=edges[edge][1], closed=edge in closed)
-                   for edge in identifiers if edge in edges],
+            edges=[self._editor_edge(edge, edges[edge], closed) for edge in identifiers if edge in edges],
+            stops=[dict(stop_id=stop, name=stop_label(stop), node_id=node, x=graph.nodes[node]["x"], y=graph.nodes[node]["y"])
+                   for stop, node in config["required_stops"].items() if node in graph and stop in route.required_stop_ids],
             original_directed_edge_ids=route.directed_edge_ids, assumptions=assumptions)
+
+    def _editor_edge(self, identifier: str, edge: tuple[int, int, dict], closed: set[str]) -> dict:
+        result = dict(edge_id=identifier, source=edge[0], target=edge[1], closed=identifier in closed)
+        if self._network:
+            status, note = self._network.fit(identifier, self._fixture)
+            result.update(road_name=self._network.road_name(identifier), fit=status, fit_note=note,
+                          path=[dict(x=x, y=y, z=0.0) for x, y in self._network.edges[identifier]["path"]])
+        return result
+
+    @staticmethod
+    def _closed(snapshot: FullSnapshot) -> set[str]:
+        return {edge for d in snapshot.disruptions if d.active_from_tick <= snapshot.tick and
+                (d.active_until_tick is None or snapshot.tick < d.active_until_tick)
+                for edge in d.affected_edge_ids}
+
+    def _stop_visits(self, ids: list[str], nodes: list[int]) -> dict[str, list[int]]:
+        """Each required stop's positions in the node path where it is actually served: from its kerb."""
+        config = self._fixture
+        approaches = config.get("stop_approach_edge_ids", {})
+        visits: dict[str, list[int]] = {}
+        for stop, node in config["required_stops"].items():
+            allowed = approaches.get(stop)
+            visits[stop] = [index for index, at in enumerate(nodes) if at == node and
+                            (allowed is None or (index > 0 and ids[index - 1] in allowed))]
+        return visits
 
     def _walk(self, ids: list[str], edges: dict[str, tuple[int, int, dict]]) -> list[int]:
         nodes: list[int] = []
@@ -108,7 +151,8 @@ class RouteEditService:
                         float(config["cruise_speed_kph"]))
             distance += length
             duration += length / (speed / 3.6)
-        coverage = {stop: config["required_stops"].get(stop) in nodes for stop in stops}
+        visits = self._stop_visits(ids, nodes)
+        coverage = {stop: bool(visits.get(stop)) for stop in stops}
         duration += sum(coverage.values()) * float(config["stop_dwell_s"])
         duration += float(config.get("loop_end_dwell_s", 0.0))
         energy = distance / 1000 * float(config["travel_kwh_per_km"])
@@ -121,6 +165,12 @@ class RouteEditService:
         if request.directed_edge_ids is not None:
             return request.directed_edge_ids
         config = self._fixture
+        if request.waypoint_edge_ids:
+            approaches = config.get("stop_approach_edge_ids", {})
+            stops = [approaches[stop] for stop in config["required_stops"] if stop in approaches]
+            planned, self._unreached = self._network.plan(config["start_node_id"], config["destination_node_id"], stops,
+                                                          request.waypoint_edge_ids, closed, config)
+            return planned
         allowed = {edge for path in self._curated_paths() for edge in path}
         network = nx.DiGraph()
         for identifier in sorted(allowed - closed):
@@ -140,6 +190,16 @@ class RouteEditService:
             return []
         return result
 
+    def first_avoidable_edge(self, snapshot: FullSnapshot, route_id: str) -> str:
+        """The first road of a route with a way round it: blocking the shared entrance would strand the shuttle."""
+        route = next(r for r in snapshot.routes if r.route_id == route_id)
+        edges, closed = self._edges(), self._closed(snapshot)
+        draft = RouteEditRequest(route_id=route_id, expected_route_revision=route.revision, draft_revision=1)
+        for identifier in route.directed_edge_ids:
+            if self._candidate(draft, edges, closed | {identifier}):
+                return identifier
+        return route.directed_edge_ids[0]
+
     def preview(self, snapshot: FullSnapshot, request: RouteEditRequest, *, retain: bool = True) -> RouteEditPreview:
         route = next((r for r in snapshot.routes if r.route_id == request.route_id), None)
         if route is None:
@@ -150,17 +210,28 @@ class RouteEditService:
             raise TrainingStoreError("INVALID_REFERENCE", "No curated operating metadata for this route")
         if self._graph_repository.get().routing_mode != "directed":
             raise TrainingStoreError("UNKNOWN_CONSTRAINT", "Directed road metadata is unavailable")
+        if request.waypoint_edge_ids:
+            if self._network is None:
+                raise TrainingStoreError("UNKNOWN_CONSTRAINT", "This route has no operating road network to pick from")
+            unknown = next((key for key in request.waypoint_edge_ids if key not in self._network.edges), None)
+            if unknown is not None:
+                raise TrainingStoreError("INVALID_REFERENCE", "Waypoint is not a road of the operating network")
         edges = self._edges()
-        closed = {identifier for disruption in snapshot.disruptions
-                  if disruption.active_from_tick <= snapshot.tick and
-                  (disruption.active_until_tick is None or snapshot.tick < disruption.active_until_tick)
-                  for identifier in disruption.affected_edge_ids}
-        ids = self._candidate(request, edges, closed)
+        closed = self._closed(snapshot)
+        unreached = None
+        with self._lock:
+            self._unreached = None
+            ids = self._candidate(request, edges, closed)
+            unreached = self._unreached
         nodes = self._walk(ids, edges)
         config = self._fixture
         checks: list[RouteCheck] = []
-        def check(name: str, status: str, message: str, feature: str | None = None) -> None:
-            checks.append(RouteCheck(check=name, status=status, message=message, feature_id=feature))
+        network = self._network
+        def road(identifier: str | None) -> str:
+            return network.road_name(identifier) if network and identifier else "this road"
+        def check(name: str, status: str, message: str, feature: str | None = None, edges_at_fault: list[str] | None = None) -> None:
+            checks.append(RouteCheck(check=name, status=status, message=message, feature_id=feature,
+                                     edge_ids=edges_at_fault if edges_at_fault is not None else [feature] if feature in edges else []))
 
         missing = next((identifier for identifier in ids if identifier not in edges), None)
         wrong_way = False
@@ -178,6 +249,8 @@ class RouteEditService:
             direction_message = "Route runs opposite the required service direction"
         if missing:
             check("GEOMETRY", "FAIL", "Unknown directed road segment", missing)
+        elif unreached:
+            check("GEOMETRY", "FAIL", f"The shuttle can't reach {road(unreached)} and still complete its loop: it would have to U-turn or drive against a one-way road.", unreached)
         elif not ids:
             check("GEOMETRY", "FAIL", "No route connects the requested nodes within the curated network")
         elif not nodes or nodes[0] != config["start_node_id"] or nodes[-1] != config["destination_node_id"]:
@@ -186,29 +259,39 @@ class RouteEditService:
             check("GEOMETRY", "PASS", "Directed segments form a continuous endpoint-to-endpoint path")
         check("DIRECTION", "FAIL" if wrong_way else "PASS" if nodes else "UNKNOWN",
               direction_message if wrong_way or nodes else "Direction cannot be checked without a path", missing)
-        closed_hit = next((identifier for identifier in ids if identifier in closed), None)
-        check("CLOSURE", "FAIL" if closed_hit else "PASS", "Route uses an active closure" if closed_hit else "Active closure avoided", closed_hit)
-        coverage = {stop: config["required_stops"].get(stop) in nodes for stop in route.required_stop_ids}
+        closed_hits = list(dict.fromkeys(identifier for identifier in ids if identifier in closed))
+        closed_hit = closed_hits[0] if closed_hits else None
+        check("CLOSURE", "FAIL" if closed_hit else "PASS",
+              (f"{capitalised(road(closed_hit))} is closed: the route can't use it." if network else "Route uses an active closure") if closed_hit else "Active closure avoided",
+              closed_hit, closed_hits)
+        visits = self._stop_visits(ids, nodes)
+        coverage = {stop: bool(visits.get(stop)) for stop in route.required_stop_ids}
         missed = next((stop for stop, served in coverage.items() if not served), None)
-        stop_positions = [nodes.index(config["required_stops"][stop]) for stop in route.required_stop_ids] if not missed else []
-        out_of_order = not missed and stop_positions != sorted(stop_positions)
+        stop_positions = []
+        for stop in route.required_stop_ids if not missed else []:
+            later = [index for index in visits[stop] if not stop_positions or index > stop_positions[-1]]
+            stop_positions.append(later[0] if later else -1)
+        out_of_order = not missed and -1 in stop_positions
         check("STOPS", "FAIL" if missed or out_of_order else "PASS",
-              "Required stop is missing" if missed else "Required stops are out of order" if out_of_order else "Required stops are served in order",
+              (f"The route misses {stop_label(missed)}." if network else "Required stop is missing") if missed else "Required stops are out of order" if out_of_order else "Required stops are served in order",
               missed or (route.required_stop_ids[0] if out_of_order else None))
         outside = next((str(node) for node in nodes if node not in config["operating_node_ids"]), None)
         check("OPERATING_AREA", "FAIL" if outside else "PASS", "Route leaves the configured operating area" if outside else "Route stays inside the configured operating area", outside)
-        curated = {edge for path in self._curated_paths() for edge in path}
-        uncurated = next((identifier for identifier in ids if identifier not in curated), None)
-        fit_known = all(name in config for name in ("road_width_m", "road_height_m", "vehicle_width_m", "vehicle_height_m", "minimum_side_clearance_m")) and not uncurated
-        clearance = float(config["road_width_m"]) - float(config["vehicle_width_m"]) if fit_known else 0.0
-        fit_fail = fit_known and (clearance < 2 * float(config["minimum_side_clearance_m"]) or float(config["road_height_m"]) < float(config["vehicle_height_m"]))
-        check("VEHICLE_FIT", "UNKNOWN" if not fit_known else "FAIL" if fit_fail else "PASS",
-              "Vehicle clearance is not curated for this segment" if not fit_known else "Vehicle does not fit" if fit_fail else "Curated vehicle clearance is sufficient", uncurated)
-        # Additional authored alternatives opt in to explicit turn coverage.
-        turn_paths = self._curated_paths() if "alternative_directed_edge_paths" in config else [config["detour_directed_edge_ids"]]
-        known_turns = {(a, b) for path in turn_paths for a, b in zip(path, path[1:])}
-        unknown_turn = next((f"{a}>{b}" for a, b in zip(ids, ids[1:]) if (a, b) not in known_turns), None)
-        check("TURNS", "UNKNOWN" if unknown_turn else "PASS", "Turn rule is not curated" if unknown_turn else "Curated turns are permitted", unknown_turn)
+        if network:
+            self._network_checks(ids, check)
+        else:
+            curated = {edge for path in self._curated_paths() for edge in path}
+            uncurated = next((identifier for identifier in ids if identifier not in curated), None)
+            fit_known = all(name in config for name in ("road_width_m", "road_height_m", "vehicle_width_m", "vehicle_height_m", "minimum_side_clearance_m")) and not uncurated
+            clearance = float(config["road_width_m"]) - float(config["vehicle_width_m"]) if fit_known else 0.0
+            fit_fail = fit_known and (clearance < 2 * float(config["minimum_side_clearance_m"]) or float(config["road_height_m"]) < float(config["vehicle_height_m"]))
+            check("VEHICLE_FIT", "UNKNOWN" if not fit_known else "FAIL" if fit_fail else "PASS",
+                  "Vehicle clearance is not curated for this segment" if not fit_known else "Vehicle does not fit" if fit_fail else "Curated vehicle clearance is sufficient", uncurated)
+            # Additional authored alternatives opt in to explicit turn coverage.
+            turn_paths = self._curated_paths() if "alternative_directed_edge_paths" in config else [config["detour_directed_edge_ids"]]
+            known_turns = {(a, b) for path in turn_paths for a, b in zip(path, path[1:])}
+            unknown_turn = next((f"{a}>{b}" for a, b in zip(ids, ids[1:]) if (a, b) not in known_turns), None)
+            check("TURNS", "UNKNOWN" if unknown_turn else "PASS", "Turn rule is not curated" if unknown_turn else "Curated turns are permitted", unknown_turn)
         original_ids = route.directed_edge_ids
         original_nodes = self._walk(original_ids, edges)
         edited = self._metrics(ids, nodes, route.required_stop_ids, edges)
@@ -229,13 +312,55 @@ class RouteEditService:
                                               "z": float(self._graph_repository.get().graph.nodes[node].get("z", 0.0))}
                                              for node in nodes], checks=checks,
                                    validation=validation, approvable=validation in {"PASS", "WARN"},
-                                   original=original, edited=edited)
+                                   original=original, edited=edited,
+                                   edge_paths=self._edge_paths(ids) if nodes else [],
+                                   service_impact=self._service_impact(snapshot, route.route_id, original, edited))
         if retain:
             with self._lock:
                 self._previews[preview.preview_id] = (request.model_copy(deep=True), preview.model_copy(deep=True))
                 while len(self._previews) > 256:
                     self._previews.popitem(last=False)
         return preview
+
+    def _network_checks(self, ids: list[str], check) -> None:
+        """Every road of the path against its own metadata, and every turn between two of them."""
+        network, config = self._network, self._fixture
+        known = [identifier for identifier in dict.fromkeys(ids) if identifier in network.edges]
+        results = {identifier: network.fit(identifier, config) for identifier in known}
+        failed = [identifier for identifier in known if results[identifier][0] == "FAIL"]
+        unknown = [identifier for identifier in known if results[identifier][0] == "UNKNOWN"]
+        at_fault = failed or unknown
+        if at_fault:
+            check("VEHICLE_FIT", "FAIL" if failed else "UNKNOWN", results[at_fault[0]][1], at_fault[0], at_fault)
+        else:
+            check("VEHICLE_FIT", "PASS", "The shuttle fits on every road of this route.")
+        # The shuttle goes round: its last road leads onto its first
+        turns = list(zip(ids, ids[1:]))
+        if ids and self._fixture["start_node_id"] == self._fixture["destination_node_id"]:
+            turns.append((ids[-1], ids[0]))
+        bad = next(((a, b) for a, b in turns if a in network.edges and b in network.edges and not network.turn_allowed(a, b)), None)
+        if bad:
+            check("TURNS", "FAIL", network.turn_description(*bad), f"{bad[0]}>{bad[1]}", list(bad))
+        else:
+            check("TURNS", "PASS", "Every turn on this route is one a shuttle can make.")
+
+    def _edge_paths(self, ids: list[str]) -> list[list[dict]]:
+        """Per-edge drawn geometry, where the road's shape is known."""
+        if not self._network or any(identifier not in self._network.edges for identifier in ids):
+            return []
+        return [[dict(x=x, y=y, z=0.0) for x, y in self._network.edges[identifier]["path"]] for identifier in ids]
+
+    def _service_impact(self, snapshot: FullSnapshot, route_id: str, original: RouteMetrics | None,
+                        edited: RouteMetrics | None) -> list[RouteServiceImpact]:
+        """How many more loops each assigned shuttle's charge buys, on either route, above its reserve."""
+        def loops(vehicle, metrics: RouteMetrics | None) -> int | None:
+            if metrics is None or metrics.energy_kwh <= 0:
+                return None
+            spare = vehicle.battery_kwh - reserve_kwh(ENERGY_R1, vehicle.battery_capacity_kwh)
+            return max(0, int(spare // metrics.energy_kwh))
+        return [RouteServiceImpact(vehicle_id=v.vehicle_id, battery_kwh=v.battery_kwh, loops_on_original=loops(v, original),
+                                   loops_on_edited=loops(v, edited))
+                for v in snapshot.vehicles if v.route_id == route_id]
 
     def _finish_approval(self, store: TrainingStore, command: DispatcherCommand):
         """Resume an accepted approval from its durable command, even without a preview cache."""
@@ -280,7 +405,9 @@ class RouteEditService:
                       source=proposed.source,
                       data={"preview_id": payload["preview_id"], "reason": command.reason,
                             "target_vehicle_ids": targets, "directed_edge_ids": payload["directed_edge_ids"],
-                            "energy_kwh": refreshed.edited.energy_kwh})
+                            "energy_kwh": refreshed.edited.energy_kwh,
+                            "original": refreshed.original.model_dump(mode="json") if refreshed.original else None,
+                            "edited": refreshed.edited.model_dump(mode="json")})
         return store.apply(command.command_id, proposed, (event,))
 
     def approve(self, store: TrainingStore, actor_id: str, session_id: str,

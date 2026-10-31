@@ -161,7 +161,10 @@ namespace Formula9.UI
             // amee's hover buttons are all on the main simulator, so the login page stays silent.
             uiSounds.Attach(root.Q("training-host"));
             start.clicked += uiSounds.StartClicked;
+            root.Q<Button>("route-start").clicked += uiSounds.StartClicked;
             world.RouteNodeSelected += _ => uiSounds.PointPicked();
+            world.RoadClicked += (_, __) => uiSounds.PointPicked();
+            world.ViewChanged += Render;
 
             ShowLogin(null);
             StartCoroutine(Poll());

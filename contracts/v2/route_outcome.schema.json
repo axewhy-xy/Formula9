@@ -1,0 +1,307 @@
+{
+  "$defs": {
+    "RouteMetrics": {
+      "additionalProperties": true,
+      "properties": {
+        "distance_m": {
+          "minimum": 0,
+          "title": "Distance M",
+          "type": "number"
+        },
+        "duration_s": {
+          "minimum": 0,
+          "title": "Duration S",
+          "type": "number"
+        },
+        "energy_kwh": {
+          "minimum": 0,
+          "title": "Energy Kwh",
+          "type": "number"
+        },
+        "stop_coverage": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "title": "Stop Coverage",
+          "type": "object"
+        }
+      },
+      "required": [
+        "distance_m",
+        "duration_s",
+        "stop_coverage",
+        "energy_kwh"
+      ],
+      "title": "RouteMetrics",
+      "type": "object"
+    },
+    "RouteOutcomeLoop": {
+      "additionalProperties": true,
+      "properties": {
+        "all_stops_served": {
+          "title": "All Stops Served",
+          "type": "boolean"
+        },
+        "duration_s": {
+          "minimum": 0,
+          "title": "Duration S",
+          "type": "number"
+        },
+        "energy_kwh": {
+          "title": "Energy Kwh",
+          "type": "number"
+        },
+        "finished_tick": {
+          "minimum": 0,
+          "title": "Finished Tick",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "duration_s",
+        "energy_kwh",
+        "all_stops_served",
+        "finished_tick"
+      ],
+      "title": "RouteOutcomeLoop",
+      "type": "object"
+    },
+    "RouteOutcomeStop": {
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "served_this_loop": {
+          "title": "Served This Loop",
+          "type": "boolean"
+        },
+        "stop_id": {
+          "title": "Stop Id",
+          "type": "string"
+        },
+        "times_served": {
+          "minimum": 0,
+          "title": "Times Served",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "stop_id",
+        "name",
+        "times_served",
+        "served_this_loop"
+      ],
+      "title": "RouteOutcomeStop",
+      "type": "object"
+    }
+  },
+  "$id": "https://formula9.local/contracts/v2/route_outcome.schema.json",
+  "additionalProperties": true,
+  "description": "What an approved route did once it ran: measured by the actor, never inferred by a client.",
+  "properties": {
+    "battery_kwh": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Battery Kwh"
+    },
+    "contract_version": {
+      "default": "2.0",
+      "pattern": "^2\\.[0-9]+$",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "delay_vs_original_s": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Delay Vs Original S"
+    },
+    "delay_vs_plan_s": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Delay Vs Plan S"
+    },
+    "extra_energy_vs_original_kwh": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Extra Energy Vs Original Kwh"
+    },
+    "extra_energy_vs_plan_kwh": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Extra Energy Vs Plan Kwh"
+    },
+    "held_for_incident": {
+      "default": false,
+      "title": "Held For Incident",
+      "type": "boolean"
+    },
+    "loops": {
+      "items": {
+        "$ref": "#/$defs/RouteOutcomeLoop"
+      },
+      "title": "Loops",
+      "type": "array"
+    },
+    "loops_left_on_charge": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Loops Left On Charge"
+    },
+    "original": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RouteMetrics"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "planned": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RouteMetrics"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason"
+    },
+    "route_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Route Id",
+      "type": "string"
+    },
+    "route_revision": {
+      "minimum": 0,
+      "title": "Route Revision",
+      "type": "integer"
+    },
+    "service_preserved": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Service Preserved"
+    },
+    "session_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Session Id",
+      "type": "string"
+    },
+    "state": {
+      "enum": [
+        "NOT_APPROVED",
+        "APPROVED",
+        "RUNNING",
+        "LOOP_COMPLETED"
+      ],
+      "title": "State",
+      "type": "string"
+    },
+    "stops": {
+      "items": {
+        "$ref": "#/$defs/RouteOutcomeStop"
+      },
+      "title": "Stops",
+      "type": "array"
+    },
+    "summary": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Summary",
+      "type": "array"
+    },
+    "vehicle_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Vehicle Id"
+    }
+  },
+  "required": [
+    "session_id",
+    "route_id",
+    "route_revision",
+    "state"
+  ],
+  "title": "RouteOutcome",
+  "type": "object"
+}

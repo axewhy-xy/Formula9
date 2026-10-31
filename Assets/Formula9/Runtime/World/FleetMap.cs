@@ -11,8 +11,8 @@ using Newtonsoft.Json.Linq;
 
 namespace Formula9.World
 {
-    // An operational planar view, also used for the pre-trip graph. Coordinates and routes
-    // come from the backend; the client never creates substitute road geometry. A 2D session sits
+    // An operational planar view, also the route editor (FleetMap.RouteEditing.cs). Coordinates and
+    // routes come from the backend; the client never creates substitute road geometry. A 2D session sits
     // on real Singapore: OpenStreetMap tiles underneath and LTA bus stops when zoomed in. A 3D
     // session's local frame is not a real place, so it gets neither.
     [UxmlElement]
@@ -53,8 +53,6 @@ namespace Formula9.World
         public static Color ShuttleColor(int index) => ShuttlePalette[index % ShuttlePalette.Length];
 
         private FullSnapshot snapshot;
-        private RouteEditorContext context;
-        private RouteEditPreview preview;
         private readonly VisualElement tileLayer = new VisualElement { pickingMode = PickingMode.Ignore };
         private readonly VisualElement drawing = new VisualElement { pickingMode = PickingMode.Ignore };
         private readonly VisualElement labels = new VisualElement { pickingMode = PickingMode.Ignore };
@@ -70,9 +68,9 @@ namespace Formula9.World
         private const float DragStartDistance = 4;
         private string selectedId;
         private bool offline;
-        private RouteEditorContext roads;
         private readonly VisualElement legend = new VisualElement { pickingMode = PickingMode.Ignore };
-        private readonly VisualElement busStopLegend;
+        private readonly VisualElement busStopLegend, proposedLegend, notClearedLegend;
+        private readonly Action<bool> showLegend;
         private readonly Label scale = new Label { pickingMode = PickingMode.Ignore };
         private readonly Label banner = new Label { pickingMode = PickingMode.Ignore };
         // Shuttles glide between snapshots instead of jumping to each one.
@@ -124,7 +122,6 @@ namespace Formula9.World
             drawing.MarkDirtyRepaint();
         }
         public event Action<string> VehicleSelected;
-        public event Action<long> NodeSelected;
 
         public FleetMap()
         {
@@ -147,18 +144,20 @@ namespace Formula9.World
             // Click the title to fold the list away and see the map underneath.
             var legendRows = new VisualElement { pickingMode = PickingMode.Ignore };
             var legendToggle = new Button { text = "Legend  -", tooltip = "Show or hide the legend" };
-            legendToggle.clicked += () =>
+            showLegend = show =>
             {
-                var hide = legendRows.resolvedStyle.display != DisplayStyle.None;
-                legendRows.style.display = hide ? DisplayStyle.None : DisplayStyle.Flex;
-                legendToggle.text = hide ? "Legend  +" : "Legend  -";
+                legendRows.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
+                legendToggle.text = show ? "Legend  -" : "Legend  +";
             };
+            legendToggle.clicked += () => showLegend(legendRows.resolvedStyle.display == DisplayStyle.None);
             legendToggle.AddToClassList("map-legend-title");
             legend.Add(legendToggle);
             legend.Add(legendRows);
             LegendRow(legendRows, "Planned route", PlannedRoute, "swatch-line");
             LegendRow(legendRows, "Approved detour", ApprovedDetour, "swatch-line");
             LegendRow(legendRows, "Road closed", RoadClosed, "swatch-band");
+            proposedLegend = LegendRow(legendRows, "Proposed route", Proposed, "swatch-line");
+            notClearedLegend = LegendRow(legendRows, "Not cleared for the shuttle", RoadNotCleared, "swatch-thin");
             LegendRow(legendRows, "Other roads", OtherRoads, "swatch-thin");
             LegendRow(legendRows, "Shuttle", ShuttlePalette[0], "swatch-square");
             LegendRow(legendRows, "Incident", RoadClosed, "swatch-dot");
@@ -210,16 +209,13 @@ namespace Formula9.World
             });
             RegisterCallback<PointerCaptureOutEvent>(_ => pressed = dragging = false);
             style.overflow = Overflow.Hidden;
+            BuildEditing();
         }
 
         private void Click(Vector2 point)
         {
-            if (context != null)
-            {
-                var nearest = context.Nodes.OrderBy(n => Vector2.Distance(Project(n.X, n.Y), point)).FirstOrDefault();
-                if (nearest != null && Vector2.Distance(Project(nearest.X, nearest.Y), point) <= 14) NodeSelected?.Invoke(nearest.NodeId);
-            }
-            else if (snapshot != null)
+            if (ClickEditor(point)) return;
+            if (snapshot != null)
             {
                 var marker = incidentMarkers.OrderBy(kv => Vector2.Distance(Project(kv.Value.Position.x, kv.Value.Position.y), point)).FirstOrDefault();
                 if (marker.Key != null && Vector2.Distance(Project(marker.Value.Position.x, marker.Value.Position.y), point) <= 16)
@@ -237,18 +233,18 @@ namespace Formula9.World
             if (panel != null && tiles != null) tiles.TileLoaded -= RefreshTiles;
             tiles = basemap; transit = busStopSource; this.islandWhenEmpty = islandWhenEmpty;
             if (panel != null && tiles != null) tiles.TileLoaded += RefreshTiles;
-            Show(snapshot, context, preview);
+            Show(snapshot);
         }
 
-        public void Show(FullSnapshot value, RouteEditorContext graph = null, RouteEditPreview proposal = null)
+        public void Show(FullSnapshot value)
         {
             if (snapshot?.SessionId != value?.SessionId)
                 incidentMarkers.Clear();
             if (snapshot?.SessionId != value?.SessionId || context?.RouteId != graph?.RouteId) { pan = Vector2.zero; zoom = 1; }
             UpdateTracks(value);
-            snapshot = value; context = graph; preview = proposal;
+            snapshot = value;
             var points = new List<Vector2>();
-            if (context != null) points.AddRange(context.Nodes.Select(n => new Vector2((float)n.X, (float)n.Y)));
+            if (draft != null) points.AddRange(draft.FocusPoints());
             else if (snapshot != null)
             {
                 points.AddRange(snapshot.Routes.SelectMany(r => r.EdgePathsM).SelectMany(p => p).Select(p => new Vector2((float)p.XM, (float)p.YM)));
@@ -300,11 +296,11 @@ namespace Formula9.World
 
         private void AnimationFrame()
         {
-            if (snapshot == null || context != null || contentRect.width < 1 || contentRect.height < 1) return;
+            if (snapshot == null || contentRect.width < 1 || contentRect.height < 1) return;
             var now = Time.realtimeSinceStartup;
             var gliding = !offline && tracks.Values.Any(t => t.Duration > 0 && now < t.Start + t.Duration && t.From != t.To);
             if (gliding) RefreshLabels();
-            if (gliding || (!offline && snapshot.Incidents.Any(i => i.State != "RESOLVED"))) drawing.MarkDirtyRepaint();
+            if (gliding || draft?.Highlighted.Count > 0 || (!offline && snapshot.Incidents.Any(i => i.State != "RESOLVED"))) drawing.MarkDirtyRepaint();
         }
 
         private static VisualElement LegendRow(VisualElement legend, string text, Color color, string swatchClass)
@@ -318,13 +314,6 @@ namespace Formula9.World
             row.Add(new Label(text) { pickingMode = PickingMode.Ignore });
             legend.Add(row);
             return row;
-        }
-
-        // The streets of the route graph, drawn faintly under the fleet's routes.
-        public void SetRoadNetwork(RouteEditorContext graph)
-        {
-            roads = graph;
-            drawing.MarkDirtyRepaint();
         }
 
         private static double NiceLength(double value)
@@ -353,12 +342,13 @@ namespace Formula9.World
         {
             legend.style.display = islandWhenEmpty ? DisplayStyle.Flex : DisplayStyle.None;
             busStopLegend.style.display = BusStopsShown && busStops.Count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
+            proposedLegend.style.display = notClearedLegend.style.display = draft != null ? DisplayStyle.Flex : DisplayStyle.None;
             var metres = NiceLength(110 * MetresPerPoint);
             scale.text = metres >= 1000 ? $"{metres / 1000:0.#} km" : $"{metres:0.#} m";
             scale.style.width = (float)(metres / MetresPerPoint);
         }
 
-        private bool OnRealMap => (tiles != null || transit != null) && (snapshot != null ? snapshot.Spatial == null : context == null && islandWhenEmpty);
+        private bool OnRealMap => (tiles != null || transit != null) && (snapshot != null ? snapshot.Spatial == null : islandWhenEmpty);
         private bool BusStopsShown => transit != null && OnRealMap && MetresPerPoint <= BusStopMaxMetresPerPoint;
 
         private float FitScale => Mathf.Min(Mathf.Max(1, contentRect.width - 60) / Mathf.Max(1, max.x - min.x),
@@ -406,16 +396,15 @@ namespace Formula9.World
             placedLabels.Clear();
             busBoxes.Clear();
             // Shuttles matter most: a stop or depot name that would cover one waits until it has passed
-            if (context == null && snapshot != null)
+            if (snapshot != null)
                 foreach (var vehicle in snapshot.Vehicles) { var at = ShownAt(vehicle); busBoxes.Add(new Rect(at.x - BusBoxSize / 2, at.y - BusBoxSize / 2, BusBoxSize, BusBoxSize)); }
-            if (context != null)
-                foreach (var node in context.Nodes) PlaceLabel(node.NodeId.ToString(), Project(node.X, node.Y), LabelStyle.Beside, DotOutline);
-            else if (snapshot != null)
+            if (draft != null) PlaceDraftLabels();
+            if (snapshot != null)
             {
                 // The selected shuttle first; a label that would cover another is left out, as in the Qt map
                 foreach (var vehicle in snapshot.Vehicles.OrderBy(v => v.VehicleId == SelectedId ? 0 : 1).ThenBy(v => v.VehicleId, StringComparer.Ordinal))
                     PlaceLabel(vehicle.VehicleId + (snapshot.Incidents.Any(i => i.VehicleId == vehicle.VehicleId && i.State != "RESOLVED") ? " !" : ""), ShownAt(vehicle), LabelStyle.Below, DotOutline);
-                foreach (var (stop, colors) in ServedStops()) PlaceLabel(stop.StopId, Project(stop.Position.XM, stop.Position.YM), LabelStyle.Beside, colors.Count > 0 ? colors[0] : StopColor);
+                if (draft == null) foreach (var (stop, colors) in ServedStops()) PlaceLabel(RouteDraftView.StopName(stop.StopId), Project(stop.Position.XM, stop.Position.YM), LabelStyle.Beside, colors.Count > 0 ? colors[0] : StopColor);
             }
             // Bus stop names last, so they never push a shuttle or session stop label off the map
             if (BusStopsShown && MetresPerPoint <= BusStopLabelMetresPerPoint)
@@ -584,34 +573,17 @@ namespace Formula9.World
                     if (!contentRect.Contains(at) || ServedByARoute(busStops[i].Code)) continue;
                     Dot(painter, at, BusStopColor, 5);
                 }
-            if (context != null)
-            {
-                var nodes = context.Nodes.ToDictionary(n => n.NodeId);
-                foreach (var edge in context.Edges)
-                {
-                    if (!nodes.TryGetValue(edge.Source, out var a) || !nodes.TryGetValue(edge.Target, out var b)) continue;
-                    var start = Project(a.X, a.Y); var end = Project(b.X, b.Y);
-                    Line(painter, new[] { start, end }, edge.Closed ? RoadClosed : realMap ? new Color(0.25f, 0.35f, 0.5f) : new Color(0.5f, 0.6f, 0.7f), 2);
-                    var direction = (end - start).normalized; var tip = Vector2.Lerp(start, end, 0.65f);
-                    Line(painter, new[] { tip - direction * 7 + new Vector2(-direction.y, direction.x) * 4, tip, tip - direction * 7 - new Vector2(-direction.y, direction.x) * 4 }, Color.gray, 1);
-                }
-                foreach (var node in context.Nodes) Dot(painter, Project(node.X, node.Y), node.NodeId == context.StartNodeId || node.NodeId == context.DestinationNodeId ? Color.green : Color.white, 4);
-            }
-            else if (snapshot != null)
+            if (draft != null) DrawRoadLayer(painter);
+            else DrawClosedRoads(painter);
+            if (snapshot != null)
             {
                 var closures = new HashSet<string>(snapshot.Disruptions.Where(d => d.ActiveFromTick <= snapshot.Tick && (d.ActiveUntilTick == null || snapshot.Tick < d.ActiveUntilTick)).SelectMany(d => d.AffectedEdgeIds));
-                if (roads != null)
-                {
-                    var nodes = roads.Nodes.ToDictionary(n => n.NodeId);
-                    foreach (var edge in roads.Edges)
-                        if (nodes.TryGetValue(edge.Source, out var a) && nodes.TryGetValue(edge.Target, out var b))
-                            Line(painter, new[] { Project(a.X, a.Y), Project(b.X, b.Y) }, OtherRoads, 2);
-                }
                 // A route is an approved detour when it was revised, or a shuttle on it is detouring
                 var detouring = new HashSet<string>(snapshot.Vehicles.Where(v => v.ServiceState == "DETOURING").Select(v => v.RouteId));
-                foreach (var route in snapshot.Routes)
+                // While editing, only the route being edited: the rest of the fleet would hide the roads
+                foreach (var route in snapshot.Routes.Where(r => draft == null || r.RouteId == draft.Context.RouteId))
                 {
-                    var routeColor = !realMap ? new Color(0.4f, 0.6f, 0.7f) : route.Revision > 1 || detouring.Contains(route.RouteId) ? ApprovedDetour : PlannedRoute;
+                    var routeColor = draft != null ? CommittedInEdit : !realMap ? new Color(0.4f, 0.6f, 0.7f) : route.Revision > 1 || detouring.Contains(route.RouteId) ? ApprovedDetour : PlannedRoute;
                     for (var i = 0; i < route.EdgePathsM.Count; i++)
                     {
                         var path = route.EdgePathsM[i].Select(p => Project(p.XM, p.YM)).ToArray();
@@ -625,13 +597,15 @@ namespace Formula9.World
                 }
                 // A stop wears the colours of the shuttles that serve it: an outer ring for the first,
                 // an inner one for a second where two share it
-                foreach (var (stop, colors) in ServedStops())
+                if (draft != null) DrawProposal(painter);
+                foreach (var (stop, colors) in ServedStops().Where(s => draft == null))
                 {
                     var at = Project(stop.Position.XM, stop.Position.YM);
                     Dot(painter, at, colors.Count > 0 ? colors[0] : StopColor, 9, false);
                     if (colors.Count > 1) Dot(painter, at, colors[1], 6, false);
                     Dot(painter, at, Color.white, 3, false);
                 }
+                if (draft != null) DrawPins(painter);
                 foreach (var depot in snapshot.Depots)
                 {
                     var at = Project(depot.Position.XM, depot.Position.YM);
@@ -673,7 +647,6 @@ namespace Formula9.World
                     Glyph.DrawBus(painter, at, 30, offline ? Frozen : ShuttleColor(i));
                 }
             }
-            if (preview != null) Line(painter, preview.Polyline.Select(p => Project(p.X, p.Y)).ToArray(), Color.green, 4);
         }
 
         private static void Line(Painter2D painter, Vector2[] points, Color color, float width)

@@ -15,6 +15,7 @@
  */
 
 using System;
+using System.Collections;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -26,6 +27,7 @@ using Formula9.World;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.TestTools;
 using UnityEngine.UIElements;
 
 namespace Formula9.Tests
@@ -62,6 +64,41 @@ namespace Formula9.Tests
             //     Task<HttpResponse>: The city reply.
             public Task<HttpResponse> SendAsync(HttpRequest request, CancellationToken cancellation = default) =>
                 Task.FromResult(new HttpResponse { Status = 200, Body = "{\"buildings\":[{\"id\":\"way/1\",\"type\":\"retail\",\"name\":\"\",\"height_m\":30,\"rings_m\":[[[0,100],[10,100],[10,110],[0,110],[0,100]]]}]}" });
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Class: SlowBuilding
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This class holds the one-building city back until released, like a real download.
+        private sealed class SlowBuilding : IHttpTransport
+        {
+            private readonly TaskCompletionSource<bool> released = new TaskCompletionSource<bool>();
+
+            // -----------------------------------------------------------------------------------
+            // Function: Release
+            // -----------------------------------------------------------------------------------
+            // Description:
+            //     This function lets the requests finish.
+            public void Release() => released.TrySetResult(true);
+
+            // -----------------------------------------------------------------------------------
+            // Function: SendAsync
+            // -----------------------------------------------------------------------------------
+            // Description:
+            //     This function answers with the one-building city once released.
+            //
+            // Args:
+            //     request (HttpRequest): The request.
+            //     cancellation (CancellationToken): Unused.
+            //
+            // Returns:
+            //     Task<HttpResponse>: The city reply.
+            public async Task<HttpResponse> SendAsync(HttpRequest request, CancellationToken cancellation = default)
+            {
+                await released.Task;
+                return await new OneBuilding().SendAsync(request, cancellation);
+            }
         }
 
         private GameObject rig;
@@ -270,6 +307,154 @@ namespace Formula9.Tests
             var outside = camera.transform.position = new Vector3(0, 500, 0);
             Frame();
             Assert.AreEqual(outside, camera.transform.position, "the camera is no longer placed in the shuttle");
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: DriverViewSeesPastItsOwnShuttle
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The real render from the eye shows the sky ahead, not the back of the shuttle's own
+        //     dark windscreen. Skipped without a graphics device, as under -nographics.
+        [Test]
+        public void DriverViewSeesPastItsOwnShuttle()
+        {
+            if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null) Assert.Ignore("needs a graphics device");
+            view.DriveSelected();
+            Frame();
+            var texture = new RenderTexture(64, 64, 24);
+            try
+            {
+                camera.targetTexture = texture;
+                camera.Render();
+                RenderTexture.active = texture;
+                var image = new Texture2D(64, 64, TextureFormat.RGB24, false);
+                image.ReadPixels(new Rect(0, 0, 64, 64), 0, 0);
+                image.Apply();
+                RenderTexture.active = null;
+                var above = image.GetPixel(32, 56);
+                UnityEngine.Object.DestroyImmediate(image);
+                Assert.AreEqual(camera.backgroundColor.b, above.b, 0.05f, $"sky above the horizon ahead, was {above}");
+            }
+            finally
+            {
+                camera.targetTexture = null;
+                RenderTexture.active = null;
+                texture.Release();
+            }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: LeavingDriverViewShowsTheShuttleAgain
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The shuttle the camera sits in is hidden only while it does: Overview, Follow
+        //     selected and choosing another shuttle all bring it back.
+        [Test]
+        public void LeavingDriverViewShowsTheShuttleAgain()
+        {
+            var shuttle = ShuttleTransform().gameObject;
+            view.DriveSelected();
+            Frame();
+            Assert.IsFalse(shuttle.activeSelf, "hidden from the inside");
+            view.Overview();
+            Assert.IsTrue(shuttle.activeSelf, "Overview");
+            view.DriveSelected();
+            Frame();
+            view.FollowSelected();
+            Frame();
+            Assert.IsTrue(shuttle.activeSelf, "Follow selected");
+            view.DriveSelected();
+            Frame();
+            view.SelectEntity(null);
+            Frame();
+            Assert.IsTrue(shuttle.activeSelf, "no selection");
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: FollowSelectedLeavesDriverView
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Follow selected takes the camera out of the shuttle, to watch it from above.
+        [Test]
+        public void FollowSelectedLeavesDriverView()
+        {
+            view.DriveSelected();
+            Frame();
+            view.FollowSelected();
+            Frame();
+            Assert.Greater(camera.transform.position.y, 20, "above the shuttle");
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: LosingTheShuttleLeavesDriverView
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     When a snapshot no longer has the shuttle, its marker goes and the camera returns
+        //     over the city instead of staying where the shuttle last was.
+        [Test]
+        public void LosingTheShuttleLeavesDriverView()
+        {
+            view.DriveSelected();
+            Frame();
+            var eye = camera.transform.position;
+            var next = Snapshot();
+            next.Vehicles.RemoveAll(v => v.VehicleId == Shuttle);
+            view.Show(next);
+            Frame();
+            Assert.IsFalse(rig.GetComponentsInChildren<Transform>(true).Any(t => t.name == "Shuttle " + Shuttle), "marker removed");
+            Assert.Greater(Vector3.Distance(camera.transform.position, eye), 100, "back over the city");
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: DriverViewFromTheMapOpensTheCity
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A planar session starts on its 2D map, and Driver view goes to the 3D city from there.
+        [Test]
+        public void DriverViewFromTheMapOpensTheCity()
+        {
+            view.ShowMap(true);
+            view.DriveSelected();
+            Frame();
+            Assert.IsFalse(view.ShowingMap, "the 3D city is shown");
+            AssertAtEye(58.9f);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: DriverViewWaitsForTheCityToLoad
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The first Driver view may have to load the buildings. It stays on through that and
+        //     takes its seat when they arrive.
+        //
+        // Returns:
+        //     IEnumerator: The test's frames.
+        [UnityTest]
+        public IEnumerator DriverViewWaitsForTheCityToLoad()
+        {
+            var transport = new SlowBuilding();
+            var root = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/Formula9/UI/Formula9App.uxml").CloneTree();
+            var slowRig = new GameObject("Slow driver view test");
+            try
+            {
+                var slow = slowRig.AddComponent<WorldView>();
+                var backend = new Uri("http://backend.test");
+                slow.Attach(root.Q("world"), new SceneLoader(transport, backend), null, null, new CityClient(transport, backend));
+                slow.Show(Snapshot());
+                slow.SelectEntity(Shuttle);
+                slow.DriveSelected();
+                var update = typeof(WorldView).GetMethod("Update", BindingFlags.NonPublic | BindingFlags.Instance);
+                update.Invoke(slow, null);
+                transport.Release();
+                var deadline = Time.realtimeSinceStartup + 10;
+                Func<bool> arrived = () => slowRig.GetComponentsInChildren<Transform>(true).Any(t => t.name == "Shuttle " + Shuttle);
+                while (!arrived() && Time.realtimeSinceStartup < deadline) yield return null;
+                Assert.IsTrue(arrived(), "the city loaded");
+                update.Invoke(slow, null);
+                var eye = slowRig.GetComponentsInChildren<Camera>(true).Single(c => c.name == "World Camera").transform.position;
+                Assert.AreEqual(4f, eye.y, 1e-3f, "in the shuttle, 4 m above the ground");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(slowRig); }
         }
 
         // -----------------------------------------------------------------------------------

@@ -183,8 +183,7 @@ class IncidentService:
                 item.provenance = snapshot.source.model_copy(deep=True)
             affected_edges = self.config.get("affected_edge_ids", self.routes._fixture["closed_directed_edge_ids"])
             if self.config.get("block_current_route_entrance", False):
-                current_route = next(r for r in snapshot.routes if r.route_id == vehicle.route_id)
-                affected_edges = current_route.directed_edge_ids[:1]
+                affected_edges = [self.routes.first_avoidable_edge(snapshot, vehicle.route_id)]
             disruption = Disruption(
                 disruption_id=self.config["disruption_id"], aggregate_revision=1,
                 affected_edge_ids=affected_edges,
