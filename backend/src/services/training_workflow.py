@@ -14,6 +14,7 @@ Description:
 """
 
 from copy import deepcopy
+import traceback
 from uuid import uuid4
 
 from contracts.v2.models import Event
@@ -22,19 +23,18 @@ from src.services.battery_decision import submit_battery_decision
 from src.services.incidents import IncidentService
 
 
-def session_incidents(actor):
-    """Keep random incident configuration isolated to the session actor."""
+def session_incidents(actor, incident_id=None):
+    """Use the per-session JSON incident config, never shared mutable globals."""
     service = actor.definition.incidents
-    selection = getattr(actor, "random_incident", None)
-    if not selection:
-        # Disable the original authored incident: wait for the random event
-        # on the first shuttle's approved route instead.
-        config = deepcopy(service.config)
-        config["trigger_tick"] = 10**12
-        return IncidentService(actor.definition.routes, fixture=config)
+    selections = getattr(actor, "random_incidents", [])
+    if not selections and getattr(actor, "random_incident", None):
+        selections = [actor.random_incident]
+    selection = next((item for item in selections if item["incident_id"] == incident_id), None) if incident_id else (selections[-1] if selections else None)
     config = deepcopy(service.config)
-    config.update(selection)
-    # Existing decision and option machinery remains the authoritative writer.
+    if selection is None:
+        config["trigger_tick"] = 10**12
+    else:
+        config.update(selection)
     return IncidentService(actor.definition.routes, fixture=config)
 
 
@@ -126,7 +126,7 @@ def submit_workflow(store, actor, actor_id, command, checkpoint):
             data={"status": snapshot.session.status})
         result = unit.apply(accepted.command_id, snapshot, (event,))
     elif kind == "APPROVE_INCIDENT_OPTION":
-        result = session_incidents(staged).decide(unit, actor_id, command)
+        result = session_incidents(staged, command.target_id).decide(unit, actor_id, command)
     elif kind in {"RESERVE_CHARGER", "CONTINUE_SERVICE"}:
         # Preserve final-outcome retries, but never execute a fresh operational
         # decision against paused/ready state or a changed depot reachability.
@@ -155,20 +155,50 @@ def approve_workflow_route(store, actor, actor_id, request, checkpoint):
 
 
 def publish_workflow(store, actor, snapshot, checkpoint):
-    unit = ActorCommit(store, actor, checkpoint, current=False)
-    service = session_incidents(actor)
-    selected = getattr(actor, "random_incident", None)
-    if selected and snapshot.tick <= selected["trigger_tick"] + 2:
-        print(f"[INCIDENT DEBUG] PUBLISH attempt tick={snapshot.tick} "
-              f"id={selected['incident_id']} route={selected['route_id']} "
-              f"edge={selected['affected_edge_ids']}", flush=True)
-    try:
-        committed = service.publish(unit, snapshot)
-    except Exception as error:
-        print(f"[INCIDENT DEBUG] PUBLISH FAILED tick={snapshot.tick}: "
-              f"{type(error).__name__}: {error}", flush=True)
-        raise
-    if selected and snapshot.tick <= selected["trigger_tick"] + 2:
-        print(f"[INCIDENT DEBUG] PUBLISHED tick={committed.tick} "
-              f"incidents={[(i.incident_id, i.state) for i in committed.incidents]}", flush=True)
-    return committed
+    """Publish incident updates with per-incident diagnostics and durable checkpoints."""
+    selections = getattr(actor, "random_incidents", [])
+    if not selections and getattr(actor, "random_incident", None):
+        selections = [actor.random_incident]
+
+    if not selections:
+        return session_incidents(actor).publish(
+            ActorCommit(store, actor, checkpoint, current=False), snapshot
+        )
+
+    result = snapshot
+    for item in selections:
+        incident_id = item["incident_id"]
+        existing = next((i for i in result.incidents if i.incident_id == incident_id), None)
+        # Historical, settled incidents have no remaining state transitions.
+        # Avoid needlessly reprocessing and committing them every simulation tick.
+        if existing is not None and existing.state in {"RESOLVED", "UNRESOLVED"}:
+            disruption = next((d for d in result.disruptions
+                               if d.disruption_id == item.get("disruption_id")), None)
+            if disruption is None or (disruption.active_until_tick is not None
+                                     and result.tick >= disruption.active_until_tick):
+                continue
+        try:
+            if result.tick >= item.get("trigger_tick", 10**12) and (
+                existing is None or result.tick % 100 == 0
+            ):
+                print(f"[INCIDENT FLOW] BEGIN tick={result.tick} id={incident_id} "
+                      f"state={getattr(existing, 'state', None)} "
+                      f"guidance={item.get('requires_guidance')} ", flush=True)
+            unit = ActorCommit(store, actor, checkpoint, current=False)
+            result = session_incidents(actor, incident_id).publish(unit, result)
+            if result.tick >= item.get("trigger_tick", 10**12) and (
+                existing is None or result.tick % 100 == 0
+            ):
+                updated = next((i for i in result.incidents if i.incident_id == incident_id), None)
+                print(f"[INCIDENT FLOW] COMMITTED tick={result.tick} id={incident_id} "
+                      f"state={getattr(updated, 'state', None)} "
+                      f"snapshot={result.snapshot_id} event_sequence={result.event_sequence}", flush=True)
+        except Exception:
+            print(f"[INCIDENT FLOW] FAILED tick={result.tick} id={incident_id}", flush=True)
+            traceback.print_exc()
+            raise
+    # If all incidents were settled/skipped, the actor still needs a committed
+    # movement snapshot and checkpoint for this presentation boundary.
+    if result is snapshot:
+        result = ActorCommit(store, actor, checkpoint, current=False).commit_snapshot(result)
+    return result

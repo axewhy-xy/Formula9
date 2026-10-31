@@ -38,7 +38,7 @@ class IncidentService:
         return snapshot.scenario.scenario_id == self.config["scenario_id"]
 
     def _incident(self, snapshot: FullSnapshot, incident_id: str) -> Incident:
-        if not self.owns(snapshot) or incident_id != self.config["incident_id"]:
+        if not self.owns(snapshot):
             raise TrainingStoreError("INVALID_REFERENCE", "No authored incident fixture for this target")
         incident = next((i for i in snapshot.incidents if i.incident_id == incident_id), None)
         if incident is None:
@@ -151,7 +151,32 @@ class IncidentService:
         vehicle = next(v for v in snapshot.vehicles if v.vehicle_id == self.config["vehicle_id"])
         before_vehicle = next(v for v in previous.vehicles if v.vehicle_id == vehicle.vehicle_id)
         # Defer until eligible so a dwell or different route cannot stall fleet publications.
-        if (incident is None and snapshot.tick >= self.config["trigger_tick"] and
+        informational = not self.config.get("requires_guidance", True)
+        if (incident is None and informational and snapshot.tick >= self.config["trigger_tick"]):
+            snapshot.source = self._source(snapshot)
+            disruption = Disruption(
+                disruption_id=self.config["disruption_id"], aggregate_revision=1,
+                affected_edge_ids=self.config["affected_edge_ids"],
+                active_from_tick=snapshot.tick,
+                active_until_tick=snapshot.tick + self.config["clear_after_ticks"],
+                reason=f"Synthetic {self.config.get('kind', 'ROAD_INCIDENT')}: network impact assessment",
+                provenance=snapshot.source,
+            )
+            snapshot.disruptions.append(disruption)
+            incident = Incident(incident_id=self.config["incident_id"], aggregate_revision=1,
+                                vehicle_id=vehicle.vehicle_id, state="UNRESOLVED", detected_tick=snapshot.tick,
+                                candidate_ids=[], provenance=snapshot.source)
+            snapshot.incidents.append(incident)
+            events.append(self._event(snapshot, incident, "INCIDENT_DETECTED", {
+                "incident_type": self.config.get("kind"),
+                "map_marker": self.config.get("map_marker"),
+                "incident_edge_ids": self.config["affected_edge_ids"],
+                "impact_edge_ids": self.config.get("impact_edge_ids", []),
+                "requires_guidance": False,
+                "operational_impact": "Potential traffic delay on Shuttle 01 route" if self.config.get("impact_edge_ids") else "No effect on operations — no action required",
+                "reason": "Informational network incident; no operator decision required",
+            }))
+        if (not informational and incident is None and snapshot.tick >= self.config["trigger_tick"] and
             vehicle.route_id == self.config["route_id"] and vehicle.service_state == "IN_SERVICE"):
             snapshot.source = self._source(snapshot)
             for item in snapshot.vehicles:
@@ -176,12 +201,25 @@ class IncidentService:
             vehicle.aggregate_revision += 1
             options = self._options(snapshot, incident)
             events.append(self._event(snapshot, incident, "OPTIONS_READY", {
-                "fixture_id": self.config["fixture_id"], "detected_at_utc": datetime.now(UTC).isoformat(),
+                "fixture_id": self.config["fixture_id"], "map_marker": self.config.get("map_marker"),
+                "incident_type": self.config.get("kind"),
+                "impact_edge_ids": self.config.get("impact_edge_ids", []),
+                "operational_impact": "Road closure on Shuttle 01 route — operator review required",
+                "detected_at_utc": datetime.now(UTC).isoformat(),
                 "battery_at_detection_kwh": vehicle.battery_kwh,
                 "transitions": ["DETECTED", "AWAITING_REVIEW", "OPTIONS_READY"],
                 "vehicle_transitions": ["BLOCKED", "AWAITING_GUIDANCE"], "options": options,
             }))
-        if incident is not None:
+        if incident is not None and informational:
+            disruption = next((d for d in snapshot.disruptions if d.disruption_id == self.config["disruption_id"]), None)
+            if (disruption is not None and disruption.active_until_tick is not None
+                    and snapshot.tick >= disruption.active_until_tick and incident.state == "UNRESOLVED"):
+                incident.state = "RESOLVED"
+                incident.aggregate_revision += 1
+                events.append(self._event(snapshot, incident, "INCIDENT_RESOLVED", {
+                    "reason": "Synthetic network incident duration elapsed", "camera": None,
+                }))
+        if incident is not None and not informational:
             # A branch cannot regain unrelated recorded-camera continuity on a later publication.
             snapshot.source = self._source(previous if self.config["incident_id"] in {i.incident_id for i in previous.incidents} else snapshot)
             for item in snapshot.vehicles:

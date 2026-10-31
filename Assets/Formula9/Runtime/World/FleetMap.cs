@@ -7,6 +7,7 @@ using Formula9.Backend;
 using Formula9.Contracts;
 using UnityEngine;
 using UnityEngine.UIElements;
+using Newtonsoft.Json.Linq;
 
 namespace Formula9.World
 {
@@ -91,6 +92,37 @@ namespace Formula9.World
 
         public string SelectedId { get => selectedId; set { selectedId = value; drawing.MarkDirtyRepaint(); } }
         public bool ShowsIslandWhenEmpty => islandWhenEmpty && (tiles != null || transit != null);
+        private readonly Dictionary<string, (Vector2 Position, Vector2 Start, Vector2 End, string EdgeId, string Kind, string Impact)> incidentMarkers = new Dictionary<string, (Vector2, Vector2, Vector2, string, string, string)>();
+        public event Action<string> IncidentSelected;
+        public void SetIncidentEvents(IEnumerable<Formula9.Contracts.Event> events)
+        {
+            // Events are delivered incrementally; clearing here loses markers from
+            // older batches. Keep them until the session changes.
+            if (events != null)
+                foreach (var evt in events.OrderBy(e => e.EventSequence))
+                {
+                    if (evt.EntityType != "INCIDENT" || evt.Data == null) continue;
+                    // Keep the original detection position after resolution. The snapshot
+                    // supplies the current state, so a historical marker turns grey.
+                    var marker = evt.Data["map_marker"] as JObject;
+                    var center = marker?["center"];
+                    if (center == null) continue;
+                    var x = center.Value<float?>("x_m"); var y = center.Value<float?>("y_m");
+                    if (!x.HasValue || !y.HasValue) continue;
+                    var impacted = evt.Data["impact_edge_ids"] as JArray;
+                    var impact = evt.Data.Value<string>("operational_impact") ??
+                        (impacted != null && impacted.Count > 0 ? "Route may be affected" : "No effect on operations");
+                    var start = marker["start"];
+                    var end = marker["end"];
+                    var a = new Vector2(start?.Value<float?>("x_m") ?? x.Value, start?.Value<float?>("y_m") ?? y.Value);
+                    var b = new Vector2(end?.Value<float?>("x_m") ?? x.Value, end?.Value<float?>("y_m") ?? y.Value);
+                    incidentMarkers[evt.EntityId] = (new Vector2(x.Value, y.Value), a, b,
+                        marker.Value<string>("edge_id") ?? "", evt.Data.Value<string>("incident_type") ?? "INCIDENT", impact);
+                }
+            if (snapshot != null && snapshot.Incidents.Count > 0 && incidentMarkers.Count == 0)
+                Debug.LogWarning($"[INCIDENT MAP] {snapshot.Incidents.Count} incidents in snapshot, but no map_marker in {events?.Count() ?? 0} retained events. Check event replay / map_marker payload.");
+            drawing.MarkDirtyRepaint();
+        }
         public event Action<string> VehicleSelected;
         public event Action<long> NodeSelected;
 
@@ -189,6 +221,9 @@ namespace Formula9.World
             }
             else if (snapshot != null)
             {
+                var marker = incidentMarkers.OrderBy(kv => Vector2.Distance(Project(kv.Value.Position.x, kv.Value.Position.y), point)).FirstOrDefault();
+                if (marker.Key != null && Vector2.Distance(Project(marker.Value.Position.x, marker.Value.Position.y), point) <= 16)
+                { IncidentSelected?.Invoke(marker.Key); return; }
                 var nearest = snapshot.Vehicles.OrderBy(v => Vector2.Distance(ShownAt(v), point)).FirstOrDefault();
                 if (nearest != null && Vector2.Distance(ShownAt(nearest), point) <= 18)
                 { SelectedId = nearest.VehicleId; VehicleSelected?.Invoke(SelectedId); Refresh(); }
@@ -207,6 +242,8 @@ namespace Formula9.World
 
         public void Show(FullSnapshot value, RouteEditorContext graph = null, RouteEditPreview proposal = null)
         {
+            if (snapshot?.SessionId != value?.SessionId)
+                incidentMarkers.Clear();
             if (snapshot?.SessionId != value?.SessionId || context?.RouteId != graph?.RouteId) { pan = Vector2.zero; zoom = 1; }
             UpdateTracks(value);
             snapshot = value; context = graph; preview = proposal;
@@ -580,8 +617,8 @@ namespace Formula9.World
                         var path = route.EdgePathsM[i].Select(p => Project(p.XM, p.YM)).ToArray();
                         if (i < route.DirectedEdgeIds.Count && closures.Contains(route.DirectedEdgeIds[i]))
                         {
-                            Line(painter, path, new Color(RoadClosed.r, RoadClosed.g, RoadClosed.b, 0.35f), 20);
-                            Line(painter, path, RoadClosed, 4);
+                            Line(painter, path, new Color(RoadClosed.r, RoadClosed.g, RoadClosed.b, 0.40f), 28);
+                            Line(painter, path, RoadClosed, 10);
                         }
                         else Line(painter, path, routeColor, 6);
                     }
@@ -599,6 +636,27 @@ namespace Formula9.World
                 {
                     var at = Project(depot.Position.XM, depot.Position.YM);
                     Dot(painter, at, DepotColor, 9, false);
+                }
+                foreach (var item in incidentMarkers)
+                {
+                    var active = snapshot.Incidents.FirstOrDefault(i => i.IncidentId == item.Key);
+                    if (active == null) continue;
+                    var at = Project(item.Value.Position.x, item.Value.Position.y);
+                    var color = active.State == "RESOLVED" || active.State == "UNRESOLVED"
+                        ? Frozen : item.Value.Kind == "ROAD_ACCIDENT" ? ApprovedDetour : RoadClosed;
+                    // Network incidents can occur off the shuttle's route: render
+                    // the incident edge itself, not only route closure overlays.
+                    if (item.Value.Kind == "ROAD_BLOCK" &&
+                        closures.Contains(item.Value.EdgeId) &&
+                        Vector2.Distance(item.Value.Start, item.Value.End) > 0.01f)
+                    {
+                        var segment = new[] { Project(item.Value.Start.x, item.Value.Start.y),
+                                              Project(item.Value.End.x, item.Value.End.y) };
+                        Line(painter, segment, new Color(RoadClosed.r, RoadClosed.g, RoadClosed.b, 0.35f), 28);
+                        Line(painter, segment, RoadClosed, 10);
+                    }
+                    Dot(painter, at, color, 12);
+                    Dot(painter, at, Color.white, 3, false);
                 }
                 var ordered = snapshot.Vehicles.OrderBy(v => v.VehicleId, StringComparer.Ordinal).ToList();
                 // An incident pulses, unless the position is too old to mean anything

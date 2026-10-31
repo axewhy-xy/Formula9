@@ -149,6 +149,7 @@ class IntegratedSessionActor(SessionActor):
             self.incident_catalog.policy["first_min_s"],
             self.incident_catalog.policy["first_max_s"]) / self.STEP_S)
         self.random_incident = None
+        self.random_incidents = []
         print(f"[INCIDENT DEBUG] session={session_id} first_due_tick={self.incident_due_tick}", flush=True)
         data = self.definition.data
         pin = hashlib.sha256(f"{self.definition.signature}:{seed}".encode()).hexdigest()[:24]
@@ -368,6 +369,12 @@ class IntegratedSessionActor(SessionActor):
             traffic_hold = mode == "BLOCKED" and self.modes[shuttle.ID] in {"IN_SERVICE", "DETOURING"}
             if traffic_hold:
                 mode = self.modes[shuttle.ID]  # Preserve the intended service mode during traffic holds.
+            if shuttle.ID == 0 and mode != self.modes[shuttle.ID] and mode == "AWAITING_GUIDANCE":
+                print(f"[INCIDENT HOLD] shuttle-01 entering AWAITING_GUIDANCE at tick={self.current_tick}, "
+                      f"progress={shuttle.progress:.2f}m; current incident must be reviewed", flush=True)
+            if shuttle.ID == 0 and self.modes[shuttle.ID] == "AWAITING_GUIDANCE" and mode == "IN_SERVICE":
+                print(f"[INCIDENT HOLD] shuttle-01 released at tick={self.current_tick}; "
+                      "check incident expiry or operator decision", flush=True)
             changed = mode != self.modes[shuttle.ID] or starting
             self.modes[shuttle.ID] = mode
             if changed:
@@ -399,21 +406,41 @@ class IntegratedSessionActor(SessionActor):
         if mode not in {"IN_SERVICE", "DETOURING", "RETURNING_TO_DEPOT"}:
             shuttle.curr_vel = 0
             return shuttle.progress
-        end = min(self._routes[shuttle.route_ID]["total_length"], shuttle.progress+shuttle.cruise_vel*self.STEP_S)
+        speed_factor = 1.0
+        if shuttle.ID == 0:
+            for selection in self.random_incidents:
+                if selection.get("requires_guidance") or not selection.get("impact_edge_ids"):
+                    continue
+                start = selection["trigger_tick"]
+                if not start <= self.current_tick < start + selection["clear_after_ticks"]:
+                    continue
+                current_route = next((r for r in self.domain.routes if r.route_id == self.domain.vehicles[0].route_id), None)
+                if current_route:
+                    travelled = 0.0
+                    for edge_id, path in zip(current_route.directed_edge_ids, current_route.edge_paths_m):
+                        travelled += sum(math.hypot(b.x_m-a.x_m, b.y_m-a.y_m) for a, b in zip(path, path[1:]))
+                        if travelled > shuttle.progress + EPSILON:
+                            if edge_id in selection["impact_edge_ids"]:
+                                speed_factor = min(speed_factor, selection.get("speed_factor", 0.5))
+                            break
+        end = min(self._routes[shuttle.route_ID]["total_length"], shuttle.progress+shuttle.cruise_vel*speed_factor*self.STEP_S)
         ahead = [stop for stop in self.stop_progress.get(shuttle.route_ID, []) if stop > shuttle.progress+EPSILON]
         return min([end, *ahead])
 
     def _schedule_first_incident(self):
         """Only the first shuttle, on its already approved live detour."""
-        if self.random_incident is not None:
-            return
         if self.current_tick < self.incident_due_tick:
             return
+        # Network incidents can coexist. Avoid a second *guidance* incident
+        # on Shuttle 01 while it is already handling a direct obstruction.
+        active_guidance = any(i.vehicle_id == self.domain.vehicles[0].vehicle_id and
+                              i.state not in {"RESOLVED", "UNRESOLVED"}
+                              for i in self.domain.incidents)
         shuttle = self.shuttles[0]
         vehicle = self.domain.vehicles[0]
         route = next((r for r in self.domain.routes if r.route_id == vehicle.route_id), None)
         if self.current_tick == self.incident_due_tick or self.current_tick % 20 == 0:
-            print(f"[INCIDENT DEBUG] tick={self.current_tick} session={self.session_id} "
+            print(f"[INCIDENT DEBUG] tick={self.current_tick} next_due={self.incident_due_tick} remaining_s={max(0, (self.incident_due_tick-self.current_tick)*self.STEP_S):.1f} session={self.session_id} "
                   f"status={self.domain.session.status} shuttle0_mode={self.modes[shuttle.ID]} "
                   f"route={vehicle.route_id} revision={vehicle.route_revision} "
                   f"progress={shuttle.progress:.2f} route_found={route is not None}", flush=True)
@@ -428,28 +455,125 @@ class IntegratedSessionActor(SessionActor):
                    for edge in d.affected_edge_ids}
         remaining, walked = [], 0.0
         for edge_id, path in zip(route.directed_edge_ids, route.edge_paths_m):
-            length = sum(math.hypot(b.x_m-a.x_m, b.y_m-a.y_m)
-                         for a, b in zip(path, path[1:]))
-            walked += length
+            walked += sum(math.hypot(b.x_m-a.x_m, b.y_m-a.y_m)
+                          for a, b in zip(path, path[1:]))
             if walked > shuttle.progress + EPSILON and edge_id not in blocked:
                 remaining.append(edge_id)
-        if not remaining:
-            print("[INCIDENT DEBUG] no unpassed, unblocked edges on shuttle0 route", flush=True)
+        # Real graph edges only. Peer route hash IDs are not road graph edges.
+        network_edges = sorted(set(self.definition.data["edges"]) - blocked)
+        if not network_edges:
+            print("[INCIDENT DEBUG] no available network edges", flush=True)
             return
-        template = self.rng.choice(self.incident_catalog.templates)
-        edge = self.rng.choice(remaining)
-        self.random_incident = {
+        first_incident = len(self.random_incidents) == 0
+        if first_incident:
+            # Deterministic TEST requirement: road closure ahead on the approved route.
+            # Do not use a permanently closed edge or a segment already passed.
+            eligible = [candidate for candidate in remaining if candidate in network_edges]
+            if not eligible:
+                print("[INCIDENT DEBUG] first incident delayed: no usable upcoming edge", flush=True)
+                return
+            edge = eligible[0]
+            print("[INCIDENT DEBUG] TYPE_SELECTED first=True kind=ROAD_BLOCK", flush=True)
+            template = next((t for t in self.incident_catalog.templates if t.kind == "ROAD_BLOCK"), None)
+            if template is None:
+                print("[INCIDENT DEBUG] first incident delayed: ROAD_BLOCK template missing", flush=True)
+                return
+        else:
+            # Weighted type selection, using the session's checkpointed RNG.
+            # Keep the first incident a route-blocking ROAD_BLOCK for testing.
+            policy = self.incident_catalog.policy
+            accident_probability = max(0.0, min(1.0, float(policy.get("road_accident_probability", 0.5))))
+            chosen_kind = "ROAD_ACCIDENT" if self.rng.random() < accident_probability else "ROAD_BLOCK"
+            matching = [item for item in self.incident_catalog.templates if item.kind == chosen_kind]
+            if not matching:
+                print(f"[INCIDENT DEBUG] no template for {chosen_kind}", flush=True)
+                return
+            template = self.rng.choice(matching)
+            print(f"[INCIDENT DEBUG] TYPE_SELECTED first=False kind={template.kind} "
+                  f"accident_probability={accident_probability:.2f}", flush=True)
+            # Explicit impact policy, not a uniformly random network edge.
+            # 65% of incidents are intentionally relevant to Shuttle 01;
+            # the remainder are intentionally off its remaining route and
+            # off its one-hop congestion neighborhood.
+            policy = self.incident_catalog.policy
+            impact_probability = float(policy.get("shuttle_impact_probability", 0.65))
+            impact_probability = max(0.0, min(1.0, impact_probability))
+            adjacency = self.definition.data["edges"]
+            route_neighbors = set(remaining)
+            for route_edge in remaining:
+                if route_edge not in adjacency:
+                    continue
+                u0, v0 = adjacency[route_edge]
+                route_neighbors.update(candidate for candidate, (a, b) in adjacency.items()
+                                       if a in (u0, v0) or b in (u0, v0))
+            direct_candidates = [e for e in remaining if e in network_edges]
+            indirect_candidates = [e for e in network_edges if e in route_neighbors and e not in remaining]
+            unrelated_candidates = [e for e in network_edges if e not in route_neighbors]
+            wants_impact = self.rng.random() < impact_probability
+            # Never create a second direct hold while guidance is pending.
+            if wants_impact and template.kind == "ROAD_BLOCK" and not active_guidance and direct_candidates:
+                pool = direct_candidates
+            elif wants_impact and indirect_candidates:
+                pool = indirect_candidates
+            elif wants_impact and direct_candidates and not active_guidance:
+                pool = direct_candidates
+            elif unrelated_candidates:
+                pool = unrelated_candidates
+            elif indirect_candidates:
+                pool = indirect_candidates
+            else:
+                print("[INCIDENT DEBUG] no eligible road for a new incident", flush=True)
+                return
+            edge = self.rng.choice(pool)
+            print(f"[INCIDENT DEBUG] IMPACT_POLICY target={wants_impact} probability={impact_probability:.2f} "
+                  f"pool={len(pool)} chosen={edge} active_guidance={active_guidance}", flush=True)
+        adjacency = self.definition.data["edges"]
+        u, v = adjacency[edge]
+        neighbors = {candidate for candidate, (a, b) in adjacency.items()
+                     if a in (u, v) or b in (u, v)}
+        # Congestion propagates one network hop; not an arbitrary spatial radius.
+        impacted = [candidate for candidate in remaining if candidate == edge or candidate in neighbors]
+        direct = edge in remaining
+        is_closure = template.kind == "ROAD_BLOCK"
+        # Only a closure on the remaining route requires a guidance decision.
+        requires_guidance = is_closure and direct and not active_guidance
+        # World coordinates are the same planar metres as the route scene.
+        start_xy = self.definition.data["nodes"][str(u)]
+        end_xy = self.definition.data["nodes"][str(v)]
+        selection = {
+            "map_marker": {
+                "edge_id": edge,
+                "start": {"x_m": float(start_xy[0]), "y_m": float(start_xy[1])},
+                "end": {"x_m": float(end_xy[0]), "y_m": float(end_xy[1])},
+                "center": {"x_m": (float(start_xy[0]) + float(end_xy[0])) / 2,
+                           "y_m": (float(start_xy[1]) + float(end_xy[1])) / 2},
+            },
             "incident_id": f"random-{template.kind.lower()}-{self.current_tick}",
             "disruption_id": f"random-disruption-{self.current_tick}",
-            "kind": template.kind, "vehicle_id": vehicle.vehicle_id,
-            "route_id": vehicle.route_id, "affected_edge_ids": [edge],
+            "kind": template.kind,
+            "vehicle_id": vehicle.vehicle_id,
+            "route_id": vehicle.route_id,
+            "affected_edge_ids": [edge],
+            "impact_edge_ids": impacted,
+            "requires_guidance": requires_guidance,
+            "speed_factor": float(self.incident_catalog.policy.get("congestion_speed_factor", 0.5)) if impacted and not requires_guidance else 1.0,
             "block_current_route_entrance": False,
-            "assumptions": [*self.definition.incidents.config["assumptions"],
-                            f"Synthetic JSON incident type: {template.kind}; affected edge: {edge}."],
+            "assumptions": [
+                "Synthetic training incident from predefined_scenarios.json.",
+                f"Type: {template.kind}; incident edge: {edge}; affected route edges: {impacted}.",
+                f"Operational impact: {'route directly blocked' if requires_guidance else 'traffic delay possible' if impacted else 'none; no action required'}.",
+                "Traffic impact estimated from shared endpoints (one graph hop).",
+                "No traffic volume, lanes or signal timings are modelled.",
+                "Nearby incidents may reduce speed on connected route edges; direct closures require guidance.",
+                "Scoring is provisional and not calibrated for real-world safety.",
+            ],
             "trigger_tick": self.current_tick,
-            "clear_after_ticks": max(1, round(template.duration_s/self.STEP_S)),
+            "clear_after_ticks": max(1, round((300.0 if first_incident else template.duration_s)/self.STEP_S)),
         }
-        print(f"[INCIDENT DEBUG] SELECTED {self.random_incident}", flush=True)
+        self.random_incident = selection
+        self.random_incidents.append(selection)
+        self.incident_due_tick = self.current_tick + self.incident_catalog.next_interval_ticks(self.rng, self.STEP_S)
+        print(f"[INCIDENT DEBUG] SELECTED first={first_incident} id={selection['incident_id']} edge={edge} impact={impacted} guidance={requires_guidance} next_due={self.incident_due_tick} marker={selection['map_marker']}", flush=True)
 
     def tick(self):
         self.command_tick += 1
@@ -527,7 +651,7 @@ class IntegratedSessionActor(SessionActor):
             "parking_chargers": {str(k): v for k, v in self.parking_chargers.items()},
             "paths": [{"route_ID": key, "waypoints": [p.model_dump() for p in path["waypoints"]]} for key, path in self._routes.items()],
             "stop_progress": self.stop_progress, "incident_due_tick": self.incident_due_tick,
-            "random_incident": self.random_incident, "pending_events": [e.model_dump(mode="json") for e in self.pending_events]}
+            "random_incident": self.random_incident, "random_incidents": self.random_incidents, "pending_events": [e.model_dump(mode="json") for e in self.pending_events]}
 
     def restore_workflow(self, state, snapshot):
         """Restore checkpointed execution; reject disagreement with durable public state."""
@@ -547,6 +671,7 @@ class IntegratedSessionActor(SessionActor):
         self.pending_events = []
         self.incident_due_tick = state.get("incident_due_tick", self.incident_due_tick)
         self.random_incident = state.get("random_incident")
+        self.random_incidents = state.get("random_incidents", [self.random_incident] if self.random_incident else [])
         self.domain = snapshot.model_copy(deep=True)
         if set(self.modes) != set(range(5)) or [s.ID for s in self.shuttles] != list(range(5)):
             raise TrainingStoreError("CORRUPT_CHECKPOINT", "Workflow roster is invalid")

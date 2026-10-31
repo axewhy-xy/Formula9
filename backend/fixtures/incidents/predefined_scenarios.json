@@ -38,11 +38,15 @@
     }
   ],
   "random_generation": {
-    "min_interval_s": 15,
-    "max_interval_s": 30,
-    "max_active_incidents": 2,
+    "min_interval_s": 60,
+    "max_interval_s": 120,
+    "max_active_incidents": 3,
     "avoid_duplicate_edges": true,
     "first_min_s": 3,
-    "first_max_s": 5
+    "first_max_s": 5,
+    "network_hops": 1,
+    "congestion_speed_factor": 0.5,
+    "shuttle_impact_probability": 0.65,
+    "road_accident_probability": 0.5
   }
 }
