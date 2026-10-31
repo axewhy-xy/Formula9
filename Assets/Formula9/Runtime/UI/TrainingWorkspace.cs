@@ -71,6 +71,7 @@ namespace Formula9.UI
             }
             selection = root.Q<Label>("fleet-selection");
             Bind(root, "follow-selected", () => world.FollowSelected());
+            Bind(root, "drive-selected", () => world.DriveSelected());
             Bind(root, "camera-overview", () => world.Overview());
 
             routes = root.Q<DropdownField>("routes");
