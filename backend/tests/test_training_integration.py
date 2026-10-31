@@ -337,23 +337,30 @@ def test_decision_after_obstruction_clearance_is_durably_rejected(runtime):
 
 
 def test_alternative_pretrip_path_gets_a_matching_obstruction_and_real_detour(runtime):
+    chains = get_workflow_definition().network["chains"]
     draft = preview(runtime, via_node_ids=[only_on("bypass-c")])
-    assert draft["approvable"] and draft["directed_edge_ids"][0] == "bypass-c:0:forward"
+    assert draft["approvable"] and draft["directed_edge_ids"] == chains["bypass-c"] + chains["return"]
     approve(runtime, draft)
     send(runtime, "START")
     advance(runtime, 240)
     snapshot = read(runtime)
     obstruction = next(d for d in snapshot["disruptions"] if d["disruption_id"] == "obstruction-m2")
-    assert obstruction["affected_edge_ids"] == ["bypass-c:0:forward"]
+    # The first road only bypass C uses: the entrance it shares with bypass B leaves no way round
+    own_road = next(edge for edge in chains["bypass-c"] if edge not in chains["bypass-b"])
+    assert obstruction["affected_edge_ids"] == [own_road]
     assert incident_decision(runtime, "ROAD_DETOUR")["status"] == "APPLIED"
     advance(runtime, 20)
     assert on_branch(read(runtime)["vehicles"][0]["position"], "bypass-b")
 
 
-def test_unknown_mandatory_route_metadata_prevents_live_approval(runtime, monkeypatch):
+@pytest.mark.parametrize("missing", ["vehicle", "road"])
+def test_unknown_mandatory_route_metadata_prevents_live_approval(runtime, monkeypatch, missing):
     client, store, service, session_id = runtime
-    actor = service.sessions[session_id].actor
-    monkeypatch.delitem(actor.definition.routes._fixture, "road_width_m")
+    routes = service.sessions[session_id].actor.definition.routes
+    if missing == "vehicle":
+        monkeypatch.delitem(routes._fixture, "vehicle_width_m")
+    else:
+        monkeypatch.setitem(routes._network.edges[routes._fixture["detour_directed_edge_ids"][0]], "width_m", None)
     draft = preview(runtime)
     assert draft["validation"] == "UNKNOWN" and not draft["approvable"]
     response = client.post(f"/api/v2/sessions/{session_id}/route-approvals", json={

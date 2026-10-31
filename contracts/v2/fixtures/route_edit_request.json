@@ -6,5 +6,6 @@
   "route_id": "route-m2-detour",
   "via_node_ids": [
     26970886
-  ]
+  ],
+  "waypoint_edge_ids": []
 }
