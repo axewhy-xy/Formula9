@@ -267,6 +267,25 @@ against the backend's own marker points in `m2_3d_motion.json`.
 The project uses Linear colour space (glTF colours are linear), and the scene builder adds
 glTFast's shaders to *Always Included Shaders* so player builds render them.
 
+### Building textures
+
+The real-streets city textures its buildings' walls: plain wall on the ground floor (3.5 m, like an
+HDB void deck or a shop front) and windows above it, tinted by each building's colour. Roofs stay
+plain. Homes (residential, apartments, house, terrace, detached) use one pair of textures and every
+other building the second. `CityMesh` gives each wall vertex its distance along the outline and its
+height in metres, so `CityBuilding.shader` tiles the textures at their real size; the sizes are
+material properties (`_WallTileM`, `_WindowTileM`, `_GroundFloorM`).
+
+The textures are in `Resources/Formula9/Textures`, from ambientCG under CC0 (free to use without
+attribution):
+
+| File | Source |
+|---|---|
+| `building_wall_home.png` | [Plaster001](https://ambientcg.com/view?id=Plaster001) |
+| `building_wall_other.png` | [Concrete034](https://ambientcg.com/view?id=Concrete034) |
+| `building_window_home.png` | [Facade006](https://ambientcg.com/view?id=Facade006) |
+| `building_window_other.png` | [Facade019A](https://ambientcg.com/view?id=Facade019A) |
+
 ## Alerts
 
 `AlertGate` and `TrainingAlerts` port the Qt client's NAT-M2-07 rules: only events listed in

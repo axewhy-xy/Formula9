@@ -48,6 +48,67 @@ namespace Formula9.Tests
         }
 
         [Test]
+        public void WallsAreMeasuredInMetresRoundTheOutlineAndRoofsAreMarked()
+        {
+            var mesh = CityMesh.Build(new[] { Square("way/1", 30) });
+            try
+            {
+                var uvs = new List<Vector4>();
+                mesh.GetUVs(0, uvs);
+                Assert.AreEqual(mesh.vertexCount, uvs.Count, "one entry per vertex");
+                // Each wall is (start, bottom), (start, top), (end, top), (end, bottom), and the four
+                // walls carry on from each other round the 40 m outline
+                for (var wall = 0; wall < 4; wall++)
+                {
+                    float start = wall * 10, end = start + 10;
+                    var expected = new[] { new Vector4(start, 0, 0, 0), new Vector4(start, 30, 0, 0), new Vector4(end, 30, 0, 0), new Vector4(end, 0, 0, 0) };
+                    for (var corner = 0; corner < 4; corner++)
+                        Assert.Less(Vector4.Distance(expected[corner], uvs[wall * 4 + corner]), 1e-3f, $"wall {wall}, corner {corner}");
+                }
+                for (var i = 16; i < 20; i++) Assert.AreEqual(1, uvs[i].w, "the roof is marked to stay plain");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [TestCase("residential", CityMesh.HomePair)]
+        [TestCase("apartments", CityMesh.HomePair)]
+        [TestCase("retail", CityMesh.OtherPair)]
+        [TestCase("office", CityMesh.OtherPair)]
+        [TestCase("garage", CityMesh.OtherPair)]
+        public void HomesAndOtherBuildingsUseTheirOwnTextures(string type, float pair)
+        {
+            var building = Square("way/1", 30);
+            building.Type = type;
+            var mesh = CityMesh.Build(new[] { building });
+            try
+            {
+                var uvs = new List<Vector4>();
+                mesh.GetUVs(0, uvs);
+                Assert.IsTrue(uvs.All(uv => uv.z == pair));
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
+        public void AWallCutForARouteKeepsItsPlaceAlongTheOutline()
+        {
+            // The route cuts x from 4 to 6 out of the south wall, so its east piece starts 6 m along
+            var mesh = CityMesh.Build(new[] { Square("way/1", 30) }, CityMesh.Corridors(new[] { new[] { new Vector2(5, -5), new Vector2(5, 15) } }, 1));
+            try
+            {
+                var uvs = new List<Vector4>();
+                mesh.GetUVs(0, uvs);
+                var vertices = mesh.vertices; var normals = mesh.normals;
+                Assert.AreEqual(vertices.Length, uvs.Count);
+                // The south wall's pieces, facing south; the outline starts at its west end, (0, 0)
+                var south = Enumerable.Range(0, vertices.Length).Where(i => uvs[i].w == 0 && Mathf.Abs(vertices[i].z) < 1e-3f && normals[i].z < -0.9f).ToList();
+                Assert.IsTrue(south.Any(i => vertices[i].x > 5.9f), "the piece east of the cut is there");
+                Assert.IsTrue(south.All(i => Mathf.Abs(uvs[i].x - vertices[i].x) < 1e-3f), "measured from the outline's start, not restarted after the cut");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
         public void AnLShapedRoofStaysInsideItsOutline()
         {
             var outline = new[] { new Vector2(0, 0), new Vector2(20, 0), new Vector2(20, 10), new Vector2(10, 10), new Vector2(10, 20), new Vector2(0, 20) };
@@ -290,6 +351,36 @@ namespace Formula9.Tests
                 Assert.Less(materials[RoadMesh.KerbLayer].renderQueue, materials[RoadMesh.AsphaltLayer].renderQueue);
                 Assert.Less(materials[RoadMesh.AsphaltLayer].renderQueue, materials[RoadMesh.MarkingLayer].renderQueue);
                 Assert.Greater(materials[RoadMesh.KerbLayer].renderQueue, (int)RenderQueue.Geometry, "after the ground and buildings");
+            }
+            finally
+            {
+                view.Dispose();
+                UnityEngine.Object.DestroyImmediate(rig);
+            }
+        }
+
+        [Test]
+        public void BuildingsGetTheirWallAndWindowTexturesAndMarkersStayPlain()
+        {
+            var rig = new GameObject("City texture rig");
+            var view = new CityView(rig.transform, null);
+            try
+            {
+                Assert.IsTrue(view.LoadAsync(new CityClient(new OneBuilding(), new Uri("http://localhost")), "toa-payoh", CancellationToken.None).IsCompleted);
+                var buildings = rig.GetComponentsInChildren<MeshRenderer>().First(r => r.name == "Buildings").sharedMaterial;
+                foreach (var property in new[] { "_WallHome", "_WallOther", "_WindowHome", "_WindowOther" })
+                {
+                    var texture = buildings.GetTexture(property);
+                    Assert.IsNotNull(texture, property);
+                    Assert.AreEqual(TextureWrapMode.Repeat, texture.wrapMode, property + " tiles along the wall");
+                }
+                Assert.AreEqual(0, buildings.GetFloat("_Plain"));
+
+                var snapshot = (FullSnapshot)ContractParser.ParseMessage(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/snapshot.json")));
+                view.Show(snapshot, new ShuttleMotion(), 0);
+                var markers = rig.GetComponentsInChildren<MeshRenderer>(true).Where(r => r.name.StartsWith("Shuttle ") || r.name.StartsWith("Stop ")).ToList();
+                Assert.IsNotEmpty(markers);
+                Assert.IsTrue(markers.All(r => r.sharedMaterial.GetFloat("_Plain") == 1), "no windows on shuttles or stops");
             }
             finally
             {
