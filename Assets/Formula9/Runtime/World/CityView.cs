@@ -186,15 +186,33 @@ namespace Formula9.World
             }
 
             cancellation.ThrowIfCancellationRequested();
-            TrafficLightCount = signals.Count;
-            if (signals.Count > 0 && TrafficLightManager.Instance != null)
+
+            // --- FILTERING DUPLICATE/STACKED HEADS ---
+            // Group or filter signals that are clustered within ~2 meters and have a similar facing angle
+            var filteredSignals = new List<CitySignalTrafficLight>();
+            foreach (var signal in signals)
             {
-                var firstSignal = signals[0];
+                bool isDuplicate = filteredSignals.Any(existing =>
+                    existing.Junction == signal.Junction &&
+                    Vector2.Distance(new Vector2((float)existing.XM, (float)existing.YM), new Vector2((float)signal.XM, (float)signal.YM)) < 5.0f &&
+                    Mathf.Abs((float)(existing.FacingHeadingDeg - signal.FacingHeadingDeg)) < 30.0f
+                );
+
+                if (!isDuplicate)
+                {
+                    filteredSignals.Add(signal);
+                }
+            }
+
+            TrafficLightCount = filteredSignals.Count;
+            if (filteredSignals.Count > 0 && TrafficLightManager.Instance != null)
+            {
+                var first = filteredSignals[0];
                 TrafficLightManager.Instance.InitializeTiming(
-                    (float)firstSignal.Cycle_duration,
-                    (float)firstSignal.GL_duration,
-                    (float)firstSignal.YL_duration,
-                    (float)firstSignal.RL_duration
+                    (float)first.Cycle_duration,
+                    (float)first.GL_duration,
+                    (float)first.YL_duration,
+                    (float)first.RL_duration
                 );
             }
 
@@ -205,14 +223,18 @@ namespace Formula9.World
             {
                 // Map backend coordinates (XM, YM) to Unity 3D world space (X, Y, Z)
                 var position = new Vector3((float)signal.XM, 0f, (float)signal.YM);
-                var rotation = Quaternion.Euler(0f, (float)signal.FacingHeadingDeg + 180f, 0f);
+
+                // --- ROTATION FORMULA ---
+                // Match the shuttle's heading conversion for correct orientation
+                float correctedHeadingDeg = (float)signal.FacingHeadingDeg + 180f;
+                var headingRad = correctedHeadingDeg * Mathf.Deg2Rad;
+                var rotation = Quaternion.LookRotation(new Vector3(Mathf.Cos(headingRad), 0, Mathf.Sin(headingRad)));
 
                 var lightObj = UnityEngine.Object.Instantiate(trafficLightPrefab, position, rotation, trafficLightsContainer.transform);
                 lightObj.name = $"TrafficLight_{signal.Id ?? signal.Junction}";
 
                 trafficLightObjects.Add(lightObj);
-                // ---> UPDATE HERE: Register with TrafficLightManager and pass offset and phase <---
-                var lightScript = lightObj.GetComponent<HaloTrafficLight>();
+                var lightScript = lightObj.GetComponentInChildren<HaloTrafficLight>();
                 if (lightScript == null)
                 {
                     Debug.LogWarning($"[CityView] FAILED: Instantiated prefab for '{lightObj.name}' is missing the HaloTrafficLight component!");
@@ -225,8 +247,6 @@ namespace Formula9.World
 
                 if (lightScript != null && TrafficLightManager.Instance != null)
                 {
-                    // Note: Check your exact property names on CitySignalTrafficLight 
-                    // if they are lowercase (signal.junction), PascalCase (signal.Junction), etc.
                     string junctionId = signal.Junction ?? signal.Id ?? "default_junction";
                     float offsetS = (float)signal.OffsetS;
                     int phase = signal.Phase;
@@ -236,7 +256,9 @@ namespace Formula9.World
                 }
             }
 
-            Debug.LogWarning($"Successfully rendered {TrafficLightCount} traffic lights into the 3D map.");
+            Debug.LogWarning(filteredSignals.Count < signals.Count
+            ? $"Successfully rendered {TrafficLightCount} unique traffic lights (filtered out {signals.Count - TrafficLightCount} duplicates)."
+            : $"Successfully rendered {TrafficLightCount} traffic lights into the 3D map.");
         }
 
         // Pale speckle that the road colours tint. Its mipmaps average out to flat colour far away.

@@ -159,6 +159,9 @@ namespace Formula9.Backend
             catch (Exception error) when (error is JsonException || error is ArgumentException || error is InvalidCastException || error is NullReferenceException)
             {
                 throw new ContractException("Invalid signal traffic light reply: " + error.Message);
+            }
+        }
+
         public async Task<CityTrafficData> GetTrafficAsync(string area, CancellationToken cancellation = default)
         {
             var request = Request("GET", "/api/traffic/" + Uri.EscapeDataString(area));
@@ -197,6 +200,7 @@ namespace Formula9.Backend
                     YM = (double?)v["y_m"] ?? 0,
                 }).ToList();
                 return traffic;
+
             }
             catch (Exception error) when (error is JsonException || error is ArgumentException || error is InvalidCastException || error is NullReferenceException)
             {
