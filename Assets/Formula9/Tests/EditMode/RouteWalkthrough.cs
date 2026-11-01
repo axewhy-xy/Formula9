@@ -163,6 +163,124 @@ namespace Formula9.Tests
             yield return new ExitPlayMode();
         }
 
+        // Plays the randomized incidents in the real 3D city and keeps pictures of each kind as its
+        // traffic backs up. Same needs as the walkthrough above.
+        [UnityTest, Timeout(1500000)]
+        public IEnumerator TheIncidentsPlayOutInTheCity()
+        {
+            if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FORMULA9_WALKTHROUGH_OUT"))) Assert.Ignore("Set FORMULA9_WALKTHROUGH_OUT to a folder");
+            if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null) Assert.Ignore("No GPU (-nographics)");
+            EditorSceneManager.OpenScene("Assets/Scenes/Formula9.unity");
+            yield return new EnterPlayMode();
+
+            LogAssert.ignoreFailingMessages = true;
+            folder = Environment.GetEnvironmentVariable("FORMULA9_WALKTHROUGH_OUT");
+            Directory.CreateDirectory(folder);
+            Application.runInBackground = true;
+            Application.logMessageReceived += (text, _, type) => { if (type != LogType.Log) Note($"[{type}] {text}"); };
+            var document = UnityEngine.Object.FindFirstObjectByType<UIDocument>();
+            texture = new RenderTexture(1600, 900, 24);
+            document.panelSettings.targetTexture = texture;
+            try
+            {
+                root = document.rootVisualElement;
+                yield return Frames(5);
+                Press("mode-switch");
+                root.Q<TextField>("username").value = "walk" + Guid.NewGuid().ToString("N").Substring(0, 8);
+                root.Q<TextField>("password").value = "Walkthrough-Test-1";
+                root.Q<TextField>("confirm").value = "Walkthrough-Test-1";
+                Press("submit");
+                yield return Until(() => root.Q("training-host").resolvedStyle.display == DisplayStyle.Flex, "the training screen");
+                yield return Seconds(1);
+                Press("create");
+                yield return Until(() => !string.IsNullOrEmpty(Text("status")) && root.Q<Button>("route-tab-editor") != null && root.Q("nav-items") != null && Text("title").Length > 0, "the session");
+                yield return Seconds(2);
+                var nav = root.Q("nav-items").Query<Button>().ToList().First(b => b.Query<Label>().ToList().Any(l => l.text == "Route Planning"));
+                Press(nav);
+                map = root.Query<FleetMap>().ToList().First(m => m.resolvedStyle.display == DisplayStyle.Flex && m.contentRect.width > 1 && m.panel != null);
+                yield return Until(() => root.Q<Button>("route-suggest").enabledSelf, "the road network");
+                yield return Seconds(1);
+                yield return ProposeAndReport(Detour[0], "detour-first-road");
+                map.Focus(new[] { Detour[0], Detour[1] });
+                yield return Frames(3);
+                Road(Detour[1], out var second);
+                ClickMap(second);
+                yield return Until(() => !Text("route-verdict").StartsWith("Checking") && !Text("route-verdict").StartsWith("Waiting"), "the verdict");
+                root.Q<TextField>("route-reason").value = "Lorong 4 is closed; Lorong 7 keeps every stop";
+                yield return Until(() => root.Q<Button>("route-approve").enabledSelf, "approve enabled", 10);
+                Press("route-approve");
+                yield return Until(() => root.Q<Button>("route-start").resolvedStyle.display == DisplayStyle.Flex, "start offered");
+                yield return Seconds(2);
+                Press("route-start");
+                yield return Until(() => root.Q("world-hud")?.resolvedStyle.display == DisplayStyle.Flex, "the 3D status line");
+
+                var world = UnityEngine.Object.FindFirstObjectByType<WorldView>();
+                var workspaceIncident = root.Q<DropdownField>("incidents");
+                yield return Until(() => Text("world-hud").Contains("Road block"), "the first road block", 120);
+                Note("HUD: " + Text("world-hud"));
+                Note("Focus: " + world.FocusIncident(workspaceIncident.choices.Last()));
+                yield return Seconds(1);
+                yield return Shoot("block-start");
+                yield return Seconds(12);
+                yield return Shoot("block-12s");
+                yield return Seconds(18);
+                Note("HUD: " + Text("world-hud"));
+                yield return Shoot("block-30s");
+
+                // Go round it, so the session carries on to its random incidents
+                var incidentNav = root.Q("nav-items").Query<Button>().ToList().First(b => b.Query<Label>().ToList().Any(l => l.text == "Incident Monitor"));
+                Press(incidentNav);
+                yield return Until(() => root.Q<DropdownField>("candidates").choices.Count > 0, "incident options");
+                var candidates = root.Q<DropdownField>("candidates");
+                Note("Options: " + string.Join(", ", candidates.choices));
+                candidates.value = candidates.choices.First(c => c.ToUpperInvariant().Contains("DETOUR"));
+                root.Q<TextField>("incident-reason").value = "Go round the obstruction";
+                yield return Until(() => root.Q<Button>("incident-preview").enabledSelf, "incident preview enabled", 10);
+                Press("incident-preview");
+                yield return Until(() => root.Q<Button>("incident-approve").enabledSelf, "incident approve enabled");
+                Press("incident-approve");
+                yield return Seconds(3);
+                Press(nav);
+
+                var began = Time.realtimeSinceStartup;
+                var shownAccident = false; var sawSlow = false;
+                while ((!shownAccident || !sawSlow) && Time.realtimeSinceStartup - began < 1100)
+                {
+                    yield return Seconds(2);
+                    if (!shownAccident && Text("world-hud").Contains("Road accident"))
+                    {
+                        shownAccident = true;
+                        Note("HUD: " + Text("world-hud"));
+                        var latest = workspaceIncident.choices.Last(c => c.Contains("accident"));
+                        Note("Focus: " + world.FocusIncident(latest));
+                        yield return Seconds(1);
+                        yield return Shoot("accident-start");
+                        yield return Seconds(10);
+                        yield return Shoot("accident-10s");
+                        yield return Seconds(14);
+                        Note("HUD: " + Text("world-hud"));
+                        yield return Shoot("accident-24s");
+                    }
+                    if (!sawSlow && Text("world-hud").Contains("slowed to"))
+                    {
+                        sawSlow = true;
+                        Note("HUD: " + Text("world-hud"));
+                        world.WatchShuttle("shuttle-01");
+                        yield return Seconds(1);
+                        yield return Shoot("shuttle-slowed");
+                    }
+                }
+                Note($"Saw accident: {shownAccident}; saw shuttle slowed: {sawSlow}");
+                Assert.IsTrue(shownAccident, "a road accident came up");
+            }
+            finally
+            {
+                document.panelSettings.targetTexture = null;
+                LogAssert.ignoreFailingMessages = false;
+            }
+            yield return new ExitPlayMode();
+        }
+
         private IEnumerator ProposeAndReport(string edge, string name)
         {
             Road(edge, out var at);

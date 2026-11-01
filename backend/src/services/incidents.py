@@ -161,9 +161,18 @@ class IncidentService:
         A concurrent decision makes the publication stale and must be restaged.
         """
         previous = store.snapshot(proposed.session_id)
+        snapshot, events = self.stage(store, proposed)
+        return store.commit_snapshot(snapshot, events, expected_snapshot_id=previous.snapshot_id)
+
+    def stage(self, store: TrainingStore, proposed: FullSnapshot) -> tuple[FullSnapshot, tuple[Event, ...]]:
+        """This incident's effect on a publication, uncommitted.
+
+        A boundary commits once, so coexisting incidents chain their stages into one commit.
+        """
+        previous = store.snapshot(proposed.session_id)
         snapshot = proposed.model_copy(deep=True)
         if not self.owns(snapshot):
-            return store.commit_snapshot(snapshot, expected_snapshot_id=previous.snapshot_id)
+            return snapshot, ()
         if snapshot.session.status != "RUNNING" or previous.session.status != "RUNNING":
             raise TrainingStoreError("INVALID_TRANSITION", "Incident publications require a running session")
         if abs(snapshot.simulation_time_s - snapshot.tick * self.config["step_s"]) > 1e-6:
@@ -300,7 +309,7 @@ class IncidentService:
                                            "service_state": vehicle.service_state,
                                            "observed_battery_kwh": vehicle.battery_kwh,
                                            "observed_battery_change_kwh": vehicle.battery_kwh - self._evidence(store, previous, incident).data["battery_at_detection_kwh"]}))
-        return store.commit_snapshot(snapshot, tuple(events), expected_snapshot_id=previous.snapshot_id)
+        return snapshot, tuple(events)
 
     def _evidence(self, store: TrainingStore, snapshot: FullSnapshot, incident: Incident) -> Event:
         events = store.entity_events(snapshot.session_id, incident.incident_id, snapshot.event_sequence)

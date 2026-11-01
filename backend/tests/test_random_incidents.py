@@ -100,6 +100,48 @@ def test_informational_incidents_slow_motion_and_resolve_once_without_closing_ac
     assert store.snapshot(session_id).vehicles[0].speed_mps == pytest.approx(10.0)
 
 
+def test_coexisting_incidents_keep_the_session_ticking_and_a_hold_holds(runtime):
+    client, store, service, session_id = runtime
+    approve(runtime)
+    send(runtime, "START")
+    advance(runtime, 2)
+
+    def seed(actor):
+        route = actor.domain.routes[0]
+        accident_edge = next(e for e in actor.definition.data["edges"] if e not in route.directed_edge_ids)
+        accident = dict(incident_id="random-accident", disruption_id="random-accident-disruption",
+                        kind="ROAD_ACCIDENT", vehicle_id="shuttle-01", route_id=route.route_id,
+                        affected_edge_ids=[accident_edge], impact_edge_ids=[], requires_guidance=False,
+                        speed_factor=1.0, trigger_tick=actor.current_tick+2, clear_after_ticks=8)
+        closure = dict(incident_id="random-closure", disruption_id="random-closure-disruption",
+                       kind="ROAD_BLOCK", vehicle_id="shuttle-01", route_id=route.route_id,
+                       affected_edge_ids=[route.directed_edge_ids[-1]], impact_edge_ids=[],
+                       requires_guidance=True, trigger_tick=actor.current_tick+4,
+                       clear_after_ticks=100, block_current_route_entrance=False)
+        actor.incident_due_tick = 10**9
+        actor.random_incidents = [accident, closure]
+        actor.random_incident = closure
+
+    stage_boundary(runtime, seed)
+    start = read(runtime)["tick"]
+    advance(runtime, 4)
+    both = read(runtime)
+    assert both["tick"] > start
+    assert {i["incident_id"]: i["state"] for i in both["incidents"]} == {
+        "random-accident": "DETECTED", "random-closure": "OPTIONS_READY"}
+    held = both["vehicles"][0]
+    assert held["service_state"] == "AWAITING_GUIDANCE"
+    # The informational incident settles on its own while the other keeps holding the shuttle.
+    advance(runtime, 8)
+    later = read(runtime)
+    assert later["tick"] > both["tick"]
+    states = {i["incident_id"]: i["state"] for i in later["incidents"]}
+    assert states == {"random-accident": "RESOLVED", "random-closure": "OPTIONS_READY"}
+    assert later["vehicles"][0]["position"] == held["position"]
+    restored = TrainingSessionService._restore_session(*store.runtime(session_id))
+    assert restored.actor.generate_snapshot().vehicles == store.snapshot(session_id).vehicles
+
+
 def test_a_closure_on_the_occupied_road_cannot_offer_a_passing_detour(runtime):
     client, _, _, session_id = runtime
     approve(runtime)

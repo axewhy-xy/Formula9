@@ -186,6 +186,8 @@ def publish_workflow(store, actor, snapshot, checkpoint):
     # event log keeps each settled incident's evidence.
     actor.random_incidents = [item for item in selections if not _settled(item, snapshot)]
     result = snapshot
+    events = []
+    unit = ActorCommit(store, actor, checkpoint, current=False)
     for item in actor.random_incidents:
         incident_id = item["incident_id"]
         existing = next((i for i in result.incidents if i.incident_id == incident_id), None)
@@ -195,20 +197,18 @@ def publish_workflow(store, actor, snapshot, checkpoint):
             ):
                 logger.debug("[INCIDENT FLOW] BEGIN tick=%s id=%s state=%s guidance=%s", result.tick, incident_id,
                              getattr(existing, "state", None), item.get("requires_guidance"))
-            unit = ActorCommit(store, actor, checkpoint, current=False)
-            result = session_incidents(actor, incident_id).publish(unit, result)
+            result, staged = session_incidents(actor, incident_id).stage(unit, result)
+            events.extend(staged)
             if result.tick >= item.get("trigger_tick", 10**12) and (
                 existing is None or result.tick % 100 == 0
             ):
                 updated = next((i for i in result.incidents if i.incident_id == incident_id), None)
-                logger.debug("[INCIDENT FLOW] COMMITTED tick=%s id=%s state=%s snapshot=%s event_sequence=%s",
-                             result.tick, incident_id, getattr(updated, "state", None),
-                             result.snapshot_id, result.event_sequence)
+                logger.debug("[INCIDENT FLOW] STAGED tick=%s id=%s state=%s event_sequence=%s",
+                             result.tick, incident_id, getattr(updated, "state", None), result.event_sequence)
         except Exception:
             logger.exception("[INCIDENT FLOW] FAILED tick=%s id=%s", result.tick, incident_id)
             raise
-    # If all incidents were settled/skipped, the actor still needs a committed
-    # movement snapshot and checkpoint for this presentation boundary.
-    if result is snapshot:
-        result = ActorCommit(store, actor, checkpoint, current=False).commit_snapshot(result)
-    return result
+    # One commit per boundary, however many incidents are live: a second commit at
+    # the same tick with no events of its own would be refused as stale. If all were
+    # settled/skipped, the actor still needs its movement snapshot and checkpoint.
+    return unit.commit_snapshot(result, tuple(events))

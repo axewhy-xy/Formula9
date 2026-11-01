@@ -84,6 +84,11 @@ namespace Formula9.World
         private const float LookDegreesPerPixel = 0.2f, MaxLookPitchDeg = 30f;
         private const float EyeHeightM = 1.5f, EyeForwardM = 5.5f;
         private string selectedId, sessionBoundary;
+        private readonly Dictionary<string, IncidentRecord> incidentRecords = new Dictionary<string, IncidentRecord>();
+        // The road network, kept while the route editor reloads its own copy: closures make it do so
+        private IReadOnlyList<DraftRoad> roadNetwork;
+        private string executionLine;
+        private const float IncidentFocusDistance = 200, IncidentFocusPitch = 0.85f;
         public bool RouteEditing { get; set; }
         public event Action<string> EntitySelected;
         public event Action<long> RouteNodeSelected;
@@ -190,7 +195,7 @@ namespace Formula9.World
         public void Show(FullSnapshot snapshot)
         {
             var boundary = snapshot == null ? null : $"{snapshot.SessionId}/{snapshot.SessionEpoch}";
-            if (boundary != sessionBoundary) { sessionBoundary = boundary; preferMap = snapshot?.Spatial == null; following = false; LeaveDriverView(); selectedId = null; routeContext = null; motion.Clear(); DrawDraft(); }
+            if (boundary != sessionBoundary) { sessionBoundary = boundary; preferMap = snapshot?.Spatial == null; following = false; LeaveDriverView(); selectedId = null; routeContext = null; roadNetwork = null; incidentRecords.Clear(); motion.Clear(); DrawDraft(); }
             latest = snapshot;
             if (snapshot != null) motion.BeginSnapshot(snapshot.Tick, Time.unscaledTime);
             if (snapshot?.Spatial == null)
@@ -253,6 +258,8 @@ namespace Formula9.World
             {
                 city.Show(snapshot, motion, Time.unscaledTime);
                 city.ShowDraft(draft, servedStops);
+                city.ShowIncidents(incidentRecords.Values, snapshot, roadNetwork, Time.unscaledTime);
+                RefreshHud();
                 SetReady(true, $"3D city · {city.BuildingCount} buildings · right-drag orbit, left-drag pan, wheel zoom");
             }
         }
@@ -603,7 +610,11 @@ namespace Formula9.World
             add { if (map != null) map.IncidentSelected += value; }
             remove { if (map != null) map.IncidentSelected -= value; }
         }
-        public void SetIncidentEvents(IEnumerable<Formula9.Contracts.Event> events) => map?.SetIncidentEvents(events);
+        public void SetIncidentEvents(IEnumerable<Formula9.Contracts.Event> events)
+        {
+            map?.SetIncidentEvents(events);
+            IncidentRecord.Merge(events, incidentRecords);
+        }
 
         public string SelectedId => selectedId;
         // The 2D Map / 3D View switch. A session without a 3D world always shows its map.
@@ -624,7 +635,7 @@ namespace Formula9.World
             motion.Clear();
             if (latest != null) Show(latest);
             if (!value) FrameDraft();
-            SetExecutionStatus(hud?.text);
+            RefreshHud();
             ViewChanged?.Invoke();
         }
 
@@ -658,9 +669,44 @@ namespace Formula9.World
         //     text (string): The line, or null to hide it.
         public void SetExecutionStatus(string text)
         {
+            executionLine = text;
+            RefreshHud();
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: RefreshHud
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function shows the watched shuttle's line and a line for each live incident
+        //     over the 3D view, and hides them everywhere else.
+        private void RefreshHud()
+        {
             if (hud == null) return;
-            hud.text = text ?? "";
-            hud.style.display = !string.IsNullOrEmpty(text) && CityShown ? DisplayStyle.Flex : DisplayStyle.None;
+            var text = string.Join("\n", new[] { executionLine, CityShown ? city?.IncidentStatus : null }.Where(line => !string.IsNullOrEmpty(line)));
+            hud.text = text;
+            hud.style.display = text.Length > 0 && CityShown ? DisplayStyle.Flex : DisplayStyle.None;
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: FocusIncident
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function points the 3D city's camera at a live incident and the roads backing
+        //     up behind it.
+        //
+        // Args:
+        //     id (string): The incident.
+        //
+        // Returns:
+        //     bool: False when the 3D city is not showing that incident.
+        public bool FocusIncident(string id)
+        {
+            if (!CityShown || city == null || !city.TryGetIncidentSite(id, out var site)) return false;
+            following = false; LeaveDriverView();
+            target = new Vector3(site.x, 0, site.y);
+            distance = IncidentFocusDistance; pitch = IncidentFocusPitch; yaw = Mathf.PI - 0.35f;
+            PlaceCamera();
+            return true;
         }
 
         // -----------------------------------------------------------------------------------
@@ -842,6 +888,7 @@ namespace Formula9.World
         {
             routeContext = context; draftNodes = nodes ?? new List<long>(); routePreview = preview; DrawDraft();
             draft = view;
+            if (view != null) roadNetwork = view.Roads;
             map.ShowClosedRoads(view);
             map.ShowDraft(editing ? view : null);
             if (CityShown && city != null && city.BuildingCount > 0) city.ShowDraft(draft, servedStops);

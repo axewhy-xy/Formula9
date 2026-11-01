@@ -710,7 +710,9 @@ namespace Formula9.UI
         private void FocusIncident()
         {
             var incident = session.Store.Snapshot?.Incidents.FirstOrDefault(i => i.IncidentId == incidents.value);
-            if (incident != null) { SelectVehicle(incident.VehicleId); world.FocusSelected(); }
+            if (incident == null) return;
+            SelectVehicle(incident.VehicleId);
+            if (!world.FocusIncident(incident.IncidentId)) world.FocusSelected();
         }
 
         private void ClearEvidence()
