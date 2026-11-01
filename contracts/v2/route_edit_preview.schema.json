@@ -16,6 +16,13 @@
           "title": "Check",
           "type": "string"
         },
+        "edge_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Edge Ids",
+          "type": "array"
+        },
         "feature_id": {
           "anyOf": [
             {
@@ -114,6 +121,53 @@
       ],
       "title": "RoutePolylinePoint",
       "type": "object"
+    },
+    "RouteServiceImpact": {
+      "additionalProperties": true,
+      "properties": {
+        "battery_kwh": {
+          "minimum": 0,
+          "title": "Battery Kwh",
+          "type": "number"
+        },
+        "loops_on_edited": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Loops On Edited"
+        },
+        "loops_on_original": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Loops On Original"
+        },
+        "vehicle_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Vehicle Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "vehicle_id",
+        "battery_kwh"
+      ],
+      "title": "RouteServiceImpact",
+      "type": "object"
     }
   },
   "$id": "https://formula9.local/contracts/v2/route_edit_preview.schema.json",
@@ -149,6 +203,16 @@
         "type": "string"
       },
       "title": "Directed Edge Ids",
+      "type": "array"
+    },
+    "edge_paths": {
+      "items": {
+        "items": {
+          "$ref": "#/$defs/RoutePolylinePoint"
+        },
+        "type": "array"
+      },
+      "title": "Edge Paths",
       "type": "array"
     },
     "edited": {
@@ -222,6 +286,13 @@
       "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
       "title": "Scene Revision",
       "type": "string"
+    },
+    "service_impact": {
+      "items": {
+        "$ref": "#/$defs/RouteServiceImpact"
+      },
+      "title": "Service Impact",
+      "type": "array"
     },
     "session_epoch": {
       "minimum": 0,

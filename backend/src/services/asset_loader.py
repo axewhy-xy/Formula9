@@ -13,11 +13,13 @@ DEFAULT_ROUTES_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "routes
 # One per shuttle at most
 MAX_ROUTES = 5
 MAX_WAYPOINTS = 64
+# An approved route follows real roads junction to junction, so it has far more corners than an asset.
+MAX_ROUTE_WAYPOINTS = 2048
 MAX_ASSET_BYTES = 64 * 1024
 MAX_COORDINATE_M = 1_000_000.0
 
 
-def validate_routes(data: list[dict]) -> list[dict]:
+def validate_routes(data: list[dict], max_waypoints: int = MAX_WAYPOINTS) -> list[dict]:
     """Copy assets and derive lengths from geometry rather than rounded metadata."""
     if not isinstance(data, list) or not 1 <= len(data) <= MAX_ROUTES:
         raise ValueError(f"The curated fixture requires 1 to {MAX_ROUTES} routes")
@@ -34,8 +36,8 @@ def validate_routes(data: list[dict]) -> list[dict]:
             raise ValueError("Route IDs must be unique")
         identifiers.add(str(identifier))
         waypoints = route["waypoints"]
-        if not isinstance(waypoints, list) or not 2 <= len(waypoints) <= MAX_WAYPOINTS:
-            raise ValueError(f"Routes require 2 to {MAX_WAYPOINTS} waypoints")
+        if not isinstance(waypoints, list) or not 2 <= len(waypoints) <= max_waypoints:
+            raise ValueError(f"Routes require 2 to {max_waypoints} waypoints")
         points = [Vector2D.model_validate(p).model_copy(deep=True) for p in waypoints]
         if any(abs(p.x) > MAX_COORDINATE_M or abs(p.y) > MAX_COORDINATE_M for p in points):
             raise ValueError("Route coordinates exceed the curated local area")

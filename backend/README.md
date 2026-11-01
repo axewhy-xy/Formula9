@@ -43,6 +43,20 @@ The same scenario is exercised by the BE-M2-06 benchmark; see
 [backend instrumentation and evidence](../docs/session_creation.md#backend-instrumentation-and-evidence)
 for collection commands, generated artifacts and the separate client acceptance gate.
 
+Its routes are edited on the operating network in `fixtures/m2_operating_network.json`, built from
+the OpenStreetMap extract by `src/routing/build_operating_network.py`. One physical road is one
+edge per direction, with its width, headroom and access and where each came from. A preview with
+`waypoint_edge_ids` plans over the whole network (`src/routing/operating_network.py`: no U-turns,
+stops served at the kerb); empty and `via_node_ids` requests stay on the curated paths, as do the
+legacy route fixture and spatial sessions. Each check names its roads in `edge_ids`, unknown
+mandatory metadata blocks approval, and the extract has no turn restriction relations, so only
+U-turns are refused. `GET /api/v2/sessions/{id}/routes/{route}/outcome` reads back the durable
+`STOP_SERVED` and `LOOP_COMPLETED` events against what was approved.
+
+A session pins the fixture it started on. After the network or scenario changes, sessions from
+the old revision can't be recovered: they are marked `FAILED` with `CORRUPT_CHECKPOINT`, stay
+readable, and a new session has to be created.
+
 The v2 training persistence boundary and restart behavior are documented in
 [BE-M2-03 persistence handoff](../docs/milestone_status/M2/be-m2-03-status.md).
 

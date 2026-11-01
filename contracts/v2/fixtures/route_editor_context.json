@@ -10,42 +10,70 @@
     {
       "closed": false,
       "edge_id": "1535209095:0:reverse",
+      "fit": null,
+      "fit_note": null,
+      "path": [],
+      "road_name": null,
       "source": 26970786,
       "target": 1329728439
     },
     {
       "closed": false,
       "edge_id": "440462565:12:forward",
+      "fit": null,
+      "fit_note": null,
+      "path": [],
+      "road_name": null,
       "source": 1329728439,
       "target": 26970880
     },
     {
       "closed": false,
       "edge_id": "5061138:0:reverse",
+      "fit": null,
+      "fit_note": null,
+      "path": [],
+      "road_name": null,
       "source": 26970880,
       "target": 26970886
     },
     {
       "closed": false,
       "edge_id": "51894042:0:forward",
+      "fit": null,
+      "fit_note": null,
+      "path": [],
+      "road_name": null,
       "source": 26970886,
       "target": 1370249326
     },
     {
       "closed": false,
       "edge_id": "51894042:1:forward",
+      "fit": null,
+      "fit_note": null,
+      "path": [],
+      "road_name": null,
       "source": 1370249326,
       "target": 1370249338
     },
     {
       "closed": false,
       "edge_id": "51894042:2:forward",
+      "fit": null,
+      "fit_note": null,
+      "path": [],
+      "road_name": null,
       "source": 1370249338,
       "target": 662221987
     },
     {
       "closed": true,
       "edge_id": "1535209095:1:forward",
+      "fit": null,
+      "fit_note": null,
+      "path": [],
+      "road_name": null,
       "source": 26970786,
       "target": 662221987
     }
@@ -103,5 +131,6 @@
   "scene_revision": "scene-r1",
   "session_epoch": 1,
   "session_id": "session-001",
-  "start_node_id": 26970786
+  "start_node_id": 26970786,
+  "stops": []
 }

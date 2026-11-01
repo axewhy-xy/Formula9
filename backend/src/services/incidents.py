@@ -21,18 +21,42 @@ from contracts.v2.models import (
 from contracts.v2.route_edit import RouteEditRequest
 from src.persistence.training_store import TrainingStore, TrainingStoreError
 from src.services.route_edit import RouteEditService, get_route_edit_service
+from src.services.incident_scenarios.simulated_catalog import SimulatedIncidentCatalog
 
 
 FIXTURE_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "m2_incident.json"
+# A shuttle in one of these has left service for a charger (or run flat) and will not finish a detour
+LEFT_SERVICE = {"RETURNING_TO_DEPOT", "QUEUED_FOR_CHARGE", "CHARGING", "STANDBY", "OUT_OF_SERVICE"}
 
 
 class IncidentService:
     def __init__(self, routes: RouteEditService, fixture_path: Path = FIXTURE_PATH, *, fixture: dict | None = None):
         self.routes = routes
         self.config = deepcopy(fixture) if fixture is not None else json.loads(fixture_path.read_text(encoding="utf-8"))
+        # Template catalog is read-only; the existing authored incident workflow is unchanged.
+        self.simulated_catalog = SimulatedIncidentCatalog()
 
     def owns(self, snapshot: FullSnapshot) -> bool:
         return snapshot.scenario.scenario_id == self.config["scenario_id"]
+
+    def for_incident(self, store: TrainingStore, snapshot: FullSnapshot, incident_id: str) -> IncidentService:
+        """Resolve the same checkpointed instance for previews, history and decisions."""
+        if incident_id == self.config["incident_id"]:
+            return self
+        incident = next((i for i in snapshot.incidents if i.incident_id == incident_id), None)
+        if not self.owns(snapshot) or incident is None:
+            raise TrainingStoreError("INVALID_REFERENCE", "Incident has not been detected")
+        _, state = store.runtime(snapshot.session_id)
+        workflow = state.get("workflow", {})
+        selections = workflow.get("random_incidents") or [workflow.get("random_incident")]
+        selection = next((item for item in selections if item and item["incident_id"] == incident_id), None)
+        if selection is None:
+            # Settled incidents leave the checkpoint. Their evidence reads use the
+            # event log and shared rubric, not the per-incident selection.
+            if incident.state not in {"RESOLVED", "UNRESOLVED"}:
+                raise TrainingStoreError("INVALID_REFERENCE", "Incident configuration is unavailable")
+            return IncidentService(self.routes, fixture={**self.config, "incident_id": incident_id})
+        return IncidentService(self.routes, fixture={**self.config, **selection})
 
     def _incident(self, snapshot: FullSnapshot, incident_id: str) -> Incident:
         if not self.owns(snapshot) or incident_id != self.config["incident_id"]:
@@ -68,11 +92,16 @@ class IncidentService:
             "closures": {d.disruption_id: d.model_dump(mode="json") for d in snapshot.disruptions},
         }
 
-    def _road_preview(self, snapshot: FullSnapshot, incident: Incident):
+    def _route_service(self, snapshot: FullSnapshot, incident: Incident):
+        """Incident detours retain the operating metadata of their original route."""
         vehicle = next(v for v in snapshot.vehicles if v.vehicle_id == incident.vehicle_id)
-        return self.routes.preview(snapshot, RouteEditRequest(
-            route_id=vehicle.route_id, expected_route_revision=vehicle.route_revision, draft_revision=1,
-        ), retain=False)
+        if vehicle.route_id == self.routes._fixture["route_id"]:
+            return self.routes
+        return RouteEditService(self.routes._graph_repository,
+                                fixture={**self.routes._fixture, "route_id": vehicle.route_id})
+
+    def _road_preview(self, snapshot: FullSnapshot, incident: Incident):
+        return self._route_service(snapshot, incident).continuation_preview(snapshot, incident.vehicle_id)
 
     def _options(self, snapshot: FullSnapshot, incident: Incident) -> dict:
         road = self._road_preview(snapshot, incident)
@@ -101,7 +130,7 @@ class IncidentService:
                 closure = next(d for d in future.disruptions if d.disruption_id == disruption.disruption_id)
                 closure.active_until_tick = future.tick
                 route = next(r for r in future.routes if r.route_id == self.config["route_id"])
-                continuation = self.routes.preview(future, RouteEditRequest(
+                continuation = self._route_service(future, incident).preview(future, RouteEditRequest(
                     route_id=route.route_id, expected_route_revision=route.revision, draft_revision=1,
                     directed_edge_ids=route.directed_edge_ids,
                 ), retain=False)
@@ -134,9 +163,18 @@ class IncidentService:
         A concurrent decision makes the publication stale and must be restaged.
         """
         previous = store.snapshot(proposed.session_id)
+        snapshot, events = self.stage(store, proposed)
+        return store.commit_snapshot(snapshot, events, expected_snapshot_id=previous.snapshot_id)
+
+    def stage(self, store: TrainingStore, proposed: FullSnapshot) -> tuple[FullSnapshot, tuple[Event, ...]]:
+        """This incident's effect on a publication, uncommitted.
+
+        A boundary commits once, so coexisting incidents chain their stages into one commit.
+        """
+        previous = store.snapshot(proposed.session_id)
         snapshot = proposed.model_copy(deep=True)
         if not self.owns(snapshot):
-            return store.commit_snapshot(snapshot, expected_snapshot_id=previous.snapshot_id)
+            return snapshot, ()
         if snapshot.session.status != "RUNNING" or previous.session.status != "RUNNING":
             raise TrainingStoreError("INVALID_TRANSITION", "Incident publications require a running session")
         if abs(snapshot.simulation_time_s - snapshot.tick * self.config["step_s"]) > 1e-6:
@@ -148,15 +186,40 @@ class IncidentService:
         vehicle = next(v for v in snapshot.vehicles if v.vehicle_id == self.config["vehicle_id"])
         before_vehicle = next(v for v in previous.vehicles if v.vehicle_id == vehicle.vehicle_id)
         # Defer until eligible so a dwell or different route cannot stall fleet publications.
-        if (incident is None and snapshot.tick >= self.config["trigger_tick"] and
+        informational = not self.config.get("requires_guidance", True)
+        if (incident is None and informational and snapshot.tick >= self.config["trigger_tick"]):
+            snapshot.source = self._source(snapshot)
+            # Disruptions are hard road closures. An accident's congestion is
+            # applied by the actor and must not make its road impassable.
+            if self.config.get("kind") == "ROAD_BLOCK":
+                snapshot.disruptions.append(Disruption(
+                    disruption_id=self.config["disruption_id"], aggregate_revision=1,
+                    affected_edge_ids=self.config["affected_edge_ids"], active_from_tick=snapshot.tick,
+                    active_until_tick=snapshot.tick + self.config["clear_after_ticks"],
+                    reason="Synthetic road block: network impact assessment", provenance=snapshot.source,
+                ))
+            incident = Incident(incident_id=self.config["incident_id"], aggregate_revision=1,
+                                vehicle_id=vehicle.vehicle_id, state="DETECTED", detected_tick=snapshot.tick,
+                                candidate_ids=[], provenance=snapshot.source)
+            snapshot.incidents.append(incident)
+            events.append(self._event(snapshot, incident, "INCIDENT_DETECTED", {
+                "incident_type": self.config.get("kind"),
+                "map_marker": self.config.get("map_marker"),
+                "incident_edge_ids": self.config["affected_edge_ids"],
+                "impact_edge_ids": self.config.get("impact_edge_ids", []),
+                "requires_guidance": False,
+                "active_until_tick": snapshot.tick + self.config["clear_after_ticks"],
+                "operational_impact": "Potential traffic delay on Shuttle 01 route" if self.config.get("impact_edge_ids") else "No effect on operations — no action required",
+                "reason": "Informational network incident; no operator decision required",
+            }))
+        if (not informational and incident is None and snapshot.tick >= self.config["trigger_tick"] and
             vehicle.route_id == self.config["route_id"] and vehicle.service_state == "IN_SERVICE"):
             snapshot.source = self._source(snapshot)
             for item in snapshot.vehicles:
                 item.provenance = snapshot.source.model_copy(deep=True)
             affected_edges = self.config.get("affected_edge_ids", self.routes._fixture["closed_directed_edge_ids"])
             if self.config.get("block_current_route_entrance", False):
-                current_route = next(r for r in snapshot.routes if r.route_id == vehicle.route_id)
-                affected_edges = current_route.directed_edge_ids[:1]
+                affected_edges = [self.routes.first_avoidable_edge(snapshot, vehicle.route_id)]
             disruption = Disruption(
                 disruption_id=self.config["disruption_id"], aggregate_revision=1,
                 affected_edge_ids=affected_edges,
@@ -173,12 +236,27 @@ class IncidentService:
             vehicle.aggregate_revision += 1
             options = self._options(snapshot, incident)
             events.append(self._event(snapshot, incident, "OPTIONS_READY", {
-                "fixture_id": self.config["fixture_id"], "detected_at_utc": datetime.now(UTC).isoformat(),
+                "fixture_id": self.config["fixture_id"], "map_marker": self.config.get("map_marker"),
+                "incident_type": self.config.get("kind"),
+                "impact_edge_ids": self.config.get("impact_edge_ids", []),
+                "operational_impact": "Road closure on Shuttle 01 route — operator review required",
+                "detected_at_utc": datetime.now(UTC).isoformat(),
                 "battery_at_detection_kwh": vehicle.battery_kwh,
                 "transitions": ["DETECTED", "AWAITING_REVIEW", "OPTIONS_READY"],
                 "vehicle_transitions": ["BLOCKED", "AWAITING_GUIDANCE"], "options": options,
             }))
-        if incident is not None:
+        if incident is not None and informational:
+            disruption = next((d for d in snapshot.disruptions if d.disruption_id == self.config["disruption_id"]), None)
+            until = (disruption.active_until_tick if disruption is not None else
+                     incident.detected_tick + self.config["clear_after_ticks"])
+            if (until is not None and snapshot.tick >= until
+                    and incident.state in {"DETECTED", "UNRESOLVED"}):
+                incident.state = "RESOLVED"
+                incident.aggregate_revision += 1
+                events.append(self._event(snapshot, incident, "INCIDENT_RESOLVED", {
+                    "reason": "Synthetic network incident duration elapsed", "camera": None,
+                }))
+        if incident is not None and not informational:
             # A branch cannot regain unrelated recorded-camera continuity on a later publication.
             snapshot.source = self._source(previous if self.config["incident_id"] in {i.incident_id for i in previous.incidents} else snapshot)
             for item in snapshot.vehicles:
@@ -188,7 +266,9 @@ class IncidentService:
                 disruption.active_until_tick is not None and snapshot.tick < disruption.active_until_tick):
                 evidence = self._evidence(store, previous, incident)
                 previous_options = evidence.data["options"]
-                if any(option["dependencies"] != self._dependencies(snapshot, incident) for option in previous_options.values()):
+                # The shuttle stays held for as long as the road is closed, so the choice must stay open too.
+                expired = any(c.incident_id == incident.incident_id and c.expires_at_tick < snapshot.tick for c in snapshot.candidates)
+                if expired or any(option["dependencies"] != self._dependencies(snapshot, incident) for option in previous_options.values()):
                     incident.aggregate_revision += 1
                     snapshot.candidates = [c for c in snapshot.candidates if c.incident_id != incident.incident_id]
                     incident.candidate_ids = []
@@ -225,15 +305,18 @@ class IncidentService:
                             "assumptions": self.config["assumptions"],
                         }
                     events.append(self._event(snapshot, incident, "INCIDENT_" + incident.state, data))
-            elif incident.state == "EXECUTING" and vehicle.service_state == "IN_SERVICE":
+            elif incident.state == "EXECUTING" and vehicle.service_state in {"IN_SERVICE", *LEFT_SERVICE}:
                 incident.state = "RESOLVED"
                 incident.aggregate_revision += 1
+                # A shuttle sent to a charger mid-detour never comes back to it, so the response ends there
+                reason = ("Actor completed the approved detour" if vehicle.service_state == "IN_SERVICE"
+                          else "The shuttle left the approved detour for a charger")
                 events.append(self._event(snapshot, incident, "INCIDENT_RESOLVED",
-                                          {"reason": "Actor completed the approved detour", "camera": None,
+                                          {"reason": reason, "camera": None,
                                            "service_state": vehicle.service_state,
                                            "observed_battery_kwh": vehicle.battery_kwh,
                                            "observed_battery_change_kwh": vehicle.battery_kwh - self._evidence(store, previous, incident).data["battery_at_detection_kwh"]}))
-        return store.commit_snapshot(snapshot, tuple(events), expected_snapshot_id=previous.snapshot_id)
+        return snapshot, tuple(events)
 
     def _evidence(self, store: TrainingStore, snapshot: FullSnapshot, incident: Incident) -> Event:
         events = store.entity_events(snapshot.session_id, incident.incident_id, snapshot.event_sequence)
@@ -278,10 +361,17 @@ class IncidentService:
         action = option["action"]
         # Recompute wait consequences at decision time, not at option-generation time.
         consequence = dict(option["estimated_consequence"])
+        # The operator's own detour from the route editor, in place of the planned one.
+        chosen = command.payload.get("directed_edge_ids")
+        if chosen is not None and (action != "ROAD_DETOUR" or not isinstance(chosen, list) or not 0 < len(chosen) <= 1024
+                                   or not all(isinstance(edge, str) for edge in chosen)):
+            raise TrainingStoreError("INVALID_PAYLOAD", "Only a road detour takes a list of directed road segments")
         if action == "ROAD_DETOUR":
-            refreshed = self._road_preview(snapshot, incident)
-            if not refreshed.approvable or refreshed.directed_edge_ids != option["directed_edge_ids"]:
+            refreshed = (self._route_service(snapshot, incident).chosen_continuation(snapshot, incident.vehicle_id, chosen)
+                         if chosen else self._road_preview(snapshot, incident))
+            if not refreshed.approvable or refreshed.directed_edge_ids != (chosen or option["directed_edge_ids"]):
                 raise TrainingStoreError("NO_FEASIBLE_ROUTE", "Road detour no longer passes validation")
+            consequence = refreshed.edited.model_dump(mode="json")
             route = next(r for r in snapshot.routes if r.route_id == shuttle.route_id)
             detour = RouteRevision(route_id=incident.incident_id + "-detour", revision=1,
                                   scene_revision=snapshot.scene_revision, directed_edge_ids=refreshed.directed_edge_ids,
@@ -303,7 +393,7 @@ class IncidentService:
             continuation_state = result.model_copy(deep=True)
             continuation_state.tick = closure.active_until_tick
             route = next(r for r in result.routes if r.route_id == shuttle.route_id)
-            continuation = self.routes.preview(continuation_state, RouteEditRequest(
+            continuation = self._route_service(continuation_state, incident).preview(continuation_state, RouteEditRequest(
                 route_id=route.route_id, expected_route_revision=route.revision, draft_revision=1,
                 directed_edge_ids=route.directed_edge_ids,
             ), retain=False)
@@ -326,7 +416,7 @@ class IncidentService:
             "estimated_additional_service_delay_s": round(response_s + consequence["duration_s"] - option["baseline"]["duration_s"], 6),
             "estimated_additional_energy_kwh": round(self.routes._fixture["auxiliary_kw"] * response_s / 3600 +
                                                      consequence["energy_kwh"] - option["baseline"]["energy_kwh"], 6),
-            "rule_outcomes": option["checks"] if action == "ROAD_DETOUR" else [c.model_dump(mode="json") for c in continuation.checks],
+            "rule_outcomes": [c.model_dump(mode="json") for c in (refreshed if action == "ROAD_DETOUR" else continuation).checks],
             "energy_model_revision": snapshot.scenario.energy_model_revision,
             "consequence_model": "m2_route_detour.json declared comparison parameters",
         }

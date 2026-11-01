@@ -15,6 +15,13 @@ namespace Formula9.Backend
             return value;
         }
 
+        public async Task<RouteOutcome> GetRouteOutcomeAsync(string id, string route, CancellationToken cancellation = default)
+        {
+            var value = ContractParser.Parse<RouteOutcome>(await SendTrainingAsync("GET", $"/{Segment(id)}/routes/{Segment(route)}/outcome", null, cancellation));
+            if (value.SessionId != id || value.RouteId != route) throw new ContractException("Route outcome does not match the request");
+            return value;
+        }
+
         public async Task<RouteEditPreview> PreviewRouteAsync(string id, RouteEditRequest draft, CancellationToken cancellation = default)
         {
             var value = ContractParser.Parse<RouteEditPreview>(await SendTrainingAsync("POST", $"/{Segment(id)}/route-previews", ContractParser.Serialize(draft), cancellation));

@@ -13,13 +13,14 @@ from starlette.authentication import UnauthenticatedUser
 
 from contracts.v2.models import DispatcherCommand, Id, TrainingSession
 from contracts.v2.sessions import CreateSessionRequest, SessionListResponse
-from contracts.v2.route_edit import RouteApprovalRequest, RouteEditPreview, RouteEditRequest, RouteEditorContext
+from contracts.v2.route_edit import RouteApprovalRequest, RouteEditPreview, RouteEditRequest, RouteEditorContext, RouteOutcome
 from src.core.config import get_settings
 from src.core.training_telemetry import boundary
 from src.persistence.training_store import TrainingStore, TrainingStoreError
 from src.services.battery_decision import submit_battery_decision
 from src.services.incidents import IncidentService, get_incident_service
 from src.services.route_edit import RouteEditService, get_route_edit_service
+from src.services.route_outcome import route_outcome
 from src.services.training_sessions import TrainingSessionService
 from src.services.integrated_actor import SCENARIO_ID, services_for
 
@@ -123,7 +124,14 @@ def route_editor(session_id: str, route_id: str,
                  service: RouteEditService = Depends(get_route_edit_service)) -> RouteEditorContext:
     baseline = store.snapshot(session_id)
     service, _ = services_for(baseline, routes=service)
-    return service.editor_context(baseline, route_id)
+    return service.for_route(baseline, route_id).editor_context(baseline, route_id)
+
+
+@router.get("/{session_id}/routes/{route_id}/outcome", response_model=RouteOutcome)
+def route_outcome_report(session_id: str, route_id: str,
+                         actor_id: str = Depends(get_actor_id),
+                         store: TrainingStore = Depends(get_training_store)) -> RouteOutcome:
+    return route_outcome(store, session_id, route_id)
 
 
 @router.post("/{session_id}/route-previews", response_model=RouteEditPreview)
@@ -136,7 +144,7 @@ def route_preview(session_id: str, draft: RouteEditRequest,
         snapshot = store.snapshot(session_id)
         service, _ = services_for(snapshot, routes=service)
         fields.update(boundary(snapshot))
-        result = service.preview(snapshot, draft)
+        result = service.for_route(snapshot, draft.route_id).draft_preview(snapshot, draft)
         fields.update(preview_id=result.preview_id, outcome=result.validation)
         return result
 
@@ -189,7 +197,9 @@ def incident_preview(session_id: str, command: DispatcherCommand,
                      actor_id: str = Depends(get_actor_id),
                      store: TrainingStore = Depends(get_training_store),
                      incidents: IncidentService = Depends(get_incident_service)) -> dict:
-    _, incidents = services_for(store.snapshot(session_id), incidents=incidents)
+    snapshot = store.snapshot(session_id)
+    _, incidents = services_for(snapshot, incidents=incidents)
+    incidents = incidents.for_incident(store, snapshot, command.target_id)
     return incidents.preview(store, session_id, command)
 
 
@@ -198,7 +208,9 @@ def incident_history(session_id: str, incident_id: str,
                      actor_id: str = Depends(get_actor_id),
                      store: TrainingStore = Depends(get_training_store),
                      incidents: IncidentService = Depends(get_incident_service)) -> dict:
-    _, incidents = services_for(store.snapshot(session_id), incidents=incidents)
+    snapshot = store.snapshot(session_id)
+    _, incidents = services_for(snapshot, incidents=incidents)
+    incidents = incidents.for_incident(store, snapshot, incident_id)
     return incidents.history(store, session_id, incident_id)
 
 
@@ -207,7 +219,9 @@ def incident_debrief(session_id: str, incident_id: str,
                      actor_id: str = Depends(get_actor_id),
                      store: TrainingStore = Depends(get_training_store),
                      incidents: IncidentService = Depends(get_incident_service)) -> dict:
-    _, incidents = services_for(store.snapshot(session_id), incidents=incidents)
+    snapshot = store.snapshot(session_id)
+    _, incidents = services_for(snapshot, incidents=incidents)
+    incidents = incidents.for_incident(store, snapshot, incident_id)
     return incidents.debrief(store, session_id, incident_id)
 
 
