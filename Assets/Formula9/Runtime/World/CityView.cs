@@ -58,8 +58,29 @@ namespace Formula9.World
             root.SetParent(parent, false);
             this.tiles = tiles;
             buildingMaterial = Own(new Material(Shader.Find("Formula9/CityBuilding")));
+            ApplyBuildingTextures(buildingMaterial);
             lineMaterial = Own(new Material(Shader.Find("Sprites/Default")));
             if (tiles != null) tiles.TileLoaded += RefreshTiles;
+        }
+
+        // Wall and window textures in Resources/Formula9/Textures, by shader property. Without all four
+        // the buildings keep their plain colours rather than showing white where a texture is missing.
+        private static readonly (string Property, string File)[] BuildingTextures =
+        {
+            ("_WallHome", "building_wall_home"), ("_WallOther", "building_wall_other"),
+            ("_WindowHome", "building_window_home"), ("_WindowOther", "building_window_other"),
+        };
+
+        private static void ApplyBuildingTextures(Material material)
+        {
+            var textures = BuildingTextures.Select(t => (t.Property, Texture: Resources.Load<Texture2D>("Formula9/Textures/" + t.File))).ToList();
+            if (textures.Any(t => t.Texture == null))
+            {
+                Debug.LogWarning("Building textures are missing from Resources/Formula9/Textures, so buildings are plain colour");
+                material.SetFloat("_Plain", 1);
+                return;
+            }
+            foreach (var (property, texture) in textures) material.SetTexture(property, texture);
         }
 
         private T Own<T>(T item) where T : UnityEngine.Object { owned.Add(item); return item; }
@@ -333,6 +354,8 @@ namespace Formula9.World
             item.transform.SetParent(root, false);
             item.transform.localScale = size;
             var material = Own(new Material(buildingMaterial) { color = color });
+            // A shuttle or stop is not a building: no walls or windows on it
+            material.SetFloat("_Plain", 1);
             item.GetComponent<MeshRenderer>().sharedMaterial = material;
             return item.transform;
         }
