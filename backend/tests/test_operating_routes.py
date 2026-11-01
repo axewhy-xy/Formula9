@@ -246,15 +246,16 @@ def test_the_outcome_reports_what_the_shuttle_did_against_what_was_approved(runt
     assert held["held_for_incident"] and held["summary"]
     # Answer it the way an operator would, then let the loop finish
     incident = snapshot["incidents"][0]
-    option = next(c for c in snapshot["candidates"] if c["action"] == "WAIT")
+    option = next(c for c in snapshot["candidates"] if c["action"] == "ESCALATE")
     decided = client.post(f"/api/v2/sessions/{session_id}/commands", json={
         "contract_version": "2.0", "command_id": uuid4().hex, "idempotency_key": uuid4().hex,
         "session_id": session_id, "command_type": "APPROVE_INCIDENT_OPTION", "expected_epoch": snapshot["session_epoch"],
         "expected_revision": incident["aggregate_revision"], "target_type": "INCIDENT", "target_id": incident["incident_id"],
-        "payload": {"candidate_id": option["candidate_id"]}, "reason": "Hold for the obstruction"})
+        "payload": {"candidate_id": option["candidate_id"]}, "reason": "Request assistance while safely stopped"})
     assert decided.status_code == 202 and decided.json()["status"] == "APPLIED"
     # A loop at the fixture's speed is thousands of durable ticks; only the clock depends on the speed
     service.sessions[session_id].actor.shuttles[0].cruise_vel *= SPEED_UP
+    service.sessions[session_id].actor.incident_due_tick = 10**12
 
     async def finish_a_loop():
         for _ in range(9000):
@@ -270,7 +271,7 @@ def test_the_outcome_reports_what_the_shuttle_did_against_what_was_approved(runt
     assert outcome["service_preserved"] is True
     assert all(stop["times_served"] == 1 for stop in outcome["stops"])
     measured = outcome["loops"][0]
-    # The clock starts when the shuttle leaves, so the obstruction it waited out isn't in the loop's time
+    # Detection now happens during the loop, so its hold is part of the measured time.
     assert 0 < measured["duration_s"] < draft["edited"]["duration_s"]
     assert measured["energy_kwh"] == pytest.approx(draft["edited"]["energy_kwh"], rel=0.5)
     assert outcome["delay_vs_original_s"] is not None and outcome["extra_energy_vs_original_kwh"] is not None

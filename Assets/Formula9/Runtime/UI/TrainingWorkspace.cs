@@ -56,6 +56,12 @@ namespace Formula9.UI
 
         private readonly List<Button> navButtons = new List<Button>();
         public string SelectedIncident => incidents.value;
+        public void SelectIncident(string incidentId)
+        {
+            if (string.IsNullOrEmpty(incidentId)) return;
+            incidents.value = incidentId;
+            ShowSection("operations");
+        }
         public event Action IncidentSelected;
         public event Action<string> SectionChanged;
         private const int RoutePage = 1, ReportsPage = 4, ScenariosPage = 5, MaxLedgerEntries = 200;
@@ -219,8 +225,22 @@ namespace Formula9.UI
                 string.Join(";", s.Candidates.Where(c => c.IncidentId == selectedIncident.IncidentId).Select(c => $"{c.CandidateId}:{c.Revision}:{c.Validation}"));
             if (incidentBoundary != newIncidentBoundary) { incidentBoundary = newIncidentBoundary; ClearIncidentPreview(); ClearEvidence(); incidentReport.text = ""; }
             Choices(candidates, selectedIncident?.CandidateIds ?? Enumerable.Empty<string>());
-            incidentData.text = s.Incidents.Count == 0 ? "No incidents detected." : "Select an incident and option, enter a reason, then preview the consequences before approval.";
+            var hasOptions = selectedIncident != null && selectedIncident.CandidateIds.Count > 0;
+            if (selectedIncident == null)
+                incidentData.text = "No incident selected.";
+            else if (!hasOptions)
+                incidentData.text = $"{(selectedIncident.IncidentId.Contains("road_accident") ? "ROAD ACCIDENT" : "ROAD BLOCK")} | {selectedIncident.State}\n" +
+                    "No operator decision is required for this incident. The shuttle is not being held for guidance. " +
+                    "Check the map for its location; any indirect traffic impact depends on the assessed route edges. " +
+                    "If there are no affected route edges, there is no effect on operations.";
+            else
+                incidentData.text = $"{(selectedIncident.IncidentId.Contains("road_accident") ? "ROAD ACCIDENT" : "ROAD BLOCK")} | {selectedIncident.State}\n" +
+                    "This incident requires operator review. Select an option and preview its consequences before approval.";
             incidentDecisions.style.display = s.Incidents.Count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
+            candidates.style.display = hasOptions ? DisplayStyle.Flex : DisplayStyle.None;
+            incidentReason.style.display = hasOptions ? DisplayStyle.Flex : DisplayStyle.None;
+            previewIncident.style.display = hasOptions ? DisplayStyle.Flex : DisplayStyle.None;
+            approveIncident.style.display = hasOptions ? DisplayStyle.Flex : DisplayStyle.None;
             Rows(incidentTable, s.Incidents.OrderBy(i => i.IncidentId, StringComparer.Ordinal).Select(i => new[] { i.IncidentId, i.VehicleId, i.State, i.DetectedTick.ToString(), string.Join(", ", i.CandidateIds) }));
             foreach (var row in incidentTable.Children()) { var id = ((Label)row[0]).text; row.RegisterCallback<ClickEvent>(_ => incidents.value = id); }
             Rows(candidateTable, s.Candidates.Where(c => c.IncidentId == incidents.value).Select(c => new[] { c.CandidateId, c.Action, c.Validation, c.ExpiresAtTick.ToString(), string.Join("; ", c.Assumptions) }));

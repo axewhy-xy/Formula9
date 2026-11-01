@@ -67,6 +67,7 @@ namespace Formula9.UI
         private Button forgot, submit, modeSwitch, start, pause, resume, archive, refreshSessions;
         private DropdownField scenario, sessions;
 
+        private string incidentHistorySessionId;
         private WorldView world;
         private TrainingWorkspace workspace;
 
@@ -88,6 +89,13 @@ namespace Formula9.UI
             session.SnapshotAccepted += (snapshot, reset) =>
             {
                 world.Show(snapshot);
+                // A newly joined session starts its live event cursor at the
+                // snapshot sequence. Fetch older incident locations separately.
+                if (snapshot != null && incidentHistorySessionId != snapshot.SessionId)
+                {
+                    incidentHistorySessionId = snapshot.SessionId;
+                    Run(LoadIncidentMapHistory(snapshot.SessionId, snapshot.EventSequence));
+                }
                 Render();
                 Run(RefreshSessionListIfChanged());
             };
@@ -103,6 +111,7 @@ namespace Formula9.UI
             session.SessionLeft += () =>
             {
                 world.Show(null);
+                incidentHistorySessionId = null;
                 sessionId.SetValueWithoutNotify("");
                 lastListedState = null;
                 Render();
@@ -128,6 +137,7 @@ namespace Formula9.UI
             foreach (var name in new[] { "operations", "scenarios", "reports" })
                 rootElement.Q<Button>("section-" + name).clicked += () => workspace.ShowSection(name);
             workspace.ShowSection("operations");
+            world.IncidentSelected += id => workspace.SelectIncident(id);
             workspace.IncidentSelected += () => { if (session.Store.Snapshot != null) RenderFleet(session.Store.Snapshot); };
 
             // Alerts play for live events the store accepted, and for events a recovery appended.
@@ -139,6 +149,8 @@ namespace Formula9.UI
             muteToggle.SetValueWithoutNotify(mute.Muted);
             muteToggle.RegisterValueChangedCallback(change => mute.Muted = change.newValue);
             session.EventsAccepted += events => alerts.OnEvents(events, true);
+            session.EventsAccepted += _ => { if (session.Store.Snapshot != null) world.SetIncidentEvents(session.Store.Events); };
+            session.RecoveryEventsReceived += _ => { if (session.Store.Snapshot != null) world.SetIncidentEvents(session.Store.Events); };
             session.RecoveryEventsReceived += events => alerts.OnEvents(events, true);
 
             // Interface sounds from amee's review.
@@ -700,6 +712,7 @@ namespace Formula9.UI
         //     snapshot (FullSnapshot): The accepted snapshot.
         private void RenderFleet(FullSnapshot snapshot)
         {
+            world.SetIncidentEvents(session.Store.Events);
             fleet.Clear();
             var rows = TrainingPresenter.Fleet(snapshot, workspace?.SelectedIncident);
             fleetEmpty.style.display = rows.Count == 0 ? DisplayStyle.Flex : DisplayStyle.None;
@@ -815,6 +828,25 @@ namespace Formula9.UI
         {
             message.text = text;
             message.style.display = string.IsNullOrEmpty(text) ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+
+        // Replays only for map placement, without altering the SessionController's
+        // authoritative event cursor or the incident decision workflow.
+        private async Task LoadIncidentMapHistory(string targetSessionId, long throughSequence)
+        {
+            long cursor = 0;
+            int batches = 0;
+            while (cursor < throughSequence && batches++ < 100)
+            {
+                var reply = await api.GetEventsAsync(targetSessionId, cursor, 100);
+                if (incidentHistorySessionId != targetSessionId ||
+                    session.Store.Snapshot?.SessionId != targetSessionId)
+                    return;
+                if (reply.Events != null && reply.Events.Count > 0)
+                    world.SetIncidentEvents(reply.Events);
+                if (reply.NextSequence <= cursor) break;
+                cursor = reply.NextSequence;
+            }
         }
 
         // -----------------------------------------------------------------------------------

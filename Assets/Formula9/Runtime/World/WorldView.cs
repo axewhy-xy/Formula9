@@ -598,6 +598,12 @@ namespace Formula9.World
         // Args:
         //     other (FleetMap): The map, for example the workspace's.
         public void UseRealMap(FleetMap other) => other.UseRealMap(tiles, transit);
+        public event Action<string> IncidentSelected
+        {
+            add { if (map != null) map.IncidentSelected += value; }
+            remove { if (map != null) map.IncidentSelected -= value; }
+        }
+        public void SetIncidentEvents(IEnumerable<Formula9.Contracts.Event> events) => map?.SetIncidentEvents(events);
 
         public string SelectedId => selectedId;
         // The 2D Map / 3D View switch. A session without a 3D world always shows its map.

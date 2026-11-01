@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "time_unit": "simulation_seconds",
+  "notes": "Synthetic templates only. Instance IDs, affected route edges, and trigger ticks are assigned by the running session.",
+  "scenarios": [
+    {
+      "incident_id": "road-block",
+      "kind": "ROAD_BLOCK",
+      "duration_s": 30,
+      "warning_s": 0,
+      "detection_delay_s": 0,
+      "recovery_s": 0,
+      "max_multiplier": 1.0,
+      "source": {
+        "provenance": "SYNTHETIC"
+      },
+      "simulation_assumptions": {
+        "full_road_closure": true,
+        "advance_announcement": true
+      }
+    },
+    {
+      "incident_id": "road-accident",
+      "kind": "ROAD_ACCIDENT",
+      "duration_s": 30,
+      "warning_s": 0,
+      "detection_delay_s": 0,
+      "recovery_s": 0,
+      "max_multiplier": 2.0,
+      "source": {
+        "provenance": "SYNTHETIC"
+      },
+      "simulation_assumptions": {
+        "partial_obstruction": true,
+        "duration_is_estimate": true,
+        "congestion_multiplier_is_estimate": true
+      }
+    }
+  ],
+  "random_generation": {
+    "min_interval_s": 60,
+    "max_interval_s": 120,
+    "max_active_incidents": 3,
+    "avoid_duplicate_edges": true,
+    "first_min_s": 10,
+    "first_max_s": 11,
+    "network_hops": 1,
+    "congestion_speed_factor": 0.5,
+    "shuttle_impact_probability": 0.65,
+    "road_accident_probability": 0.5
+  }
+}
