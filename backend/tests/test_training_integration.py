@@ -37,12 +37,12 @@ from src.services.training_workflow import publish_workflow
 
 
 def bay(charger_id="charger-1"):
-    x, y = get_workflow_definition().data["bay_positions_m"][charger_id]
+    x, y = get_workflow_definition().bay_positions[charger_id]
     return {"x_m": float(x), "y_m": float(y), "z_m": 0.}
 
 
-def parking(index):
-    x, y = get_workflow_definition().parking_positions[index]
+def parking(index, depot_id="depot-toa-payoh-interchange"):
+    x, y = get_workflow_definition().parking_positions[depot_id][index]
     return {"x_m": float(x), "y_m": float(y), "z_m": 0.}
 
 
@@ -175,7 +175,7 @@ def reserve(runtime, vehicle_id="shuttle-05", key="battery-choice"):
 def test_one_live_session_runs_route_incident_depot_and_charging(runtime):
     client, store, service, session_id = runtime
     initial = read(runtime)
-    assert len(initial["vehicles"]) == 5 and len(initial["routes"]) == 5 and len(initial["chargers"]) == 2
+    assert len(initial["vehicles"]) == 5 and len(initial["routes"]) == 5 and len(initial["chargers"]) == 4 and len(initial["depots"]) == 2
     assert send(runtime, "START")["status"] == "REJECTED"  # Closed route never silently starts.
     assert read(runtime)["session"]["status"] == "READY"
     draft = preview(runtime)

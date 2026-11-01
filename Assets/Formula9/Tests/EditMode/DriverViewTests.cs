@@ -125,6 +125,9 @@ namespace Formula9.Tests
             var vehicle = snapshot.Vehicles.First(v => v.VehicleId == Shuttle);
             vehicle.HeadingDeg = headingDeg;
             vehicle.Position.XM = x; vehicle.Position.YM = y;
+            // The fixture's depot is at the origin among the shuttles; its charger posts would stand
+            // right in front of the driver, and these tests are about the shuttle's own body
+            foreach (var depot in snapshot.Depots) depot.Position.XM = 1000;
             return snapshot;
         }
 

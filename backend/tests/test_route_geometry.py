@@ -84,6 +84,9 @@ def test_every_shuttle_pulls_in_at_every_stop_on_its_route():
         assert routes[first].stops_m[0].stop_id == routes[second].stops_m[0].stop_id, "they share where the loop closes"
     actor.is_paused = False
     actor.modes = {index: "IN_SERVICE" for index in actor.modes}
+    # Shuttle-05 starts low and would leave for the depot on its own after a loop
+    for shuttle in actor.shuttles:
+        shuttle.battery = 100.0
     visited = {shuttle.ID: set() for shuttle in actor.shuttles}
     for _ in range(9000):
         actor.tick()

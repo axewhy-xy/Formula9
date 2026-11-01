@@ -92,15 +92,21 @@ Description:
 Args:
     model (EnergyModel): The energy parameters.
     snapshot (FullSnapshot): The training snapshot.
+    depot_choices: Optional depot ID by vehicle: the depot each shuttle would
+        head for, whose distance depot_distances_m gives. Without it, or for a
+        shuttle it does not name, the snapshot's first depot is used.
 
 Returns:
     list[EnergyForecast]: One forecast per routed shuttle.
 """
 def energy_forecasts(model: EnergyModel, snapshot: FullSnapshot, *, depot_distances_m: dict[str, float] | None = None,
-                      depot_speed_mps: float | None = None) -> list[EnergyForecast]:
+                      depot_speed_mps: float | None = None,
+                      depot_choices: dict[str, str] | None = None) -> list[EnergyForecast]:
     routes = {r.route_id: r for r in snapshot.routes}
-    depot = snapshot.depots[0] if snapshot.depots else None
-    return [forecast_for_vehicle(model, vehicle, routes[vehicle.route_id], depot,
+    depots = {d.depot_id: d for d in snapshot.depots}
+    first = snapshot.depots[0] if snapshot.depots else None
+    return [forecast_for_vehicle(model, vehicle, routes[vehicle.route_id],
+                                 depots.get((depot_choices or {}).get(vehicle.vehicle_id), first),
                                  depot_distance_m=(depot_distances_m or {}).get(vehicle.vehicle_id),
                                  depot_speed_mps=depot_speed_mps)
             for vehicle in snapshot.vehicles
@@ -142,6 +148,9 @@ Args:
         in seconds.
     parking_distances_m: Optional bay-to-standby path lengths by vehicle and
         charger. Requires depot distances and a positive declared depot speed.
+    depot_choices: Optional depot ID by vehicle. CHARGE_NOW is then offered at
+        the first free charger of that depot, the one depot_distances_m
+        measures; without it, at the first free charger anywhere.
 
 Returns:
     list[ChargeOption]: The options, marked as estimates; empty when no
@@ -150,7 +159,8 @@ Returns:
 def charge_options(model: EnergyModel, snapshot: FullSnapshot, charge_s: float = 1200.0,
                    *, depot_distances_m: dict[str, float] | None = None,
                    depot_speed_mps: float | None = None,
-                   parking_distances_m: dict[tuple[str, str], float] | None = None) -> list[ChargeOption]:
+                   parking_distances_m: dict[tuple[str, str], float] | None = None,
+                   depot_choices: dict[str, str] | None = None) -> list[ChargeOption]:
     if parking_distances_m is not None:
         if depot_distances_m is None or depot_speed_mps is None or depot_speed_mps <= 0:
             raise ValueError("Parking estimates require depot distances and a positive depot speed")
@@ -167,7 +177,9 @@ def charge_options(model: EnergyModel, snapshot: FullSnapshot, charge_s: float =
         started = o.offered_at_tick if o.offered_at_tick is not None else o.expires_at_tick - OPTION_LIFETIME_TICKS
         decision_started[o.vehicle_id] = min(started, decision_started.get(o.vehicle_id, started))
     options = []
-    for forecast in energy_forecasts(model, snapshot, depot_distances_m=depot_distances_m, depot_speed_mps=depot_speed_mps):
+    depot_chargers = {d.depot_id: set(d.charger_ids) for d in snapshot.depots}
+    for forecast in energy_forecasts(model, snapshot, depot_distances_m=depot_distances_m, depot_speed_mps=depot_speed_mps,
+                                     depot_choices=depot_choices):
         if forecast.loops_remaining is None or forecast.loops_remaining > LOW_LOOPS:
             continue
         vehicle = vehicles[forecast.vehicle_id]
@@ -194,8 +206,10 @@ def charge_options(model: EnergyModel, snapshot: FullSnapshot, charge_s: float =
                 assumptions=[f"Reserve breached after {forecast.loops_remaining} more loops"],
                 min_in_service_vehicles=len(serving),
             ))
+        # Only a charger at the depot the distance was measured to; any charger without a choice
+        chosen = depot_chargers.get((depot_choices or {}).get(vehicle.vehicle_id))
         charger = next((c for c in sorted(snapshot.chargers, key=lambda c: c.charger_id)
-                        if len(c.occupied_vehicle_ids) < c.port_count), None)
+                        if len(c.occupied_vehicle_ids) < c.port_count and (chosen is None or c.charger_id in chosen)), None)
         if charger is not None:
             route = routes[vehicle.route_id]
             loop = loop_energy_kwh(model, route.distance_m, route.estimated_duration_s)
@@ -316,11 +330,14 @@ Returns:
 def with_battery_decisions(model: EnergyModel, snapshot: FullSnapshot, charge_s: float = 1200.0,
                            *, depot_distances_m: dict[str, float] | None = None,
                            depot_speed_mps: float | None = None,
-                           parking_distances_m: dict[tuple[str, str], float] | None = None) -> FullSnapshot:
+                           parking_distances_m: dict[tuple[str, str], float] | None = None,
+                           depot_choices: dict[str, str] | None = None) -> FullSnapshot:
     result = snapshot.model_copy(deep=True)
-    result.energy_forecasts = energy_forecasts(model, snapshot, depot_distances_m=depot_distances_m, depot_speed_mps=depot_speed_mps)
+    result.energy_forecasts = energy_forecasts(model, snapshot, depot_distances_m=depot_distances_m, depot_speed_mps=depot_speed_mps,
+                                               depot_choices=depot_choices)
     result.charge_options = charge_options(model, snapshot, charge_s, depot_distances_m=depot_distances_m,
-                                          depot_speed_mps=depot_speed_mps, parking_distances_m=parking_distances_m)
+                                          depot_speed_mps=depot_speed_mps, parking_distances_m=parking_distances_m,
+                                          depot_choices=depot_choices)
     result.charge_option_revisions = {**snapshot.charge_option_revisions,
                                       **{o.option_id: o.revision for o in result.charge_options}}
     loops = {f.vehicle_id: f.loops_remaining for f in result.energy_forecasts}

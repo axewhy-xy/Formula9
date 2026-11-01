@@ -29,6 +29,11 @@ namespace Formula9.World
         private static readonly Color StopServed = new Color(0.153f, 0.682f, 0.376f);
         private static readonly Color StopDwelling = new Color(1, 0.84f, 0.2f);
         private static readonly Color WindscreenColor = new Color(0.08f, 0.12f, 0.16f);
+        // A depot is a pad with a charger post for each bay; the backend lays its bays out 30 m apart
+        private static readonly Vector3 DepotPadSize = new Vector3(60, 0.4f, 34), ChargerPostSize = new Vector3(2, 6, 2);
+        private const float ChargerSpacingM = 30;
+        private static readonly Color DepotPadColor = new Color(0.122f, 0.306f, 0.349f);
+        private static readonly Color ChargerFree = new Color(0.153f, 0.682f, 0.376f), ChargerTaken = new Color(1, 0.6f, 0.1f);
         private HashSet<string> served = new HashSet<string>();
 
         private readonly Transform root;
@@ -39,6 +44,7 @@ namespace Formula9.World
         private readonly List<GameObject> routeObjects = new List<GameObject>();
         private readonly List<GameObject> draftObjects = new List<GameObject>();
         private readonly Dictionary<string, (Material Material, Color Color)> stopMarkers = new Dictionary<string, (Material, Color)>();
+        private readonly Dictionary<string, Material> chargerPosts = new Dictionary<string, Material>();
         private readonly HashSet<string> dwelling = new HashSet<string>();
         private RouteDraftView shownDraft;
         private RouteEditPreview shownPreview;
@@ -215,6 +221,40 @@ namespace Formula9.World
             var key = string.Join(";", snapshot.Routes.Select(r => $"{r.RouteId}:{r.Revision}")) + snapshot.Disruptions.Count;
             if (key != routesKey) { routesKey = key; BuildRoutes(snapshot, ordered); }
             NoteDwelling(snapshot, ordered);
+            RefreshChargers(snapshot);
+        }
+
+        public int DepotCount { get; private set; }
+
+        // A charger post shows green while it has a free port and amber once every port is taken.
+        private void RefreshChargers(FullSnapshot snapshot)
+        {
+            foreach (var charger in snapshot.Chargers ?? new List<Charger>())
+                if (chargerPosts.TryGetValue(charger.ChargerId, out var material))
+                    material.color = charger.OccupiedVehicleIds.Count < charger.PortCount ? ChargerFree : ChargerTaken;
+        }
+
+        private void BuildDepots(FullSnapshot snapshot)
+        {
+            chargerPosts.Clear();
+            DepotCount = 0;
+            foreach (var depot in snapshot.Depots)
+            {
+                var at = new Vector3((float)depot.Position.XM, 0, (float)depot.Position.YM);
+                var pad = Marker(PrimitiveType.Cube, DepotPadSize, DepotPadColor, "Depot " + depot.DepotId);
+                pad.position = at + Vector3.up * DepotPadSize.y / 2;
+                routeObjects.Add(pad.gameObject);
+                for (var i = 0; i < depot.ChargerIds.Count; i++)
+                {
+                    var offset = (i - (depot.ChargerIds.Count - 1) / 2f) * ChargerSpacingM;
+                    var post = Marker(PrimitiveType.Cube, ChargerPostSize, ChargerFree, "Charger " + depot.ChargerIds[i]);
+                    // Just behind its bay, so a charging shuttle stands in front of it
+                    post.position = at + new Vector3(offset, ChargerPostSize.y / 2, ShuttleSize.z / 2 + ChargerPostSize.z);
+                    chargerPosts[depot.ChargerIds[i]] = post.GetComponent<MeshRenderer>().sharedMaterial;
+                    routeObjects.Add(post.gameObject);
+                }
+                DepotCount++;
+            }
         }
 
         // A route is a paler shade of its shuttle, so the shuttle stands out on its own road.
@@ -315,6 +355,7 @@ namespace Formula9.World
             routeObjects.Clear();
             stopMarkers.Clear();
             CutRoutesThroughBuildings(snapshot);
+            BuildDepots(snapshot);
             foreach (var route in snapshot.Routes)
             {
                 var serving = ordered.Select((v, index) => (v, index)).Where(p => p.v.RouteId == route.RouteId).Select(p => p.index).ToList();

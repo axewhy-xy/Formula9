@@ -411,6 +411,37 @@ namespace Formula9.Tests
         }
 
         [Test]
+        public void EveryDepotStandsInTheCityWithAChargerPostThatShowsWhenItIsTaken()
+        {
+            var rig = new GameObject("City depot rig");
+            var view = new CityView(rig.transform, null);
+            try
+            {
+                var snapshot = (FullSnapshot)ContractParser.ParseMessage(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/snapshot.json")));
+                snapshot.Chargers.Add(new Charger { ChargerId = "charger-3", AggregateRevision = 1, PortCount = 1, PowerKw = 50, OccupiedVehicleIds = new List<string>() });
+                snapshot.Depots.Add(new Depot { DepotId = "depot-2", Position = new Position { XM = 900, YM = -600 }, ChargerIds = new List<string> { "charger-3" } });
+                view.Show(snapshot, new ShuttleMotion(), 0);
+                Assert.AreEqual(2, view.DepotCount);
+                var pad = rig.GetComponentsInChildren<Transform>().Single(t => t.name == "Depot depot-2");
+                Assert.AreEqual(new Vector3(900, 0.2f, -600), pad.position, "the pad lies on the ground at the backend's position");
+                Renderer Post(string id) => rig.GetComponentsInChildren<MeshRenderer>().Single(r => r.name == "Charger " + id);
+                Assert.AreEqual(900, Post("charger-3").transform.position.x, 1e-3f, "a depot's only charger stands at its middle");
+                var first = Post("charger-1").transform.position.x - (float)snapshot.Depots[0].Position.XM;
+                Assert.AreEqual(-15, first, 1e-3f, "two bays sit 15 m either side, as the backend lays them out");
+                var free = Post("charger-3").sharedMaterial.color;
+                snapshot.Chargers.Single(c => c.ChargerId == "charger-3").OccupiedVehicleIds.Add("shuttle-01");
+                view.Show(snapshot, new ShuttleMotion(), 1);
+                Assert.AreNotEqual(free, Post("charger-3").sharedMaterial.color, "a taken charger changes colour");
+                Assert.AreEqual(free, Post("charger-1").sharedMaterial.color, "a free one keeps its colour");
+            }
+            finally
+            {
+                view.Dispose();
+                UnityEngine.Object.DestroyImmediate(rig);
+            }
+        }
+
+        [Test]
         public void TheCityCutsItsBuildingsForTheRoutesItShowsAndForTheirNewRevisions()
         {
             var rig = new GameObject("City route rig");
