@@ -37,11 +37,18 @@ namespace Formula9.World
         public int RoadCount { get; private set; }
         public Bounds Bounds { get; private set; }
 
-        public CityView(Transform parent, MapTiles tiles)
+        private readonly List<GameObject> trafficLightObjects = new List<GameObject>();
+        public int TrafficLightCount { get; private set; }
+        private readonly GameObject trafficLightPrefab;
+
+        public CityView(Transform parent, MapTiles tiles, GameObject trafficLightPrefab = null)
         {
             root = new GameObject("City").transform;
             root.SetParent(parent, false);
             this.tiles = tiles;
+
+            this.trafficLightPrefab = trafficLightPrefab;
+
             buildingMaterial = Own(new Material(Shader.Find("Formula9/CityBuilding")));
             lineMaterial = Own(new Material(Shader.Find("Sprites/Default")));
             if (tiles != null) tiles.TileLoaded += RefreshTiles;
@@ -62,6 +69,8 @@ namespace Formula9.World
             city.GetComponent<MeshRenderer>().sharedMaterial = buildingMaterial;
             BuildGround();
             await LoadRoadsAsync(client, area, cancellation);
+
+            await LoadTrafficLightsAsync(client, area, cancellation);
         }
 
         public void SetVisible(bool visible) { if (root != null) root.gameObject.SetActive(visible); }
@@ -92,6 +101,47 @@ namespace Formula9.World
             var renderer = road.GetComponent<MeshRenderer>();
             renderer.sharedMaterials = materials;
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        }
+
+        private async Task LoadTrafficLightsAsync(CityClient client, string area, CancellationToken cancellation)
+        {
+            var trafficLightPrefab = Resources.Load<GameObject>("Formula9/TrafficLights");
+            if (trafficLightPrefab == null)
+            {
+                Debug.LogWarning("Traffic light prefab is missing. Skipping traffic light rendering.");
+                return;
+            }
+
+            List<CitySignalTrafficLight> signals;
+            try
+            {
+                signals = await client.GetSignalTrafficLightAsync(area, cancellation);
+            }
+            catch (Exception error) when (!(error is OperationCanceledException))
+            {
+                Debug.LogWarning("Failed to load traffic signals from backend: " + error.Message);
+                return;
+            }
+
+            cancellation.ThrowIfCancellationRequested();
+            TrafficLightCount = signals.Count;
+
+            var trafficLightsContainer = new GameObject("TrafficLights");
+            trafficLightsContainer.transform.SetParent(root, false);
+
+            foreach (var signal in signals)
+            {
+                // Map backend coordinates (XM, YM) to Unity 3D world space (X, Y, Z)
+                var position = new Vector3((float)signal.XM, 0f, (float)signal.YM);
+                var rotation = Quaternion.Euler(0f, (float)signal.FacingHeadingDeg + 180f, 0f);
+
+                var lightObj = UnityEngine.Object.Instantiate(trafficLightPrefab, position, rotation, trafficLightsContainer.transform);
+                lightObj.name = $"TrafficLight_{signal.Id ?? signal.Junction}";
+
+                trafficLightObjects.Add(lightObj);
+            }
+
+            Debug.LogWarning($"Successfully rendered {TrafficLightCount} traffic lights into the 3D map.");
         }
 
         // Pale speckle that the road colours tint. Its mipmaps average out to flat colour far away.

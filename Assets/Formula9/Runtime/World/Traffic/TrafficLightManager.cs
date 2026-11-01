@@ -1,79 +1,63 @@
-using System.Diagnostics;
-using UnityEngine;
+//using System.Collections.Generic;
+//using System.IO;
+//using UnityEngine;
 
-namespace Formula9
-{
-    public class TrafficLightManager : MonoBehaviour
-    {
-        [Header("References")]
-        public GameObject trafficLightPrefab; // Assign your 3D traffic light prefab here
-        public TextAsset jsonFile;            // Drag your toa-payoh-signals.json here in Inspector
+//namespace Formula9
+//{
+//    public class TrafficLightManager : MonoBehaviour
+//    {
+//        public static TrafficLightManager Instance;
 
-        void Start()
-        {
-            if (jsonFile != null)
-            {
-                SpawnTrafficLights();
-            }
-            else
-            {
-                UnityEngine.Debug.LogError("JSON file not assigned to TrafficLightManager!");
-            }
-        }
+//        private List<HaloTrafficLight> registeredLights = new List<HaloTrafficLight>();
 
-        void SpawnTrafficLights()
-        {
-            // Parse the JSON data
-            TrafficSignalList dataList = JsonUtility.FromJson<TrafficSignalList>(jsonFile.text);
+//        void Awake()
+//        {
+//            if (Instance == null) Instance = this;
+//            else Destroy(gameObject);
+//        }
 
-            if (dataList == null || dataList.signals == null)
-            {
-                // Fallback or alternative parsing if the root is an array instead of an object
-                // If JsonUtility fails on root arrays, you can use JsonUtility with a wrapper or Newtonsoft.Json.
-                UnityEngine.Debug.LogWarning("Standard wrapper parsing failed or empty. Trying manual array parse...");
-                ParseAsArray(jsonFile.text);
-                return;
-            }
+//        public void RegisterTrafficLight(HaloTrafficLight lightScript, string roadCode)
+//        {
+//            if (!registeredLights.Contains(lightScript))
+//            {
+//                registeredLights.Add(lightScript);
+//            }
+//        }
 
-            foreach (var entry in dataList.signals)
-            {
-                Vector3 spawnPos = new Vector3(entry.x, entry.y, entry.z);
-                GameObject spawnedLight = Instantiate(trafficLightPrefab, spawnPos, Quaternion.identity);
+//        void Start()
+//        {
+//            // Start the global traffic light cycle loop
+//            StartCoroutine(TrafficLightCycleRoutine());
+//        }
 
-                // Pass the timing parameters to the light controller
-                TrafficLightController controller = spawnedLight.GetComponent<TrafficLightController>();
-                if (controller != null)
-                {
-                    controller.greenTime = entry.greenDuration > 0 ? entry.greenDuration : 5f;
-                    controller.yellowTime = entry.yellowDuration > 0 ? entry.yellowDuration : 2f;
-                    controller.redTime = entry.redDuration > 0 ? entry.redDuration : 5f;
-                }
-            }
-        }
+//        IEnumerator TrafficLightCycleRoutine()
+//        {
+//            while (true)
+//            {
+//                // Phase 1: RED
+//                SetAllLightsState(LightState.Red);
+//                yield return new WaitForSeconds(30f);
 
-        void ParseAsArray(string jsonString)
-        {
-            // Unity's JsonUtility doesn't natively parse top-level arrays. 
-            // We wrap it using a helper trick or standard iteration if needed:
-            string wrappedJson = "{\"signals\":" + jsonString + "}";
-            TrafficSignalList dataList = JsonUtility.FromJson<TrafficSignalList>(wrappedJson);
+//                // Phase 3: YELLOW / AMBER
+//                SetAllLightsState(LightState.Yellow);
+//                yield return new WaitForSeconds(3f);
 
-            if (dataList != null && dataList.signals != null)
-            {
-                foreach (var entry in dataList.signals)
-                {
-                    Vector3 spawnPos = new Vector3(entry.x, entry.y, entry.z);
-                    GameObject spawnedLight = Instantiate(trafficLightPrefab, spawnPos, Quaternion.identity);
+//                // Phase 2: GREEN
+//                SetAllLightsState(LightState.Green);
+//                yield return new WaitForSeconds(30f);
+//            }
+//        }
 
-                    TrafficLightController controller = spawnedLight.GetComponent<TrafficLightController>();
-                    if (controller != null)
-                    {
-                        controller.greenTime = 5f;
-                        controller.yellowTime = 2f;
-                        controller.redTime = 5f;
-                    }
-                }
-            }
-        }
-    }
-}
+//        void SetAllLightsState(bool red, bool yellow, bool green)
+//        {
+//            foreach (var light in registeredLights)
+//            {
+//                if (light != null)
+//                {
+//                    // Calls the built-in method from HaloTrafficLight.cs
+//                    light.OnLightStateChanged(red, yellow, green);
+//                }
+//            }
+//        }
+//    }
+//}
