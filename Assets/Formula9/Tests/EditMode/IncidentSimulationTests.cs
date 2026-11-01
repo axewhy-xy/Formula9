@@ -50,6 +50,36 @@ namespace Formula9.Tests
             Road("beyond", 8, 6, false, -400, 0, -200, 0),
         };
 
+        [Test]
+        public void TrafficKeepsOffAClosureAndOnlyAsMuchOfTheQueueAsHasFormed()
+        {
+            var plan = IncidentSimulation.Plan(Record(IncidentSimulation.Block), Network(), Snapshot());
+            var early = IncidentSimulation.Hazards(plan, 0);
+            Assert.AreEqual(1, early.Count, "only the closed road, as no queue has formed");
+            Assert.IsTrue(early[0].BothWays);
+            CollectionAssert.AreEqual(plan.Road, early[0].Path);
+
+            var hazards = IncidentSimulation.Hazards(plan, 4);
+            Assert.AreEqual(1 + plan.Lanes.Count(l => l.StartM < 20), hazards.Count);
+            var queue = hazards[1];
+            Assert.IsFalse(queue.BothWays);
+            Assert.AreEqual(20, IncidentSimulation.Length(queue.Path), 0.01f, "as far as it has grown");
+            var run = queue.Path[queue.Path.Length - 1] - queue.Path[0];
+            var lane = plan.Lanes[0];
+            Assert.Less(Vector2.Dot(run, lane.Points[1] - lane.Points[0]), 0, "running the way its traffic goes, in towards the incident");
+        }
+
+        [Test]
+        public void TrafficKeepsOffAnAccidentsSceneOnly()
+        {
+            var plan = IncidentSimulation.Plan(Record(IncidentSimulation.Accident), Network(), Snapshot());
+            var scene = IncidentSimulation.Hazards(plan, 0)[0];
+            Assert.IsTrue(scene.BothWays);
+            Assert.AreEqual(28, IncidentSimulation.Length(scene.Path), 0.01f);
+            Assert.AreEqual(36, scene.Path[0].y, 0.01f);
+            Assert.AreEqual(64, scene.Path[scene.Path.Length - 1].y, 0.01f);
+        }
+
         private static Event MarkerEvent(string eventType, JObject extra)
         {
             var data = new JObject

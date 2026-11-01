@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Formula9.Backend;
 using Formula9.Contracts;
 using UnityEngine;
+using HealthbarGames;
 
 namespace Formula9.World
 {
@@ -55,21 +56,35 @@ namespace Formula9.World
         private readonly CityIncidents incidents;
         private List<CityBuilding> buildings;
         private Mesh buildingMesh;
+        private CityTrafficRenderer traffic;
+        // A queue grows slowly, so the traffic need not look at the incidents every frame
+        private const float HazardRefreshS = 0.5f;
+        private float hazardsDueS;
+        private readonly List<TrafficObstacle> trafficObstacles = new List<TrafficObstacle>();
 
         public int BuildingCount { get; private set; }
         public int RoadCount { get; private set; }
         public Bounds Bounds { get; private set; }
         public string IncidentStatus => incidents.Status;
 
-        public CityView(Transform parent, MapTiles tiles)
+        private readonly List<GameObject> trafficLightObjects = new List<GameObject>();
+        public int TrafficLightCount { get; private set; }
+        private readonly GameObject trafficLightPrefab;
+        private IReadOnlyList<CityRoad> loadedRoads = Array.Empty<CityRoad>();
+
+        public CityView(Transform parent, MapTiles tiles, GameObject trafficLightPrefab = null)
         {
             root = new GameObject("City").transform;
             root.SetParent(parent, false);
             this.tiles = tiles;
+
+            this.trafficLightPrefab = trafficLightPrefab;
+
             buildingMaterial = Own(new Material(Shader.Find("Formula9/CityBuilding")));
             ApplyBuildingTextures(buildingMaterial);
             lineMaterial = Own(new Material(Shader.Find("Sprites/Default")));
             incidents = new CityIncidents(root, buildingMaterial, lineMaterial);
+            traffic = new CityTrafficRenderer();
             if (tiles != null) tiles.TileLoaded += RefreshTiles;
         }
 
@@ -111,6 +126,8 @@ namespace Formula9.World
             city.GetComponent<MeshRenderer>().sharedMaterial = buildingMaterial;
             BuildGround();
             await LoadRoadsAsync(client, area, cancellation);
+
+            await LoadTrafficLightsAsync(client, area, cancellation);
         }
 
         public void SetVisible(bool visible) { if (root != null) root.gameObject.SetActive(visible); }
@@ -123,6 +140,7 @@ namespace Formula9.World
             catch (Exception error) when (!(error is OperationCanceledException))
             {
                 Debug.LogWarning("No road surfaces, so the map's roads show instead: " + error.Message);
+                traffic?.Rebuild(Array.Empty<CityRoad>(), null);
                 return;
             }
             cancellation.ThrowIfCancellationRequested();
@@ -141,6 +159,102 @@ namespace Formula9.World
             var renderer = road.GetComponent<MeshRenderer>();
             renderer.sharedMaterials = materials;
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            CityTrafficData trafficData = null;
+            try { trafficData = await client.GetTrafficAsync(area, cancellation); }
+            catch (Exception error) when (!(error is OperationCanceledException))
+            {
+                Debug.LogWarning("No traffic sample; roads still render: " + error.Message);
+            }
+            cancellation.ThrowIfCancellationRequested();
+            CitySignalData signals = null;
+            if (trafficData != null)
+            {
+                // Without the lights, traffic still gives way at junctions
+                try { signals = await client.GetSignalsAsync(area, cancellation); }
+                catch (Exception error) when (!(error is OperationCanceledException))
+                {
+                    Debug.LogWarning("No traffic lights; traffic only gives way at junctions: " + error.Message);
+                }
+                cancellation.ThrowIfCancellationRequested();
+            }
+            traffic?.Rebuild(roads, trafficData, signals);
+        }
+
+        private async Task LoadTrafficLightsAsync(CityClient client, string area, CancellationToken cancellation)
+        {
+            var trafficLightPrefab = Resources.Load<GameObject>("Formula9/TrafficLights");
+            if (trafficLightPrefab == null)
+            {
+                Debug.LogWarning("Traffic light prefab is missing. Skipping traffic light rendering.");
+                return;
+            }
+
+            List<CitySignalTrafficLight> signals;
+            try
+            {
+                signals = await client.GetSignalTrafficLightAsync(area, cancellation);
+            }
+
+            catch (Exception error) when (!(error is OperationCanceledException))
+            {
+                Debug.LogWarning("Failed to load traffic signals from backend: " + error.Message);
+                return;
+            }
+
+            cancellation.ThrowIfCancellationRequested();
+
+            var filteredSignals = TrafficLightPlacement.OnePerPole(signals);
+
+            TrafficLightCount = filteredSignals.Count;
+            if (filteredSignals.Count > 0 && TrafficLightManager.Instance != null)
+            {
+                var first = filteredSignals[0];
+                TrafficLightManager.Instance.InitializeTiming(new CitySignalTiming
+                {
+                    GreenS = (int)first.GL_duration,
+                    YellowS = (int)first.YL_duration,
+                    AllRedS = (int)first.RL_duration,
+                });
+                if (traffic != null) TrafficLightManager.Instance.SetClock(() => traffic.SignalClockS);
+            }
+
+            var trafficLightsContainer = new GameObject("TrafficLights");
+            trafficLightsContainer.transform.SetParent(root, false);
+
+            foreach (var signal in filteredSignals)
+            {
+                var pose = TrafficLightPlacement.Place(signal, loadedRoads);
+
+                var lightObj = UnityEngine.Object.Instantiate(trafficLightPrefab, pose.Position, pose.Rotation, trafficLightsContainer.transform);
+                lightObj.name = $"TrafficLight_{signal.Id ?? signal.Junction}";
+                if (pose.Mirrored) lightObj.transform.localScale = new Vector3(-1, 1, 1);
+
+                trafficLightObjects.Add(lightObj);
+                var lightScript = lightObj.GetComponentInChildren<HaloTrafficLight>();
+                if (lightScript == null)
+                {
+                    Debug.LogWarning($"[CityView] FAILED: Instantiated prefab for '{lightObj.name}' is missing the HaloTrafficLight component!");
+                }
+
+                if (TrafficLightManager.Instance == null)
+                {
+                    Debug.LogWarning("[CityView] FAILED: TrafficLightManager.Instance returned null!");
+                }
+
+                if (lightScript != null && TrafficLightManager.Instance != null)
+                {
+                    string junctionId = signal.Junction ?? signal.Id ?? "default_junction";
+                    int offsetS = (int)signal.OffsetS;
+                    int phase = signal.Phase;
+
+                    TrafficLightManager.Instance.RegisterTrafficLight(lightScript, junctionId, offsetS, phase);
+                    //Debug.LogWarning($"[CityView] Spawned & Registered light for junction: {junctionId}, Phase: {signal.Phase}, Offset: {signal.OffsetS}");
+                }
+            }
+
+            Debug.LogWarning(filteredSignals.Count < signals.Count
+            ? $"Successfully rendered {TrafficLightCount} unique traffic lights (filtered out {signals.Count - TrafficLightCount} duplicates)."
+            : $"Successfully rendered {TrafficLightCount} traffic lights into the 3D map.");
         }
 
         // Pale speckle that the road colours tint. Its mipmaps average out to flat colour far away.
@@ -415,6 +529,23 @@ namespace Formula9.World
             return item.transform;
         }
 
+        // Called once a frame, unlike Tick, which a new snapshot also calls. A delta of zero holds traffic still.
+        public void TickTraffic(float deltaTime, Camera camera)
+        {
+            if (traffic == null) return;
+            hazardsDueS -= deltaTime;
+            if (hazardsDueS <= 0)
+            {
+                hazardsDueS = HazardRefreshS;
+                traffic.SetHazards(incidents.TrafficHazards());
+            }
+            trafficObstacles.Clear();
+            foreach (var pair in shuttles)
+                trafficObstacles.Add(new TrafficObstacle { Id = pair.Key, Position = pair.Value.position, Forward = pair.Value.forward, HalfLength = ShuttleSize.z / 2, HalfWidth = ShuttleSize.x / 2 });
+            traffic.SetShuttles(trafficObstacles);
+            traffic.Tick(deltaTime, camera);
+        }
+
         // Called each frame: shuttles glide between the backend's poses.
         public void Tick(ShuttleMotion motion, float now)
         {
@@ -457,6 +588,8 @@ namespace Formula9.World
         {
             if (tiles != null) tiles.TileLoaded -= RefreshTiles;
             incidents.Dispose();
+            traffic?.Dispose();
+            traffic = null;
             if (root != null) WorldBuilder.Remove(root.gameObject);
             foreach (var item in owned)
             {
