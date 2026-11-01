@@ -433,6 +433,14 @@ class IntegratedSessionActor(SessionActor):
                 shuttle.curr_vel = self.definition.data["speed_mps"] if shuttle.state == ShuttleState.ROUTE_LOOP else 0.0
             shuttle.position = Vector2D(x=vehicle.position.x_m, y=vehicle.position.y_m)
             shuttle.battery = vehicle.battery_kwh*100/vehicle.battery_capacity_kwh
+        # A detour replaced by a later one is never driven again, so its path leaves the checkpoint.
+        driven = {v.route_id for v in snapshot.vehicles}
+        for incident in snapshot.incidents:
+            detour = incident.incident_id + "-detour"
+            if detour not in driven:
+                self._routes.pop(detour, None)
+                self.stop_progress.pop(detour, None)
+                self.stop_names.pop(detour, None)
         self.domain = snapshot.model_copy(deep=True)
         self.command_revision = snapshot.session.aggregate_revision
         self.is_paused = snapshot.session.status != "RUNNING"
@@ -735,7 +743,8 @@ class IntegratedSessionActor(SessionActor):
         excluded = {"snapshot_id", "event_sequence", "session_epoch", "session"}
         if domain.model_dump(exclude=excluded) != snapshot.model_dump(exclude=excluded):
             raise TrainingStoreError("CORRUPT_CHECKPOINT", "Workflow and public checkpoint disagree")
-        if len(state["paths"]) > 9 or state["pending_events"]:
+        # Five service routes, one live detour and a depot path per shuttle.
+        if len(state["paths"]) > 11 or state["pending_events"]:
             raise TrainingStoreError("CORRUPT_CHECKPOINT", "Workflow path/event bounds are invalid")
         self._routes = {p["route_ID"]: validate_routes([p], MAX_ROUTE_WAYPOINTS)[0] for p in state["paths"]}
         self.modes = {int(k): v for k, v in state["modes"].items()}

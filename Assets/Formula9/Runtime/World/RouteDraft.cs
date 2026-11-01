@@ -19,6 +19,7 @@ namespace Formula9.World
     public sealed class DraftRoad
     {
         public string EdgeId, Name, Fit;
+        public long Source, Target;
         public bool Closed, OnTwinSide;
         public Vector2[] Points;
         public Rect Bounds;
@@ -52,7 +53,7 @@ namespace Formula9.World
                 else continue;
                 all.Add(new DraftRoad
                 {
-                    EdgeId = edge.EdgeId, Name = edge.RoadName, Fit = edge.Fit, Closed = edge.Closed, Points = points, Bounds = BoundsOf(points),
+                    EdgeId = edge.EdgeId, Name = edge.RoadName, Fit = edge.Fit, Source = edge.Source, Target = edge.Target, Closed = edge.Closed, Points = points, Bounds = BoundsOf(points),
                     // A two-way road is drawn once; either direction picks it
                     OnTwinSide = edge.EdgeId.EndsWith(":reverse", StringComparison.Ordinal) && ids.Contains(edge.EdgeId.Substring(0, edge.EdgeId.Length - "reverse".Length) + "forward"),
                 });

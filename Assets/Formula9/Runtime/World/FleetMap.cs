@@ -7,7 +7,6 @@ using Formula9.Backend;
 using Formula9.Contracts;
 using UnityEngine;
 using UnityEngine.UIElements;
-using Newtonsoft.Json.Linq;
 
 namespace Formula9.World
 {
@@ -90,33 +89,15 @@ namespace Formula9.World
 
         public string SelectedId { get => selectedId; set { selectedId = value; drawing.MarkDirtyRepaint(); } }
         public bool ShowsIslandWhenEmpty => islandWhenEmpty && (tiles != null || transit != null);
-        private readonly Dictionary<string, (Vector2 Position, Vector2 Start, Vector2 End, string EdgeId, string Kind, string Impact)> incidentMarkers = new Dictionary<string, (Vector2, Vector2, Vector2, string, string, string)>();
+        private readonly Dictionary<string, IncidentRecord> incidentMarkers = new Dictionary<string, IncidentRecord>();
         public event Action<string> IncidentSelected;
         public void SetIncidentEvents(IEnumerable<Formula9.Contracts.Event> events)
         {
             // Events are delivered incrementally; clearing here loses markers from
-            // older batches. Keep them until the session changes.
-            if (events != null)
-                foreach (var evt in events.OrderBy(e => e.EventSequence))
-                {
-                    if (evt.EntityType != "INCIDENT" || evt.Data == null) continue;
-                    // Keep the original detection position after resolution. The snapshot
-                    // supplies the current state, so a historical marker turns grey.
-                    var marker = evt.Data["map_marker"] as JObject;
-                    var center = marker?["center"];
-                    if (center == null) continue;
-                    var x = center.Value<float?>("x_m"); var y = center.Value<float?>("y_m");
-                    if (!x.HasValue || !y.HasValue) continue;
-                    var impacted = evt.Data["impact_edge_ids"] as JArray;
-                    var impact = evt.Data.Value<string>("operational_impact") ??
-                        (impacted != null && impacted.Count > 0 ? "Route may be affected" : "No effect on operations");
-                    var start = marker["start"];
-                    var end = marker["end"];
-                    var a = new Vector2(start?.Value<float?>("x_m") ?? x.Value, start?.Value<float?>("y_m") ?? y.Value);
-                    var b = new Vector2(end?.Value<float?>("x_m") ?? x.Value, end?.Value<float?>("y_m") ?? y.Value);
-                    incidentMarkers[evt.EntityId] = (new Vector2(x.Value, y.Value), a, b,
-                        marker.Value<string>("edge_id") ?? "", evt.Data.Value<string>("incident_type") ?? "INCIDENT", impact);
-                }
+            // older batches. Keep them until the session changes. The original detection
+            // position outlasts resolution: the snapshot supplies the current state, so a
+            // historical marker turns grey.
+            IncidentRecord.Merge(events, incidentMarkers);
             drawing.MarkDirtyRepaint();
         }
         public event Action<string> VehicleSelected;

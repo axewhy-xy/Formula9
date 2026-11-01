@@ -201,13 +201,23 @@ class RouteEditService:
                 return identifier
         return route.directed_edge_ids[0]
 
-    def continuation_preview(self, snapshot: FullSnapshot, vehicle_id: str) -> RouteEditPreview:
-        """Validate a detour that still contains the shuttle's current road and driven prefix."""
-        vehicle = next(v for v in snapshot.vehicles if v.vehicle_id == vehicle_id)
-        route = next(r for r in snapshot.routes if r.route_id == vehicle.route_id)
-        request = dict(route_id=route.route_id, expected_route_revision=route.revision, draft_revision=1)
-        if self._network is None:
-            return self.preview(snapshot, RouteEditRequest(**request), retain=False)
+    def for_route(self, snapshot: FullSnapshot, route_id: str) -> "RouteEditService":
+        """An incident's detour keeps the operating metadata of the route it replaced."""
+        if route_id == self._fixture["route_id"] or route_id not in {i.incident_id + "-detour" for i in snapshot.incidents}:
+            return self
+        return RouteEditService(self._graph_repository, fixture={**self._fixture, "route_id": route_id})
+
+    def draft_preview(self, snapshot: FullSnapshot, request: RouteEditRequest) -> RouteEditPreview:
+        """What an operator's draft does. A shuttle held at an incident carries on from where it stands."""
+        riders = {v.vehicle_id for v in snapshot.vehicles if v.route_id == request.route_id}
+        held = next((i for i in snapshot.incidents if i.state == "OPTIONS_READY" and i.vehicle_id in riders), None)
+        if held is None or self._network is None:
+            return self.preview(snapshot, request)
+        self._check_waypoints(request)
+        return self.continuation_preview(snapshot, held.vehicle_id, request)
+
+    def _driven_prefix(self, vehicle, route) -> list[str]:
+        """The roads of a route already driven, through the one the shuttle is on; empty when it is off the route."""
         # The public position is authoritative, including a hold rolled back to
         # the previous presentation boundary. Find its occupied road geometrically.
         nearest = (math.inf, 0)
@@ -222,17 +232,44 @@ class RouteEditService:
                 distance = math.hypot(vehicle.position.x_m-a.x_m-t*dx, vehicle.position.y_m-a.y_m-t*dy)
                 if distance < nearest[0]:
                     nearest = (distance, index)
-        prefix = route.directed_edge_ids[:nearest[1]+1]
+        return route.directed_edge_ids[:nearest[1]+1] if nearest[0] <= 0.01 else []
+
+    def continuation_preview(self, snapshot: FullSnapshot, vehicle_id: str,
+                             draft: RouteEditRequest | None = None) -> RouteEditPreview:
+        """Validate a detour that still contains the shuttle's current road and driven prefix."""
+        vehicle = next(v for v in snapshot.vehicles if v.vehicle_id == vehicle_id)
+        route = next(r for r in snapshot.routes if r.route_id == vehicle.route_id)
+        request = dict(route_id=route.route_id, expected_route_revision=draft.expected_route_revision if draft else route.revision,
+                       draft_revision=draft.draft_revision if draft else 1)
+        if self._network is None:
+            return self.preview(snapshot, RouteEditRequest(**request), retain=False)
+        prefix = self._driven_prefix(vehicle, route)
         visited = self._stop_visits(prefix, self._walk(prefix, self._edges()))
         remaining_stops = [self._fixture["stop_approach_edge_ids"][stop]
                            for stop in route.required_stop_ids if not visited.get(stop)]
-        ids = self._network.continuation(prefix, self._fixture["destination_node_id"], remaining_stops,
-                                         self._closed(snapshot), self._fixture) if nearest[0] <= 0.01 else []
+        ids, unreached = self._network.continuation(prefix, self._fixture["destination_node_id"], remaining_stops,
+                                                    self._closed(snapshot), self._fixture,
+                                                    draft.waypoint_edge_ids if draft else [])
         result = self.preview(snapshot, RouteEditRequest(**request,
                               directed_edge_ids=ids or route.directed_edge_ids), retain=False)
         if not ids:
+            message = (f"The shuttle can't reach {self._network.road_name(unreached)} from where it is held and still complete its loop."
+                       if unreached else "No detour connects to the shuttle's current road")
+            result.checks.append(RouteCheck(check="GEOMETRY", status="FAIL", message=message, feature_id=unreached,
+                                            edge_ids=[unreached] if unreached else []))
+            result.validation, result.approvable = "FAIL", False
+        return result
+
+    def chosen_continuation(self, snapshot: FullSnapshot, vehicle_id: str, ids: list[str]) -> RouteEditPreview:
+        """Validate the operator's own detour: exactly these roads, from where the shuttle stands."""
+        vehicle = next(v for v in snapshot.vehicles if v.vehicle_id == vehicle_id)
+        route = next(r for r in snapshot.routes if r.route_id == vehicle.route_id)
+        result = self.preview(snapshot, RouteEditRequest(route_id=route.route_id, expected_route_revision=route.revision,
+                                                         draft_revision=1, directed_edge_ids=ids), retain=False)
+        prefix = self._driven_prefix(vehicle, route)
+        if not prefix or ids[:len(prefix)] != prefix:
             result.checks.append(RouteCheck(check="GEOMETRY", status="FAIL",
-                                           message="No detour connects to the shuttle's current road"))
+                                            message="This detour does not continue from the shuttle's current road"))
             result.validation, result.approvable = "FAIL", False
         return result
 
@@ -246,12 +283,7 @@ class RouteEditService:
             raise TrainingStoreError("INVALID_REFERENCE", "No curated operating metadata for this route")
         if self._graph_repository.get().routing_mode != "directed":
             raise TrainingStoreError("UNKNOWN_CONSTRAINT", "Directed road metadata is unavailable")
-        if request.waypoint_edge_ids:
-            if self._network is None:
-                raise TrainingStoreError("UNKNOWN_CONSTRAINT", "This route has no operating road network to pick from")
-            unknown = next((key for key in request.waypoint_edge_ids if key not in self._network.edges), None)
-            if unknown is not None:
-                raise TrainingStoreError("INVALID_REFERENCE", "Waypoint is not a road of the operating network")
+        self._check_waypoints(request)
         edges = self._edges()
         closed = self._closed(snapshot)
         unreached = None
@@ -357,6 +389,14 @@ class RouteEditService:
                 while len(self._previews) > 256:
                     self._previews.popitem(last=False)
         return preview
+
+    def _check_waypoints(self, request: RouteEditRequest) -> None:
+        if not request.waypoint_edge_ids:
+            return
+        if self._network is None:
+            raise TrainingStoreError("UNKNOWN_CONSTRAINT", "This route has no operating road network to pick from")
+        if any(key not in self._network.edges for key in request.waypoint_edge_ids):
+            raise TrainingStoreError("INVALID_REFERENCE", "Waypoint is not a road of the operating network")
 
     def _network_checks(self, ids: list[str], check) -> None:
         """Every road of the path against its own metadata, and every turn between two of them."""

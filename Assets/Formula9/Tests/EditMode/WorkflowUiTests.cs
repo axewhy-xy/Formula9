@@ -78,6 +78,135 @@ namespace Formula9.Tests
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
         }
 
+        // The route page's toggle rides in a shuttle of the chosen route, keeps to the selected one
+        // when that is on the route, and goes back to the map the route is drafted on.
+        [Test]
+        public async Task RoutePlanningTogglesTheDriverViewOfTheRoutesShuttle()
+        {
+            var raw = Fixture("snapshot"); raw["session"]["status"] = "READY";
+            var backend = new Backend();
+            backend.Reply = request =>
+            {
+                var path = request.Url.AbsolutePath;
+                if (path.EndsWith("/snapshot")) return Task.FromResult(new HttpResponse { Status = 200, Body = raw.ToString() });
+                if (path.EndsWith("/editor") || path.EndsWith("/outcome")) return Task.FromResult(new HttpResponse { Failure = HttpFailure.Incomplete });
+                if (path.Contains("/events"))
+                {
+                    var replay = Fixture("event_replay"); replay["events"] = new JArray(); replay["has_more"] = false;
+                    replay["after_sequence"] = raw["event_sequence"].DeepClone(); replay["next_sequence"] = raw["event_sequence"].DeepClone();
+                    return Task.FromResult(new HttpResponse { Status = 200, Body = replay.ToString() });
+                }
+                return Task.FromResult(new HttpResponse { Status = 200, Body = "{\"buildings\":[{\"id\":\"way/1\",\"type\":\"retail\",\"name\":\"\",\"height_m\":30,\"rings_m\":[[[0,100],[10,100],[10,110],[0,110],[0,100]]]}]}" });
+            };
+            var auth = new AuthSession(); auth.Begin("trainee", "token", 3600);
+            var url = new Uri("http://backend.test");
+            var api = new TrainingApi(backend, auth, url);
+            var session = new SessionController(api, auth);
+            var root = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/Formula9/UI/Formula9App.uxml").CloneTree();
+            var rig = new GameObject("Route driver view test"); var world = rig.AddComponent<WorldView>();
+            try
+            {
+                world.Attach(root.Q("world"), new SceneLoader(backend, url), null, null, new CityClient(backend, url));
+                var workspace = new TrainingWorkspace(root, api, session, world, _ => { }, _ => { });
+                var toggle = root.Q<Button>("route-driver");
+                var press = typeof(TrainingWorkspace).GetMethod("ToggleDriverView", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                await session.JoinAsync((string)raw["session_id"]);
+                world.Show(session.Store.Snapshot);
+                workspace.ShowRoutePlanning();
+                Assert.IsTrue(world.ShowingMap, "a route is drafted on the map");
+                Assert.IsTrue(toggle.enabledSelf);
+
+                press.Invoke(workspace, null);
+                Assert.IsTrue(world.Driving);
+                Assert.IsFalse(world.ShowingMap);
+                Assert.AreEqual("shuttle-01", world.SelectedId, "the route's first shuttle");
+                Assert.AreEqual("Leave driver view", toggle.text);
+                Assert.IsTrue(toggle.ClassListContains("segment-selected"));
+
+                press.Invoke(workspace, null);
+                Assert.IsFalse(world.Driving);
+                Assert.IsTrue(world.ShowingMap, "back on the map");
+                Assert.AreEqual("Driver view", toggle.text);
+
+                workspace.SelectVehicle("shuttle-03");
+                press.Invoke(workspace, null);
+                Assert.AreEqual("shuttle-03", world.SelectedId, "the selected shuttle, being on this route");
+            }
+            finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
+        }
+
+        // A closure holding a shuttle opens the map on it, except for someone driving: they keep their
+        // seat in the shuttle they chose, and leaving it takes them to the map and the held shuttle.
+        [Test]
+        public async Task AClosureLeavesADriverInTheirSeat()
+        {
+            var raw = Fixture("snapshot");
+            var backend = new Backend();
+            backend.Reply = request =>
+            {
+                var path = request.Url.AbsolutePath;
+                if (path.EndsWith("/snapshot")) return Task.FromResult(new HttpResponse { Status = 200, Body = raw.ToString() });
+                if (path.EndsWith("/editor") || path.EndsWith("/outcome")) return Task.FromResult(new HttpResponse { Failure = HttpFailure.Incomplete });
+                if (path.Contains("/events"))
+                {
+                    var replay = Fixture("event_replay"); replay["events"] = new JArray(); replay["has_more"] = false;
+                    replay["after_sequence"] = raw["event_sequence"].DeepClone(); replay["next_sequence"] = raw["event_sequence"].DeepClone();
+                    return Task.FromResult(new HttpResponse { Status = 200, Body = replay.ToString() });
+                }
+                return Task.FromResult(new HttpResponse { Status = 200, Body = "{\"buildings\":[{\"id\":\"way/1\",\"type\":\"retail\",\"name\":\"\",\"height_m\":30,\"rings_m\":[[[0,100],[10,100],[10,110],[0,110],[0,100]]]}]}" });
+            };
+            var auth = new AuthSession(); auth.Begin("trainee", "token", 3600);
+            var url = new Uri("http://backend.test");
+            var api = new TrainingApi(backend, auth, url);
+            var session = new SessionController(api, auth);
+            var root = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/Formula9/UI/Formula9App.uxml").CloneTree();
+            var rig = new GameObject("Held closure driver test"); var world = rig.AddComponent<WorldView>();
+            var wait = (JObject)raw["candidates"][0];
+            var detour = (JObject)wait.DeepClone(); detour["candidate_id"] = "candidate-detour-1"; detour["action"] = "ROAD_DETOUR";
+            async Task Hold(bool held)
+            {
+                raw["snapshot_id"] = Guid.NewGuid().ToString();
+                raw["candidates"] = held ? new JArray(wait.DeepClone(), detour.DeepClone()) : new JArray(wait.DeepClone());
+                raw["incidents"][0]["candidate_ids"] = held ? new JArray("candidate-wait-1", "candidate-detour-1") : new JArray("candidate-wait-1");
+                await session.RefreshAsync();
+            }
+            try
+            {
+                world.Attach(root.Q("world"), new SceneLoader(backend, url), null, null, new CityClient(backend, url));
+                var workspace = new TrainingWorkspace(root, api, session, world, _ => { }, _ => { });
+                var toggle = root.Q<Button>("route-driver");
+                var press = typeof(TrainingWorkspace).GetMethod("ToggleDriverView", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                await session.JoinAsync((string)raw["session_id"]);
+                world.Show(session.Store.Snapshot);
+                workspace.ShowSection("operations");
+                workspace.SelectVehicle("shuttle-03");
+                press.Invoke(workspace, null);
+                Assert.IsTrue(world.Driving);
+
+                await Hold(true);
+                workspace.Render();
+                Assert.IsTrue(world.Driving, "still driving");
+                Assert.IsFalse(world.ShowingMap, "still in the city");
+                Assert.AreEqual("shuttle-03", world.SelectedId, "still in the shuttle they chose");
+                Assert.AreEqual("Leave driver view", toggle.text);
+
+                press.Invoke(workspace, null);
+                Assert.IsFalse(world.Driving);
+                Assert.IsTrue(world.ShowingMap, "leaving goes to the closure, on the map");
+                Assert.AreEqual("shuttle-01", world.SelectedId, "the held shuttle");
+
+                await Hold(false);
+                workspace.Render();
+                Assert.IsFalse(world.ShowingMap, "the road reopened: watching in 3D");
+                workspace.SelectVehicle("shuttle-03");
+                await Hold(true);
+                workspace.Render();
+                Assert.IsTrue(world.ShowingMap, "not driving: the closure opens the map");
+                Assert.AreEqual("shuttle-01", world.SelectedId, "on the held shuttle");
+            }
+            finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
+        }
+
         // A horizontal ScrollView lays its children out side by side. Each data table must keep its
         // heading and rows in one column inside it, or the rows render beside the heading, out of view.
         [Test]
