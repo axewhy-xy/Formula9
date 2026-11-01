@@ -48,6 +48,44 @@ namespace Formula9.Backend
         public List<CityTrafficVehicle> Vehicles = new List<CityTrafficVehicle>();
     }
 
+    public enum SignalColor { Green, Yellow, Red }
+
+    // The backend's made-up signal cycle (src.traffic.signal_cycle), which any client may work out for itself.
+    public sealed class CitySignalTiming
+    {
+        public int GreenS = 30, YellowS = 3, AllRedS = 2, Phases = 2;
+
+        public SignalColor ColorAt(double timeS, int offsetS, int phase)
+        {
+            var phaseS = GreenS + YellowS + AllRedS;
+            var cycleS = Phases * phaseS;
+            var into = (timeS + offsetS - phase * phaseS) % cycleS;
+            if (into < 0) into += cycleS;
+            return into < GreenS ? SignalColor.Green : into < GreenS + YellowS ? SignalColor.Yellow : SignalColor.Red;
+        }
+    }
+
+    // One road into a signalled junction.
+    public sealed class CitySignalApproach
+    {
+        public string Road;
+        public float HeadingDeg, StopX, StopY;
+        public int Phase;
+    }
+
+    public sealed class CitySignalJunction
+    {
+        public string Id;
+        public int OffsetS;
+        public List<CitySignalApproach> Approaches = new List<CitySignalApproach>();
+    }
+
+    public sealed class CitySignalData
+    {
+        public CitySignalTiming Timing = new CitySignalTiming();
+        public List<CitySignalJunction> Junctions = new List<CitySignalJunction>();
+    }
+
     // /api/buildings and /api/roads: public map data, so no login is needed.
     public sealed class CityClient : BackendClientBase
     {
@@ -132,6 +170,39 @@ namespace Formula9.Backend
             {
                 throw new ContractException("Invalid traffic reply: " + error.Message);
             }
+        }
+
+        // The lights' places and cycle. Their colours follow from these, so they need no polling.
+        public async Task<CitySignalData> GetSignalsAsync(string area, CancellationToken cancellation = default)
+        {
+            var request = Request("GET", "/api/road-features/" + Uri.EscapeDataString(area) + "/signals");
+            request.TimeoutSeconds = 30;
+            var reply = await SendAsync(request, cancellation);
+            try { return ParseSignals(reply); }
+            catch (Exception error) when (error is JsonException || error is ArgumentException || error is InvalidCastException || error is NullReferenceException)
+            {
+                throw new ContractException("Invalid signal reply: " + error.Message);
+            }
+        }
+
+        public static CitySignalData ParseSignals(string reply)
+        {
+            var root = JObject.Parse(reply);
+            var timing = root["timing"] as JObject ?? throw new ContractException("Signal reply has no timing");
+            var junctions = root["junctions"] as JArray ?? throw new ContractException("Signal reply has no junctions");
+            return new CitySignalData
+            {
+                Timing = new CitySignalTiming { GreenS = (int)timing["green_s"], YellowS = (int)timing["yellow_s"], AllRedS = (int)timing["all_red_s"], Phases = (int)timing["phases"] },
+                Junctions = junctions.Select(j => new CitySignalJunction
+                {
+                    Id = (string)j["id"],
+                    OffsetS = (int)j["offset_s"],
+                    Approaches = j["approaches"].Select(a => new CitySignalApproach
+                    {
+                        Road = (string)a["road"], HeadingDeg = (float)a["heading_deg"], StopX = (float)a["stop_x_m"], StopY = (float)a["stop_y_m"], Phase = (int)a["phase"],
+                    }).ToList(),
+                }).ToList(),
+            };
         }
     }
 }

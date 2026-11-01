@@ -87,7 +87,8 @@ namespace Formula9.World
     // backing up along the roads leading to it. The backend models no other traffic ("No traffic
     // volume, lanes or signal timings are modelled"), so the queue is illustration: it follows the real
     // road graph and the incident's own clock, and never affects the shuttle. Only the backend moves
-    // the shuttle, and only on the incident's impact edges.
+    // the shuttle, and only on the incident's impact edges. The background traffic keeps off the scene
+    // and stops behind the queue, by way of Hazards.
     public static class IncidentSimulation
     {
         public const string Block = "ROAD_BLOCK", Accident = "ROAD_ACCIDENT";
@@ -96,6 +97,8 @@ namespace Formula9.World
         private const float RollInS = 3, RollInMps = 8, CreepM = 0.8f, CreepRate = 0.9f, CreepWaveM = 0.06f;
         private const int MaxLanes = 16, MaxCars = 48, Paints = 5;
         private const float ShuttleOnRoadM = 8;
+        // The wrecks, van and cones stretch this far along the road either side of the site
+        private const float SceneReachM = 14;
 
         public static IncidentPlan Plan(IncidentRecord record, IReadOnlyList<DraftRoad> network, FullSnapshot snapshot)
         {
@@ -159,6 +162,23 @@ namespace Formula9.World
 
         // How far the traffic has backed up, seconds of simulation after the incident.
         public static float QueueM(float elapsedS) => Mathf.Clamp(elapsedS * GrowthMps, 0, ReachM);
+
+        // What the background traffic must keep off right now: the closed road or the accident scene, in
+        // either direction, and as much of the queue as has formed, in the direction it is waiting.
+        public static List<TrafficHazard> Hazards(IncidentPlan plan, float elapsedS)
+        {
+            var hazards = new List<TrafficHazard>();
+            var length = Length(plan.Road);
+            var scene = plan.Record.Kind == Block ? plan.Road : Between(plan.Road, Mathf.Max(0, length / 2 - SceneReachM), Mathf.Min(length, length / 2 + SceneReachM));
+            hazards.Add(new TrafficHazard { Path = scene, BothWays = true });
+            var queue = QueueM(elapsedS);
+            foreach (var lane in plan.Lanes)
+            {
+                var formed = Mathf.Clamp(queue - lane.StartM, 0, lane.LengthM);
+                if (formed > 0) hazards.Add(new TrafficHazard { Path = Between(lane.Points, 0, formed).Reverse().ToArray() });
+            }
+            return hazards;
+        }
 
         // A car rolls up to the back of the queue, stops, then edges forward with it. False until it comes.
         public static bool CarPose(QueueCar car, QueueLane lane, float elapsedS, out Vector2 at, out Vector2 travel)
