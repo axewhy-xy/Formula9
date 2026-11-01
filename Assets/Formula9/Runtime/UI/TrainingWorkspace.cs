@@ -27,7 +27,7 @@ namespace Formula9.UI
         private readonly DropdownField routes, incidents, candidates;
         private readonly TextField routeReason, chargeReason, incidentReason;
         private readonly Label routeProblem, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes, incidentData, incidentReport, selection;
-        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowClosure, approve, routeStart, routeWatch, previewIncident, approveIncident, rerouteIncident, history, debrief;
+        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowClosure, routeDriver, approve, routeStart, routeWatch, previewIncident, approveIncident, rerouteIncident, history, debrief;
         private readonly FleetMap evidenceMap;
         private readonly VisualElement routeStages, routeWaypoints, routeIssues, routeMetrics, routeDecide, routeFeedback, routeApply, routeOutcomePanel, routeOutcomeRows, fleetTable;
         private readonly List<VisualElement> operationalViews;
@@ -89,8 +89,9 @@ namespace Formula9.UI
             Bind(root, "camera-overview", () => world.Overview());
 
             routes = root.Q<DropdownField>("routes");
-            routes.RegisterValueChangedCallback(_ => { ResetDraft(); dependencies = null; RequestContext(); });
+            routes.RegisterValueChangedCallback(_ => { ResetDraft(); dependencies = null; RequestContext(); if (world.Driving) DriveRoute(); });
             Bind(root, "refresh", RequestContext);
+            routeDriver = Bind(root, "route-driver", ToggleDriverView);
             routeStages = root.Q("route-stages");
             foreach (var stage in RoutePresenter.Stages) { var chip = new Label(stage); chip.AddToClassList("route-stage"); routeStages.Add(chip); }
             routeProblem = root.Q<Label>("route-problem");
@@ -283,6 +284,9 @@ namespace Formula9.UI
             routeStart.style.display = s?.Session.Status == "READY" && !routeClosed ? DisplayStyle.Flex : DisplayStyle.None;
             routeStart.SetEnabled(Current && s?.Session.Status == "READY" && !routeClosed);
             routeWatch.style.display = s != null && s.Session.Status != "READY" && outcome?.VehicleId != null ? DisplayStyle.Flex : DisplayStyle.None;
+            routeDriver.SetEnabled(world.Driving || (world.CanDrive && RouteVehicle() != null));
+            routeDriver.text = world.Driving ? "Leave driver view" : "Driver view";
+            routeDriver.EnableInClassList("segment-selected", world.Driving);
             foreach (var button in offerTable.Query<Button>().ToList()) { var option = s?.ChargeOptions.FirstOrDefault(o => o.OptionId == (string)button.userData); button.SetEnabled(option != null && OfferOpen(s, option)); }
             var candidate = s?.Candidates.FirstOrDefault(c => c.CandidateId == candidates.value && c.IncidentId == incidents.value);
             var decision = Current && !incidentBusy && s?.Session.Status == "RUNNING" && candidate?.Validation == "PASS" && candidate.ExpiresAtTick >= s.Tick &&
@@ -316,8 +320,8 @@ namespace Formula9.UI
             dependencies = null;
             if (held == null)
             {
-                // A route is edited on the map; running, it is watched in 3D
-                if (shownPage == RoutePage && heldVehicle != null) world.WatchShuttle(heldVehicle);
+                // A route is edited on the map; running, it is watched in 3D, or from the driver's seat
+                if (shownPage == RoutePage && heldVehicle != null && !world.Driving) world.WatchShuttle(heldVehicle);
                 return;
             }
             Choices(incidents, s.Incidents.Select(i => i.IncidentId));
@@ -455,7 +459,30 @@ namespace Formula9.UI
         {
             var s = session.Store.Snapshot;
             if (!Current || s?.Session.Status != "READY") return;
-            if (await session.SendControlAsync("START")) { WatchRoute(); await session.RefreshAsync(); }
+            if (await session.SendControlAsync("START")) { if (!world.Driving) WatchRoute(); await session.RefreshAsync(); }
+        }
+
+        // The shuttle this route's driver view rides in: the selected one if it is on this route.
+        private string RouteVehicle()
+        {
+            var onRoute = session.Store.Snapshot?.Vehicles.Where(v => v.RouteId == routes.value).OrderBy(v => v.VehicleId, StringComparer.Ordinal).Select(v => v.VehicleId).ToList();
+            if (onRoute == null) return null;
+            return onRoute.Contains(world.SelectedId) ? world.SelectedId : outcome?.VehicleId ?? onRoute.FirstOrDefault();
+        }
+
+        private void DriveRoute()
+        {
+            var vehicle = RouteVehicle();
+            if (vehicle == null) return;
+            SelectVehicle(vehicle);
+            world.DriveSelected();
+        }
+
+        private void ToggleDriverView()
+        {
+            if (world.Driving) world.StopDriving();
+            else DriveRoute();
+            UpdateActions();
         }
 
         private void WatchRoute()

@@ -3,7 +3,7 @@
  *
  * Author: Choo Jian Wei
  * Date Created: 31/10/2026
- * Last Modified: 31/10/2026
+ * Last Modified: 01/11/2026
  *
  * Description:
  *     Task 4, the first-person view camera. Builds the real WorldView with the training layout, a
@@ -383,6 +383,98 @@ namespace Formula9.Tests
             view.FollowSelected();
             Frame();
             Assert.Greater(camera.transform.position.y, 20, "above the shuttle");
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: StoppingGoesBackToTheMapItCameFrom
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A route is drafted on the 2D map: toggling Driver view off goes back to it, with the
+        //     shuttle showing again.
+        [Test]
+        public void StoppingGoesBackToTheMapItCameFrom()
+        {
+            var shuttle = ShuttleTransform().gameObject;
+            view.ShowMap(true);
+            view.DriveSelected();
+            Frame();
+            Assert.IsTrue(view.Driving);
+            Assert.IsFalse(view.ShowingMap);
+            view.StopDriving();
+            Assert.IsFalse(view.Driving);
+            Assert.IsTrue(view.ShowingMap, "back on the map");
+            Assert.IsTrue(shuttle.activeSelf, "the shuttle shows again");
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: StoppingStaysIn3DWhenItCameFrom3D
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Toggling Driver view off from the 3D city stays in the city, over the shuttle.
+        [Test]
+        public void StoppingStaysIn3DWhenItCameFrom3D()
+        {
+            view.DriveSelected();
+            Frame();
+            view.StopDriving();
+            Frame();
+            Assert.IsFalse(view.ShowingMap);
+            Assert.Greater(camera.transform.position.y, 20, "above the city");
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: StoppingGoesBackToFollowingTheShuttle
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A shuttle being watched is still watched after a spell in its driver seat, even when
+        //     Driver view was pressed twice on the way.
+        [Test]
+        public void StoppingGoesBackToFollowingTheShuttle()
+        {
+            view.WatchShuttle(Shuttle);
+            view.DriveSelected();
+            view.DriveSelected();
+            Frame();
+            view.StopDriving();
+            view.Show(Snapshot(90, 10, 250));
+            Frame();
+            var below = Vector3.ProjectOnPlane(ShuttleTransform().position - camera.transform.position, camera.transform.right);
+            Assert.Greater(Vector3.Dot(camera.transform.forward, below.normalized), 0.99f, "still looking at the shuttle after it moved");
+            Assert.Greater(camera.transform.position.y, 20, "from above");
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: GoingToTheMapLeavesDriverView
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The 2D map, which a closure holding a shuttle opens by itself, takes the camera out
+        //     of the shuttle, so the toggle does not claim otherwise.
+        [Test]
+        public void GoingToTheMapLeavesDriverView()
+        {
+            var shuttle = ShuttleTransform().gameObject;
+            view.DriveSelected();
+            Frame();
+            view.ShowMap(true);
+            Assert.IsFalse(view.Driving);
+            Assert.IsTrue(shuttle.activeSelf, "the shuttle shows again");
+            view.ShowMap(false);
+            Frame();
+            Assert.Greater(camera.transform.position.y, 20, "3D comes back over the city");
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: RoutePlanningHasADriverViewToggle
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The route page has its own Driver view button, in the same row as Watch in 3D.
+        [Test]
+        public void RoutePlanningHasADriverViewToggle()
+        {
+            var root = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/Formula9/UI/Formula9App.uxml").CloneTree();
+            var toggle = root.Q("page-route").Q<Button>("route-driver");
+            Assert.IsNotNull(toggle);
+            Assert.AreSame(root.Q("page-route").Q<Button>("route-watch").parent, toggle.parent);
         }
 
         // -----------------------------------------------------------------------------------

@@ -4,7 +4,7 @@
  * Author: Choo Jian Wei
  * Contributors: Lau Xiang Yang (3D route drafting), Rishika (real Singapore map)
  * Date Created: 30/10/2026
- * Last Modified: 31/10/2026
+ * Last Modified: 01/11/2026
  *
  * Description:
  *     Part of the Unity client's 3D world. It renders the selected session's verified scene into a
@@ -77,6 +77,7 @@ namespace Formula9.World
         private Material lineMaterial;
         private bool following;
         private bool driving;
+        private bool mapBeforeDriving, followingBeforeDriving;
         private RouteDraftView draft;
         private IReadOnlyCollection<string> servedStops = Array.Empty<string>();
         private Label hud;
@@ -260,7 +261,9 @@ namespace Formula9.World
                 city.ShowDraft(draft, servedStops);
                 city.ShowIncidents(incidentRecords.Values, snapshot, roadNetwork, Time.unscaledTime);
                 RefreshHud();
-                SetReady(true, $"3D city · {city.BuildingCount} buildings · right-drag orbit, left-drag pan, wheel zoom");
+                SetReady(true, driving
+                    ? $"Driver view · {selectedId} · drag to look around"
+                    : $"3D city · {city.BuildingCount} buildings · right-drag orbit, left-drag pan, wheel zoom");
             }
         }
 
@@ -630,6 +633,8 @@ namespace Formula9.World
         //     value (bool): True for the 2D map.
         public void ShowMap(bool value)
         {
+            // The map has no driver's seat, so coming back to 3D starts over the city
+            if (value) LeaveDriverView();
             if (preferMap == value) { ViewChanged?.Invoke(); return; }
             preferMap = value;
             motion.Clear();
@@ -784,15 +789,37 @@ namespace Formula9.World
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function goes to the 3D city and puts the camera in the selected shuttle's
-        //     driver seat, looking where it is heading, until Overview is chosen. It does nothing
-        //     without a selected shuttle or in a session that has no 3D city.
+        //     driver seat, looking where it is heading, until something else takes the camera. It
+        //     does nothing without a selected shuttle or in a session that has no 3D city.
         public void DriveSelected()
         {
-            if (latest == null || latest.Spatial != null || cityClient == null || latest.Vehicles.All(v => v.VehicleId != selectedId)) return;
+            if (!CanDrive || latest.Vehicles.All(v => v.VehicleId != selectedId)) return;
+            if (!driving) { mapBeforeDriving = preferMap; followingBeforeDriving = following; }
             driving = true;
             lookYaw = lookPitch = 0;
             following = false;
             ShowMap(false);
+        }
+
+        // Whether the camera is in a shuttle's driver seat, and whether this session has a 3D city
+        // for it to be in.
+        public bool Driving => driving;
+        public bool CanDrive => latest != null && latest.Spatial == null && cityClient != null;
+
+        // -----------------------------------------------------------------------------------
+        // Function: StopDriving
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function is the other half of the driver view toggle: it leaves the shuttle and
+        //     goes back to what Driver view was entered from, the 2D map, the followed shuttle or
+        //     the 3D city around the proposal.
+        public void StopDriving()
+        {
+            if (!driving) return;
+            LeaveDriverView();
+            if (mapBeforeDriving) ShowMap(true);
+            else if (followingBeforeDriving) WatchShuttle(selectedId);
+            else FrameDraft();
         }
 
         // -----------------------------------------------------------------------------------
