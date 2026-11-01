@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Formula9.Backend;
 using Formula9.Contracts;
 using UnityEngine;
+using HealthbarGames;
 
 namespace Formula9.World
 {
@@ -117,6 +118,7 @@ namespace Formula9.World
             {
                 signals = await client.GetSignalTrafficLightAsync(area, cancellation);
             }
+
             catch (Exception error) when (!(error is OperationCanceledException))
             {
                 Debug.LogWarning("Failed to load traffic signals from backend: " + error.Message);
@@ -125,6 +127,16 @@ namespace Formula9.World
 
             cancellation.ThrowIfCancellationRequested();
             TrafficLightCount = signals.Count;
+            if (signals.Count > 0 && TrafficLightManager.Instance != null)
+            {
+                var firstSignal = signals[0];
+                TrafficLightManager.Instance.InitializeTiming(
+                    (float)firstSignal.Cycle_duration,
+                    (float)firstSignal.GL_duration,
+                    (float)firstSignal.YL_duration,
+                    (float)firstSignal.RL_duration
+                );
+            }
 
             var trafficLightsContainer = new GameObject("TrafficLights");
             trafficLightsContainer.transform.SetParent(root, false);
@@ -139,6 +151,29 @@ namespace Formula9.World
                 lightObj.name = $"TrafficLight_{signal.Id ?? signal.Junction}";
 
                 trafficLightObjects.Add(lightObj);
+                // ---> UPDATE HERE: Register with TrafficLightManager and pass offset and phase <---
+                var lightScript = lightObj.GetComponent<HaloTrafficLight>();
+                if (lightScript == null)
+                {
+                    Debug.LogWarning($"[CityView] FAILED: Instantiated prefab for '{lightObj.name}' is missing the HaloTrafficLight component!");
+                }
+
+                if (TrafficLightManager.Instance == null)
+                {
+                    Debug.LogWarning("[CityView] FAILED: TrafficLightManager.Instance returned null!");
+                }
+
+                if (lightScript != null && TrafficLightManager.Instance != null)
+                {
+                    // Note: Check your exact property names on CitySignalTrafficLight 
+                    // if they are lowercase (signal.junction), PascalCase (signal.Junction), etc.
+                    string junctionId = signal.Junction ?? signal.Id ?? "default_junction";
+                    float offsetS = (float)signal.OffsetS;
+                    int phase = signal.Phase;
+
+                    TrafficLightManager.Instance.RegisterTrafficLight(lightScript, junctionId, offsetS, phase);
+                    //Debug.LogWarning($"[CityView] Spawned & Registered light for junction: {junctionId}, Phase: {signal.Phase}, Offset: {signal.OffsetS}");
+                }
             }
 
             Debug.LogWarning($"Successfully rendered {TrafficLightCount} traffic lights into the 3D map.");

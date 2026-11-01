@@ -28,13 +28,6 @@ namespace Formula9.Backend
         public List<(double X, double Y)> Points;
     }
 
-    //public sealed class CitySignalTrafficLight
-    //{
-    //    public string Junction;
-    //    public int Phase;
-    //    public double XM, YM, FacingDegree;
-    //}
-
     //public sealed class TrafficLightData
     //{
     //    public Dictionary<string, int> Offsets;  // junction id 
@@ -59,6 +52,12 @@ namespace Formula9.Backend
         public string RoadCode { get; set; }
         public double XM { get; set; }
         public double YM { get; set; }
+        public double OffsetS { get; set; }
+
+        public double GL_duration { get; set; } //green light duration
+        public double YL_duration { get; set; } //yellow light duration
+        public double RL_duration { get; set; } //red light duration
+        public double Cycle_duration { get; set; } //traffic light cycle duration
     }
 
 
@@ -112,27 +111,6 @@ namespace Formula9.Backend
             }
         }
 
-        //public async Task<List<CitySignalTrafficLight>> GetSignalTrafficLightAsync(string area, CancellationToken cancellation = default)
-        //{
-        //    var request = Request("GET", "/api/signaltrafficlight/" + Uri.EscapeDataString(area));
-        //    request.TimeoutSeconds = 30;
-        //    var reply = await SendAsync(request, cancellation);
-
-        //    try
-        //    {
-        //        return (JObject.Parse(reply)["signaltrafficlight"] as JArray ?? throw new ContractException("Signal Traffic Light reply has no signal traffic lights"))
-        //            .Select(r => new CitySignalTrafficLight
-        //            {
-        //                Junction = (string)r[""];
-
-        //    }
-
-        //    catch (Exception error) when (error is JsonException || error is ArgumentException || error is InvalidCastException || error is NullReferenceException)
-        //    {
-        //        throw new ContractException("Invalid Signal Traffic Light reply " + error.Message);
-        //    }
-        //}
-
         public async Task<List<CitySignalTrafficLight>> GetSignalTrafficLightAsync(string area, CancellationToken cancellation = default)
         {
             var request = Request("GET", $"/api/road-features/{area}/signals");
@@ -141,8 +119,13 @@ namespace Formula9.Backend
 
             try
             {
+                var root = JObject.Parse(reply);
+
+                // Parse the timing object from the JSON root
+                var timingToken = root["timing"];
+
                 // The JSON root contains a "signals" array matching the loaded fixture data[cite: 7]
-                return (JObject.Parse(reply)["signals"] as JArray ?? throw new ContractException("Signal traffic light reply has no signals"))
+                var signals = (root["signals"] as JArray ?? throw new ContractException("Signal traffic light reply has no signals"))
                     .Select(r => new CitySignalTrafficLight
                     {
                         Id = (string)r["id"],
@@ -156,8 +139,15 @@ namespace Formula9.Backend
                         BearingDeg = (double)r["bearing_deg"],
                         RoadCode = (string)r["road_code"],
                         XM = (double)r["x_m"],
-                        YM = (double)r["y_m"]
+                        YM = (double)r["y_m"],
+                        GL_duration = (double)timingToken["green_s"],
+                        YL_duration = (double)timingToken["yellow_s"],
+                        RL_duration = (double)timingToken["all_red_s"],
+                        Cycle_duration = (double)timingToken["cycle_s"],
+
                     }).ToList();
+
+                return signals;
             }
             catch (Exception error) when (error is JsonException || error is ArgumentException || error is InvalidCastException || error is NullReferenceException)
             {
