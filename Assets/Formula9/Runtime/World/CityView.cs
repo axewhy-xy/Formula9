@@ -70,6 +70,7 @@ namespace Formula9.World
         private readonly List<GameObject> trafficLightObjects = new List<GameObject>();
         public int TrafficLightCount { get; private set; }
         private readonly GameObject trafficLightPrefab;
+        private IReadOnlyList<CityRoad> loadedRoads = Array.Empty<CityRoad>();
 
         public CityView(Transform parent, MapTiles tiles, GameObject trafficLightPrefab = null)
         {
@@ -202,51 +203,31 @@ namespace Formula9.World
 
             cancellation.ThrowIfCancellationRequested();
 
-            // --- FILTERING DUPLICATE/STACKED HEADS ---
-            // Group or filter signals that are clustered within ~2 meters and have a similar facing angle
-            var filteredSignals = new List<CitySignalTrafficLight>();
-            foreach (var signal in signals)
-            {
-                bool isDuplicate = filteredSignals.Any(existing =>
-                    existing.Junction == signal.Junction &&
-                    Vector2.Distance(new Vector2((float)existing.XM, (float)existing.YM), new Vector2((float)signal.XM, (float)signal.YM)) < 5.0f &&
-                    Mathf.Abs((float)(existing.FacingHeadingDeg - signal.FacingHeadingDeg)) < 30.0f
-                );
-
-                if (!isDuplicate)
-                {
-                    filteredSignals.Add(signal);
-                }
-            }
+            var filteredSignals = TrafficLightPlacement.OnePerPole(signals);
 
             TrafficLightCount = filteredSignals.Count;
             if (filteredSignals.Count > 0 && TrafficLightManager.Instance != null)
             {
                 var first = filteredSignals[0];
-                TrafficLightManager.Instance.InitializeTiming(
-                    (float)first.Cycle_duration,
-                    (float)first.GL_duration,
-                    (float)first.YL_duration,
-                    (float)first.RL_duration
-                );
+                TrafficLightManager.Instance.InitializeTiming(new CitySignalTiming
+                {
+                    GreenS = (int)first.GL_duration,
+                    YellowS = (int)first.YL_duration,
+                    AllRedS = (int)first.RL_duration,
+                });
+                if (traffic != null) TrafficLightManager.Instance.SetClock(() => traffic.SignalClockS);
             }
 
             var trafficLightsContainer = new GameObject("TrafficLights");
             trafficLightsContainer.transform.SetParent(root, false);
 
-            foreach (var signal in signals)
+            foreach (var signal in filteredSignals)
             {
-                // Map backend coordinates (XM, YM) to Unity 3D world space (X, Y, Z)
-                var position = new Vector3((float)signal.XM, 0f, (float)signal.YM);
+                var pose = TrafficLightPlacement.Place(signal, loadedRoads);
 
-                // --- ROTATION FORMULA ---
-                // Match the shuttle's heading conversion for correct orientation
-                float correctedHeadingDeg = (float)signal.FacingHeadingDeg + 180f;
-                var headingRad = correctedHeadingDeg * Mathf.Deg2Rad;
-                var rotation = Quaternion.LookRotation(new Vector3(Mathf.Cos(headingRad), 0, Mathf.Sin(headingRad)));
-
-                var lightObj = UnityEngine.Object.Instantiate(trafficLightPrefab, position, rotation, trafficLightsContainer.transform);
+                var lightObj = UnityEngine.Object.Instantiate(trafficLightPrefab, pose.Position, pose.Rotation, trafficLightsContainer.transform);
                 lightObj.name = $"TrafficLight_{signal.Id ?? signal.Junction}";
+                if (pose.Mirrored) lightObj.transform.localScale = new Vector3(-1, 1, 1);
 
                 trafficLightObjects.Add(lightObj);
                 var lightScript = lightObj.GetComponentInChildren<HaloTrafficLight>();
@@ -263,7 +244,7 @@ namespace Formula9.World
                 if (lightScript != null && TrafficLightManager.Instance != null)
                 {
                     string junctionId = signal.Junction ?? signal.Id ?? "default_junction";
-                    float offsetS = (float)signal.OffsetS;
+                    int offsetS = (int)signal.OffsetS;
                     int phase = signal.Phase;
 
                     TrafficLightManager.Instance.RegisterTrafficLight(lightScript, junctionId, offsetS, phase);

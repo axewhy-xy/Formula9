@@ -123,7 +123,10 @@ namespace Formula9.Backend
                 return (JObject.Parse(reply)["buildings"] as JArray ?? throw new ContractException("Building reply has no buildings"))
                     .Select(b => new CityBuilding
                     {
-                        Id = (string)b["id"], Type = (string)b["type"], Name = (string)b["name"], HeightM = (double)b["height_m"],
+                        Id = (string)b["id"],
+                        Type = (string)b["type"],
+                        Name = (string)b["name"],
+                        HeightM = (double)b["height_m"],
                         Rings = b["rings_m"].Select(ring => ring.Select(p => ((double)p[0], (double)p[1])).ToList()).ToList(),
                     }).ToList();
             }
@@ -143,8 +146,13 @@ namespace Formula9.Backend
                 return (JObject.Parse(reply)["roads"] as JArray ?? throw new ContractException("Road reply has no roads"))
                     .Select(r => new CityRoad
                     {
-                        Id = (string)r["id"], Class = (string)r["class"], FromNode = (long)r["from_node"], ToNode = (long)r["to_node"],
-                        Oneway = (bool)r["oneway"], Lanes = (int)r["lanes"], SpeedKph = (int?)r["speed_kph"] ?? 40,
+                        Id = (string)r["id"],
+                        Class = (string)r["class"],
+                        FromNode = (long)r["from_node"],
+                        ToNode = (long)r["to_node"],
+                        Oneway = (bool)r["oneway"],
+                        Lanes = (int)r["lanes"],
+                        SpeedKph = (int?)r["speed_kph"] ?? 40,
                         Points = r["points_m"].Select(p => ((double)p[0], (double)p[1])).ToList(),
                     }).ToList();
             }
@@ -160,42 +168,47 @@ namespace Formula9.Backend
             request.TimeoutSeconds = 30;
             var reply = await SendAsync(request, cancellation);
 
-            try
-            {
-                var root = JObject.Parse(reply);
-
-                // Parse the timing object from the JSON root
-                var timingToken = root["timing"];
-
-                // The JSON root contains a "signals" array matching the loaded fixture data[cite: 7]
-                var signals = (root["signals"] as JArray ?? throw new ContractException("Signal traffic light reply has no signals"))
-                    .Select(r => new CitySignalTrafficLight
-                    {
-                        Id = (string)r["id"],
-                        Junction = (string)r["junction"],
-                        Phase = (int)r["phase"],
-                        Approach = (string)r["approach"],
-                        TrafficHeadingDeg = (double)r["traffic_heading_deg"],
-                        FacingHeadingDeg = (double)r["facing_heading_deg"],
-                        DirectionSource = (string)r["direction_source"],
-                        TypeCode = (string)r["type_code"],
-                        BearingDeg = (double)r["bearing_deg"],
-                        RoadCode = (string)r["road_code"],
-                        XM = (double)r["x_m"],
-                        YM = (double)r["y_m"],
-                        GL_duration = (double)timingToken["green_s"],
-                        YL_duration = (double)timingToken["yellow_s"],
-                        RL_duration = (double)timingToken["all_red_s"],
-                        Cycle_duration = (double)timingToken["cycle_s"],
-
-                    }).ToList();
-
-                return signals;
-            }
+            try { return ParseSignalTrafficLights(reply); }
             catch (Exception error) when (error is JsonException || error is ArgumentException || error is InvalidCastException || error is NullReferenceException)
             {
                 throw new ContractException("Invalid signal traffic light reply: " + error.Message);
             }
+        }
+
+        public static List<CitySignalTrafficLight> ParseSignalTrafficLights(string reply)
+        {
+            var root = JObject.Parse(reply);
+
+            // Parse the timing object from the JSON root
+            var timingToken = root["timing"];
+
+            // A head runs on its junction's offset, which the reply gives on the junction
+            var offsets = (root["junctions"] as JArray ?? throw new ContractException("Signal traffic light reply has no junctions"))
+                .ToDictionary(j => (string)j["id"], j => (double)j["offset_s"]);
+
+            // The JSON root contains a "signals" array matching the loaded fixture data
+            return (root["signals"] as JArray ?? throw new ContractException("Signal traffic light reply has no signals"))
+                .Select(r => new CitySignalTrafficLight
+                {
+                    Id = (string)r["id"],
+                    Junction = (string)r["junction"],
+                    Phase = (int)r["phase"],
+                    Approach = (string)r["approach"],
+                    TrafficHeadingDeg = (double)r["traffic_heading_deg"],
+                    FacingHeadingDeg = (double)r["facing_heading_deg"],
+                    DirectionSource = (string)r["direction_source"],
+                    TypeCode = (string)r["type_code"],
+                    BearingDeg = (double)r["bearing_deg"],
+                    RoadCode = (string)r["road_code"],
+                    XM = (double)r["x_m"],
+                    YM = (double)r["y_m"],
+                    OffsetS = offsets.TryGetValue((string)r["junction"], out var offset) ? offset : 0,
+                    GL_duration = (double)timingToken["green_s"],
+                    YL_duration = (double)timingToken["yellow_s"],
+                    RL_duration = (double)timingToken["all_red_s"],
+                    Cycle_duration = (double)timingToken["cycle_s"],
+
+                }).ToList();
         }
 
         public async Task<CityTrafficData> GetTrafficAsync(string area, CancellationToken cancellation = default)
@@ -266,7 +279,11 @@ namespace Formula9.Backend
                     OffsetS = (int)j["offset_s"],
                     Approaches = j["approaches"].Select(a => new CitySignalApproach
                     {
-                        Road = (string)a["road"], HeadingDeg = (float)a["heading_deg"], StopX = (float)a["stop_x_m"], StopY = (float)a["stop_y_m"], Phase = (int)a["phase"],
+                        Road = (string)a["road"],
+                        HeadingDeg = (float)a["heading_deg"],
+                        StopX = (float)a["stop_x_m"],
+                        StopY = (float)a["stop_y_m"],
+                        Phase = (int)a["phase"],
                     }).ToList(),
                 }).ToList(),
             };

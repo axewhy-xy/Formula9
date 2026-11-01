@@ -33,6 +33,7 @@ namespace HealthbarGames
         public Material LightsOffMat;
 
         private bool mInitialized = false;
+        private int mLastState = -1;
 
         void Awake()
         {
@@ -55,23 +56,30 @@ namespace HealthbarGames
         {
             if (!mInitialized)
                 return;
+
+            // Called every frame for every light in the city, and the colours rarely change
+            int state = (redLightState ? 1 : 0) | (yellowLightState ? 2 : 0) | (greenLightState ? 4 : 0);
+            if (state == mLastState)
+                return;
+            mLastState = state;
+
             if (RedHalo != null)
                 RedHalo.SetActive(redLightState);
 
             if (RedRenderer != null)
-                RedRenderer.material = (redLightState) ? LightsOnMat : LightsOffMat;
+                RedRenderer.sharedMaterial = (redLightState) ? LightsOnMat : LightsOffMat;
 
             if (YellowHalo != null)
                 YellowHalo.SetActive(yellowLightState);
 
             if (YellowRenderer != null)
-                YellowRenderer.material = (yellowLightState) ? LightsOnMat : LightsOffMat;
+                YellowRenderer.sharedMaterial = (yellowLightState) ? LightsOnMat : LightsOffMat;
 
             if (GreenHalo != null)
                 GreenHalo.SetActive(greenLightState);
 
             if (GreenRenderer != null)
-                GreenRenderer.material = (greenLightState) ? LightsOnMat : LightsOffMat;
+                GreenRenderer.sharedMaterial = (greenLightState) ? LightsOnMat : LightsOffMat;
         }
     }
 }
