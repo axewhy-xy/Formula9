@@ -39,13 +39,11 @@ namespace Formula9.Backend
     {
         public string Id, Model, Road, Color;
         public int Direction, Lane, SpeedKph;
-        public float LaneOffsetM, DistanceM, HeadingDeg;
-        public double XM, YM;
+        public float DistanceM;
     }
 
     public sealed class CityTrafficData
     {
-        public List<string> Attribution = new List<string>();
         public Dictionary<string, CityTrafficModel> Models = new Dictionary<string, CityTrafficModel>();
         public List<CityTrafficVehicle> Vehicles = new List<CityTrafficVehicle>();
     }
@@ -107,7 +105,6 @@ namespace Formula9.Backend
                 var modelsToken = root["models"] as JObject ?? throw new ContractException("Traffic reply has no models");
                 var vehiclesToken = root["vehicles"] as JArray ?? throw new ContractException("Traffic reply has no vehicles");
                 var traffic = new CityTrafficData();
-                if (root["attribution"] is JArray attribution) traffic.Attribution = attribution.Select(a => (string)a).Where(a => !string.IsNullOrEmpty(a)).ToList();
                 foreach (var entry in modelsToken.Properties())
                 {
                     traffic.Models[entry.Name] = new CityTrafficModel
@@ -126,12 +123,8 @@ namespace Formula9.Backend
                     Road = (string)v["road"],
                     Direction = (int?)v["direction"] ?? 1,
                     Lane = (int?)v["lane"] ?? 0,
-                    LaneOffsetM = (float?)v["lane_offset_m"] ?? 0,
                     DistanceM = (float?)v["distance_m"] ?? 0,
-                    HeadingDeg = (float?)v["heading_deg"] ?? 0,
                     SpeedKph = (int?)v["speed_kph"] ?? 40,
-                    XM = (double?)v["x_m"] ?? 0,
-                    YM = (double?)v["y_m"] ?? 0,
                 }).ToList();
                 return traffic;
             }

@@ -71,7 +71,7 @@ namespace Formula9.World
             ApplyBuildingTextures(buildingMaterial);
             lineMaterial = Own(new Material(Shader.Find("Sprites/Default")));
             incidents = new CityIncidents(root, buildingMaterial, lineMaterial);
-            traffic = new CityTrafficRenderer(root);
+            traffic = new CityTrafficRenderer();
             if (tiles != null) tiles.TileLoaded += RefreshTiles;
         }
 
@@ -426,10 +426,12 @@ namespace Formula9.World
             return item.transform;
         }
 
+        // Called once a frame, unlike Tick, which a new snapshot also calls. A delta of zero holds traffic still.
+        public void TickTraffic(float deltaTime, Camera camera) => traffic?.Tick(deltaTime, camera);
+
         // Called each frame: shuttles glide between the backend's poses.
         public void Tick(ShuttleMotion motion, float now)
         {
-            traffic?.Tick(Time.deltaTime);
             foreach (var pair in shuttles)
                 if (motion.Sample(pair.Key, now, out var position, out var rotation))
                     pair.Value.SetPositionAndRotation(position, rotation);
