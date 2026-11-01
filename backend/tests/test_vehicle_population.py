@@ -186,3 +186,19 @@ def test_the_api_serves_the_prepared_roads():
     assert client.get("/api/roads/nowhere").status_code == 404
     assert client.get("/api/roads/vehicle-population").status_code == 404, "another file in the folder, not an area"
     assert client.get("/api/roads/..%2F..%2Fsecret").status_code == 404
+
+
+def test_the_api_serves_the_prepared_traffic():
+    from fastapi.testclient import TestClient
+
+    from src.app import app
+
+    client = TestClient(app)
+    answer = client.get("/api/traffic/toa-payoh").json()
+    assert "attribution" in answer and len(answer["attribution"]) >= 1
+    assert set(answer["models"]) >= {"car", "taxi", "motorcycle", "van", "truck", "heavy_truck", "bus"}
+    assert len(answer["vehicles"]) >= 1000
+    assert all("model" in vehicle and "speed_kph" in vehicle for vehicle in answer["vehicles"][:10])
+    assert client.get("/api/traffic/nowhere").status_code == 404
+    assert client.get("/api/traffic/vehicle-population").status_code == 404
+    assert client.get("/api/traffic/..%2F..%2Fsecret").status_code == 404

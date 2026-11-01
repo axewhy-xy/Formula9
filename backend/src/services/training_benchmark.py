@@ -336,7 +336,7 @@ def run(output: Path, *, ticks=None, validation_samples=None, reconnect_samples=
             metadata = source_metadata()
             definition = get_workflow_definition()
             inventory = {"vehicles": 5, "service_patterns": len(definition.actor_routes),
-                "chargers": len(definition.data["bay_positions_m"]),
+                "chargers": len(definition.bay_positions),
                 "route_validation_graph_edges": definition.graph.graph.number_of_edges(),
                 "geometry": "AUTHORED_PLANAR", "fixture_signature": definition.signature}
             write("manifest.json", {**metadata, "profile": config, "content_inventory": inventory,
@@ -353,7 +353,7 @@ def run(output: Path, *, ticks=None, validation_samples=None, reconnect_samples=
                     mark("created", initial)
                     check("one_integrated_runtime", store.runtime_ids() == [session_id]
                           and len(app.state.training_services[store].sessions) == 1
-                          and len(initial.vehicles) == 5 and len(initial.routes) == 5 and len(initial.chargers) == 2)
+                          and len(initial.vehicles) == 5 and len(initial.routes) == 5 and len(initial.chargers) == 4 and len(initial.depots) == 2)
                     blocked = send(client, initial, command(initial, "START"))
                     check("closed_route_prevents_start", blocked["status"] == "REJECTED"
                           and store.snapshot(session_id).session.status == "READY")
@@ -438,7 +438,7 @@ def run(output: Path, *, ticks=None, validation_samples=None, reconnect_samples=
                     check("route_executes_after_hold", moved.vehicles[0].route_revision == 2)
                     charging = wait_for(client, store, session_id,
                         lambda s: s.vehicles[4].service_state == "CHARGING", "charging_started")
-                    bay = definition.data["bay_positions_m"][charge.charger_id]
+                    bay = definition.bay_positions[charge.charger_id]
                     check("actual_bay_arrival", (charging.vehicles[4].position.x_m, charging.vehicles[4].position.y_m) == tuple(bay)
                           and charging.vehicles[4].position != initial.vehicles[4].position)
                     charge_start_kwh = charging.vehicles[4].battery_kwh

@@ -86,6 +86,7 @@ class ActorCommit:
 
     def _prepare(self, proposed, events):
         self.actor.synchronize(proposed)
+        self.actor.note_decisions(events)
         result = self.actor.generate_snapshot()
         result.snapshot_id = self.baseline.snapshot_id
         events = [*self.actor.pending_events, *events]
