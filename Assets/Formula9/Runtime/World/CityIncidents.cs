@@ -197,6 +197,14 @@ namespace Formula9.World
 
         private float Clock(Scene scene) => IncidentSimulation.ElapsedS(scene.Plan.Record, snapshot);
 
+        // Every scene and queue the background traffic must keep off, as they stand now.
+        public List<TrafficHazard> TrafficHazards()
+        {
+            var hazards = new List<TrafficHazard>();
+            foreach (var scene in scenes.Values) hazards.AddRange(IncidentSimulation.Hazards(scene.Plan, Clock(scene)));
+            return hazards;
+        }
+
         // Called each frame: the queue grows along its roads and the lights flash. The queue runs on the
         // incident's own clock, so it stands still when the session or the backend does: a gap in the
         // snapshots cannot move it on by more than a moment.

@@ -330,7 +330,12 @@ namespace Formula9.World
         //     moves the shuttles of the city or scene each frame and keeps a followed one in view.
         private void Update()
         {
-            if (CityShown && city != null) city.Tick(motion, Time.unscaledTime);
+            if (CityShown && city != null)
+            {
+                city.Tick(motion, Time.unscaledTime);
+                // On the same clock as the shuttles, and still when they are
+                city.TickTraffic(latest.Session?.Status == "RUNNING" ? Time.unscaledDeltaTime : 0, viewCamera);
+            }
             else if (world != null) world.Advance(motion, Time.unscaledTime);
             else return;
             if (driving) PlaceDriverCamera();

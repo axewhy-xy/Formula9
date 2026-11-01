@@ -61,15 +61,51 @@ namespace Formula9.Backend
     {
         public string Id, Model, Road, Color;
         public int Direction, Lane, SpeedKph;
-        public float LaneOffsetM, DistanceM, HeadingDeg;
-        public double XM, YM;
+        public float DistanceM;
     }
 
     public sealed class CityTrafficData
     {
-        public List<string> Attribution = new List<string>();
         public Dictionary<string, CityTrafficModel> Models = new Dictionary<string, CityTrafficModel>();
         public List<CityTrafficVehicle> Vehicles = new List<CityTrafficVehicle>();
+    }
+
+    public enum SignalColor { Green, Yellow, Red }
+
+    // The backend's made-up signal cycle (src.traffic.signal_cycle), which any client may work out for itself.
+    public sealed class CitySignalTiming
+    {
+        public int GreenS = 30, YellowS = 3, AllRedS = 2, Phases = 2;
+
+        public SignalColor ColorAt(double timeS, int offsetS, int phase)
+        {
+            var phaseS = GreenS + YellowS + AllRedS;
+            var cycleS = Phases * phaseS;
+            var into = (timeS + offsetS - phase * phaseS) % cycleS;
+            if (into < 0) into += cycleS;
+            return into < GreenS ? SignalColor.Green : into < GreenS + YellowS ? SignalColor.Yellow : SignalColor.Red;
+        }
+    }
+
+    // One road into a signalled junction.
+    public sealed class CitySignalApproach
+    {
+        public string Road;
+        public float HeadingDeg, StopX, StopY;
+        public int Phase;
+    }
+
+    public sealed class CitySignalJunction
+    {
+        public string Id;
+        public int OffsetS;
+        public List<CitySignalApproach> Approaches = new List<CitySignalApproach>();
+    }
+
+    public sealed class CitySignalData
+    {
+        public CitySignalTiming Timing = new CitySignalTiming();
+        public List<CitySignalJunction> Junctions = new List<CitySignalJunction>();
     }
 
     // /api/buildings and /api/roads: public map data, so no login is needed.
@@ -173,7 +209,6 @@ namespace Formula9.Backend
                 var modelsToken = root["models"] as JObject ?? throw new ContractException("Traffic reply has no models");
                 var vehiclesToken = root["vehicles"] as JArray ?? throw new ContractException("Traffic reply has no vehicles");
                 var traffic = new CityTrafficData();
-                if (root["attribution"] is JArray attribution) traffic.Attribution = attribution.Select(a => (string)a).Where(a => !string.IsNullOrEmpty(a)).ToList();
                 foreach (var entry in modelsToken.Properties())
                 {
                     traffic.Models[entry.Name] = new CityTrafficModel
@@ -192,12 +227,8 @@ namespace Formula9.Backend
                     Road = (string)v["road"],
                     Direction = (int?)v["direction"] ?? 1,
                     Lane = (int?)v["lane"] ?? 0,
-                    LaneOffsetM = (float?)v["lane_offset_m"] ?? 0,
                     DistanceM = (float?)v["distance_m"] ?? 0,
-                    HeadingDeg = (float?)v["heading_deg"] ?? 0,
                     SpeedKph = (int?)v["speed_kph"] ?? 40,
-                    XM = (double?)v["x_m"] ?? 0,
-                    YM = (double?)v["y_m"] ?? 0,
                 }).ToList();
                 return traffic;
 
@@ -206,6 +237,39 @@ namespace Formula9.Backend
             {
                 throw new ContractException("Invalid traffic reply: " + error.Message);
             }
+        }
+
+        // The lights' places and cycle. Their colours follow from these, so they need no polling.
+        public async Task<CitySignalData> GetSignalsAsync(string area, CancellationToken cancellation = default)
+        {
+            var request = Request("GET", "/api/road-features/" + Uri.EscapeDataString(area) + "/signals");
+            request.TimeoutSeconds = 30;
+            var reply = await SendAsync(request, cancellation);
+            try { return ParseSignals(reply); }
+            catch (Exception error) when (error is JsonException || error is ArgumentException || error is InvalidCastException || error is NullReferenceException)
+            {
+                throw new ContractException("Invalid signal reply: " + error.Message);
+            }
+        }
+
+        public static CitySignalData ParseSignals(string reply)
+        {
+            var root = JObject.Parse(reply);
+            var timing = root["timing"] as JObject ?? throw new ContractException("Signal reply has no timing");
+            var junctions = root["junctions"] as JArray ?? throw new ContractException("Signal reply has no junctions");
+            return new CitySignalData
+            {
+                Timing = new CitySignalTiming { GreenS = (int)timing["green_s"], YellowS = (int)timing["yellow_s"], AllRedS = (int)timing["all_red_s"], Phases = (int)timing["phases"] },
+                Junctions = junctions.Select(j => new CitySignalJunction
+                {
+                    Id = (string)j["id"],
+                    OffsetS = (int)j["offset_s"],
+                    Approaches = j["approaches"].Select(a => new CitySignalApproach
+                    {
+                        Road = (string)a["road"], HeadingDeg = (float)a["heading_deg"], StopX = (float)a["stop_x_m"], StopY = (float)a["stop_y_m"], Phase = (int)a["phase"],
+                    }).ToList(),
+                }).ToList(),
+            };
         }
     }
 }

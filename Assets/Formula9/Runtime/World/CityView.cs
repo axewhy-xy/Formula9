@@ -57,6 +57,10 @@ namespace Formula9.World
         private List<CityBuilding> buildings;
         private Mesh buildingMesh;
         private CityTrafficRenderer traffic;
+        // A queue grows slowly, so the traffic need not look at the incidents every frame
+        private const float HazardRefreshS = 0.5f;
+        private float hazardsDueS;
+        private readonly List<TrafficObstacle> trafficObstacles = new List<TrafficObstacle>();
 
         public int BuildingCount { get; private set; }
         public int RoadCount { get; private set; }
@@ -79,7 +83,7 @@ namespace Formula9.World
             ApplyBuildingTextures(buildingMaterial);
             lineMaterial = Own(new Material(Shader.Find("Sprites/Default")));
             incidents = new CityIncidents(root, buildingMaterial, lineMaterial);
-            traffic = new CityTrafficRenderer(root);
+            traffic = new CityTrafficRenderer();
             if (tiles != null) tiles.TileLoaded += RefreshTiles;
         }
 
@@ -161,7 +165,18 @@ namespace Formula9.World
                 Debug.LogWarning("No traffic sample; roads still render: " + error.Message);
             }
             cancellation.ThrowIfCancellationRequested();
-            traffic?.Rebuild(roads, trafficData);
+            CitySignalData signals = null;
+            if (trafficData != null)
+            {
+                // Without the lights, traffic still gives way at junctions
+                try { signals = await client.GetSignalsAsync(area, cancellation); }
+                catch (Exception error) when (!(error is OperationCanceledException))
+                {
+                    Debug.LogWarning("No traffic lights; traffic only gives way at junctions: " + error.Message);
+                }
+                cancellation.ThrowIfCancellationRequested();
+            }
+            traffic?.Rebuild(roads, trafficData, signals);
         }
 
         private async Task LoadTrafficLightsAsync(CityClient client, string area, CancellationToken cancellation)
@@ -533,10 +548,26 @@ namespace Formula9.World
             return item.transform;
         }
 
+        // Called once a frame, unlike Tick, which a new snapshot also calls. A delta of zero holds traffic still.
+        public void TickTraffic(float deltaTime, Camera camera)
+        {
+            if (traffic == null) return;
+            hazardsDueS -= deltaTime;
+            if (hazardsDueS <= 0)
+            {
+                hazardsDueS = HazardRefreshS;
+                traffic.SetHazards(incidents.TrafficHazards());
+            }
+            trafficObstacles.Clear();
+            foreach (var pair in shuttles)
+                trafficObstacles.Add(new TrafficObstacle { Id = pair.Key, Position = pair.Value.position, Forward = pair.Value.forward, HalfLength = ShuttleSize.z / 2, HalfWidth = ShuttleSize.x / 2 });
+            traffic.SetShuttles(trafficObstacles);
+            traffic.Tick(deltaTime, camera);
+        }
+
         // Called each frame: shuttles glide between the backend's poses.
         public void Tick(ShuttleMotion motion, float now)
         {
-            traffic?.Tick(Time.deltaTime);
             foreach (var pair in shuttles)
                 if (motion.Sample(pair.Key, now, out var position, out var rotation))
                     pair.Value.SetPositionAndRotation(position, rotation);

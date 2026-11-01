@@ -15,21 +15,46 @@ MonoBehaviour:
   entries:
   - modelId: car
     prefab: {fileID: 3088367953666554868, guid: 3f4c94171ec263047907b5ec53d740ca, type: 3}
+    yawDegrees: 0
+    paintable: 1
+    material: {fileID: 0}
   - modelId: car
     prefab: {fileID: 4574867339965997693, guid: ba3b64a0bfa0f6b40abd136f25b54061, type: 3}
+    yawDegrees: 0
+    paintable: 1
+    material: {fileID: 2100000, guid: d7dbfe340a8782c48bc71012558e7542, type: 2}
   - modelId: car
     prefab: {fileID: 7388311926231439747, guid: 7b300278ae5d57e4288fe06c7d43c3e1, type: 3}
+    yawDegrees: 0
+    paintable: 1
+    material: {fileID: 2100000, guid: d7dbfe340a8782c48bc71012558e7542, type: 2}
   - modelId: taxi
     prefab: {fileID: 709385970848430609, guid: 208148a64b26ead429c28298b662a4f5, type: 3}
-  - modelId: motorcycle
-    prefab: {fileID: 7388311926231439747, guid: 7b300278ae5d57e4288fe06c7d43c3e1, type: 3}
+    yawDegrees: 0
+    paintable: 0
+    material: {fileID: 0}
   - modelId: van
     prefab: {fileID: 8464805770805926984, guid: fa85179b18d269b45b05a959023e73e8, type: 3}
+    yawDegrees: 0
+    paintable: 1
+    material: {fileID: 0}
   - modelId: van
     prefab: {fileID: 3298527340143751871, guid: 507777845a9393a4e83f8c362e915549, type: 3}
+    yawDegrees: 0
+    paintable: 1
+    material: {fileID: 0}
   - modelId: truck
     prefab: {fileID: 4060658808584454531, guid: d38fe25cb283cd44fbb8061c5aabeb57, type: 3}
+    yawDegrees: 0
+    paintable: 1
+    material: {fileID: 0}
   - modelId: heavy_truck
     prefab: {fileID: 4445357358193449343, guid: 125b9061c4f4b5649a4ac65142f40d42, type: 3}
+    yawDegrees: 0
+    paintable: 1
+    material: {fileID: 0}
   - modelId: bus
     prefab: {fileID: 5352112619491041860, guid: aa71d9df118fc154a858babad5b1a66f, type: 3}
+    yawDegrees: 0
+    paintable: 1
+    material: {fileID: 0}
