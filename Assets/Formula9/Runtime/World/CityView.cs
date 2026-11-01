@@ -48,6 +48,7 @@ namespace Formula9.World
         private readonly CityIncidents incidents;
         private List<CityBuilding> buildings;
         private Mesh buildingMesh;
+        private CityTrafficRenderer traffic;
 
         public int BuildingCount { get; private set; }
         public int RoadCount { get; private set; }
@@ -63,6 +64,7 @@ namespace Formula9.World
             ApplyBuildingTextures(buildingMaterial);
             lineMaterial = Own(new Material(Shader.Find("Sprites/Default")));
             incidents = new CityIncidents(root, buildingMaterial, lineMaterial);
+            traffic = new CityTrafficRenderer(root);
             if (tiles != null) tiles.TileLoaded += RefreshTiles;
         }
 
@@ -113,6 +115,7 @@ namespace Formula9.World
             catch (Exception error) when (!(error is OperationCanceledException))
             {
                 Debug.LogWarning("No road surfaces, so the map's roads show instead: " + error.Message);
+                traffic?.Rebuild(Array.Empty<CityRoad>(), null);
                 return;
             }
             cancellation.ThrowIfCancellationRequested();
@@ -131,6 +134,14 @@ namespace Formula9.World
             var renderer = road.GetComponent<MeshRenderer>();
             renderer.sharedMaterials = materials;
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            CityTrafficData trafficData = null;
+            try { trafficData = await client.GetTrafficAsync(area, cancellation); }
+            catch (Exception error) when (!(error is OperationCanceledException))
+            {
+                Debug.LogWarning("No traffic sample; roads still render: " + error.Message);
+            }
+            cancellation.ThrowIfCancellationRequested();
+            traffic?.Rebuild(roads, trafficData);
         }
 
         // Pale speckle that the road colours tint. Its mipmaps average out to flat colour far away.
@@ -372,6 +383,7 @@ namespace Formula9.World
         // Called each frame: shuttles glide between the backend's poses.
         public void Tick(ShuttleMotion motion, float now)
         {
+            traffic?.Tick(Time.deltaTime);
             foreach (var pair in shuttles)
                 if (motion.Sample(pair.Key, now, out var position, out var rotation))
                     pair.Value.SetPositionAndRotation(position, rotation);
@@ -411,6 +423,8 @@ namespace Formula9.World
         {
             if (tiles != null) tiles.TileLoaded -= RefreshTiles;
             incidents.Dispose();
+            traffic?.Dispose();
+            traffic = null;
             if (root != null) WorldBuilder.Remove(root.gameObject);
             foreach (var item in owned)
             {
