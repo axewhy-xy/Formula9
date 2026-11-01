@@ -34,8 +34,6 @@ namespace Formula9.World
         private const int RoofMaterial = 0, FrameMaterial = 1, GlassMaterial = 2;
         private const int SeatMaterial = 3, SignMaterial = 4, PavementMaterial = 5, TactileMaterial = 6;
         private const int MaterialCount = 7;
-        // Number of tile repetitions per metre on ordinary shelter faces.
-        private static readonly float[] TextureRepeatPerMetre = { 0.9f, 1.6f, 0.35f, 1.8f, 1f, 1.1f, 2.5f };
         private readonly Material[] materials = new Material[MaterialCount];
         private readonly List<Mesh> meshes = new List<Mesh>();
         private GameObject activeRoot;
@@ -43,100 +41,66 @@ namespace Formula9.World
 
         public BusStopShelterFactory()
         {
-            // Built-in render pipeline: our custom PBR surface shader.
-            // URP: Unity's physically based Lit shader with the same albedo, normal,
-            // metallic and smoothness maps. ShaderLab surface shaders are not URP compatible.
+            // Untextured flat-colour shelters. This class does not load any
+            // BusStop albedo, normal-map, sign or paving texture assets.
             var useUrp = GraphicsSettings.currentRenderPipeline != null;
-            var opaqueShader = useUrp
-                ? Shader.Find("Universal Render Pipeline/Lit")
-                : Resources.Load<Shader>("Formula9/Shaders/BusStopSurface");
+            var opaqueShader = Shader.Find(useUrp
+                ? "Universal Render Pipeline/Lit"
+                : "Standard");
             if (opaqueShader == null)
-                opaqueShader = Shader.Find(useUrp ? "Universal Render Pipeline/Lit" : "Standard");
+                opaqueShader = Shader.Find("Unlit/Color");
             if (opaqueShader == null)
-                throw new InvalidOperationException("No compatible opaque bus-stop shader was found.");
+                throw new InvalidOperationException("No supported shader for plain-colour bus stops.");
 
-            // Transparent, lightly reflective glass. Same ShaderLab shader is usable
-            // as a custom unlit transparent pass in Built-in and URP.
+            // Keep the glass transparent, but do not assign it an image texture.
             var glassShader = useUrp
                 ? Resources.Load<Shader>("Formula9/Shaders/BusStopGlassURP")
                     ?? Shader.Find("Formula9/BusStopGlassURP")
-                    ?? opaqueShader
                 : Resources.Load<Shader>("Formula9/Shaders/BusStopGlass")
-                    ?? Shader.Find("Formula9/BusStopGlass")
-                    ?? opaqueShader;
+                    ?? Shader.Find("Formula9/BusStopGlass");
+            if (glassShader == null)
+            {
+                // The standard transparent fallback works without any textures.
+                glassShader = opaqueShader;
+                Debug.LogWarning("[BusStop] Glass shader unavailable; using a standard transparent material.");
+            }
 
-            materials[RoofMaterial] = MakeSurface(opaqueShader, "roof_metal", "roof_metal_normal",
-                new Color(0.96f, 0.93f, 0.89f), 0.30f, 0.38f, 0.45f);
-            materials[FrameMaterial] = MakeSurface(opaqueShader, "brushed_metal", "brushed_metal_normal",
-                new Color(0.17f, 0.19f, 0.20f), 0.72f, 0.37f, 0.42f);
-            materials[GlassMaterial] = MakeGlass(glassShader, "blue_glass");
-            materials[SeatMaterial] = MakeSurface(opaqueShader, "brushed_metal", "brushed_metal_normal",
-                new Color(0.95f, 0.90f, 0.87f), 0.28f, 0.45f, 0.30f);
-            materials[SignMaterial] = MakeSurface(opaqueShader, "bus_stop_sign", null,
-                Color.white, 0.03f, 0.65f, 0f);
-            materials[PavementMaterial] = MakeSurface(opaqueShader, "paving", "paving_normal",
-                new Color(0.77f, 0.78f, 0.76f), 0f, 0.13f, 0.72f);
-            materials[TactileMaterial] = MakeSurface(opaqueShader, "tactile_yellow", "tactile_yellow_normal",
-                Color.white, 0f, 0.29f, 0.75f);
-        }
-
-        private static Texture2D LoadTexture(string file)
-        {
-            if (string.IsNullOrEmpty(file)) return null;
-            var texture = Resources.Load<Texture2D>("Formula9/Textures/" + file);
-            if (texture == null)
-                Debug.LogWarning("[BusStop] Missing texture Formula9/Textures/" + file);
-            return texture;
+            materials[RoofMaterial] = MakeSurface(opaqueShader, "roof", new Color(0.70f, 0.72f, 0.73f), 0.20f, 0.35f);
+            materials[FrameMaterial] = MakeSurface(opaqueShader, "frame", new Color(0.17f, 0.19f, 0.20f), 0.65f, 0.35f);
+            materials[GlassMaterial] = MakeGlass(glassShader);
+            materials[SeatMaterial] = MakeSurface(opaqueShader, "bench", new Color(0.83f, 0.84f, 0.85f), 0.15f, 0.35f);
+            materials[SignMaterial] = MakeSurface(opaqueShader, "sign", new Color(0.10f, 0.39f, 0.80f), 0.02f, 0.48f);
+            materials[PavementMaterial] = MakeSurface(opaqueShader, "pavement", new Color(0.72f, 0.74f, 0.73f), 0f, 0.12f);
+            materials[TactileMaterial] = MakeSurface(opaqueShader, "tactile", new Color(0.96f, 0.77f, 0.12f), 0f, 0.20f);
         }
 
         private static void SetBaseColour(Material material, Color colour)
         {
             if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", colour);
-            else if (material.HasProperty("_Color")) material.SetColor("_Color", colour);
+            if (material.HasProperty("_Color")) material.SetColor("_Color", colour);
         }
 
-        private static Material MakeSurface(Shader shader, string diffuse, string normal,
-            Color tint, float metallic, float smoothness, float bumpScale)
+        private static Material MakeSurface(Shader shader, string name,
+            Color tint, float metallic, float smoothness)
         {
-            var material = new Material(shader) { name = "BusStop/" + diffuse };
+            var material = new Material(shader) { name = "BusStop/plain-" + name };
             SetBaseColour(material, tint);
-            var albedo = LoadTexture(diffuse);
-            if (albedo != null)
-            {
-                if (material.HasProperty("_BaseMap")) material.SetTexture("_BaseMap", albedo);
-                if (material.HasProperty("_MainTex")) material.SetTexture("_MainTex", albedo);
-            }
-            var normalMap = LoadTexture(normal);
-            if (normalMap != null && material.HasProperty("_BumpMap"))
-            {
-                material.SetTexture("_BumpMap", normalMap);
-                if (material.HasProperty("_BumpScale")) material.SetFloat("_BumpScale", bumpScale);
-                material.EnableKeyword("_NORMALMAP");
-            }
             if (material.HasProperty("_Metallic")) material.SetFloat("_Metallic", metallic);
             if (material.HasProperty("_Smoothness")) material.SetFloat("_Smoothness", smoothness);
-            if (material.HasProperty("_MicroGrain")) material.SetFloat("_MicroGrain", 0.13f);
             return material;
         }
 
-        private static Material MakeGlass(Shader shader, string textureFile)
+        private static Material MakeGlass(Shader shader)
         {
-            var material = new Material(shader) { name = "BusStop/clear-glass" };
-            var texture = LoadTexture(textureFile);
-            if (texture != null)
-            {
-                if (material.HasProperty("_MainTex")) material.SetTexture("_MainTex", texture);
-                if (material.HasProperty("_BaseMap")) material.SetTexture("_BaseMap", texture);
-            }
-            var tint = new Color(0.78f, 0.86f, 0.88f, 0.38f);
+            var material = new Material(shader) { name = "BusStop/plain-glass" };
+            var tint = new Color(0.78f, 0.86f, 0.88f, 0.36f);
             if (material.HasProperty("_Tint")) material.SetColor("_Tint", tint);
             SetBaseColour(material, tint);
             if (material.HasProperty("_Opacity")) material.SetFloat("_Opacity", 0.17f);
-            if (material.HasProperty("_EdgeReflect")) material.SetFloat("_EdgeReflect", 0.48f);
+            if (material.HasProperty("_EdgeReflect")) material.SetFloat("_EdgeReflect", 0.40f);
             if (material.HasProperty("_Smoothness")) material.SetFloat("_Smoothness", 0.90f);
 
-            // Fallback transparent setup when the custom glass shader is missing.
-            // Built-in Standard and URP Lit configure transparency differently.
+            // Standard / URP Lit transparent fallback if custom glass shader is missing.
             if (!material.HasProperty("_Opacity"))
             {
                 if (material.HasProperty("_Mode")) material.SetFloat("_Mode", 3f);
@@ -189,8 +153,6 @@ namespace Formula9.World
                 mesh.SetUVs(0, uvs);
                 mesh.subMeshCount = MaterialCount;
                 for (var i = 0; i < MaterialCount; i++) mesh.SetTriangles(triangles[i], i, false);
-                // Unity normal-mapped shaders require vertex tangents in addition to UV0.
-                mesh.RecalculateTangents();
                 mesh.RecalculateBounds();
                 meshes.Add(mesh);
 
@@ -217,7 +179,7 @@ namespace Formula9.World
                 // the chunk's combined mesh, not separate GameObjects.
                 AddBox(vertices, normals, uvs, triangles[material], at, rotation,
                     center * ShelterScale, size * ShelterScale,
-                    TextureRepeatPerMetre[material], material == SignMaterial);
+                    1f, material == SignMaterial);
             }
 
             // Shape loosely follows modern Singapore bus stops:
@@ -283,7 +245,7 @@ namespace Formula9.World
 
         /// <summary>
         /// Append a six-faced box with outward normals, winding, and tiled UV0s.
-        /// Sign faces use one atlas-sized UV square so the bus icon remains legible.
+        /// UVs are retained for shader compatibility, but no image maps are assigned.
         /// </summary>
         private static void AddBox(List<Vector3> vertices, List<Vector3> normals,
             List<Vector2> uvs, List<int> triangles,

@@ -14,9 +14,13 @@ namespace Formula9.World
         public const int KerbLayer = 0, AsphaltLayer = 1, MarkingLayer = 2, LayerCount = 3;
         // The backend places vehicles in lanes of this width; CityRoadMarkings.shader draws its lines by it
         public const float LaneWidthM = 3.2f;
-        public const float ShoulderM = 0.6f, KerbM = 1.5f;
+        public const float ShoulderM = 0.6f, KerbM = 0.55f;
         // Just above the ground, under the routes
         public const float SurfaceY = 0.1f;
+        // Kerb polygons must sit BELOW asphalt; coplanar submeshes produce dark
+        // triangle fans at junctions due to depth-buffer competition.
+        public const float KerbSurfaceY = SurfaceY - 0.055f;
+        public const float LegacyLineY = SurfaceY + 0.015f;
         // Lines stop this far short of the widest road at a junction, leaving it plain asphalt
         private const float JunctionClearanceM = 1;
         // Car parks and driveways between blocks are not lined
@@ -42,15 +46,51 @@ namespace Formula9.World
             float Clearance(long node) => ends[node].Count > 2 ? ends[node].Max() + JunctionClearanceM : 0;
 
             var vertices = new List<Vector3>(); var lines = new List<Vector4>();
+            var textureCoords = new List<Vector4>();
             var layers = Enumerable.Range(0, LayerCount).Select(_ => new List<int>()).ToArray();
-            void Surface(List<Vector2> points, float halfWidth, List<int> triangles)
+            void Surface(List<Vector2> points, float halfWidth, List<int> triangles, float height)
             {
-                Ribbon(points, halfWidth, null, 0, 0, 0, 0, vertices, lines, triangles);
+                Ribbon(points, halfWidth, null, 0, 0, 0, 0, vertices, lines, triangles, height);
                 for (var i = 0; i < points.Count; i++)
-                    if (i == 0 || i == points.Count - 1 || IsSharp(points[i - 1], points[i], points[i + 1])) Cap(points[i], halfWidth, vertices, lines, triangles);
+                    if (i == 0 || i == points.Count - 1 || IsSharp(points[i - 1], points[i], points[i + 1])) Cap(points[i], halfWidth, vertices, lines, triangles, height);
             }
-            foreach (var (road, points) in list) Surface(points, HalfWidth(road) + KerbM, layers[KerbLayer]);
-            foreach (var (road, points) in list) Surface(points, HalfWidth(road), layers[AsphaltLayer]);
+            // Kerbs are two OUTER edge strips, not another full-width road polygon.
+            // Full-width kerb underlays used to show through adjacent road junctions
+            // as thick grey bars whenever road surfaces failed to coincide exactly.
+            foreach (var (road, points) in list)
+                KerbEdges(points, HalfWidth(road), vertices, lines, layers[KerbLayer]);
+            // The user-supplied two-lane road texture is projected along the
+            // same ribbon as the asphalt. TEXCOORD1: across [0..1], distance
+            // along the road (in texture repeats), actual total lanes, fade.
+            // This DOES NOT change legacy TEXCOORD0 or the public Build API.
+            while (textureCoords.Count < vertices.Count) textureCoords.Add(Vector4.zero);
+            foreach (var (road, points) in list)
+            {
+                int first = vertices.Count;
+                Surface(points, HalfWidth(road), layers[AsphaltLayer], SurfaceY);
+                while (textureCoords.Count < vertices.Count) textureCoords.Add(Vector4.zero);
+                var along = Along(points);
+                float length = along[along.Count - 1];
+                float fromCut = Clearance(road.FromNode);
+                float toCut = Clearance(road.ToNode);
+                // Our backend's two-way Lanes represents lanes per direction.
+                int totalLanes = road.Oneway ? road.Lanes : road.Lanes * 2;
+                totalLanes = Mathf.Max(1, totalLanes);
+                for (int i = 0; i < points.Count; i++)
+                {
+                    float fade = 1f;
+                    if (fromCut > 0f)
+                        fade = Mathf.Min(fade, Mathf.Clamp01((along[i] - fromCut) / 2f));
+                    if (toCut > 0f)
+                        fade = Mathf.Min(fade, Mathf.Clamp01((length - along[i] - toCut) / 2f));
+                    float v = along[i] / 24f; // Four source-image dash cycles / 24 metres
+                    float signedLanes = road.Oneway ? totalLanes : -totalLanes;
+                    textureCoords[first + i * 2] = new Vector4(1f, v, signedLanes, fade);
+                    textureCoords[first + i * 2 + 1] = new Vector4(0f, v, signedLanes, fade);
+                }
+                // Fan/cap polygons are deliberately bare asphalt; their zero
+                // lane-count UV prevents a starburst of texture marks.
+            }
             foreach (var (road, points) in list)
             {
                 if (road.Class == UnmarkedClass) continue;
@@ -60,14 +100,195 @@ namespace Formula9.World
                 var (cut, cutAlong) = Slice(points, along, from, to);
                 // In lanes: a one-way road counts from its edge, a two-way road from its centre line
                 var middleLane = road.Oneway ? road.Lanes / 2f : 0;
-                Ribbon(cut, HalfWidth(road), cutAlong, middleLane, HalfWidth(road) / LaneWidthM, road.Lanes, road.Oneway ? 0 : 1, vertices, lines, layers[MarkingLayer]);
+                Ribbon(cut, HalfWidth(road), cutAlong, middleLane, HalfWidth(road) / LaneWidthM, road.Lanes, road.Oneway ? 0 : 1, vertices, lines, layers[MarkingLayer], LegacyLineY);
             }
 
+            // Legacy marking submesh adds more vertices after asphalt. Keep the
+            // secondary UV array exactly the same length as the mesh vertices.
+            while (textureCoords.Count < vertices.Count) textureCoords.Add(Vector4.zero);
+
             var mesh = new Mesh { name = "City roads", indexFormat = IndexFormat.UInt32 };
-            mesh.SetVertices(vertices); mesh.SetUVs(0, lines);
+            mesh.SetVertices(vertices); mesh.SetUVs(0, lines); mesh.SetUVs(1, textureCoords);
             mesh.subMeshCount = LayerCount;
             for (var i = 0; i < LayerCount; i++) mesh.SetTriangles(layers[i], i);
             mesh.RecalculateNormals(); mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        // VISUAL-ONLY standard longitudinal paint. This mesh is separate from the
+        // legacy shader-encoded MarkingLayer so older EditMode tests and the
+        // established RoadMesh.Build signature remain unchanged.
+        // The lane centre, separators and edges come from the SAME road polyline
+        // that builds the asphalt, not from loosely aligned GIS paint paths.
+        public static Mesh BuildBaseLanePaint(IEnumerable<CityRoad> roads,
+            IEnumerable<Vector2> mappedCrossings = null,
+            IEnumerable<Vector2> mappedJunctions = null)
+        {
+            var roadList = roads.Where(r => r != null && r.Points != null).ToList();
+            var crossings = mappedCrossings == null
+                ? new List<Vector2>() : mappedCrossings.ToList();
+            var junctions = mappedJunctions == null
+                ? new List<Vector2>() : mappedJunctions.ToList();
+            var nodeArms = new Dictionary<long, int>();
+            foreach (var road in roadList)
+            {
+                if (!nodeArms.ContainsKey(road.FromNode)) nodeArms[road.FromNode] = 0;
+                if (!nodeArms.ContainsKey(road.ToNode)) nodeArms[road.ToNode] = 0;
+                nodeArms[road.FromNode]++;
+                nodeArms[road.ToNode]++;
+            }
+            var vertices = new List<Vector3>();
+            var triangles = new List<int>();
+            var discarded = new HashSet<string>();
+            int drawnRoads = 0, drawnDashes = 0;
+            const float paintY = SurfaceY + .042f;
+            const float edgeWidth = .16f;
+            const float dividerWidth = .14f;
+            const float dashLength = 2.0f;
+            const float dashGap = 4.0f;
+
+            void Quad(Vector2 a, Vector2 b, float width)
+            {
+                var direction = b - a;
+                if (direction.sqrMagnitude < .0004f) return;
+                Vector2 normal = LeftOf(direction.normalized) * (width * .5f);
+                int i = vertices.Count;
+                // Upward winding for Unity's X/Z coordinate convention.
+                vertices.Add(Ground(a + normal, paintY));
+                vertices.Add(Ground(a - normal, paintY));
+                vertices.Add(Ground(b - normal, paintY));
+                vertices.Add(Ground(b + normal, paintY));
+                triangles.Add(i); triangles.Add(i + 2); triangles.Add(i + 1);
+                triangles.Add(i); triangles.Add(i + 3); triangles.Add(i + 2);
+                drawnDashes++;
+            }
+
+            // Each segment is sampled from a SINGLE continuous OSM road centreline.
+            // Distances across road fragments are not joined or guessed.
+            foreach (var road in roadList)
+            {
+                string cls = (road.Class ?? "").ToLowerInvariant();
+                if (cls == "service" || cls == "path" || cls == "footway" ||
+                    cls == "pedestrian" || cls == "cycleway" || cls == "steps" ||
+                    cls == "track" || cls == "construction" || cls == "platform") continue;
+                var points = Line(road);
+                if (points.Count < 2 || road.Lanes < 1) continue;
+                var distances = Along(points);
+                float total = distances[distances.Count - 1];
+                if (total < 5f) continue;
+                // Drop exact duplicate road polylines; parallel carriageways
+                // remain separate because their geometry is different.
+                string key = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "{0:F2},{1:F2}|{2:F2},{3:F2}|{4}|{5}",
+                    points[0].x, points[0].y, points[points.Count-1].x,
+                    points[points.Count-1].y, road.Lanes, road.Oneway);
+                if (!discarded.Add(key)) continue;
+
+                int armsFrom = nodeArms[road.FromNode];
+                int armsTo = nodeArms[road.ToNode];
+                // Do not continue a divider across a branching intersection.
+                float start = armsFrom > 2 ? Mathf.Min(10f, HalfWidth(road) + 1.5f) : 0.8f;
+                float end = total - (armsTo > 2 ? Mathf.Min(10f, HalfWidth(road) + 1.5f) : 0.8f);
+                if (end - start < 2f) continue;
+                float asphaltHalf = HalfWidth(road);
+                float edge = Mathf.Max(.20f, asphaltHalf - .25f);
+
+                // Geometric miter normals avoid wedge-like joins on curved roads.
+                var normals = new Vector2[points.Count];
+                for (int i = 0; i < points.Count; i++)
+                {
+                    var incoming = (points[i] - points[Mathf.Max(0, i - 1)]).normalized;
+                    var outgoing = (points[Mathf.Min(i + 1, points.Count - 1)] - points[i]).normalized;
+                    if (i == 0) incoming = outgoing;
+                    if (i == points.Count - 1) outgoing = incoming;
+                    var n0 = LeftOf(incoming); var n1 = LeftOf(outgoing);
+                    var n = (n0 + n1).normalized;
+                    if (n.sqrMagnitude < .25f) n = n1;
+                    normals[i] = n * Mathf.Min(1.7f,
+                        1f / Mathf.Max(.58f, Vector2.Dot(n, n1)));
+                }
+
+                // One-way lanes count across the full road; for two-way roads
+                // existing RoadMesh.HalfWidth treats Lanes as per direction.
+                var offsets = new List<(float Side, bool Dashed, float Width)>();
+                offsets.Add((-edge, false, edgeWidth));
+                offsets.Add((+edge, false, edgeWidth));
+                if (road.Oneway)
+                {
+                    for (int lane = 1; lane < road.Lanes; lane++)
+                        offsets.Add((-asphaltHalf + ShoulderM + lane * LaneWidthM,
+                            true, dividerWidth));
+                }
+                else
+                {
+                    offsets.Add((0f, false, dividerWidth)); // two-way centre line
+                    for (int lane = 1; lane < road.Lanes; lane++)
+                    {
+                        offsets.Add((+lane * LaneWidthM, true, dividerWidth));
+                        offsets.Add((-lane * LaneWidthM, true, dividerWidth));
+                    }
+                }
+
+                bool NearMappedObstacle(Vector2 roadAxisPoint)
+                {
+                    // Compare the axis, not individual lane offsets: a zebra
+                    // crossing spans ALL lanes, including the outer edge lines.
+                    foreach (var crossing in crossings)
+                        if ((roadAxisPoint - crossing).sqrMagnitude < 5f * 5f) return true;
+                    foreach (var junction in junctions)
+                        if ((roadAxisPoint - junction).sqrMagnitude < 12f * 12f) return true;
+                    return false;
+                }
+
+                foreach (var entry in offsets)
+                {
+                    for (int i = 1; i < points.Count; i++)
+                    {
+                        float segmentStart = distances[i-1], segmentEnd = distances[i];
+                        if (segmentEnd <= start || segmentStart >= end) continue;
+                        float length = segmentEnd - segmentStart;
+                        if (length < .001f) continue;
+                        var a = points[i-1] + normals[i-1] * entry.Side;
+                        var b = points[i] + normals[i] * entry.Side;
+                        float left = Mathf.Max(start, segmentStart), right = Mathf.Min(end, segmentEnd);
+                        float position = left;
+                        // Fixed 6m cycle measured from the beginning of the road;
+                        // dashed lines stay phase-aligned across its many segments.
+                        while (position < right - .002f)
+                        {
+                            // Split solid lines too, so crossings and junctions
+                            // can suppress just the nearby portion, not a whole
+                            // 60-metre OSM segment.
+                            float next = Mathf.Min(right, position + 3f);
+                            bool paint = true;
+                            if (entry.Dashed)
+                            {
+                                float phase = position % (dashLength + dashGap);
+                                paint = phase < dashLength;
+                                float change = paint ? dashLength - phase : dashLength + dashGap - phase;
+                                next = Mathf.Min(right, position + Mathf.Max(.01f, change));
+                            }
+                            if (paint)
+                            {
+                                var p = Vector2.Lerp(a, b, (position - segmentStart) / length);
+                                var q = Vector2.Lerp(a, b, (next - segmentStart) / length);
+                                var axis = Vector2.Lerp(points[i-1],points[i],
+                                    ((position + next)*.5f - segmentStart) / length);
+                                if (!NearMappedObstacle(axis)) Quad(p, q, entry.Width);
+                            }
+                            position = next;
+                        }
+                    }
+                }
+                drawnRoads++;
+            }
+            var mesh = new Mesh { name = "RoadMesh: generated standard lane lines", indexFormat = IndexFormat.UInt32 };
+            mesh.SetVertices(vertices);
+            mesh.SetTriangles(triangles, 0);
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            Debug.Log($"[RoadMesh] Base longitudinal lines from {drawnRoads} roads; {drawnDashes} painted segments; " +
+                "line geometry is OSM-based visual approximation, not surveyed LTA paint.");
             return mesh;
         }
 
@@ -113,7 +334,7 @@ namespace Formula9.World
 
         // A strip along a line, mitred at its bends. Each vertex tells the marking shader (lane position
         // across the road, metres along it, lanes, 1 if two-way).
-        private static void Ribbon(List<Vector2> points, float halfWidth, List<float> along, float middleLane, float halfLanes, int lanes, int twoWay, List<Vector3> vertices, List<Vector4> lines, List<int> triangles)
+        private static void Ribbon(List<Vector2> points, float halfWidth, List<float> along, float middleLane, float halfLanes, int lanes, int twoWay, List<Vector3> vertices, List<Vector4> lines, List<int> triangles, float height)
         {
             for (var i = 0; i < points.Count; i++)
             {
@@ -125,7 +346,7 @@ namespace Formula9.World
                 var stretch = Mathf.Min(1 / Mathf.Max(Vector2.Dot(left, LeftOf(outOf)), 1e-3f), MaxMitre);
                 var offset = left * (halfWidth * stretch);
                 var start = vertices.Count;
-                vertices.Add(Ground(points[i] + offset)); vertices.Add(Ground(points[i] - offset));
+                vertices.Add(Ground(points[i] + offset, height)); vertices.Add(Ground(points[i] - offset, height));
                 var distance = along == null ? 0 : along[i];
                 lines.Add(new Vector4(middleLane + halfLanes, distance, lanes, twoWay));
                 lines.Add(new Vector4(middleLane - halfLanes, distance, lanes, twoWay));
@@ -134,18 +355,66 @@ namespace Formula9.World
             }
         }
 
-        private static void Cap(Vector2 center, float radius, List<Vector3> vertices, List<Vector4> lines, List<int> triangles)
+        // Create a pair of kerb-only edge bands instead of a complete second
+        // carriageway. Keep the original public RoadMesh API and all 3 submeshes
+        // so existing EditMode tests and consumers remain compatible.
+        private static void KerbEdges(List<Vector2> points, float asphaltHalfWidth,
+            List<Vector3> vertices, List<Vector4> lines, List<int> triangles)
+        {
+            if (points.Count < 2) return;
+            var normals = new Vector2[points.Count];
+            for (int i = 0; i < points.Count; i++)
+            {
+                var previous = (points[i] - points[Mathf.Max(0, i - 1)]).normalized;
+                var next = (points[Mathf.Min(i + 1, points.Count - 1)] - points[i]).normalized;
+                if (i == 0) previous = next;
+                if (i == points.Count - 1) next = previous;
+                var leftPrev = LeftOf(previous);
+                var leftNext = LeftOf(next);
+                var miter = leftPrev + leftNext;
+                miter = miter.sqrMagnitude < 1e-6f ? leftNext : miter.normalized;
+                var stretch = Mathf.Min(1f / Mathf.Max(Vector2.Dot(miter, leftNext), 0.001f), MaxMitre);
+                normals[i] = miter * stretch;
+            }
+
+            void Quad(Vector2 a, Vector2 b, Vector2 c, Vector2 d)
+            {
+                int index = vertices.Count;
+                vertices.Add(Ground(a, KerbSurfaceY));
+                vertices.Add(Ground(b, KerbSurfaceY));
+                vertices.Add(Ground(c, KerbSurfaceY));
+                vertices.Add(Ground(d, KerbSurfaceY));
+                for (int k = 0; k < 4; k++) lines.Add(Vector4.zero);
+                triangles.AddRange(new[] { index, index + 1, index + 2,
+                    index, index + 2, index + 3 });
+            }
+
+            for (int i = 1; i < points.Count; i++)
+            {
+                var a = points[i - 1]; var b = points[i];
+                if ((b - a).sqrMagnitude < MinSegmentM * MinSegmentM) continue;
+                var na = normals[i - 1]; var nb = normals[i];
+                float inner = asphaltHalfWidth;
+                float outer = asphaltHalfWidth + KerbM;
+                Quad(a + na * inner, a + na * outer,
+                     b + nb * outer, b + nb * inner);
+                Quad(a - na * inner, b - nb * inner,
+                     b - nb * outer, a - na * outer);
+            }
+        }
+
+        private static void Cap(Vector2 center, float radius, List<Vector3> vertices, List<Vector4> lines, List<int> triangles, float height)
         {
             var start = vertices.Count;
-            vertices.Add(Ground(center)); lines.Add(Vector4.zero);
+            vertices.Add(Ground(center, height)); lines.Add(Vector4.zero);
             for (var i = 0; i < CapSides; i++)
             {
                 var angle = -2 * Mathf.PI * i / CapSides;
-                vertices.Add(Ground(center + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * radius)); lines.Add(Vector4.zero);
+                vertices.Add(Ground(center + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * radius, height)); lines.Add(Vector4.zero);
                 triangles.AddRange(new[] { start, start + 1 + i, start + 1 + (i + 1) % CapSides });
             }
         }
 
-        private static Vector3 Ground(Vector2 point) => new Vector3(point.x, SurfaceY, point.y);
+        private static Vector3 Ground(Vector2 point, float height) => new Vector3(point.x, height, point.y);
     }
 }
