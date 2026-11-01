@@ -14,7 +14,7 @@
           "items": {
             "type": "string"
           },
-          "maxItems": 128,
+          "maxItems": 1024,
           "minItems": 1,
           "type": "array"
         },
@@ -48,6 +48,14 @@
       },
       "maxItems": 16,
       "title": "Via Node Ids",
+      "type": "array"
+    },
+    "waypoint_edge_ids": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 16,
+      "title": "Waypoint Edge Ids",
       "type": "array"
     }
   },

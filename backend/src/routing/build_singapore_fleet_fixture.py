@@ -31,16 +31,27 @@ from urllib.request import Request, urlopen
 
 import networkx as nx
 
+from src.routing.build_operating_network import OperatingRoads, MAX_TURN_DEG, build_network, heading_change_deg, strongly_connected
+
 FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "m2_integrated.json"
+NETWORK_FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "m2_operating_network.json"
 OSM_DIRECTORY = Path(__file__).resolve().parents[2] / "fixtures" / "osm"
 OVERPASS_URL = "https://overpass.kumi.systems/api/interpreter"
 
 # Where a fleet can be built: a box (south, west, north, east) around the bus interchange it runs
-# from, named as in OpenStreetMap. Add an area here and run with --area --download to use it.
+# from, named as in OpenStreetMap. The interchange is the first depot; "other_depots" (optional)
+# names more places in the box with chargers, such as bus terminals, also as in OpenStreetMap.
+# Add an area here and run with --area --download to use it.
 SERVICE_AREAS = {
     "toa-payoh": {"name": "Toa Payoh", "box": (1.326, 103.838, 1.344, 103.860),
-                  "interchange": "Toa Payoh Interchange"},
+                  "interchange": "Toa Payoh Interchange",
+                  "other_depots": ["Saint Michael's Bus Terminal"]},
 }
+
+
+def depot_names(area: dict) -> list[str]:
+    """Every depot of an area, its interchange first."""
+    return [area["interchange"], *area.get("other_depots", [])]
 DEFAULT_AREA = "toa-payoh"
 
 QUERY = """
@@ -96,11 +107,13 @@ def slug(text: str) -> str:
 
 
 class Network:
-    def __init__(self, osm: dict, interchange: str):
+    def __init__(self, osm: dict, interchange: str, depots: list[str]):
         elements = osm["elements"]
         self.position = {e["id"]: project(e["lat"], e["lon"]) for e in elements if e["type"] == "node"}
         self.loop = nx.DiGraph()
         self.access = nx.DiGraph()
+        self.tags = {}
+        self.way_nodes = {}
         for way in (e for e in elements if e["type"] == "way" and "highway" in e.get("tags", {})):
             tags = way["tags"]
             if tags.get("access") in ("private", "no"):
@@ -113,29 +126,50 @@ class Network:
             graphs = [self.access]
             if tags["highway"] in LOOP_ROADS:
                 graphs.append(self.loop)
+            self.tags[way["id"]] = tags
+            self.way_nodes[way["id"]] = nodes
             for a, b in zip(nodes, nodes[1:]):
                 length = math.dist(self.position[a], self.position[b])
                 for graph in graphs:
-                    graph.add_edge(a, b, length=length)
+                    graph.add_edge(a, b, length=length, way=way["id"])
                     if not oneway:
-                        graph.add_edge(b, a, length=length)
+                        graph.add_edge(b, a, length=length, way=way["id"])
         self.stops = []
-        self.depot = None
+        # Each depot's place: a node where it is, or else the middle of a way that outlines it
+        nodes, outlines = {}, {}
         for element in elements:
             tags = element.get("tags", {})
             if element["type"] == "node" and tags.get("highway") == "bus_stop" and tags.get("ref"):
                 self.stops.append({"ref": tags["ref"], "name": tags.get("name", tags["ref"]),
                                    "at": project(element["lat"], element["lon"])})
-            if element["type"] == "node" and tags.get("name") == interchange:
-                self.depot = project(element["lat"], element["lon"])
-        if self.depot is None:
-            raise ValueError(f"{interchange} is not in the downloaded area")
+            name = tags.get("name")
+            if name not in depots:
+                continue
+            if element["type"] == "node":
+                nodes[name] = project(element["lat"], element["lon"])
+            elif element["type"] == "way" and name not in outlines:
+                corners = [self.position[n] for n in element.get("nodes", []) if n in self.position]
+                if corners:
+                    outlines[name] = (sum(p[0] for p in corners) / len(corners), sum(p[1] for p in corners) / len(corners))
+        self.depot_places = {name: nodes.get(name, outlines.get(name)) for name in depots}
+        missing = [name for name, place in self.depot_places.items() if place is None]
+        if missing:
+            raise ValueError(f"{', '.join(missing)} not in the downloaded area")
+        # The interchange, where the loops are laid out from
+        self.depot = self.depot_places[interchange]
         # Only the part of the network a shuttle can both reach and leave: the download's edges cut
         # roads off, and car-park loops are one-way pockets
         core = max(nx.strongly_connected_components(self.loop), key=len)
         self.loop = self.loop.subgraph(core).copy()
         degree = {n: len(set(self.loop.predecessors(n)) | set(self.loop.successors(n))) for n in self.loop}
         self.junctions = {n for n, d in degree.items() if d >= 3}
+
+    def way_runs_forward(self, way: int, start, end) -> bool:
+        """Whether going from start to end follows the way's own drawing order."""
+        points = [self.position[n] for n in self.way_nodes[way]]
+        nearest = min(range(len(points) - 1), key=lambda i: math.dist(points[i], start) + math.dist(points[i + 1], start))
+        a, b = points[nearest], points[nearest + 1]
+        return (b[0] - a[0]) * (end[0] - start[0]) + (b[1] - a[1]) * (end[1] - start[1]) >= 0
 
     def points(self, path: list[int]) -> list[tuple[float, float]]:
         return [self.position[n] for n in path]
@@ -363,77 +397,66 @@ def split_peer_routes(data: dict, net: Network, used: set[str]) -> None:
     data["vehicle_assignments"] = [data["vehicle_assignments"][0], "route-peer-b", "route-peer-c", "route-peer-d", "route-peer-e"]
 
 
-def connector(net: Network, start_point, start_node):
-    """Real roads from a loop's start to the interchange, ending just inside it."""
-    entry = min(net.access.nodes, key=lambda n: math.dist(net.position[n], net.depot))
+def connector(net: Network, start_point, start_node, depot):
+    """Real roads from a loop's start to a depot, ending just inside it."""
+    # The nearest road the loop can drive to: the closest one may be a cut-off piece inside the site
+    reachable = nx.descendants(net.access, start_node) | {start_node}
+    entry = min(reachable, key=lambda n: math.dist(net.position[n], depot))
     path = nx.dijkstra_path(net.access, start_node, entry, weight="length")
     points = [tuple(start_point)] + net.points(path)
-    inside = (float(round(net.depot[0])), float(round(net.depot[1])) + 25.0)
+    inside = (float(round(depot[0])), float(round(depot[1])) + 25.0)
     points = simplify(points, 2.0) + [inside]
     return [list(p) for index, p in enumerate(points) if index == 0 or p != points[index - 1]]
 
 
 def build(osm: dict, base: dict, area: dict) -> dict:
-    net = Network(osm, area["interchange"])
+    net = Network(osm, area["interchange"], depot_names(area))
     main, bypass_b, bypass_c, back, stops = find_main_loop(net)
 
-    # Split the return leg at its stops, so each stop is a node of the route graph
+    # Split the return leg at its stops, so each stop is a node of the road network
+    roads = OperatingRoads(net)
     back_points = net.points(back)
-    pieces, stop_points = [], []
-    cut_index, cut_point = 0, back_points[0]
+    back_nodes = list(back)
+    stop_points, stop_nodes = [], []
+    cut_point = back_points[0]
     for index, t, stop in stops[:3]:
         a, b = back_points[index], back_points[index + 1]
         share = t / max(math.dist(a, b), 1e-9)
         foot = (round(a[0] + (b[0] - a[0]) * share, 2), round(a[1] + (b[1] - a[1]) * share, 2))
         if math.dist(foot, cut_point) < 15 or math.dist(foot, back_points[-1]) < 15:
             continue
-        pieces.append([cut_point] + back_points[cut_index + 1:index + 1] + [foot])
+        ahead = back_nodes.index(back[index + 1])
+        stop_node = roads.insert_stop(back_nodes[ahead - 1], back[index + 1], foot)
+        back_nodes.insert(ahead, stop_node)
         stop_points.append((stop, foot))
-        cut_index, cut_point = index, foot
-    pieces.append([cut_point] + back_points[cut_index + 1:])
+        stop_nodes.append(stop_node)
+        cut_point = foot
 
-    tolerance = 1.5
-    while True:
-        main_line = simplify(net.points(main), tolerance)
-        b_line = simplify(net.points(bypass_b), tolerance)
-        c_line = simplify(net.points(bypass_c), tolerance)
-        back_lines = [simplify(piece, tolerance) for piece in pieces]
-        back_count = sum(len(line) - 1 for line in back_lines)
-        if max(len(main_line), len(b_line), len(c_line)) + back_count <= MAX_LOOP_POINTS:
-            break
-        tolerance *= 1.4
-
-    nodes: dict[str, list[float]] = {}
-    index_of: dict[tuple[float, float], int] = {}
-
-    def node(point) -> int:
-        point = (round(point[0], 2), round(point[1], 2))
-        if point not in index_of:
-            index_of[point] = len(index_of) + 1
-            nodes[str(index_of[point])] = [point[0], point[1]]
-        return index_of[point]
-
-    start, junction = node(main_line[0]), node(main_line[-1])
-    edges: dict[str, list[int]] = {}
-
-    def chain(name: str, line, counter: list[int]) -> list[str]:
-        ids = []
-        for a, b in zip(line, line[1:]):
-            identifier = f"{name}:{counter[0]}:forward"
-            edges[identifier] = [node(a), node(b)]
-            ids.append(identifier)
-            counter[0] += 1
-        return ids
-
-    main_ids = chain("main", main_line, [0])
-    b_ids = chain("bypass-b", b_line, [0])
-    c_ids = chain("bypass-c", c_line, [0])
-    return_counter = [0]
-    return_ids = [identifier for line in back_lines for identifier in chain("return", line, return_counter)]
-    required = {f"{stop['ref']}-{slug(stop['name'])}": node(point) for stop, point in stop_points}
+    network = build_network(roads, [("main", main), ("bypass-b", bypass_b), ("bypass-c", bypass_c), ("return", back_nodes)],
+                            simplify, curated_width_m=base["route_edit"]["road_width_m"])
+    if not strongly_connected(network):
+        raise ValueError("The operating network has roads a shuttle could not leave")
+    edges = {identifier: [network["edges"][identifier]["source"], network["edges"][identifier]["target"]]
+             for ids in network["chains"].values() for identifier in ids}
+    nodes = {str(n): network["nodes"][str(n)] for n in sorted({n for pair in edges.values() for n in pair})}
+    main_ids, b_ids, c_ids, return_ids = (network["chains"][name] for name in ("main", "bypass-b", "bypass-c", "return"))
+    start = network["node_ids"][main[0]]
+    required = {f"{stop['ref']}-{slug(stop['name'])}": network["node_ids"][node]
+                for (stop, _), node in zip(stop_points, stop_nodes)}
+    # A stop is only served from its own kerb: arriving along the return leg
+    arrivals = {network["edges"][identifier]["target"]: identifier for identifier in return_ids}
+    approaches = {stop: [arrivals[node]] for stop, node in required.items()}
+    for path in (main_ids + return_ids, b_ids + return_ids, c_ids + return_ids):
+        for first, second in zip(path, path[1:]):
+            turn = heading_change_deg(network["edges"][first]["path"], network["edges"][second]["path"])
+            if turn > MAX_TURN_DEG:
+                raise ValueError(f"The scenario's own route turns {turn:.0f} degrees from {first} to {second}")
+    # The streets of the main loop, which the peers must keep clear of
+    main_line, b_line, c_line = net.points(main), net.points(bypass_b), net.points(bypass_c)
+    back_line = [roads.position[n] for n in back_nodes]
 
     used = {stop["ref"] for stop, _ in stop_points}
-    avoid = densify(main_line) + densify(b_line) + densify(c_line) + [p for line in back_lines for p in densify(line)]
+    avoid = densify(main_line) + densify(b_line) + densify(c_line) + densify(back_line)
     peers = find_peer_loops(net, avoid, used)
 
     data = json.loads(json.dumps(base))
@@ -446,15 +469,20 @@ def build(osm: dict, base: dict, area: dict) -> dict:
     data["nodes"] = nodes
     data["edges"] = edges
     route_edit = data["route_edit"]
+    route_edit["network_fixture"] = NETWORK_FIXTURE.name
     route_edit["start_node_id"] = start
     route_edit["destination_node_id"] = start
     route_edit["default_via_node_ids"] = [next(iter(required.values()))]
     route_edit["required_stops"] = required
+    route_edit["stop_approach_edge_ids"] = approaches
     route_edit["operating_node_ids"] = sorted(int(n) for n in nodes)
     route_edit["original_directed_edge_ids"] = main_ids + return_ids
-    route_edit["closed_directed_edge_ids"] = [main_ids[0]]
+    # The whole main road and, where it is two-way, its other direction: a closure shuts the road
+    closed_back = [identifier.replace(":forward", ":reverse") for identifier in main_ids]
+    route_edit["closed_directed_edge_ids"] = main_ids + [identifier for identifier in closed_back if identifier in network["edges"]]
     route_edit["detour_directed_edge_ids"] = b_ids + return_ids
     route_edit["alternative_directed_edge_paths"] = [c_ids + return_ids]
+    data["operating_network"] = {key: network[key] for key in ("nodes", "edges", "chains", "rules")}
     data["peer_patterns"] = [
         {"route_ID": route_id, "waypoints": [{"x": p[0], "y": p[1]} for p in loop["ring"]]}
         for route_id, loop in zip(("route-peer-b", "route-peer-c"), peers)
@@ -462,21 +490,30 @@ def build(osm: dict, base: dict, area: dict) -> dict:
     data["peer_stops"] = {route_id: f"{loop['stop']['ref']}-{slug(loop['stop']['name'])}"
                           for route_id, loop in zip(("route-peer-b", "route-peer-c"), peers)}
     split_peer_routes(data, net, used)
-    # Whole metres, as the yard is laid out on axis-aligned lines from the bays: arrival then lands
-    # exactly on a bay instead of a hair beside it
-    depot = [float(round(net.depot[0])), float(round(net.depot[1]))]
-    data["depot_id"] = f"depot-{slug(area['interchange'])}"
-    data["depot_position_m"] = depot
-    data["bay_positions_m"] = {"charger-1": [round(depot[0] - 15, 2), depot[1]],
-                               "charger-2": [round(depot[0] + 15, 2), depot[1]]}
-    data["depot_connectors"] = {
-        route_edit["route_id"]: connector(net, main_line[0], main[0]),
-        "route-peer-b": connector(net, peers[0]["ring"][0], peers[0]["start_node"]),
-        "route-peer-c": connector(net, peers[1]["ring"][0], peers[1]["start_node"]),
-    }
-    # The second shuttle on each loop leaves it for the depot the same way
-    data["depot_connectors"]["route-peer-d"] = data["depot_connectors"]["route-peer-b"]
-    data["depot_connectors"]["route-peer-e"] = data["depot_connectors"]["route-peer-c"]
+    # The single-depot keys of older fixtures; "depots" below replaces them
+    for key in ("depot_id", "depot_position_m", "bay_positions_m", "depot_connectors"):
+        data.pop(key, None)
+    # Every depot, each with its own two charger bays and a road in from each loop. Charger IDs
+    # run on across depots, so each is unique; the first depot keeps charger-1 and charger-2.
+    # Positions are whole metres, as the yard is laid out on axis-aligned lines from the bays:
+    # arrival then lands exactly on a bay instead of a hair beside it.
+    data["depots"] = []
+    for index, name in enumerate(depot_names(area)):
+        place = net.depot_places[name]
+        at = [float(round(place[0])), float(round(place[1]))]
+        first, second = f"charger-{index * 2 + 1}", f"charger-{index * 2 + 2}"
+        # Roads are chosen from the exact place, as for the original depot, so its paths stay the same
+        roads = {
+            route_edit["route_id"]: connector(net, net.position[main[0]], main[0], place),
+            "route-peer-b": connector(net, peers[0]["ring"][0], peers[0]["start_node"], place),
+            "route-peer-c": connector(net, peers[1]["ring"][0], peers[1]["start_node"], place),
+        }
+        # The second shuttle on each loop leaves it for the depot the same way
+        roads["route-peer-d"] = roads["route-peer-b"]
+        roads["route-peer-e"] = roads["route-peer-c"]
+        data["depots"].append({"depot_id": f"depot-{slug(name)}", "position_m": at,
+                               "bays": {first: [round(at[0] - 15, 2), at[1]], second: [round(at[0] + 15, 2), at[1]]},
+                               "connectors": roads})
     data["assumptions"][0] = (f"Real {area['name']} road geometry and LTA bus stop positions from OpenStreetMap, simplified "
                               "to at most 64 waypoints a loop; energy-r1 estimates. Lanes, signals and traffic are not modelled.")
     data["assumptions"][1] = ("Shuttle-01 dwells at its loop entrance junction for 12 seconds; an obstruction on the first "
@@ -515,6 +552,15 @@ def low_battery_kwh(actor, index: int) -> float:
     return battery
 
 
+def write_network(network: dict, path: Path) -> None:
+    """One edge a line, so a rebuild's diff shows which roads changed."""
+    def block(name: str, values: dict) -> str:
+        lines = ",\n".join(f"  {json.dumps(key)}: {json.dumps(value, ensure_ascii=False)}" for key, value in values.items())
+        return f'"{name}": {{\n{lines}\n}}'
+    path.write_text("{\n" + ",\n".join(block(name, network[name]) for name in ("rules", "chains", "nodes", "edges")) + "\n}\n",
+                    encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--area", choices=sorted(SERVICE_AREAS), default=DEFAULT_AREA, help="Service area to build")
@@ -538,6 +584,8 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as error:
         print(error, file=sys.stderr)
         return 1
+    network = data.pop("operating_network")
+    write_network(network, arguments.output.parent / NETWORK_FIXTURE.name)
     arguments.output.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     if arguments.output.resolve() == FIXTURE.resolve():
         try:
@@ -549,8 +597,9 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         arguments.output.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     route = data["route_edit"]
-    print(f"{len(data['nodes'])} nodes, {len(data['edges'])} edges; stops {list(route['required_stops'])};"
-          f" peers {data['peer_stops']}; depot {data['depot_position_m']}")
+    print(f"{len(network['nodes'])} network nodes, {len(network['edges'])} network edges; "
+          f"{len(data['nodes'])} scenario nodes, {len(data['edges'])} scenario edges; stops {list(route['required_stops'])};"
+          f" peers {data['peer_stops']}; depots {[d['position_m'] for d in data['depots']]}")
     return 0
 
 

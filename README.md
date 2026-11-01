@@ -207,13 +207,18 @@ Any screen showing this data must credit LTA with the `attribution` in each file
 All seven remaining Qt client workflows are available in Unity. The workspace tabs beside
 the world view are **Fleet**, **Route planning**, **Charging**, **Incidents** and **Reports**.
 
-- **Route planning:** choose a route while the session is READY. Its backend graph shows
-  directed edges, closures and endpoint node IDs. Click intermediate nodes in order, or enter
-  their IDs; Undo, Redo and Cancel draft edit the proposal. **Validate / preview** displays
-  mandatory checks, the proposed path, stop coverage, distance, duration and energy estimates.
-  Enter an approval reason and approve for every assigned shuttle. An empty via list asks
-  the backend for its configured detour. Start becomes available once the assigned route
-  avoids the closure. A revision, closure, epoch or draft change requires a fresh preview.
+- **Route planning:** the exercise runs Problem, Detour, Check, Approve, Outcome. The map shows
+  the closure and every road of the operating network. Click roads to send the shuttle along
+  them; the backend plans the loop through them and the stops, and each change is checked
+  straight away. A failed check says why in plain words and highlights the road (**Show** brings
+  it into view). A road with no recorded width or headroom can't be cleared, so it blocks
+  approval. Time, energy, distance, stop coverage and loops on charge are shown against the closed
+  route. Click a pin or use ×, Undo, Redo or Clear to change the proposal; **Suggest a detour**
+  asks for the scenario's own way round. Give a reason and approve for every assigned shuttle.
+  **Start and watch in 3D** then follows the shuttle as it drives that exact geometry, and
+  **What happened** reports the stops served, each loop's measured time and energy, and whether
+  service was preserved. A revision, closure, epoch or draft change requires a fresh check.
+  The map data has no turn restrictions, so U-turns are the only turns refused.
 - **Charging:** review battery state, reserve forecasts, charger occupancy and offered
   consequences. Select a passing, unexpired option, enter a reason, then use
   **Reserve / Continue service**. The backend applies the decision and determines all motion
@@ -238,8 +243,8 @@ the world view are **Fleet**, **Route planning**, **Charging**, **Incidents** an
   posts `/api/v2/scenes/{scene_revision}/readiness` with the pinned manifest and asset hashes.
   Start remains disabled until that report succeeds; use **Retry 3D** after a load failure.
 
-For the default integrated exercise: create a session, open Route planning, validate the
-default detour, enter a reason, approve, then start. Charging and incident decisions become
+For the default integrated exercise: create a session, open Route planning, click roads round
+the closure (or ask for a suggestion), enter a reason, approve, then start. Charging and incident decisions become
 available as the exercise runs. Unsupported route metadata and failed or unknown mandatory
 checks are shown as such; Unity does not fabricate a feasible path.
 
@@ -262,6 +267,42 @@ against the backend's own marker points in `m2_3d_motion.json`.
 The project uses Linear colour space (glTF colours are linear), and the scene builder adds
 glTFast's shaders to *Always Included Shaders* so player builds render them.
 
+### Building textures
+
+The real-streets city textures its buildings' walls: plain wall on the ground floor (3.5 m, like an
+HDB void deck or a shop front) and windows above it, tinted by each building's colour. Roofs stay
+plain. Each building uses one of five sets of a wall and a window texture, chosen in
+`CityMesh.TexturePair` from its OpenStreetMap type and height (25 m, about eight storeys, makes a tower):
+
+| Set | Buildings |
+| --- | --- |
+| HDB | `residential` towers (OSM tags HDB blocks `residential`) |
+| Home | `apartments` towers (private condominiums) |
+| Low-rise | houses, terraces, detached and semi-detached houses, and `residential` or `apartments` under 25 m |
+| Office | `office`, `commercial`, `hotel`, `hospital`, and untagged (`yes`) towers |
+| Other | everything else: shops, schools, industry, garages |
+
+`CityMesh` gives each wall vertex its distance along the outline and its height in metres, so
+`CityBuilding.shader` tiles the textures at their real size; the sizes are material properties, one a
+set (`_TileHome`, `_TileOther`, `_TileHdb`, `_TileLowRise`, `_TileOffice`: wall in xy, windows in zw),
+with `_GroundFloorM` for the plain ground floor.
+
+The textures are in `Resources/Formula9/Textures`, all CC0 (free to use without attribution), from
+ambientCG, ShareTextures and Poly Haven:
+
+| File | Source |
+| --- | --- |
+| `building_wall_home.png` | [Plaster001](https://ambientcg.com/view?id=Plaster001) |
+| `building_wall_other.png` | [Concrete034](https://ambientcg.com/view?id=Concrete034) |
+| `building_window_home.png` | [Facade006](https://ambientcg.com/view?id=Facade006) |
+| `building_window_other.png` | [Facade019A](https://ambientcg.com/view?id=Facade019A) |
+| `building_wall_hdb.png` | [Plaster002](https://ambientcg.com/a/Plaster002) |
+| `building_window_hdb.png` | [Facade 1](https://www.sharetextures.com/textures/other/facade_1) |
+| `building_wall_lowrise.png` | [Plaster Brick Pattern](https://polyhaven.com/a/plaster_brick_pattern) |
+| `building_window_lowrise.png` | [Facade018A](https://ambientcg.com/a/Facade018A) |
+| `building_wall_office.png` | [Exterior Wall Cladding 03](https://polyhaven.com/a/exterior_wall_cladding_03) |
+| `building_window_office.png` | [Facade005](https://ambientcg.com/a/Facade005) |
+
 ## Alerts
 
 `AlertGate` and `TrainingAlerts` port the Qt client's NAT-M2-07 rules: only events listed in
@@ -279,8 +320,8 @@ The clips in `Resources/Formula9/Audio` are copies of the web app's files:
 | Sound | Clip | Plays when |
 |---|---|---|
 | Button hover | `ui_button_hover.wav` (TileHover 2) | the pointer enters an enabled button of the main simulator, including Start scenario; never on click |
-| Start | `ui_start_click.wav` (UI_Hover 6) | **Start scenario** is clicked |
-| Map point | `ui_map_point.wav` (UI Hover New 1) | a node is picked for a route on the map |
+| Start | `ui_start_click.wav` (UI_Hover 6) | **Start scenario** or **Start and watch in 3D** is clicked |
+| Map point | `ui_map_point.wav` (UI Hover New 1) | a road is picked for a route on the map |
 | Dropdown | `ui_map_point.wav` at 1.15× pitch | a dropdown is opened, and when the user chooses an option |
 
 The big primary buttons (**Create training session**, **Join**) and the login page stay silent
@@ -325,7 +366,10 @@ set FORMULA9_E2E_BACKEND_URL=http://127.0.0.1:8010
 
 Never point `FORMULA9_E2E_BACKEND_URL` at the team's shared backend. The `Render` test draws the real scene and needs a GPU,
 so it is skipped under `-nographics`; set `FORMULA9_RENDER_OUT` to a `.png` path to keep the
-image.
+image. `RouteWalkthrough`, in the same category, plays the routing exercise through the real UI in Play
+mode and keeps a picture and a log line per step in `FORMULA9_WALKTHROUGH_OUT`. It signs up
+throwaway users too, so it is skipped unless `FORMULA9_BACKEND_URL` is also set, at the isolated
+backend.
 
 The workflow tests also cover stale route graph replies, inclusive offer expiry ticks,
 lost approval replies, readiness payloads, and canonical mesh picks against the shared

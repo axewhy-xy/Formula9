@@ -121,7 +121,7 @@ namespace Formula9.Audio
         // Function: PointPicked
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function plays the map point sound (UI Hover New 1) when a node is picked for a
+        //     This function plays the map point sound (UI Hover New 1) when a road is picked for a
         //     route.
         public void PointPicked() => play?.Invoke(UiSound.MapPoint);
 

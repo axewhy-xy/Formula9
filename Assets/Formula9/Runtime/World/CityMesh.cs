@@ -29,6 +29,12 @@ namespace Formula9.World
         private const float EdgeToleranceM = 1e-3f;
         // Less of an outline than this left over is only thin strips, like the sides of a canopy over the road
         private const float MinLeftShare = 0.2f;
+        // Each vertex's first texture coordinate is (metres along the wall, metres up, texture set, 1 on a
+        // roof), so CityBuilding.shader can tile walls and windows by real size and leave roofs plain.
+        // A set is one wall texture and one window texture; the numbers match the shader's.
+        public const float HomePair = 0, OtherPair = 1, HdbPair = 2, LowRisePair = 3, OfficePair = 4;
+        // From this height (about eight storeys) a block of flats is a tower, not a low-rise home
+        public const float TowerM = 25;
 
         public static Mesh Build(IEnumerable<CityBuilding> buildings, IReadOnlyList<Corridor> corridors = null)
         {
@@ -41,15 +47,17 @@ namespace Formula9.World
         public static void Fill(Mesh mesh, IEnumerable<CityBuilding> buildings, IReadOnlyList<Corridor> corridors = null)
         {
             var vertices = new List<Vector3>(); var colors = new List<Color>(); var triangles = new List<int>();
+            var uvs = new List<Vector4>();
             foreach (var building in buildings)
             {
                 var color = ColorFor(building);
+                var pair = TexturePair(building);
                 foreach (var ring in building.Rings)
-                    Extrude(ring.Select(p => new Vector2((float)p.X, (float)p.Y)).ToList(), (float)building.HeightM, color, corridors, vertices, colors, triangles);
+                    Extrude(ring.Select(p => new Vector2((float)p.X, (float)p.Y)).ToList(), (float)building.HeightM, color, pair, corridors, vertices, colors, uvs, triangles);
             }
             mesh.Clear();
             mesh.indexFormat = IndexFormat.UInt32;
-            mesh.SetVertices(vertices); mesh.SetColors(colors); mesh.SetTriangles(triangles, 0);
+            mesh.SetVertices(vertices); mesh.SetColors(colors); mesh.SetUVs(0, uvs); mesh.SetTriangles(triangles, 0);
             mesh.RecalculateNormals(); mesh.RecalculateBounds();
         }
 
@@ -78,6 +86,25 @@ namespace Formula9.World
             return Rect.MinMaxRect(min.x, min.y, max.x, max.y);
         }
 
+        // Which wall and window textures a building uses. In Singapore OSM tags HDB blocks "residential" and
+        // private condominiums "apartments", so a tall "residential" block is HDB and a tall "apartments" one
+        // a private home. Houses, and any block of flats under TowerM, are low-rise homes. Offices, shops in
+        // towers (commercial), hotels and hospitals, and untagged towers look like offices; everything else,
+        // such as shops, schools and industry, keeps the plain concrete set.
+        public static float TexturePair(CityBuilding building)
+        {
+            var tall = building.HeightM >= TowerM;
+            switch (building.Type)
+            {
+                case "residential": return tall ? HdbPair : LowRisePair;
+                case "apartments": return tall ? HomePair : LowRisePair;
+                case "house": case "terrace": case "detached": case "semidetached_house": case "bungalow": return LowRisePair;
+                case "office": case "commercial": case "hotel": case "hospital": return OfficePair;
+                case "yes": return tall ? OfficePair : OtherPair;
+                default: return OtherPair;
+            }
+        }
+
         private static Color ColorFor(CityBuilding building)
         {
             Color baseColor;
@@ -102,7 +129,7 @@ namespace Formula9.World
         }
 
         // Canonical (x, y) is Unity (x, z). Front faces are clockwise seen from outside.
-        private static void Extrude(List<Vector2> outline, float height, Color color, IReadOnlyList<Corridor> corridors, List<Vector3> vertices, List<Color> colors, List<int> triangles)
+        private static void Extrude(List<Vector2> outline, float height, Color color, float pair, IReadOnlyList<Corridor> corridors, List<Vector3> vertices, List<Color> colors, List<Vector4> uvs, List<int> triangles)
         {
             var points = new List<Vector2>(outline);
             if (points.Count > 1 && points[0] == points[points.Count - 1]) points.RemoveAt(points.Count - 1);
@@ -119,29 +146,45 @@ namespace Formula9.World
                 roofPieces.AddRange(pieces);
             }
             if (cuts.Count > 0 && roofPieces.Sum(piece => Mathf.Abs(SignedArea(piece))) < MinLeftShare * SignedArea(points)) return;
-            void Wall(Vector2 a, Vector2 b)
+            // alongA and alongB are how far a and b are along the wall in metres, so windows keep their width
+            void Wall(Vector2 a, Vector2 b, float alongA, float alongB)
             {
                 var start = vertices.Count;
                 vertices.Add(new Vector3(a.x, 0, a.y)); vertices.Add(new Vector3(a.x, height, a.y));
                 vertices.Add(new Vector3(b.x, height, b.y)); vertices.Add(new Vector3(b.x, 0, b.y));
                 // Walls a little darker low down, so buildings read as solid
                 colors.Add(color * 0.8f); colors.Add(color); colors.Add(color); colors.Add(color * 0.8f);
+                uvs.Add(new Vector4(alongA, 0, pair, 0)); uvs.Add(new Vector4(alongA, height, pair, 0));
+                uvs.Add(new Vector4(alongB, height, pair, 0)); uvs.Add(new Vector4(alongB, 0, pair, 0));
                 triangles.AddRange(new[] { start, start + 1, start + 2, start, start + 2, start + 3 });
             }
+            void RoofPoint(Vector2 point)
+            {
+                vertices.Add(new Vector3(point.x, height, point.y)); colors.Add(color * 1.05f);
+                uvs.Add(new Vector4(point.x, point.y, pair, 1));
+            }
+            // Measured round the whole outline, so the window columns carry on round each corner
+            var outlineSoFar = 0f;
             for (var i = 0; i < points.Count; i++)
-                foreach (var (p, q) in Outside(points[i], points[(i + 1) % points.Count], cuts)) Wall(p, q);
+            {
+                var corner = points[i];
+                foreach (var (p, q) in Outside(corner, points[(i + 1) % points.Count], cuts))
+                    Wall(p, q, outlineSoFar + Vector2.Distance(corner, p), outlineSoFar + Vector2.Distance(corner, q));
+                outlineSoFar += Vector2.Distance(corner, points[(i + 1) % points.Count]);
+            }
             // The sides of a cut are new walls, facing into the corridor: its inside is left of each edge
             foreach (var cut in cuts)
             {
                 var others = cuts.Where(c => c != cut).ToList();
                 for (var i = 0; i < cut.Corners.Length; i++)
                     foreach (var (enter, leave) in InsideOutline(cut.Corners[i], cut.Corners[(i + 1) % cut.Corners.Length], points))
-                        foreach (var (p, q) in Outside(enter, leave, others)) Wall(q, p);
+                        foreach (var (p, q) in Outside(enter, leave, others))
+                            Wall(q, p, Vector2.Distance(cut.Corners[i], q), Vector2.Distance(cut.Corners[i], p));
             }
             if (cuts.Count == 0)
             {
                 var roof = vertices.Count;
-                foreach (var point in points) { vertices.Add(new Vector3(point.x, height, point.y)); colors.Add(color * 1.05f); }
+                foreach (var point in points) RoofPoint(point);
                 foreach (var triangle in whole) triangles.Add(roof + triangle);
                 return;
             }
@@ -149,7 +192,7 @@ namespace Formula9.World
             {
                 if (SignedArea(piece) < 0) piece.Reverse();
                 var roof = vertices.Count;
-                foreach (var point in piece) { vertices.Add(new Vector3(point.x, height, point.y)); colors.Add(color * 1.05f); }
+                foreach (var point in piece) RoofPoint(point);
                 for (var j = 1; j + 1 < piece.Count; j++) triangles.AddRange(new[] { roof, roof + j + 1, roof + j });
             }
         }

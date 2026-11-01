@@ -598,18 +598,106 @@
 .draft-actions { flex-direction: row; flex-shrink: 0; margin-bottom: 8px; }
 .app .draft-actions Button { flex-grow: 1; flex-basis: 0; }
 .app .draft-actions Button.draft-last { margin-right: 0; }
+.route-view-actions { margin-top: 8px; }
 .app Button.wide-button { margin: 8px 0; flex-shrink: 0; }
-
-.route-graph {
-    height: 420px;
-    min-height: 320px;
-    flex-shrink: 0;
-    margin: 8px 0;
-    border-width: 1px;
-    border-color: rgb(220, 230, 230);
-    background-color: rgb(255, 255, 255);
-}
 
 .fleet-empty { flex-grow: 1; align-items: center; justify-content: center; padding: 30px 0; }
 .fleet-empty-icon { width: 120px; height: 120px; align-items: center; justify-content: center; margin-bottom: 18px; border-radius: 60px; background-color: rgb(220, 232, 232); }
 .fleet-empty-title { font-size: 17px; -unity-font-style: bold; margin-bottom: 8px; }
+
+/* The routing exercise: a sidebar of stages beside the map, in the operator's words. */
+.route-stages { flex-direction: row; flex-shrink: 0; margin-bottom: 10px; }
+.route-stage {
+    flex-grow: 1;
+    flex-basis: 0;
+    height: 28px;
+    margin-right: 4px;
+    font-size: 12px;
+    -unity-text-align: middle-center;
+    color: rgb(92, 112, 116);
+    background-color: rgb(230, 238, 238);
+    border-radius: 6px;
+}
+.route-stage-done { color: rgb(15, 76, 92); background-color: rgb(209, 232, 226); }
+.route-stage-current { color: rgb(255, 255, 255); -unity-font-style: bold; background-color: rgb(15, 76, 92); }
+
+.route-card {
+    flex-shrink: 0;
+    margin-bottom: 10px;
+    padding: 10px 12px;
+    border-width: 1px;
+    border-color: rgb(220, 230, 230);
+    border-radius: 8px;
+    background-color: rgb(250, 252, 252);
+}
+.route-card-problem { border-left-width: 4px; border-left-color: rgb(214, 48, 49); }
+.route-card-title { -unity-font-style: bold; margin-bottom: 4px; }
+.route-card-text { white-space: normal; margin-bottom: 6px; }
+.route-verdict { white-space: normal; -unity-font-style: bold; margin-bottom: 6px; }
+.route-verdict-good { color: rgb(24, 122, 76); }
+.route-verdict-bad { color: rgb(190, 42, 44); }
+.app Button.route-link { align-self: flex-start; height: 26px; margin: 0; padding: 0 10px; font-size: 12px; }
+
+.route-waypoints { flex-shrink: 0; margin-bottom: 6px; }
+.route-waypoint { flex-direction: row; align-items: center; margin-bottom: 4px; }
+.route-waypoint-number {
+    width: 22px;
+    height: 22px;
+    margin-right: 8px;
+    border-radius: 11px;
+    font-size: 12px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-center;
+    color: rgb(255, 255, 255);
+    background-color: rgb(22, 101, 192);
+}
+.route-waypoint-name { flex-grow: 1; flex-basis: 0; white-space: normal; }
+.app Button.route-waypoint-remove { width: 26px; height: 26px; margin: 0; padding: 0; }
+
+.route-issue {
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+    margin-bottom: 6px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background-color: rgb(253, 237, 236);
+}
+.route-issue-text { flex-grow: 1; flex-basis: 0; white-space: normal; margin-right: 8px; color: rgb(120, 28, 28); }
+
+.route-metrics { flex-shrink: 0; margin-bottom: 4px; }
+.route-metric { flex-direction: row; flex-shrink: 0; padding: 3px 0; border-bottom-width: 1px; border-bottom-color: rgb(232, 238, 238); }
+.route-metric-label { flex-grow: 1; flex-basis: 0; white-space: normal; color: rgb(72, 90, 94); }
+.route-metric-value { -unity-font-style: bold; margin-left: 8px; }
+.route-metric-change { min-width: 90px; margin-left: 8px; -unity-text-align: upper-right; white-space: normal; color: rgb(24, 122, 76); }
+.route-metric-worse { color: rgb(178, 92, 12); }
+.route-basis { margin-top: 4px; font-size: 12px; }
+
+.map-hover {
+    position: absolute;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    color: rgb(255, 255, 255);
+    background-color: rgba(15, 30, 38, 0.9);
+}
+.map-pin-number {
+    position: absolute;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    margin: 0;
+    font-size: 12px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-center;
+    color: rgb(255, 255, 255);
+}
+.world-hud {
+    position: absolute;
+    left: 10px;
+    top: 10px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    color: rgb(255, 255, 255);
+    background-color: rgba(15, 30, 38, 0.85);
+}

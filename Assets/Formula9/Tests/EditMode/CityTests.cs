@@ -48,6 +48,76 @@ namespace Formula9.Tests
         }
 
         [Test]
+        public void WallsAreMeasuredInMetresRoundTheOutlineAndRoofsAreMarked()
+        {
+            var mesh = CityMesh.Build(new[] { Square("way/1", 30) });
+            try
+            {
+                var uvs = new List<Vector4>();
+                mesh.GetUVs(0, uvs);
+                Assert.AreEqual(mesh.vertexCount, uvs.Count, "one entry per vertex");
+                // Each wall is (start, bottom), (start, top), (end, top), (end, bottom), and the four
+                // walls carry on from each other round the 40 m outline
+                for (var wall = 0; wall < 4; wall++)
+                {
+                    float start = wall * 10, end = start + 10;
+                    // A 30 m residential block is an HDB tower, so its walls carry the HDB set
+                    const float set = CityMesh.HdbPair;
+                    var expected = new[] { new Vector4(start, 0, set, 0), new Vector4(start, 30, set, 0), new Vector4(end, 30, set, 0), new Vector4(end, 0, set, 0) };
+                    for (var corner = 0; corner < 4; corner++)
+                        Assert.Less(Vector4.Distance(expected[corner], uvs[wall * 4 + corner]), 1e-3f, $"wall {wall}, corner {corner}");
+                }
+                for (var i = 16; i < 20; i++) Assert.AreEqual(1, uvs[i].w, "the roof is marked to stay plain");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [TestCase("residential", 40, CityMesh.HdbPair)]
+        [TestCase("residential", 12, CityMesh.LowRisePair)]
+        [TestCase("apartments", 40, CityMesh.HomePair)]
+        [TestCase("apartments", 12, CityMesh.LowRisePair)]
+        [TestCase("house", 8, CityMesh.LowRisePair)]
+        [TestCase("terrace", 8, CityMesh.LowRisePair)]
+        [TestCase("office", 12, CityMesh.OfficePair)]
+        [TestCase("commercial", 20, CityMesh.OfficePair)]
+        [TestCase("yes", 60, CityMesh.OfficePair)]
+        [TestCase("yes", 12, CityMesh.OtherPair)]
+        [TestCase("retail", 6, CityMesh.OtherPair)]
+        [TestCase("garage", 4, CityMesh.OtherPair)]
+        public void EachKindOfBuildingUsesItsOwnTextures(string type, float heightM, float pair)
+        {
+            var building = Square("way/1", heightM);
+            building.Type = type;
+            var mesh = CityMesh.Build(new[] { building });
+            try
+            {
+                var uvs = new List<Vector4>();
+                mesh.GetUVs(0, uvs);
+                Assert.IsTrue(uvs.All(uv => uv.z == pair));
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
+        public void AWallCutForARouteKeepsItsPlaceAlongTheOutline()
+        {
+            // The route cuts x from 4 to 6 out of the south wall, so its east piece starts 6 m along
+            var mesh = CityMesh.Build(new[] { Square("way/1", 30) }, CityMesh.Corridors(new[] { new[] { new Vector2(5, -5), new Vector2(5, 15) } }, 1));
+            try
+            {
+                var uvs = new List<Vector4>();
+                mesh.GetUVs(0, uvs);
+                var vertices = mesh.vertices; var normals = mesh.normals;
+                Assert.AreEqual(vertices.Length, uvs.Count);
+                // The south wall's pieces, facing south; the outline starts at its west end, (0, 0)
+                var south = Enumerable.Range(0, vertices.Length).Where(i => uvs[i].w == 0 && Mathf.Abs(vertices[i].z) < 1e-3f && normals[i].z < -0.9f).ToList();
+                Assert.IsTrue(south.Any(i => vertices[i].x > 5.9f), "the piece east of the cut is there");
+                Assert.IsTrue(south.All(i => Mathf.Abs(uvs[i].x - vertices[i].x) < 1e-3f), "measured from the outline's start, not restarted after the cut");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
         public void AnLShapedRoofStaysInsideItsOutline()
         {
             var outline = new[] { new Vector2(0, 0), new Vector2(20, 0), new Vector2(20, 10), new Vector2(10, 10), new Vector2(10, 20), new Vector2(0, 20) };
@@ -298,6 +368,38 @@ namespace Formula9.Tests
             }
         }
 
+        [Test]
+        public void BuildingsGetTheirWallAndWindowTexturesAndMarkersStayPlain()
+        {
+            var rig = new GameObject("City texture rig");
+            var view = new CityView(rig.transform, null);
+            try
+            {
+                Assert.IsTrue(view.LoadAsync(new CityClient(new OneBuilding(), new Uri("http://localhost")), "toa-payoh", CancellationToken.None).IsCompleted);
+                var buildings = rig.GetComponentsInChildren<MeshRenderer>().First(r => r.name == "Buildings").sharedMaterial;
+                Assert.AreEqual(10, CityView.BuildingTextures.Length, "a wall and a window for each of the five sets");
+                foreach (var property in CityView.BuildingTextures.Select(t => t.Property))
+                {
+                    Assert.IsTrue(buildings.HasProperty(property), property + " is in the shader");
+                    var texture = buildings.GetTexture(property);
+                    Assert.IsNotNull(texture, property);
+                    Assert.AreEqual(TextureWrapMode.Repeat, texture.wrapMode, property + " tiles along the wall");
+                }
+                Assert.AreEqual(0, buildings.GetFloat("_Plain"));
+
+                var snapshot = (FullSnapshot)ContractParser.ParseMessage(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/snapshot.json")));
+                view.Show(snapshot, new ShuttleMotion(), 0);
+                var markers = rig.GetComponentsInChildren<MeshRenderer>(true).Where(r => r.name.StartsWith("Shuttle ") || r.name.StartsWith("Stop ")).ToList();
+                Assert.IsNotEmpty(markers);
+                Assert.IsTrue(markers.All(r => r.sharedMaterial.GetFloat("_Plain") == 1), "no windows on shuttles or stops");
+            }
+            finally
+            {
+                view.Dispose();
+                UnityEngine.Object.DestroyImmediate(rig);
+            }
+        }
+
         [TestCase(404, "{\"detail\":\"No road data\"}")]
         [TestCase(200, "{\"roads\":[{\"id\":\"way/9/1\"}]}")]
         public void ACityWithoutRoadDataStillStands(int status, string body)
@@ -311,6 +413,38 @@ namespace Formula9.Tests
                 Assert.AreEqual(1, view.BuildingCount);
                 Assert.AreEqual(0, view.RoadCount);
                 Assert.IsFalse(rig.GetComponentsInChildren<MeshRenderer>().Any(r => r.name == "Roads"));
+            }
+            finally
+            {
+                view.Dispose();
+                UnityEngine.Object.DestroyImmediate(rig);
+            }
+        }
+
+        [Test]
+        public void EveryDepotStandsInTheCityWithAChargerPostThatShowsWhenItIsTaken()
+        {
+            var rig = new GameObject("City depot rig");
+            var view = new CityView(rig.transform, null);
+            try
+            {
+                var snapshot = (FullSnapshot)ContractParser.ParseMessage(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/snapshot.json")));
+                snapshot.Chargers.Add(new Charger { ChargerId = "charger-3", AggregateRevision = 1, PortCount = 1, PowerKw = 50, OccupiedVehicleIds = new List<string>() });
+                snapshot.Depots.Add(new Depot { DepotId = "depot-2", Position = new Position { XM = 900, YM = -600 }, ChargerIds = new List<string> { "charger-3" } });
+                view.Show(snapshot, new ShuttleMotion(), 0);
+                Assert.AreEqual(2, view.DepotCount);
+                var pad = rig.GetComponentsInChildren<Transform>().Single(t => t.name == "Depot depot-2");
+                Assert.AreEqual(new Vector3(900, 0.2f, -600), pad.position, "the pad lies on the ground at the backend's position");
+                Renderer Post(string id) => rig.GetComponentsInChildren<MeshRenderer>().Single(r => r.name == "Charger " + id);
+                Assert.AreEqual(904.5f, Post("charger-3").transform.position.x, 1e-3f, "a depot's only bay is at its middle, its post beside it");
+                Assert.AreEqual(-600, Post("charger-3").transform.position.z, 1e-3f, "level with the bay, not in the lane in or out");
+                var first = Post("charger-1").transform.position.x - (float)snapshot.Depots[0].Position.XM;
+                Assert.AreEqual(-19.5f, first, 1e-3f, "two bays sit 15 m either side, as the backend lays them out, each post on its outer side");
+                var free = Post("charger-3").sharedMaterial.color;
+                snapshot.Chargers.Single(c => c.ChargerId == "charger-3").OccupiedVehicleIds.Add("shuttle-01");
+                view.Show(snapshot, new ShuttleMotion(), 1);
+                Assert.AreNotEqual(free, Post("charger-3").sharedMaterial.color, "a taken charger changes colour");
+                Assert.AreEqual(free, Post("charger-1").sharedMaterial.color, "a free one keeps its colour");
             }
             finally
             {
