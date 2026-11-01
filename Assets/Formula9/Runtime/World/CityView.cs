@@ -56,6 +56,10 @@ namespace Formula9.World
         private List<CityBuilding> buildings;
         private Mesh buildingMesh;
         private CityTrafficRenderer traffic;
+        // A queue grows slowly, so the traffic need not look at the incidents every frame
+        private const float HazardRefreshS = 0.5f;
+        private float hazardsDueS;
+        private readonly List<TrafficObstacle> trafficObstacles = new List<TrafficObstacle>();
 
         public int BuildingCount { get; private set; }
         public int RoadCount { get; private set; }
@@ -151,7 +155,18 @@ namespace Formula9.World
                 Debug.LogWarning("No traffic sample; roads still render: " + error.Message);
             }
             cancellation.ThrowIfCancellationRequested();
-            traffic?.Rebuild(roads, trafficData);
+            CitySignalData signals = null;
+            if (trafficData != null)
+            {
+                // Without the lights, traffic still gives way at junctions
+                try { signals = await client.GetSignalsAsync(area, cancellation); }
+                catch (Exception error) when (!(error is OperationCanceledException))
+                {
+                    Debug.LogWarning("No traffic lights; traffic only gives way at junctions: " + error.Message);
+                }
+                cancellation.ThrowIfCancellationRequested();
+            }
+            traffic?.Rebuild(roads, trafficData, signals);
         }
 
         // Pale speckle that the road colours tint. Its mipmaps average out to flat colour far away.
@@ -427,7 +442,21 @@ namespace Formula9.World
         }
 
         // Called once a frame, unlike Tick, which a new snapshot also calls. A delta of zero holds traffic still.
-        public void TickTraffic(float deltaTime, Camera camera) => traffic?.Tick(deltaTime, camera);
+        public void TickTraffic(float deltaTime, Camera camera)
+        {
+            if (traffic == null) return;
+            hazardsDueS -= deltaTime;
+            if (hazardsDueS <= 0)
+            {
+                hazardsDueS = HazardRefreshS;
+                traffic.SetHazards(incidents.TrafficHazards());
+            }
+            trafficObstacles.Clear();
+            foreach (var pair in shuttles)
+                trafficObstacles.Add(new TrafficObstacle { Id = pair.Key, Position = pair.Value.position, Forward = pair.Value.forward, HalfLength = ShuttleSize.z / 2, HalfWidth = ShuttleSize.x / 2 });
+            traffic.SetShuttles(trafficObstacles);
+            traffic.Tick(deltaTime, camera);
+        }
 
         // Called each frame: shuttles glide between the backend's poses.
         public void Tick(ShuttleMotion motion, float now)

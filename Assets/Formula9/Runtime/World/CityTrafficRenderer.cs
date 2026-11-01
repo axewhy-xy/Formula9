@@ -8,7 +8,7 @@ using UnityEngine.Rendering;
 namespace Formula9.World
 {
     // Draws and moves the background traffic sample from /api/traffic/{area}.
-    public sealed class CityTrafficRenderer : IDisposable
+    public sealed partial class CityTrafficRenderer : IDisposable
     {
         private const float LaneWidthM = 3.2f;
         private const int BatchSize = 1023;
@@ -27,7 +27,6 @@ namespace Formula9.World
 
         private readonly Material template;
         private readonly Material blockMaterial;
-        private readonly ICollisionLimiter collision = new PassThroughCollisionLimiter();
         private readonly Dictionary<string, DirectedRoad> roads = new Dictionary<string, DirectedRoad>();
         private readonly Dictionary<long, List<DirectedRoad>> exitsByNode = new Dictionary<long, List<DirectedRoad>>();
         private readonly List<DirectedRoad> entryRoads = new List<DirectedRoad>();
@@ -53,9 +52,14 @@ namespace Formula9.World
             blockMaterial.SetFloat(VertexColorId, 1);
         }
 
-        public void Rebuild(IReadOnlyList<CityRoad> roadsData, CityTrafficData trafficData)
+        public void Rebuild(IReadOnlyList<CityRoad> roadsData, CityTrafficData trafficData, CitySignalData signals = null)
         {
             roads.Clear();
+            roadGrid.Clear();
+            filledRoads.Clear();
+            hazardRoads.Clear();
+            claimsByNode.Clear();
+            redLightRuns = 0;
             exitsByNode.Clear();
             entryRoads.Clear();
             largeEntryRoads.Clear();
@@ -63,6 +67,7 @@ namespace Formula9.World
             vehicles.Clear();
 
             BuildDirectedRoads(roadsData);
+            PlaceSignals(signals);
             if (template == null || roads.Count == 0 || trafficData == null) return;
             FindEntryRoads();
 
@@ -82,9 +87,7 @@ namespace Formula9.World
             if (vehicles.Count == 0) return;
 
             var step = Mathf.Min(deltaTime, MaxStepSeconds);
-            if (step > 0)
-                for (var i = 0; i < vehicles.Count; i++)
-                    Advance(vehicles[i], step);
+            if (step > 0) Drive(step);
             for (var i = 0; i < vehicles.Count; i++)
                 UpdatePose(vehicles[i], step);
 
@@ -237,56 +240,19 @@ namespace Formula9.World
                 Rng = Hash(seed.Id ?? seed.Model),
                 Paint = QualitySettings.activeColorSpace == ColorSpace.Linear ? paint.linear : paint,
                 TurnRadius = Mathf.Max(MinTurnRadiusM, trafficData.Models[seed.Model].LengthM),
+                Length = trafficData.Models[seed.Model].LengthM,
+                HalfWidth = trafficData.Models[seed.Model].WidthM / 2,
                 Render = render
             };
-            state.NextRoad = ChooseNextRoad(state);
             vehicles.Add(state);
-        }
-
-        private void Advance(VehicleState vehicle, float dt)
-        {
-            var desired = vehicle.Road.SpeedMps * vehicle.SpeedFactor;
-            desired = Mathf.Min(desired, TurnSpeed(vehicle));
-            desired = Mathf.Min(desired, SignalLimit(vehicle, desired));
-            desired = collision.LimitSpeed(vehicle, desired);
-            vehicle.Speed = Mathf.MoveTowards(vehicle.Speed, desired, Acceleration(vehicle.Model) * dt);
-            vehicle.Distance += vehicle.Speed * dt;
-
-            var safety = 0;
-            while (vehicle.Distance > vehicle.Road.Length && safety++ < 6)
-            {
-                var next = vehicle.NextRoad;
-                if (next == null) { EnterFromOutside(vehicle); return; }
-                vehicle.Distance -= vehicle.Road.Length;
-                PutOn(vehicle, next);
-            }
-        }
-
-        // A road with no way on leaves the area, so the vehicle has gone: another comes in at the edge.
-        // Otherwise those roads would collect the traffic until the rest of the city ran empty.
-        private void EnterFromOutside(VehicleState vehicle)
-        {
-            var entries = IsLarge(vehicle.Model) ? largeEntryRoads : entryRoads;
-            if (entries.Count == 0) entries = entryRoads;
-            if (entries.Count == 0) { vehicle.Distance = vehicle.Road.Length; return; }
-            vehicle.Rng = Step(vehicle.Rng);
-            vehicle.Distance = 0;
-            vehicle.Placed = false;
-            PutOn(vehicle, entries[(int)(vehicle.Rng % (uint)entries.Count)]);
-        }
-
-        private void PutOn(VehicleState vehicle, DirectedRoad road)
-        {
-            vehicle.Road = road;
-            vehicle.Lane = Mathf.Clamp(vehicle.Lane, 0, Mathf.Max(0, road.Lanes - 1));
-            vehicle.NextRoad = ChooseNextRoad(vehicle);
         }
 
         // The vehicle's place on the road jumps at a bend or a junction. What is drawn closes on it, so
         // the vehicle steers across instead of snapping.
         private static void UpdatePose(VehicleState vehicle, float dt)
         {
-            if (!vehicle.Road.Sample(vehicle.Distance, vehicle.Road.LaneOffset(vehicle.Lane), out var target, out var tangent)) return;
+            if (vehicle.Outside) return;
+            if (!vehicle.Road.Sample(vehicle.Distance, vehicle.Road.LaneOffset(vehicle.Lane) + vehicle.Aside, out var target, out var tangent)) return;
             if (!vehicle.Placed)
             {
                 vehicle.Position = target;
@@ -300,31 +266,22 @@ namespace Formula9.World
             vehicle.Forward = Vector3.RotateTowards(vehicle.Forward, tangent, turnRate * dt, 0);
         }
 
-        private float TurnSpeed(VehicleState vehicle)
-        {
-            if (vehicle.NextRoad == null) return vehicle.Road.SpeedMps * vehicle.SpeedFactor;
-            var remaining = vehicle.Road.Length - vehicle.Distance;
-            if (remaining > 24f) return vehicle.Road.SpeedMps * vehicle.SpeedFactor;
-            var angle = Vector3.Angle(vehicle.Road.EndDirection, vehicle.NextRoad.StartDirection);
-            var maxTurn = Mathf.Lerp(3f, vehicle.Road.SpeedMps * vehicle.SpeedFactor, Mathf.InverseLerp(120f, 15f, angle));
-            return maxTurn;
-        }
-
-        private static float SignalLimit(VehicleState vehicle, float desired) => desired;
-
         private static float Acceleration(string model) =>
             model == "motorcycle" ? 4f : model == "heavy_truck" ? 1.5f : model == "truck" || model == "bus" ? 2f : 3f;
 
         private static bool IsLarge(string model) => model == "bus" || model == "truck" || model == "heavy_truck";
 
-        private DirectedRoad ChooseNextRoad(VehicleState vehicle)
+        private DirectedRoad ChooseNextRoad(VehicleState vehicle, DirectedRoad from)
         {
-            if (!exitsByNode.TryGetValue(vehicle.Road.ToNode, out var exits)) return null;
+            if (!exitsByNode.TryGetValue(from.ToNode, out var exits)) return null;
 
             // Large vehicles keep off service roads, the rule the backend places them by. They turn
             // back, or leave the area, instead of taking one.
             var allowed = exits.Where(road => !(IsLarge(vehicle.Model) && road.Class == "service")).ToList();
-            var candidates = allowed.Where(road => road.RoadId != vehicle.Road.RoadId).ToList();
+            // A road with a hazard on it is taken only if there is no other way, even back
+            var open = allowed.Where(road => road.Hazards.Count == 0).ToList();
+            if (open.Count > 0) allowed = open;
+            var candidates = allowed.Where(road => road.RoadId != from.RoadId).ToList();
             if (candidates.Count == 0) candidates = allowed;
             if (candidates.Count == 0) return null;
             if (candidates.Count == 1) return candidates[0];
@@ -332,7 +289,7 @@ namespace Formula9.World
             var weighted = new List<(DirectedRoad Road, float Weight)>(candidates.Count);
             foreach (var candidate in candidates)
             {
-                var straightness = Mathf.InverseLerp(180f, 0f, Vector3.Angle(vehicle.Road.EndDirection, candidate.StartDirection));
+                var straightness = Mathf.InverseLerp(180f, 0f, Vector3.Angle(from.EndDirection, candidate.StartDirection));
                 var weight = ClassWeight(candidate.Class) * Mathf.Lerp(0.4f, 1.6f, straightness);
                 weighted.Add((candidate, Mathf.Max(0.01f, weight)));
             }
@@ -632,15 +589,38 @@ namespace Formula9.World
         private sealed class VehicleState
         {
             public string Id, Model;
-            public DirectedRoad Road, NextRoad;
-            public int Lane;
-            public float Distance, Speed, SpeedFactor, TurnRadius;
+            public DirectedRoad Road;
+            // The roads it means to take after this one, and the junctions it has been given way at
+            public readonly List<DirectedRoad> Ahead = new List<DirectedRoad>();
+            public readonly List<Claim> Claims = new List<Claim>();
+            public int Lane, LaneIndex;
+            public float Distance, Speed, TargetSpeed, SpeedFactor, TurnRadius, Length, HalfWidth;
+            // How long it has stood still, and been kept waiting by a junction
+            public float StoppedS, WaitS;
+            // Metres to the left of its lane, to let a shuttle by
+            public float Aside, TargetAside;
+            // Off the map, waiting for room on a road into the area
+            public bool Outside;
             public uint Rng;
             public Color Paint;
             public ModelRenderData Render;
             // What is drawn: it follows the vehicle's place on the road, and is unset until first placed.
             public bool Placed;
             public Vector3 Position, Forward;
+
+            public bool HasClaim(DirectedRoad to)
+            {
+                foreach (var claim in Claims)
+                    if (claim.To == to && !claim.Entered) return true;
+                return false;
+            }
+
+            public bool HasClaimFrom(DirectedRoad from)
+            {
+                foreach (var claim in Claims)
+                    if (claim.From == from && !claim.Entered) return true;
+                return false;
+            }
         }
 
         private sealed class DirectedRoad
@@ -654,6 +634,11 @@ namespace Formula9.World
             public float[] Along;
             public float Length;
             public Vector3 StartDirection, EndDirection;
+            // Each lane's vehicles, back to front, as of this step
+            public List<VehicleState>[] Traffic;
+            public bool Filled;
+            public readonly List<StopLine> Stops = new List<StopLine>();
+            public readonly List<Span> Hazards = new List<Span>();
 
             public static DirectedRoad Create(CityRoad source, int direction, Vector3[] points)
             {
@@ -669,12 +654,16 @@ namespace Formula9.World
                 if (start.sqrMagnitude < 0.001f) start = Vector3.forward;
                 if (end.sqrMagnitude < 0.001f) end = Vector3.forward;
 
+                var lanes = Mathf.Max(1, source.Lanes);
+                var traffic = new List<VehicleState>[lanes];
+                for (var i = 0; i < lanes; i++) traffic[i] = new List<VehicleState>();
                 return new DirectedRoad
                 {
+                    Traffic = traffic,
                     Key = $"{source.Id}|{direction}",
                     RoadId = source.Id,
                     Class = source.Class,
-                    Lanes = Mathf.Max(1, source.Lanes),
+                    Lanes = lanes,
                     SpeedMps = Mathf.Max(2f, source.SpeedKph / 3.6f),
                     Oneway = source.Oneway,
                     FromNode = direction == 1 ? source.FromNode : source.ToNode,
@@ -692,6 +681,28 @@ namespace Formula9.World
             {
                 lane = Mathf.Clamp(lane, 0, Mathf.Max(0, Lanes - 1));
                 return Oneway ? (lane - (Lanes - 1) * 0.5f) * LaneWidthM : (lane + 0.5f) * LaneWidthM;
+            }
+
+            public int LaneFrom(int lane) => Mathf.Clamp(lane, 0, Lanes - 1);
+
+            // How far a point is from the centreline, and how far along it and which way it runs there.
+            public float Project(Vector2 point, out float along, out Vector3 tangent)
+            {
+                var best = float.MaxValue;
+                along = 0;
+                tangent = StartDirection;
+                for (var i = 1; i < Points.Length; i++)
+                {
+                    var a = new Vector2(Points[i - 1].x, Points[i - 1].z);
+                    var run = new Vector2(Points[i].x, Points[i].z) - a;
+                    var share = run.sqrMagnitude > 0 ? Mathf.Clamp01(Vector2.Dot(point - a, run) / run.sqrMagnitude) : 0;
+                    var distance = Vector2.Distance(point, a + run * share);
+                    if (distance >= best) continue;
+                    best = distance;
+                    along = Along[i - 1] + (Along[i] - Along[i - 1]) * share;
+                    tangent = (Points[i] - Points[i - 1]).normalized;
+                }
+                return best;
             }
 
             public bool Sample(float distance, float leftM, out Vector3 position, out Vector3 tangent)
@@ -716,16 +727,6 @@ namespace Formula9.World
                 position = center + left * leftM;
                 return true;
             }
-        }
-
-        private interface ICollisionLimiter
-        {
-            float LimitSpeed(VehicleState vehicle, float desiredMps);
-        }
-
-        private sealed class PassThroughCollisionLimiter : ICollisionLimiter
-        {
-            public float LimitSpeed(VehicleState vehicle, float desiredMps) => desiredMps;
         }
     }
 }
