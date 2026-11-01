@@ -39,12 +39,19 @@ OSM_DIRECTORY = Path(__file__).resolve().parents[2] / "fixtures" / "osm"
 OVERPASS_URL = "https://overpass.kumi.systems/api/interpreter"
 
 # Where a fleet can be built: a box (south, west, north, east) around the bus interchange it runs
-# from, named as in OpenStreetMap. Add an area here and run with --area --download to use it.
+# from, named as in OpenStreetMap. The interchange is the first depot; "other_depots" (optional)
+# names more places in the box with chargers, such as bus terminals, also as in OpenStreetMap.
+# Add an area here and run with --area --download to use it.
 SERVICE_AREAS = {
     "toa-payoh": {"name": "Toa Payoh", "box": (1.326, 103.838, 1.344, 103.860),
                   "interchange": "Toa Payoh Interchange",
-                  "depots": ["Toa Payoh Interchange", "Saint Michael's Bus Terminal"]},
+                  "other_depots": ["Saint Michael's Bus Terminal"]},
 }
+
+
+def depot_names(area: dict) -> list[str]:
+    """Every depot of an area, its interchange first."""
+    return [area["interchange"], *area.get("other_depots", [])]
 DEFAULT_AREA = "toa-payoh"
 
 QUERY = """
@@ -100,7 +107,7 @@ def slug(text: str) -> str:
 
 
 class Network:
-    def __init__(self, osm: dict, interchange: str, depot_names: list[str]):
+    def __init__(self, osm: dict, interchange: str, depots: list[str]):
         elements = osm["elements"]
         self.position = {e["id"]: project(e["lat"], e["lon"]) for e in elements if e["type"] == "node"}
         self.loop = nx.DiGraph()
@@ -128,32 +135,28 @@ class Network:
                     if not oneway:
                         graph.add_edge(b, a, length=length, way=way["id"])
         self.stops = []
-        self.depot = None
+        # Each depot's place: a node where it is, or else the middle of a way that outlines it
+        nodes, outlines = {}, {}
         for element in elements:
             tags = element.get("tags", {})
             if element["type"] == "node" and tags.get("highway") == "bus_stop" and tags.get("ref"):
                 self.stops.append({"ref": tags["ref"], "name": tags.get("name", tags["ref"]),
                                    "at": project(element["lat"], element["lon"])})
-            if element["type"] == "node" and tags.get("name") == interchange:
-                self.depot = project(element["lat"], element["lon"])
-        if self.depot is None:
-            raise ValueError(f"{interchange} is not in the downloaded area")
-        # Each depot's place: a node where it is, or the middle of a way that outlines it
-        self.depot_places = {}
-        for element in elements:
-            name = element.get("tags", {}).get("name")
-            if name not in depot_names or name in self.depot_places:
+            name = tags.get("name")
+            if name not in depots:
                 continue
             if element["type"] == "node":
-                self.depot_places[name] = project(element["lat"], element["lon"])
-            elif element["type"] == "way":
+                nodes[name] = project(element["lat"], element["lon"])
+            elif element["type"] == "way" and name not in outlines:
                 corners = [self.position[n] for n in element.get("nodes", []) if n in self.position]
                 if corners:
-                    self.depot_places[name] = (sum(p[0] for p in corners) / len(corners),
-                                               sum(p[1] for p in corners) / len(corners))
-        missing = [name for name in depot_names if name not in self.depot_places]
+                    outlines[name] = (sum(p[0] for p in corners) / len(corners), sum(p[1] for p in corners) / len(corners))
+        self.depot_places = {name: nodes.get(name, outlines.get(name)) for name in depots}
+        missing = [name for name, place in self.depot_places.items() if place is None]
         if missing:
             raise ValueError(f"{', '.join(missing)} not in the downloaded area")
+        # The interchange, where the loops are laid out from
+        self.depot = self.depot_places[interchange]
         # Only the part of the network a shuttle can both reach and leave: the download's edges cut
         # roads off, and car-park loops are one-way pockets
         core = max(nx.strongly_connected_components(self.loop), key=len)
@@ -407,7 +410,7 @@ def connector(net: Network, start_point, start_node, depot):
 
 
 def build(osm: dict, base: dict, area: dict) -> dict:
-    net = Network(osm, area["interchange"], area["depots"])
+    net = Network(osm, area["interchange"], depot_names(area))
     main, bypass_b, bypass_c, back, stops = find_main_loop(net)
 
     # Split the return leg at its stops, so each stop is a node of the road network
@@ -495,7 +498,7 @@ def build(osm: dict, base: dict, area: dict) -> dict:
     # Positions are whole metres, as the yard is laid out on axis-aligned lines from the bays:
     # arrival then lands exactly on a bay instead of a hair beside it.
     data["depots"] = []
-    for index, name in enumerate(area["depots"]):
+    for index, name in enumerate(depot_names(area)):
         place = net.depot_places[name]
         at = [float(round(place[0])), float(round(place[1]))]
         first, second = f"charger-{index * 2 + 1}", f"charger-{index * 2 + 2}"

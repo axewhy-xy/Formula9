@@ -10,12 +10,18 @@ Description:
     pointed at the nearest depot with a free charger (Saint Michael's once Toa
     Payoh is full), that CHARGE_NOW offers a charger at that depot, and that a
     shuttle nobody sends to charge turns back on its own at the last safe point,
-    arrives at or above the 15% reserve and charges there.
+    arrives at or above the 15% reserve and charges there. Also covers a depot
+    filling up late, a charger out of reach, a stranded shuttle freeing its port,
+    letting riders off before the depot, loop ends, CONTINUE, and a restored checkpoint; the committed runs through
+    the store (a detour, CONTINUE and recovery) are in test_training_integration.
 
 """
 
+from types import SimpleNamespace
+
 import pytest
 
+from contracts.v2.models import FullSnapshot
 from src.energy.decisions import charge_options, energy_forecasts
 from src.energy.forecast import reserve_kwh
 from src.energy.model import ENERGY_R1
@@ -122,6 +128,8 @@ def test_an_ignored_low_shuttle_turns_back_in_time_and_charges_above_its_reserve
     assert actor.modes[1] == "RETURNING_TO_DEPOT"
     assert actor.domain.vehicles[1].vehicle_id in next(c for c in actor.domain.chargers
                                                        if c.charger_id == turned.data["charger_id"]).occupied_vehicle_ids
+    set_down, _ = run_until(actor, 1, "PASSENGERS_SET_DOWN")
+    assert set_down.data["stop_id"] == turned.data["set_down_stop_id"], "riders get off before it heads in"
     run_until(actor, 1, "DEPOT_BAY_ARRIVED")
     assert shuttle.battery*actor.BATTERY_CAPACITY_KWH/100 >= reserve
     assert (shuttle.position.x, shuttle.position.y) == tuple(actor.definition.bay_positions[turned.data["charger_id"]])
@@ -154,7 +162,148 @@ def test_with_no_free_charger_anywhere_it_carries_on_and_says_so_once():
     assert actor.modes[1] != "RETURNING_TO_DEPOT"
 
 
-def test_a_checkpoint_keeps_the_unavailable_note():
+def low(actor, index, below=0.3):
+    actor.shuttles[index].battery = (low_battery_kwh(actor, index)-below)*100/actor.BATTERY_CAPACITY_KWH
+
+
+def quiet_actor():
+    """A running actor where only the shuttle under test is low."""
     actor = running_actor()
-    actor.safety_unavailable = {1}
-    assert actor.workflow_state()["safety_unavailable"] == [1]
+    actor.shuttles[4].battery = 100.0
+    actor.incident_due_tick = 10**12
+    return actor
+
+
+def above_every_depot(actor, index, spare=0.2):
+    """A battery that reaches every depot above the reserve with spare kWh to go."""
+    shuttle = actor.shuttles[index]
+    reserve = reserve_kwh(ENERGY_R1, actor.BATTERY_CAPACITY_KWH)
+    need = -min(actor._arrival_kwh(0.0, actor._depot_distance(shuttle, d)) for d in actor.definition.depots)
+    shuttle.battery = (reserve+need+spare)*100/actor.BATTERY_CAPACITY_KWH
+
+
+def test_toa_payoh_filling_up_late_still_leaves_saint_michaels_in_reach():
+    first = quiet_actor()
+    above_every_depot(first, 1)
+    turned, _ = run_until(first, 1, "SAFETY_RETURN")
+    assert turned.data["depot_id"] == TOA_PAYOH
+    # The same run, but Toa Payoh fills up on the tick before the shuttle turned back
+    second = quiet_actor()
+    above_every_depot(second, 1)
+    while second.current_tick < turned.tick-1:
+        second.tick()
+        second.pending_events.clear()
+    fill(second, TOA_PAYOH)
+    late, _ = run_until(second, 1, "SAFETY_RETURN")
+    reserve = reserve_kwh(ENERGY_R1, second.BATTERY_CAPACITY_KWH)
+    assert late.data["depot_id"] == SAINT_MICHAELS and late.data["expected_arrival_kwh"] >= reserve
+    run_until(second, 1, "DEPOT_BAY_ARRIVED")
+    assert second.shuttles[1].battery*second.BATTERY_CAPACITY_KWH/100 >= reserve
+
+
+def test_a_charger_out_of_reach_is_not_reserved():
+    actor = quiet_actor()
+    actor.shuttles[1].battery = 0.01
+    actor.tick()
+    events = [e for e in actor.pending_events if e.entity_id == "shuttle-02"]
+    assert [e.data["reason"] for e in events if e.event_type == "SAFETY_RETURN_UNAVAILABLE"] == ["CHARGER_OUT_OF_REACH"]
+    assert "SAFETY_RETURN" not in {e.event_type for e in events}
+    assert all("shuttle-02" not in c.occupied_vehicle_ids for c in actor.domain.chargers)
+
+
+def test_a_shuttle_stranded_on_its_way_in_frees_its_port():
+    actor = quiet_actor()
+    shuttle = actor.shuttles[1]
+    actor.domain.chargers[0].occupied_vehicle_ids.append("shuttle-02")
+    points, _, _ = actor._depot_trip(shuttle, "charger-1", 10.0)
+    actor._head_for_bay(shuttle, points)
+    actor.modes[1] = "RETURNING_TO_DEPOT"
+    shuttle.battery = 0.001
+    exhausted, _ = run_until(actor, 1, "BATTERY_EXHAUSTED", max_ticks=200)
+    assert exhausted.data["released_charger_id"] == "charger-1"
+    assert actor.domain.chargers[0].occupied_vehicle_ids == [] and actor.modes[1] == "OUT_OF_SERVICE"
+
+
+def test_turning_back_at_a_loop_end_records_the_loop_first():
+    actor = quiet_actor()
+    shuttle = actor.shuttles[1]
+    route = actor._routes[shuttle.route_ID]
+    shuttle.progress = route["total_length"]
+    shuttle.position = actor._route_evaluation(shuttle.route_ID, shuttle.progress)
+    actor.modes[1], shuttle.dwell_timer = "DWELLING", actor.DWELL_S
+    reserve = reserve_kwh(ENERGY_R1, actor.BATTERY_CAPACITY_KWH)
+    # Enough to get in from here, not enough for another loop first
+    need = -min(actor._arrival_kwh(0.0, actor._depot_distance(shuttle, d)) for d in actor._guarded_depots(shuttle))
+    shuttle.battery = (reserve+need+0.05)*100/actor.BATTERY_CAPACITY_KWH
+    actor.loop_started[1] = (0, shuttle.battery*actor.BATTERY_CAPACITY_KWH/100)
+    actor.tick()
+    names = [e.event_type for e in actor.pending_events if e.entity_id == "shuttle-02"]
+    assert names.index("LOOP_COMPLETED") < names.index("SAFETY_RETURN")
+    assert 1 not in actor.loop_started, "the trip in is not counted as the next loop"
+
+
+def test_continue_promises_only_the_loops_before_the_shuttle_turns_back():
+    actor = running_actor()
+    filled = actor.battery_decisions(ENERGY_R1, actor.generate_snapshot())
+    forecast = next(f for f in filled.energy_forecasts if f.vehicle_id == "shuttle-05")
+    option = next(o for o in filled.charge_options if o.vehicle_id == "shuttle-05" and o.action == "CONTINUE")
+    assert option.loops_after <= forecast.loops_remaining and "on its own" in option.assumptions[0]
+    turned, seen = run_until(actor, 4, "SAFETY_RETURN")
+    loops = sum(e.event_type == "LOOP_COMPLETED" for e in seen)
+    assert loops >= option.loops_after, "it was allowed every loop CONTINUE promised"
+
+
+def test_a_safety_return_after_continue_is_not_scored_as_no_decision():
+    actor = quiet_actor()
+    low(actor, 1)
+    actor.note_decisions([SimpleNamespace(event_type="SERVICE_CONTINUED", entity_id="shuttle-02", data={})])
+    turned, _ = run_until(actor, 1, "SAFETY_RETURN")
+    assert turned.data["after_decision"] == "CONTINUE" and turned.data["assessment"] is None
+    assert "shuttle-02" not in actor.continued, "the next return is judged afresh"
+
+
+def test_a_restored_checkpoint_keeps_the_safety_return_state():
+    # restore_workflow brings back the workflow state; the shuttles' own state, and the whole
+    # recovery through the session service, are covered in test_training_integration
+    actor = quiet_actor()
+    actor.note_decisions([SimpleNamespace(event_type="SERVICE_CONTINUED", entity_id="shuttle-02", data={})])
+    actor.safety_unavailable = {3}
+    state = actor.workflow_state()
+    restored = IntegratedSessionActor(0, session_id="depot-test")
+    restored.restore_workflow(state, FullSnapshot.model_validate(state["domain"]))
+    assert restored.continued == {"shuttle-02"} and restored.safety_unavailable == {3}
+
+
+def test_riders_get_off_at_the_next_stop_before_it_drives_in_empty():
+    actor = quiet_actor()
+    shuttle = actor.shuttles[1]
+    reserve = reserve_kwh(ENERGY_R1, actor.BATTERY_CAPACITY_KWH)
+    actor.tick()
+    actor.pending_events.clear()
+    assert actor.modes[1] == "IN_SERVICE", "driving between stops"
+    # Inside the two-tick buffer (with the set-down dwell allowed for), so it turns back on the next tick
+    need = -min(actor._arrival_kwh(0.0, actor._depot_distance(shuttle, d), actor.DWELL_S) for d in actor._guarded_depots(shuttle))
+    shuttle.battery = (reserve+need+0.0001)*100/actor.BATTERY_CAPACITY_KWH
+    route_id = actor.domain.vehicles[1].route_id
+    names = actor.stop_names[shuttle.route_ID]
+    ahead = sorted(p for p in actor.stop_progress[shuttle.route_ID] if p > shuttle.progress)
+    actor.tick()
+    turned = next(e for e in actor.pending_events if e.event_type == "SAFETY_RETURN")
+    assert turned.data["set_down_stop_id"] == names[str(ahead[0])], "the next stop ahead"
+    assert turned.data["stops_missed"] == [names[str(p)] for p in ahead[1:]] + [names["end"]]
+    stop = next(s for s in next(r for r in actor.domain.routes if r.route_id == route_id).stops_m
+                if s.stop_id == turned.data["set_down_stop_id"])
+    held_ticks = 0
+    for _ in range(4000):
+        actor.tick()
+        names_now = {e.event_type for e in actor.pending_events if e.entity_id == "shuttle-02"}
+        actor.pending_events.clear()
+        if abs(shuttle.position.x-stop.position.x_m) < 0.01 and abs(shuttle.position.y-stop.position.y_m) < 0.01:
+            held_ticks += 1
+        if "PASSENGERS_SET_DOWN" in names_now:
+            break
+    assert held_ticks >= round(actor.DWELL_S/actor.STEP_S)-1, "it stands at the stop for a dwell"
+    assert "STOP_SERVED" not in names_now, "letting riders off is not serving the stop"
+    arrived, seen = run_until(actor, 1, "DEPOT_BAY_ARRIVED")
+    assert "STOP_SERVED" not in {e.event_type for e in seen}, "it passes the rest of its stops empty"
+    assert shuttle.battery*actor.BATTERY_CAPACITY_KWH/100 >= reserve

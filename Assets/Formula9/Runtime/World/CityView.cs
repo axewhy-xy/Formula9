@@ -31,7 +31,8 @@ namespace Formula9.World
         private static readonly Color WindscreenColor = new Color(0.08f, 0.12f, 0.16f);
         // A depot is a pad with a charger post for each bay; the backend lays its bays out 30 m apart
         private static readonly Vector3 DepotPadSize = new Vector3(60, 0.4f, 34), ChargerPostSize = new Vector3(2, 6, 2);
-        private const float ChargerSpacingM = 30;
+        // Shuttles drive into a bay from in front and leave it behind, so a post stands beside its bay
+        private const float ChargerSpacingM = 30, ChargerGapM = 1;
         private static readonly Color DepotPadColor = new Color(0.122f, 0.306f, 0.349f);
         private static readonly Color ChargerFree = new Color(0.153f, 0.682f, 0.376f), ChargerTaken = new Color(1, 0.6f, 0.1f);
         private HashSet<string> served = new HashSet<string>();
@@ -254,8 +255,9 @@ namespace Formula9.World
                 {
                     var offset = (i - (depot.ChargerIds.Count - 1) / 2f) * ChargerSpacingM;
                     var post = Marker(PrimitiveType.Cube, ChargerPostSize, ChargerFree, "Charger " + depot.ChargerIds[i]);
-                    // Just behind its bay, so a charging shuttle stands in front of it
-                    post.position = at + new Vector3(offset, ChargerPostSize.y / 2, ShuttleSize.z / 2 + ChargerPostSize.z);
+                    // On the bay's outer side (the middle bay's east side), clear of the lanes in and out
+                    var side = (offset < 0 ? -1 : 1) * (ShuttleSize.x / 2 + ChargerGapM + ChargerPostSize.x / 2);
+                    post.position = at + new Vector3(offset + side, ChargerPostSize.y / 2, 0);
                     chargerPosts[depot.ChargerIds[i]] = post.GetComponent<MeshRenderer>().sharedMaterial;
                     routeObjects.Add(post.gameObject);
                 }

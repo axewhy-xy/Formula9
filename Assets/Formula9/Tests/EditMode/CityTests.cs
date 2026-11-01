@@ -436,9 +436,10 @@ namespace Formula9.Tests
                 var pad = rig.GetComponentsInChildren<Transform>().Single(t => t.name == "Depot depot-2");
                 Assert.AreEqual(new Vector3(900, 0.2f, -600), pad.position, "the pad lies on the ground at the backend's position");
                 Renderer Post(string id) => rig.GetComponentsInChildren<MeshRenderer>().Single(r => r.name == "Charger " + id);
-                Assert.AreEqual(900, Post("charger-3").transform.position.x, 1e-3f, "a depot's only charger stands at its middle");
+                Assert.AreEqual(904.5f, Post("charger-3").transform.position.x, 1e-3f, "a depot's only bay is at its middle, its post beside it");
+                Assert.AreEqual(-600, Post("charger-3").transform.position.z, 1e-3f, "level with the bay, not in the lane in or out");
                 var first = Post("charger-1").transform.position.x - (float)snapshot.Depots[0].Position.XM;
-                Assert.AreEqual(-15, first, 1e-3f, "two bays sit 15 m either side, as the backend lays them out");
+                Assert.AreEqual(-19.5f, first, 1e-3f, "two bays sit 15 m either side, as the backend lays them out, each post on its outer side");
                 var free = Post("charger-3").sharedMaterial.color;
                 snapshot.Chargers.Single(c => c.ChargerId == "charger-3").OccupiedVehicleIds.Add("shuttle-01");
                 view.Show(snapshot, new ShuttleMotion(), 1);

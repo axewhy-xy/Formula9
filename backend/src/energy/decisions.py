@@ -20,6 +20,8 @@ Description:
     speed, including depot access. Its charge estimates account for return
     travel and auxiliary use while charging. All results remain estimates.
 """
+import math
+
 from contracts.v2.models import (
     ChargeOption, Depot, EnergyForecast, FleetVehicle, FullSnapshot, RouteRevision, transition_allowed,
 )
@@ -151,6 +153,11 @@ Args:
     depot_choices: Optional depot ID by vehicle. CHARGE_NOW is then offered at
         the first free charger of that depot, the one depot_distances_m
         measures; without it, at the first free charger anywhere.
+    return_distances_m: Optional metres from the end of each shuttle's loop to
+        the depot it must still be able to reach. The actor sends a shuttle
+        back on its own before that trip would take it below its reserve, so
+        CONTINUE then counts only the loops that leave the trip home; without
+        it, CONTINUE counts every loop down to the reserve.
 
 Returns:
     list[ChargeOption]: The options, marked as estimates; empty when no
@@ -160,7 +167,8 @@ def charge_options(model: EnergyModel, snapshot: FullSnapshot, charge_s: float =
                    *, depot_distances_m: dict[str, float] | None = None,
                    depot_speed_mps: float | None = None,
                    parking_distances_m: dict[tuple[str, str], float] | None = None,
-                   depot_choices: dict[str, str] | None = None) -> list[ChargeOption]:
+                   depot_choices: dict[str, str] | None = None,
+                   return_distances_m: dict[str, float] | None = None) -> list[ChargeOption]:
     if parking_distances_m is not None:
         if depot_distances_m is None or depot_speed_mps is None or depot_speed_mps <= 0:
             raise ValueError("Parking estimates require depot distances and a positive depot speed")
@@ -191,6 +199,19 @@ def charge_options(model: EnergyModel, snapshot: FullSnapshot, charge_s: float =
         prefix = f"charge-option-{vehicle.vehicle_id}"
         offered_at_tick = decision_started.get(vehicle.vehicle_id, snapshot.tick)
         if vehicle.vehicle_id in serving:  # only a serving shuttle can stay in service
+            loops_after = forecast.loops_remaining
+            assumption = f"Reserve breached after {loops_after} more loops"
+            back = (return_distances_m or {}).get(vehicle.vehicle_id)
+            route = routes.get(vehicle.route_id)
+            if back is not None and route is not None and depot_speed_mps:
+                # It turns for a charger on its own before its reserve, so a loop counts only if
+                # the trip home from the loop end still fits after it
+                loop = loop_energy_kwh(model, route.distance_m, route.estimated_duration_s)
+                spare = (forecast.reserve_margin_kwh - drive_energy_kwh(model, back)
+                         - auxiliary_energy_kwh(model, back / depot_speed_mps))
+                if loop > 0:
+                    loops_after = max(0, math.floor(spare / loop + 1e-9))
+                    assumption = f"Returns to a charger on its own after {loops_after} more loops, before its reserve"
             options.append(ChargeOption(
                 option_id=f"{prefix}-continue",
                 vehicle_id=vehicle.vehicle_id,
@@ -202,8 +223,8 @@ def charge_options(model: EnergyModel, snapshot: FullSnapshot, charge_s: float =
                 dependency_revisions={vehicle.vehicle_id: vehicle.aggregate_revision},
                 out_of_service_s=0.0,
                 battery_after_kwh=vehicle.battery_kwh,
-                loops_after=forecast.loops_remaining,
-                assumptions=[f"Reserve breached after {forecast.loops_remaining} more loops"],
+                loops_after=loops_after,
+                assumptions=[assumption],
                 min_in_service_vehicles=len(serving),
             ))
         # Only a charger at the depot the distance was measured to; any charger without a choice
@@ -323,6 +344,9 @@ Args:
     snapshot (FullSnapshot): The snapshot to fill.
     charge_s (float): How long CHARGE_NOW keeps the shuttle on the charger,
         in seconds.
+    depot_distances_m, depot_speed_mps, parking_distances_m, depot_choices,
+    return_distances_m: Optional actor estimates, passed on to
+        energy_forecasts and charge_options (see charge_options).
 
 Returns:
     FullSnapshot: The filled copy; the input is unchanged.
@@ -331,13 +355,14 @@ def with_battery_decisions(model: EnergyModel, snapshot: FullSnapshot, charge_s:
                            *, depot_distances_m: dict[str, float] | None = None,
                            depot_speed_mps: float | None = None,
                            parking_distances_m: dict[tuple[str, str], float] | None = None,
-                           depot_choices: dict[str, str] | None = None) -> FullSnapshot:
+                           depot_choices: dict[str, str] | None = None,
+                           return_distances_m: dict[str, float] | None = None) -> FullSnapshot:
     result = snapshot.model_copy(deep=True)
     result.energy_forecasts = energy_forecasts(model, snapshot, depot_distances_m=depot_distances_m, depot_speed_mps=depot_speed_mps,
                                                depot_choices=depot_choices)
     result.charge_options = charge_options(model, snapshot, charge_s, depot_distances_m=depot_distances_m,
                                           depot_speed_mps=depot_speed_mps, parking_distances_m=parking_distances_m,
-                                          depot_choices=depot_choices)
+                                          depot_choices=depot_choices, return_distances_m=return_distances_m)
     result.charge_option_revisions = {**snapshot.charge_option_revisions,
                                       **{o.option_id: o.revision for o in result.charge_options}}
     loops = {f.vehicle_id: f.loops_remaining for f in result.energy_forecasts}

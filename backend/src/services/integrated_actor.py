@@ -184,6 +184,9 @@ class IntegratedSessionActor(SessionActor):
         self.charge_started_kwh = {}
         self.parking_chargers = {}
         self.safety_unavailable = set()
+        self.continued = set()
+        self.set_downs = {}
+        self.tails = {}
         self.pending_events = []
         self.stop_progress = {}
         for shuttle, route, progress, battery in zip(self.shuttles, data["vehicle_assignments"],
@@ -345,9 +348,48 @@ class IntegratedSessionActor(SessionActor):
         return min(self.definition.depots,
                    key=lambda depot: math.dist((shuttle.position.x, shuttle.position.y), depot["position_m"]))
 
+    def _arrival_kwh(self, level, distance_m, extra_s=0.0):
+        """The charge left after driving distance_m at the declared speed and standing extra_s more.
+
+        Below zero means the shuttle cannot get there at all.
+        """
+        return (level - drive_energy_kwh(ENERGY_R1, distance_m)
+                - auxiliary_energy_kwh(ENERGY_R1, distance_m/self.definition.data["speed_mps"] + extra_s))
+
+    def _route_tail(self, shuttle, depot):
+        """Metres from the end of the shuttle's route to the furthest of the depot's bays.
+
+        This is the fixed part of every way in from that route (see _depot_points), so it is worked
+        out once for each route end and depot instead of every tick.
+        """
+        end = self._routes[shuttle.route_ID]["waypoints"][-1]
+        route_id = self.domain.vehicles[shuttle.ID].route_id
+        root = route_id if route_id in depot["connectors"] else self.definition.data["route_edit"]["route_id"]
+        key = (end.x, end.y, root, depot["depot_id"])
+        if key not in self.tails:
+            lengths = []
+            for charger_id in depot["bays"]:
+                points = [(end.x, end.y), *(tuple(p) for p in depot["connectors"][root])]
+                bay = self.definition.bay_positions[charger_id]
+                points.extend([(bay[0], points[-1][1]), tuple(bay)])
+                lengths.append(self._path_distance(points))
+            self.tails[key] = max(lengths)
+        return self.tails[key]
+
     def _depot_distance(self, shuttle, depot):
         # The longest way in to any of its bays, so the estimate holds whichever bay is free
-        return max(self._path_distance(self._depot_points(shuttle, charger_id)) for charger_id in depot["bays"])
+        if shuttle.route_ID.startswith("depot-path-"):
+            return max(self._path_distance(self._depot_points(shuttle, charger_id)) for charger_id in depot["bays"])
+        # The rest of the route, then the depot's road in from its end
+        remaining = max(0.0, self._routes[shuttle.route_ID]["total_length"]-shuttle.progress)
+        return remaining + self._route_tail(shuttle, depot)
+
+    def _open_depots(self, shuttle):
+        """(distance, depot) for every depot with a free charger, nearest first."""
+        free = {c.charger_id for c in self.domain.chargers if len(c.occupied_vehicle_ids) < c.port_count}
+        ranked = sorted(((self._depot_distance(shuttle, depot), index) for index, depot in enumerate(self.definition.depots)
+                         if free & set(depot["bays"])))
+        return [(distance, self.definition.depots[index]) for distance, index in ranked]
 
     def depot_choice(self, shuttle):
         """The depot a shuttle would head for, and its road distance there in metres.
@@ -367,83 +409,183 @@ class IntegratedSessionActor(SessionActor):
         if shuttle.route_ID.startswith("depot-path-"):
             depot = self._nearest_depot(shuttle)
             return depot, self._depot_distance(shuttle, depot)
-        free = {c.charger_id for c in self.domain.chargers if len(c.occupied_vehicle_ids) < c.port_count}
-        ranked = sorted((self._depot_distance(shuttle, depot), index) for index, depot in enumerate(self.definition.depots))
-        distance, index = next(((d, i) for d, i in ranked if free & set(self.definition.depots[i]["bays"])), ranked[0])
-        return self.definition.depots[index], distance
+        open_depots = self._open_depots(shuttle)
+        if open_depots:
+            distance, depot = open_depots[0]
+            return depot, distance
+        depot = min(self.definition.depots, key=lambda d: self._depot_distance(shuttle, d))
+        return depot, self._depot_distance(shuttle, depot)
+
+    def _guarded_depots(self, shuttle):
+        """The depots a serving shuttle must keep in reach above its reserve.
+
+        That is every depot with a free charger it can still reach above its reserve, not only
+        the nearest: if the nearest fills up, the next one is then still in reach. A depot already
+        out of reach, as for a shuttle that starts low, cannot be kept and is left out. With none
+        in reach, the nearest depot with a free charger, or else the nearest depot.
+        """
+        level = shuttle.battery*self.BATTERY_CAPACITY_KWH/100
+        reserve = reserve_kwh(ENERGY_R1, self.BATTERY_CAPACITY_KWH)
+        open_depots = self._open_depots(shuttle)
+        in_reach = [depot for distance, depot in open_depots if self._arrival_kwh(level, distance) >= reserve]
+        return in_reach or [depot for _, depot in open_depots[:1]] or [self.depot_choice(shuttle)[0]]
+
+    def _depot_trip(self, shuttle, charger_id, level):
+        """The way from where the shuttle is to a charger's bay, its length, and the charge it would arrive with."""
+        points = self._depot_points(shuttle, charger_id)
+        distance = self._path_distance(points)
+        return points, distance, self._arrival_kwh(level, distance)
+
+    def _head_for_bay(self, shuttle, points):
+        """Puts the shuttle on its way to a bay it already holds, along points from _depot_trip."""
+        if len(points) > 1:
+            path = geometry(f"depot-path-{shuttle.ID}", points)
+            self._routes[path["route_ID"]] = path
+            shuttle.route_ID, shuttle.progress = path["route_ID"], 0.0
+
+    def _finish_loop(self, shuttle):
+        """Records a finished loop, and the end of an approved detour that was its route."""
+        self._note_loop_finished(shuttle)
+        if any(i.vehicle_id == self.domain.vehicles[shuttle.ID].vehicle_id and i.state == "EXECUTING" for i in self.domain.incidents):
+            self._event(shuttle, "DETOUR_COMPLETED")
+
+    def _set_down_stop(self, shuttle):
+        """Where a shuttle turning back lets its riders off, and the stops it then misses.
+
+        It is the stop the shuttle stands at, or else the next one ahead on its route (the loop's
+        end counts as a stop). The way to the depot runs on along the route, so that stop is on
+        the way. Returns (metres to it, its stop ID, the IDs of the later stops on this loop).
+        """
+        names = self.stop_names.get(shuttle.route_ID, {})
+        total = self._routes[shuttle.route_ID]["total_length"]
+        stops = sorted({**{p: names.get(str(p)) for p in self.stop_progress.get(shuttle.route_ID, [])},
+                        **({total: names["end"]} if "end" in names else {total: names.get(str(total))})}.items())
+        at, stop_id = next(((p, n) for p, n in stops if p >= shuttle.progress-EPSILON), stops[-1])
+        missed = [n for p, n in stops if p > at+EPSILON and n is not None]
+        return max(0.0, at-shuttle.progress), stop_id, missed
+
+    def note_decisions(self, events):
+        """Remembers which shuttles' latest battery decision was CONTINUE, from a commit's events.
+
+        A safety return after CONTINUE is the consequence of that decision, which its own
+        SERVICE_CONTINUED event scores, not a decision nobody made.
+        """
+        for event in events:
+            if event.event_type == "SERVICE_CONTINUED":
+                self.continued.add(event.entity_id)
+            elif event.event_type == "CHARGER_RESERVED":
+                self.continued.discard(event.data.get("vehicle_id"))
 
     def _safety_returns(self):
-        """Send a shuttle back on its own when it can only just still reach a charger above its reserve.
+        """Send a shuttle back on its own at the last point it can still reach a charger above its reserve.
 
-        This is the "bingo" point: the last tick it can turn for the depot its decisions point at
-        (the nearest with a free charger) and still arrive at or above the training reserve. At a
-        loop end it also turns back when another loop would take it past that point. The trainee
-        missed the charging decision, so the SAFETY_RETURN event scores it zero. With every charger
-        taken it carries on, and SAFETY_RETURN_UNAVAILABLE is logged once; 0 kWh stays the hard floor.
+        The check is kept against every depot with a free charger still in reach (see
+        _guarded_depots), so a nearer depot filling up never leaves the shuttle past its safe
+        point for the next one; it then heads for the nearest of them. At a loop end it also
+        turns back when another loop would take it past that point, and the finished loop is
+        recorded first. A shuttle on an approved detour leaves it, and the incident service
+        resolves the incident.
+
+        It does not drive to the depot with riders on board. It stops serving its route at once
+        (the SAFETY_RETURN event is the low-battery warning), lets everyone off at the stop it
+        stands at or the next one ahead (PASSENGERS_SET_DOWN after one dwell), then drives to the
+        depot empty; the event lists the stops it misses on the rest of that loop. That stop is on
+        the way in, so the only extra cost is the dwell, which the check allows for.
+
+        The SAFETY_RETURN event scores a missed decision as zero; after CONTINUE it carries no
+        score of its own, since SERVICE_CONTINUED scored that choice. The shuttle takes the same
+        trip and path as a CHARGE_NOW (_depot_trip, _head_for_bay). Unlike CHARGE_NOW it goes even
+        if it would arrive below its reserve (after CONTINUE past the safe point, or for a shuttle
+        that started out of reach), since
+        reaching a charger beats stopping on the road; it does not go if it cannot arrive at all.
+        With no free charger, or none in reach, it carries on and SAFETY_RETURN_UNAVAILABLE is
+        logged once; 0 kWh stays the only hard floor.
         """
         speed = self.definition.data["speed_mps"]
         reserve = reserve_kwh(ENERGY_R1, self.BATTERY_CAPACITY_KWH)
         # Two ticks of driving, so the check fires before the margin is gone
         buffer = 2*(drive_energy_kwh(ENERGY_R1, speed*self.STEP_S)+auxiliary_energy_kwh(ENERGY_R1, self.STEP_S))
         for shuttle in self.shuttles:
-            if (self.modes[shuttle.ID] not in {"IN_SERVICE", "DWELLING", "DETOURING"}
+            mode = self.modes[shuttle.ID]
+            if (mode not in {"IN_SERVICE", "DWELLING", "DETOURING"}
                     or shuttle.route_ID.startswith("depot-path-") or self._held_charger(shuttle) is not None):
                 continue
             level = shuttle.battery*self.BATTERY_CAPACITY_KWH/100
             if level <= 0:
                 continue
-            depot, distance = self.depot_choice(shuttle)
-            arrival = level-drive_energy_kwh(ENERGY_R1, distance)-auxiliary_energy_kwh(ENERGY_R1, distance/speed)
             route = self._routes[shuttle.route_ID]
-            if self.modes[shuttle.ID] == "DWELLING" and shuttle.progress >= route["total_length"]-EPSILON:
-                # Leaving for another loop commits it to the whole loop before the next way in
-                loop_s = (route["total_length"]/speed + shuttle.dwell_timer
-                          + (len(self.stop_progress.get(shuttle.route_ID, []))+1)*self.DWELL_S)
-                arrival = min(arrival, arrival-drive_energy_kwh(ENERGY_R1, route["total_length"])
-                              - auxiliary_energy_kwh(ENERGY_R1, loop_s))
-            if arrival-reserve > buffer:
+            at_loop_end = mode == "DWELLING" and shuttle.progress >= route["total_length"]-EPSILON
+            # Leaving for another loop commits it to the whole loop before the next way in
+            loop_m, loop_s = 0.0, 0.0
+            if at_loop_end:
+                loop_m = route["total_length"]
+                loop_s = shuttle.dwell_timer + (len(self.stop_progress.get(shuttle.route_ID, []))+1)*self.DWELL_S
+            guarded = self._guarded_depots(shuttle)
+            # The extra dwell is where it lets its riders off on the way in
+            worst = min(self._arrival_kwh(level, self._depot_distance(shuttle, depot)+loop_m, loop_s+self.DWELL_S) for depot in guarded)
+            if worst-reserve > buffer:
                 self.safety_unavailable.discard(shuttle.ID)
                 continue
             vehicle = self.domain.vehicles[shuttle.ID]
+            open_depots = self._open_depots(shuttle)
             charger = next((c for c in sorted(self.domain.chargers, key=lambda c: c.charger_id)
-                            if c.charger_id in depot["bays"] and len(c.occupied_vehicle_ids) < c.port_count), None)
-            if charger is None:
+                            if open_depots and c.charger_id in open_depots[0][1]["bays"]
+                            and len(c.occupied_vehicle_ids) < c.port_count), None)
+            points, distance, arrival = self._depot_trip(shuttle, charger.charger_id, level) if charger else (None, None, None)
+            if charger is not None:
+                arrival -= auxiliary_energy_kwh(ENERGY_R1, self.DWELL_S)  # standing to let riders off
+            if charger is None or arrival <= 0:
                 if shuttle.ID not in self.safety_unavailable:
                     self.safety_unavailable.add(shuttle.ID)
-                    self._event(shuttle, "SAFETY_RETURN_UNAVAILABLE", battery_kwh=level, depot_id=depot["depot_id"])
+                    self._event(shuttle, "SAFETY_RETURN_UNAVAILABLE", battery_kwh=level,
+                                reason="NO_FREE_CHARGER" if charger is None else "CHARGER_OUT_OF_REACH",
+                                depot_id=(open_depots[0][1] if open_depots else guarded[0])["depot_id"])
                 continue
             self.safety_unavailable.discard(shuttle.ID)
+            set_down_m, set_down_stop, missed = self._set_down_stop(shuttle)
+            if at_loop_end:
+                self._finish_loop(shuttle)
+                self.loop_started.pop(shuttle.ID, None)  # the trip in is not the next loop
             charger.occupied_vehicle_ids.append(vehicle.vehicle_id)
             charger.aggregate_revision += 1
-            points = self._depot_points(shuttle, charger.charger_id)
-            if len(points) > 1:
-                path = geometry(f"depot-path-{shuttle.ID}", points)
-                self._routes[path["route_ID"]] = path
-                shuttle.route_ID, shuttle.progress = path["route_ID"], 0.0
+            self._head_for_bay(shuttle, points)
+            # The depot path starts here and runs on along the route, so the stop is as far along it
+            self.set_downs[shuttle.ID] = {"at_m": set_down_m, "stop_id": set_down_stop, "timer": self.DWELL_S}
             self._set_mode(shuttle, "RETURNING_TO_DEPOT")
             shuttle.state, shuttle.curr_vel = ShuttleState.ROUTE_LOOP, shuttle.cruise_vel
-            self._event(shuttle, "SAFETY_RETURN", battery_kwh=level, reserve_kwh=reserve,
-                expected_arrival_kwh=level-drive_energy_kwh(ENERGY_R1, self._path_distance(points))
-                    - auxiliary_energy_kwh(ENERGY_R1, self._path_distance(points)/speed),
-                depot_id=depot["depot_id"], charger_id=charger.charger_id, distance_m=self._path_distance(points),
-                assessment={"rubric_revision": RUBRIC_REVISION, "provisional": True, "uncalibrated": True,
+            continued = vehicle.vehicle_id in self.continued
+            self.continued.discard(vehicle.vehicle_id)
+            if continued:
+                assessment = None  # SERVICE_CONTINUED scored the decision this follows from
+            else:
+                assessment = {"rubric_revision": RUBRIC_REVISION, "provisional": True, "uncalibrated": True,
                     "scope": "BATTERY_DECISION", "outcome": "MISSED_DECISION",
                     "criteria": {key: 0 for key in RUBRIC}, "maximum_points": RUBRIC, "total": 0,
                     "assumptions": ["No charging decision was made before the last safe point to turn "
-                                    "for the depot; the shuttle returned automatically."]})
+                                    "for the depot; the shuttle returned automatically."]}
+            self._event(shuttle, "SAFETY_RETURN", battery_kwh=level, reserve_kwh=reserve, expected_arrival_kwh=arrival,
+                depot_id=self.definition.charger_depot[charger.charger_id]["depot_id"], charger_id=charger.charger_id,
+                distance_m=distance, after_decision="CONTINUE" if continued else None,
+                left_detour=mode == "DETOURING", set_down_stop_id=set_down_stop, stops_missed=missed,
+                assessment=assessment)
 
     def depot_distances(self):
         return {self.domain.vehicles[shuttle.ID].vehicle_id: self.depot_choice(shuttle)[1] for shuttle in self.shuttles}
 
     def battery_decisions(self, model, snapshot):
         choices = {self.domain.vehicles[shuttle.ID].vehicle_id: self.depot_choice(shuttle) for shuttle in self.shuttles}
+        # From each loop's end, the way in to the furthest depot it must keep in reach (see _safety_returns)
+        returns = {self.domain.vehicles[shuttle.ID].vehicle_id: max(self._route_tail(shuttle, depot) for depot in self._guarded_depots(shuttle))
+                   for shuttle in self.shuttles
+                   if self.modes[shuttle.ID] in {"IN_SERVICE", "DWELLING", "DETOURING"} and not shuttle.route_ID.startswith("depot-path-")}
         return with_battery_decisions(model, snapshot, self.definition.data["charge_s"],
             depot_distances_m={vehicle_id: distance for vehicle_id, (_, distance) in choices.items()},
             depot_speed_mps=self.definition.data["speed_mps"],
             parking_distances_m={(vehicle.vehicle_id, charger_id): self._path_distance(self._parking_points(shuttle.ID, charger_id))
                 for shuttle, vehicle in zip(self.shuttles, snapshot.vehicles)
                 for charger_id in self.definition.bay_positions},
-            depot_choices={vehicle_id: depot["depot_id"] for vehicle_id, (depot, _) in choices.items()})
+            depot_choices={vehicle_id: depot["depot_id"] for vehicle_id, (depot, _) in choices.items()},
+            return_distances_m=returns)
 
     def generate_snapshot(self) -> FullSnapshot:
         result = self.domain.model_copy(deep=True)
@@ -503,16 +645,11 @@ class IntegratedSessionActor(SessionActor):
             mode = vehicle.service_state
             if mode == "RETURNING_TO_DEPOT" and self.modes[shuttle.ID] != mode:
                 port = next(c for c in snapshot.chargers if vehicle.vehicle_id in c.occupied_vehicle_ids)
-                points = self._depot_points(shuttle, port.charger_id)
-                distance = self._path_distance(points)
-                arrival, _ = use_energy(ENERGY_R1, vehicle.battery_kwh, distance,
-                                       distance/self.definition.data["speed_mps"])
+                points, _, arrival = self._depot_trip(shuttle, port.charger_id, vehicle.battery_kwh)
                 if arrival + EPSILON < reserve_kwh(ENERGY_R1, vehicle.battery_capacity_kwh):
                     raise TrainingStoreError("NO_FEASIBLE_ROUTE", "Admitted depot path would breach the battery reserve")
-                if len(points) > 1:
-                    path = geometry(f"depot-path-{shuttle.ID}", points)
-                    self._routes[path["route_ID"]] = path
-                    shuttle.route_ID, shuttle.progress = path["route_ID"], 0.0
+                self._head_for_bay(shuttle, points)
+                self.continued.discard(vehicle.vehicle_id)
             traffic_hold = mode == "BLOCKED" and self.modes[shuttle.ID] in {"IN_SERVICE", "DETOURING"}
             if traffic_hold:
                 mode = self.modes[shuttle.ID]  # Preserve the intended service mode during traffic holds.
@@ -551,9 +688,7 @@ class IntegratedSessionActor(SessionActor):
             if shuttle.dwell_timer < EPSILON:
                 if shuttle.progress >= self._routes[shuttle.route_ID]["total_length"]-EPSILON:
                     shuttle.progress = 0.0
-                    self._note_loop_finished(shuttle)
-                    if any(i.vehicle_id == self.domain.vehicles[shuttle.ID].vehicle_id and i.state == "EXECUTING" for i in self.domain.incidents):
-                        self._event(shuttle, "DETOUR_COMPLETED")
+                    self._finish_loop(shuttle)
                 detouring = any(i.vehicle_id == self.domain.vehicles[shuttle.ID].vehicle_id and i.state == "EXECUTING"
                     for i in self.domain.incidents) and shuttle.progress != 0
                 self._set_mode(shuttle, "DETOURING" if detouring else "IN_SERVICE")
@@ -561,6 +696,15 @@ class IntegratedSessionActor(SessionActor):
             return shuttle.progress
         if mode not in {"IN_SERVICE", "DETOURING", "RETURNING_TO_DEPOT"}:
             shuttle.curr_vel = 0
+            return shuttle.progress
+        set_down = self.set_downs.get(shuttle.ID) if mode == "RETURNING_TO_DEPOT" else None
+        if set_down is not None and shuttle.progress >= set_down["at_m"]-EPSILON:
+            # At the stop where its riders get off: one dwell, then on to the depot empty
+            shuttle.curr_vel = 0
+            set_down["timer"] = max(0, set_down["timer"]-self.STEP_S)
+            if set_down["timer"] < EPSILON:
+                del self.set_downs[shuttle.ID]
+                self._event(shuttle, "PASSENGERS_SET_DOWN", stop_id=set_down["stop_id"])
             return shuttle.progress
         speed_factor = 1.0
         if shuttle.ID == 0:
@@ -583,6 +727,8 @@ class IntegratedSessionActor(SessionActor):
             self.loop_started[shuttle.ID] = (self.current_tick, shuttle.battery*self.BATTERY_CAPACITY_KWH/100)
         end = min(self._routes[shuttle.route_ID]["total_length"], shuttle.progress+shuttle.cruise_vel*speed_factor*self.STEP_S)
         ahead = [stop for stop in self.stop_progress.get(shuttle.route_ID, []) if stop > shuttle.progress+EPSILON]
+        if set_down is not None:
+            ahead.append(set_down["at_m"])
         return min([end, *ahead])
 
     def _schedule_first_incident(self):
@@ -821,7 +967,13 @@ class IntegratedSessionActor(SessionActor):
             if level <= 0 and self.modes[shuttle.ID] in {"IN_SERVICE", "DETOURING", "RETURNING_TO_DEPOT"}:
                 self._set_mode(shuttle, "OUT_OF_SERVICE")
                 shuttle.curr_vel = 0
-                self._event(shuttle, "BATTERY_EXHAUSTED")
+                # A shuttle stranded on its way in can never use its port, so it frees it for others
+                held = self._held_charger(shuttle)
+                if held is not None:
+                    held.occupied_vehicle_ids.remove(self.domain.vehicles[shuttle.ID].vehicle_id)
+                    held.aggregate_revision += 1
+                self.parking_chargers.pop(shuttle.ID, None)
+                self._event(shuttle, "BATTERY_EXHAUSTED", released_charger_id=held.charger_id if held else None)
         self._safety_returns()
 
     def workflow_state(self):
@@ -829,7 +981,8 @@ class IntegratedSessionActor(SessionActor):
             "charge_elapsed": {str(k): v for k, v in self.charge_elapsed.items()},
             "charge_started_kwh": {str(k): v for k, v in self.charge_started_kwh.items()},
             "parking_chargers": {str(k): v for k, v in self.parking_chargers.items()},
-            "safety_unavailable": sorted(self.safety_unavailable),
+            "safety_unavailable": sorted(self.safety_unavailable), "continued": sorted(self.continued),
+            "set_downs": {str(k): v for k, v in self.set_downs.items()},
             "paths": [{"route_ID": key, "waypoints": [p.model_dump() for p in path["waypoints"]]} for key, path in self._routes.items()],
             "stop_progress": self.stop_progress, "incident_due_tick": self.incident_due_tick,
             "random_incident": self.random_incident, "random_incidents": self.random_incidents,
@@ -853,6 +1006,8 @@ class IntegratedSessionActor(SessionActor):
         self.charge_started_kwh = {int(k): v for k, v in state["charge_started_kwh"].items()}
         self.parking_chargers = {int(k): v for k, v in state.get("parking_chargers", {}).items()}
         self.safety_unavailable = set(state.get("safety_unavailable", []))
+        self.continued = set(state.get("continued", []))
+        self.set_downs = {int(k): dict(v) for k, v in state.get("set_downs", {}).items()}
         # Checkpoints from before every stop was served hold a single number per route
         self.stop_progress = {route: stops if isinstance(stops, list) else [stops] for route, stops in state["stop_progress"].items()}
         # Checkpoints from before the outcome report name no stops and time no loops
