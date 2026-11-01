@@ -280,14 +280,6 @@ The textures are in `Resources/Formula9/Textures`, from ambientCG under CC0 (fre
 attribution):
 
 | File | Source |
-|---|---|
-| `building_wall_home.png` | [Plaster001](https://ambientcg.com/view?id=Plaster001) |
-| `building_wall_other.png` | [Concrete034](https://ambientcg.com/view?id=Concrete034) |
-| `building_window_home.png` | [Facade006](https://ambientcg.com/view?id=Facade006) |
-| `building_window_other.png` | [Facade019A](https://ambientcg.com/view?id=Facade019A) |
-Here is the updated Markdown table including your new textures, matching your teammate's exact format:
-
-| File | Source |
 | --- | --- |
 | `building_wall_home.png` | [Plaster001](https://ambientcg.com/view?id=Plaster001) |
 | `building_wall_other.png` | [Concrete034](https://ambientcg.com/view?id=Concrete034) |
