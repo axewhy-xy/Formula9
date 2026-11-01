@@ -18,8 +18,8 @@ namespace Formula9.World
         private const int TileZoom = 17, FarTileZoom = 14;
         private const float GroundMarginM = 250, FarGroundMarginM = 6000, FarGroundDrop = 2;
         private static readonly Vector3 ShuttleSize = new Vector3(5, 5, 12);
-        // Routes are cut through buildings a little wider than they are drawn, so a shuttle fits
-        private const float RouteWidthM = 5, RouteClearanceM = 1.5f;
+        // A route is a thin line lying on the road. It is cut through buildings wider than that, so a shuttle fits.
+        private const float RouteWidthM = 1.35f, RouteHeightM = 0.3f, RouteCutHalfWidthM = 4;
         private static readonly Color KerbColor = new Color(0.66f, 0.66f, 0.64f), AsphaltColor = new Color(0.17f, 0.17f, 0.19f), MarkingColor = new Color(0.95f, 0.95f, 0.92f);
         private const int GrainSize = 128, GrainSeed = 9;
         private const float ProposedWidthM = 6, ProposedHeightM = 2, ClosureWidthM = 9, ClosureHeightM = 1.6f;
@@ -488,11 +488,15 @@ namespace Formula9.World
             {
                 var serving = ordered.Select((v, index) => (v, index)).Where(p => p.v.RouteId == route.RouteId).Select(p => p.index).ToList();
                 var color = serving.Count > 0 ? FleetMap.ShuttleColor(serving[0]) : Color.gray;
-                var points = route.EdgePathsM.SelectMany(p => p).Select(p => new Vector3((float)p.XM, 1.2f, (float)p.YM)).ToArray();
+                var points = route.EdgePathsM.SelectMany(p => p).Select(p => new Vector3((float)p.XM, RouteHeightM, (float)p.YM)).ToArray();
                 if (points.Length > 1)
                 {
                     var line = new GameObject("Route " + route.RouteId).AddComponent<LineRenderer>();
                     line.transform.SetParent(root, false);
+                    // Flat on the road: by default a line turns to face the camera, like a wall in the driver view
+                    line.transform.localRotation = Quaternion.Euler(90, 0, 0);
+                    line.alignment = LineAlignment.TransformZ;
+                    line.numCornerVertices = 4;
                     line.useWorldSpace = true; line.sharedMaterial = lineMaterial; line.positionCount = points.Length; line.SetPositions(points);
                     line.startWidth = line.endWidth = RouteWidthM; line.startColor = line.endColor = RouteTint(color);
                     routeObjects.Add(line.gameObject);
@@ -512,7 +516,7 @@ namespace Formula9.World
         {
             if (buildingMesh == null) return;
             var paths = snapshot.Routes.Select(r => (IReadOnlyList<Vector2>)r.EdgePathsM.SelectMany(p => p).Select(p => new Vector2((float)p.XM, (float)p.YM)).ToList());
-            CityMesh.Fill(buildingMesh, buildings, CityMesh.Corridors(paths, RouteWidthM / 2 + RouteClearanceM));
+            CityMesh.Fill(buildingMesh, buildings, CityMesh.Corridors(paths, RouteCutHalfWidthM));
         }
 
         private Transform Marker(PrimitiveType shape, Vector3 size, Color color, string name)

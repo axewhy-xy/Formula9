@@ -394,3 +394,201 @@ def test_chargers_publish_where_they_are(runtime):
     bays = get_workflow_definition().bay_positions
     for charger in snapshot["chargers"]:
         assert [charger["position"]["x_m"], charger["position"]["y_m"]] == bays[charger["charger_id"]]
+
+
+@pytest.mark.real_charge_rate
+def test_charge_now_also_goes_back_to_its_route(runtime):
+    started(runtime)
+    route_id = next(v["route_id"] for v in read(runtime)["vehicles"] if v["vehicle_id"] == "shuttle-05")
+    assert reserve(runtime)["status"] == "APPLIED"
+    assert booking_of(runtime, "shuttle-05", "ACTIVE")["origin"] == "CHARGE_NOW"
+    actor = charge_to_full_and_leave(runtime, 4, "shuttle-05")
+    advance_until(runtime, lambda s: s.vehicles[4].service_state == "IN_SERVICE", limit=400)
+    shuttle = actor().shuttles[4]
+    shuttle.progress = actor()._routes[shuttle.route_ID]["total_length"] - 1.0
+    advance_until(runtime, lambda s: s.vehicles[4].service_state == "DWELLING", limit=100)
+    assert actor().shuttles[4].route_ID == route_id and booking_of(runtime, "shuttle-05", "ACTIVE") is None
+
+
+@pytest.mark.real_charge_rate
+def test_a_safety_return_also_goes_back_to_its_route():
+    from backend.tests.test_depots import low_battery_kwh, run_until, running_actor
+    actor = running_actor()
+    shuttle = actor.shuttles[1]
+    route_id = shuttle.route_ID
+    shuttle.battery = (low_battery_kwh(actor, 1) - 0.3) * 100 / actor.BATTERY_CAPACITY_KWH
+    run_until(actor, 1, "SAFETY_RETURN")
+    run_until(actor, 1, "CHARGING_STARTED")
+    shuttle.battery = 99.99
+    run_until(actor, 1, "RETURNED_TO_ROUTE")
+    assert shuttle.route_ID == route_id and actor.modes[1] == "DWELLING"
+    assert not any(actor.domain.vehicles[1].vehicle_id in c.occupied_vehicle_ids for c in actor.domain.chargers)
+
+
+@pytest.mark.real_charge_rate
+def test_the_drive_back_survives_a_backend_restart(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from backend.tests.test_training_integration import manual_clock
+    from src.api.routes.training_v2 import get_actor_id, get_training_store
+    from src.app import app
+    from src.persistence.training_store import TrainingStore
+    from src.services.integrated_actor import SCENARIO_SELECTOR
+    from src.services.training_sessions import TrainingSessionService
+    monkeypatch.setattr(TrainingSessionService, "_run", manual_clock)
+    database, previous = tmp_path/"restart.sqlite", dict(app.dependency_overrides)
+    try:
+        with TrainingStore(database) as store:
+            app.dependency_overrides[get_training_store] = lambda: store
+            app.dependency_overrides[get_actor_id] = lambda: "integration-operator"
+            with TestClient(app) as client:
+                session_id = client.post("/api/v2/sessions", headers={"Idempotency-Key": "return-restart"},
+                    json={"scenario_revision_id": SCENARIO_SELECTOR, "seed": 1000}).json()["session_id"]
+                rt = (client, store, app.state.training_services[store], session_id)
+                start = started(rt)["tick"] + 2
+                assert schedule(rt, "shuttle-05", "charger-1", start)["status"] == "APPLIED"
+                booking_id = booking_of(rt, "shuttle-05")["booking_id"]
+                advance_until(rt, lambda s: status_of(s, booking_id) == "ACTIVE")
+                charge_to_full_and_leave(rt, 4, "shuttle-05")
+                advance_until(rt, lambda s: s.vehicles[4].service_state == "IN_SERVICE", limit=400)
+        with TrainingStore(database) as store:
+            app.dependency_overrides[get_training_store] = lambda: store
+            with TestClient(app) as client:
+                rt = (client, store, app.state.training_services[store], session_id)
+                actor = rt[2].sessions[session_id].actor
+                shuttle = actor.shuttles[4]
+                assert actor.modes[4] == "IN_SERVICE" and shuttle.route_ID.startswith("depot-path-")
+                assert booking_of(rt, "shuttle-05", "ACTIVE")["phase"] == "RETURNING_TO_ROUTE"
+                status = read(rt)["session"]["status"]
+                assert status in {"RUNNING", "PAUSED"}, status
+                if status == "PAUSED":
+                    assert send(rt, "RESUME")["status"] == "APPLIED"
+                # Commands and ticks replace the actor with a staged copy, so take the current one
+                shuttle = rt[2].sessions[session_id].actor.shuttles[4]
+                shuttle.progress = rt[2].sessions[session_id].actor._routes[shuttle.route_ID]["total_length"] - 1.0
+                advance_until(rt, lambda s: status_of(s, booking_id) == "COMPLETED", limit=100)
+                assert not rt[2].sessions[session_id].actor.shuttles[4].route_ID.startswith("depot-path-")
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(previous)
+
+
+def test_scenarios_that_cannot_run_a_slot_refuse_to_book_one(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from backend.tests.test_training_integration import manual_clock
+    from src.api.routes.training_v2 import get_actor_id, get_training_store
+    from src.app import app
+    from src.persistence.training_store import TrainingStore
+    from src.services.training_sessions import SCENARIO_REVISION, TrainingSessionService
+    monkeypatch.setattr(TrainingSessionService, "_run", manual_clock)
+    previous = dict(app.dependency_overrides)
+    try:
+        with TrainingStore(tmp_path/"other.sqlite") as store:
+            app.dependency_overrides[get_training_store] = lambda: store
+            app.dependency_overrides[get_actor_id] = lambda: "integration-operator"
+            with TestClient(app) as client:
+                session_id = client.post("/api/v2/sessions", headers={"Idempotency-Key": "other-scenario"},
+                    json={"scenario_revision_id": SCENARIO_REVISION, "seed": 1000}).json()["session_id"]
+                rt = (client, store, app.state.training_services[store], session_id)
+                preview = client.post(f"/api/v2/sessions/{session_id}/charge-schedule-previews",
+                    json={"vehicle_id": "shuttle-01", "charger_id": "charger-1", "start_tick": 10})
+                assert preview.status_code == 409 or preview.status_code == 400, preview.status_code
+                snapshot = read(rt)
+                assert snapshot["charge_bookings"] == []
+                command = client.post(f"/api/v2/sessions/{session_id}/commands", json={
+                    "contract_version": "2.0", "command_id": str(uuid4()), "idempotency_key": str(uuid4()), "session_id": session_id,
+                    "command_type": "SCHEDULE_CHARGE", "expected_epoch": snapshot["session_epoch"], "expected_revision": 1,
+                    "target_type": "CHARGER", "target_id": "charger-1", "payload": {"vehicle_id": "shuttle-01", "start_tick": 10},
+                    "reason": "should not book"})
+                assert command.status_code in {400, 409}, command.text
+                assert read(rt)["charge_bookings"] == []
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(previous)
+
+
+def yard_actor():
+    from backend.tests.test_depots import running_actor
+    actor = running_actor()
+    for shuttle in actor.shuttles:  # only the two under test move
+        actor.modes[shuttle.ID] = "STANDBY"
+    return actor
+
+
+def drive_in(actor, shuttle, charger_id, metres_short_of_yard):
+    from src.schemas.shuttle_data import ShuttleState
+    port = next(c for c in actor.domain.chargers if c.charger_id == charger_id)
+    port.occupied_vehicle_ids.append(actor.domain.vehicles[shuttle.ID].vehicle_id)
+    actor._head_for_bay(shuttle, actor._depot_points(shuttle, charger_id))
+    actor._set_mode(shuttle, "RETURNING_TO_DEPOT")
+    shuttle.state, shuttle.curr_vel = ShuttleState.ROUTE_LOOP, shuttle.cruise_vel
+    shuttle.progress = actor._yard_entry_m(shuttle) - metres_short_of_yard
+    shuttle.position = actor._route_evaluation(shuttle.route_ID, shuttle.progress)
+
+
+def in_bay_ready_to_leave(actor, shuttle, charger_id):
+    from src.schemas.shuttle_data import Vector2D
+    port = next(c for c in actor.domain.chargers if c.charger_id == charger_id)
+    port.occupied_vehicle_ids.append(actor.domain.vehicles[shuttle.ID].vehicle_id)
+    bay = actor.definition.bay_positions[charger_id]
+    shuttle.position = Vector2D(x=bay[0], y=bay[1])
+    actor._begin_parking(shuttle, charger_id)
+
+
+@pytest.mark.parametrize("rate", [None, "real"])
+def test_a_shuttle_driving_in_waits_outside_the_yard_for_one_driving_out(rate, request):
+    from src.services.integrated_actor import get_workflow_definition
+    data = get_workflow_definition().data
+    saved = data["charge_time_scale"]
+    data["charge_time_scale"] = 5.5 if rate else None
+    try:
+        actor = yard_actor()
+        coming, going = actor.shuttles[3], actor.shuttles[4]
+        drive_in(actor, coming, "charger-2", 5)
+        in_bay_ready_to_leave(actor, going, "charger-1")
+        wait_at = actor._yard_entry_m(coming)
+        waited, closest = 0, 1e9
+        for _ in range(3000):
+            actor.tick()
+            if actor.modes[coming.ID] == "CHARGING":
+                break
+            if actor._in_yard(going):
+                assert coming.progress <= wait_at + 1e-6, "it must not enter while the other is moving in the yard"
+                waited += coming.progress == wait_at
+                closest = min(closest, ((coming.position.x-going.position.x)**2 + (coming.position.y-going.position.y)**2)**0.5)
+        assert actor.modes[coming.ID] == "CHARGING", "and then it gets to its charger: no deadlock"
+        assert waited > 0
+        assert closest >= 10, "they never meet in the yard"
+        assert actor.modes[going.ID] == ("IN_SERVICE" if rate else "STANDBY")
+    finally:
+        data["charge_time_scale"] = saved
+
+
+def test_a_shuttle_stays_in_its_bay_until_the_one_driving_in_has_stopped():
+    actor = yard_actor()
+    coming, going = actor.shuttles[3], actor.shuttles[4]
+    drive_in(actor, coming, "charger-2", -5)  # already past the wait
+    in_bay_ready_to_leave(actor, going, "charger-1")
+    for _ in range(3000):
+        actor.tick()
+        if actor.modes[coming.ID] in {"QUEUED_FOR_CHARGE", "CHARGING"}:
+            break
+        assert going.progress == 0, "the way out stays shut while the other is moving in the yard"
+    assert actor.modes[coming.ID] in {"QUEUED_FOR_CHARGE", "CHARGING"}
+    for _ in range(3000):
+        actor.tick()
+        if actor.modes[going.ID] == "STANDBY":
+            break
+    assert actor.modes[going.ID] == "STANDBY", "then it leaves: no deadlock"
+
+
+def test_two_shuttles_arriving_together_enter_the_yard_one_at_a_time():
+    actor = yard_actor()
+    first, second = actor.shuttles[3], actor.shuttles[4]
+    drive_in(actor, first, "charger-1", 20)
+    drive_in(actor, second, "charger-2", 20)
+    for _ in range(3000):
+        actor.tick()
+        assert not (actor._in_yard(first) and actor._in_yard(second))
+        if {actor.modes[first.ID], actor.modes[second.ID]} <= {"QUEUED_FOR_CHARGE", "CHARGING"}:
+            break
+    assert {actor.modes[first.ID], actor.modes[second.ID]} <= {"QUEUED_FOR_CHARGE", "CHARGING"}

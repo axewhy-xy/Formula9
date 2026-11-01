@@ -49,6 +49,7 @@ SCENARIO_SELECTOR = "scenario-m2-integrated-r1"
 SCENARIO_ID = "m2-integrated"
 EPSILON = 1e-8
 FULL_TOLERANCE_KWH = 0.01  # auxiliary use keeps a plugged-in battery just under capacity
+YARD_WAIT_M = 15.0  # a shuttle waits this far short of the yard, clear of one driving out
 
 
 def geometry(identifier: str, points: list) -> dict:
@@ -185,6 +186,7 @@ class IntegratedSessionActor(SessionActor):
         self.charge_elapsed = {}
         self.charge_started_kwh = {}
         self.parking_chargers = {}
+        self.yard_claims = {}  # who was let into each depot's yard this tick; never outlives the tick
         self.safety_unavailable = set()
         self.continued = set()
         self.set_downs = {}
@@ -321,10 +323,47 @@ class IntegratedSessionActor(SessionActor):
         """A shuttle charged to full has no reason to park: it clears the bay and rejoins its route."""
         return bool(self.definition.data.get("charge_time_scale"))
 
+    def _yard_entry_m(self, shuttle):
+        """How far along its path a shuttle driving in waits for its depot's yard, or None if it holds no port."""
+        port = self._held_charger(shuttle)
+        if port is None:
+            return None
+        bay, road = self.definition.bay_positions[port.charger_id], self._connector(shuttle, port.charger_id)[-1]
+        total = self._routes[shuttle.route_ID]["total_length"]
+        return max(0.0, total-(abs(road[0]-bay[0])+abs(road[1]-bay[1]))-YARD_WAIT_M)
+
+    def _in_yard(self, shuttle):
+        """Whether this shuttle is on the move inside a depot's yard."""
+        if self.modes[shuttle.ID] != "RETURNING_TO_DEPOT" or not shuttle.route_ID.startswith("depot-path-"):
+            return False
+        if shuttle.ID in self.parking_chargers:
+            return shuttle.progress > EPSILON
+        entry = self._yard_entry_m(shuttle)
+        return entry is not None and shuttle.progress > entry+EPSILON
+
+    def _yard_depot(self, shuttle):
+        position = (shuttle.position.x, shuttle.position.y)
+        return min(self.definition.depots, key=lambda depot: math.dist(position, depot["position_m"]))["depot_id"]
+
+    def _may_enter_yard(self, shuttle, *, leaving=False):
+        """A shuttle driving in shares its lane with everything else in the yard, so it moves there alone;
+        those driving out each have their own aisle, so may leave together. One in the yard is on its way
+        to a stop and never waits, so the yard always clears."""
+        depot = self._yard_depot(shuttle)
+        claim = self.yard_claims.get(depot)
+        if claim is not None and claim[0] != shuttle.ID and not (leaving and claim[1]):
+            return False
+        if any(other.ID != shuttle.ID and self._in_yard(other) and self._yard_depot(other) == depot
+               and not (leaving and other.ID in self.parking_chargers) for other in self.shuttles):
+            return False
+        self.yard_claims[depot] = (shuttle.ID, leaving)
+        return True
+
     def _conflicts(self, first, first_end, second, second_end):
         # Lanes are not modelled, so a charging trip that meets traffic on the same road would hold
-        # both shuttles nose to nose for good. Charging trips pass as if in the other lane.
-        if self._back_to_work() and (first.route_ID.startswith("depot-path-") or second.route_ID.startswith("depot-path-")):
+        # both shuttles nose to nose for good. Charging trips pass as if in the other lane; in a
+        # depot's yard they take turns instead (_may_enter_yard).
+        if first.route_ID.startswith("depot-path-") or second.route_ID.startswith("depot-path-"):
             return False
         return super()._conflicts(first, first_end, second, second_end)
 
@@ -853,6 +892,10 @@ class IntegratedSessionActor(SessionActor):
                 del self.set_downs[shuttle.ID]
                 self._event(shuttle, "PASSENGERS_SET_DOWN", stop_id=set_down["stop_id"])
             return shuttle.progress
+        leaving = mode == "RETURNING_TO_DEPOT" and shuttle.ID in self.parking_chargers
+        if leaving and shuttle.progress <= EPSILON and not self._may_enter_yard(shuttle, leaving=True):
+            shuttle.curr_vel = 0  # stays in the bay until the shuttle driving in has stopped
+            return shuttle.progress
         speed_factor = 1.0
         if shuttle.ID == 0:
             for selection in self.random_incidents:
@@ -876,6 +919,10 @@ class IntegratedSessionActor(SessionActor):
         ahead = [stop for stop in self.stop_progress.get(shuttle.route_ID, []) if stop > shuttle.progress+EPSILON]
         if set_down is not None:
             ahead.append(set_down["at_m"])
+        if mode == "RETURNING_TO_DEPOT" and not leaving and shuttle.route_ID.startswith("depot-path-"):
+            wait_at = self._yard_entry_m(shuttle)
+            if wait_at is not None and shuttle.progress <= wait_at+EPSILON and end > wait_at and not self._may_enter_yard(shuttle):
+                ahead.append(wait_at)
         return min([end, *ahead])
 
     def _schedule_first_incident(self):
@@ -1052,6 +1099,7 @@ class IntegratedSessionActor(SessionActor):
             return
         self.current_tick += 1
         self.timestamp_second = self.current_tick*self.STEP_S
+        self.yard_claims = {}
         self._schedule_first_incident()
         # Older checkpoints released a port while leaving its finished shuttle
         # in the bay. Clear that shuttle physically on resume, without releasing
