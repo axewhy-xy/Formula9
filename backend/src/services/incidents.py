@@ -25,6 +25,8 @@ from src.services.incident_scenarios.simulated_catalog import SimulatedIncidentC
 
 
 FIXTURE_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "m2_incident.json"
+# A shuttle in one of these has left service for a charger (or run flat) and will not finish a detour
+LEFT_SERVICE = {"RETURNING_TO_DEPOT", "QUEUED_FOR_CHARGE", "CHARGING", "STANDBY", "OUT_OF_SERVICE"}
 
 
 class IncidentService:
@@ -303,11 +305,14 @@ class IncidentService:
                             "assumptions": self.config["assumptions"],
                         }
                     events.append(self._event(snapshot, incident, "INCIDENT_" + incident.state, data))
-            elif incident.state == "EXECUTING" and vehicle.service_state == "IN_SERVICE":
+            elif incident.state == "EXECUTING" and vehicle.service_state in {"IN_SERVICE", *LEFT_SERVICE}:
                 incident.state = "RESOLVED"
                 incident.aggregate_revision += 1
+                # A shuttle sent to a charger mid-detour never comes back to it, so the response ends there
+                reason = ("Actor completed the approved detour" if vehicle.service_state == "IN_SERVICE"
+                          else "The shuttle left the approved detour for a charger")
                 events.append(self._event(snapshot, incident, "INCIDENT_RESOLVED",
-                                          {"reason": "Actor completed the approved detour", "camera": None,
+                                          {"reason": reason, "camera": None,
                                            "service_state": vehicle.service_state,
                                            "observed_battery_kwh": vehicle.battery_kwh,
                                            "observed_battery_change_kwh": vehicle.battery_kwh - self._evidence(store, previous, incident).data["battery_at_detection_kwh"]}))

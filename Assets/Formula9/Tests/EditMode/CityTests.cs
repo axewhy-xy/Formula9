@@ -61,7 +61,9 @@ namespace Formula9.Tests
                 for (var wall = 0; wall < 4; wall++)
                 {
                     float start = wall * 10, end = start + 10;
-                    var expected = new[] { new Vector4(start, 0, 0, 0), new Vector4(start, 30, 0, 0), new Vector4(end, 30, 0, 0), new Vector4(end, 0, 0, 0) };
+                    // A 30 m residential block is an HDB tower, so its walls carry the HDB set
+                    const float set = CityMesh.HdbPair;
+                    var expected = new[] { new Vector4(start, 0, set, 0), new Vector4(start, 30, set, 0), new Vector4(end, 30, set, 0), new Vector4(end, 0, set, 0) };
                     for (var corner = 0; corner < 4; corner++)
                         Assert.Less(Vector4.Distance(expected[corner], uvs[wall * 4 + corner]), 1e-3f, $"wall {wall}, corner {corner}");
                 }
@@ -70,14 +72,21 @@ namespace Formula9.Tests
             finally { UnityEngine.Object.DestroyImmediate(mesh); }
         }
 
-        [TestCase("residential", CityMesh.HomePair)]
-        [TestCase("apartments", CityMesh.HomePair)]
-        [TestCase("retail", CityMesh.OtherPair)]
-        [TestCase("office", CityMesh.OtherPair)]
-        [TestCase("garage", CityMesh.OtherPair)]
-        public void HomesAndOtherBuildingsUseTheirOwnTextures(string type, float pair)
+        [TestCase("residential", 40, CityMesh.HdbPair)]
+        [TestCase("residential", 12, CityMesh.LowRisePair)]
+        [TestCase("apartments", 40, CityMesh.HomePair)]
+        [TestCase("apartments", 12, CityMesh.LowRisePair)]
+        [TestCase("house", 8, CityMesh.LowRisePair)]
+        [TestCase("terrace", 8, CityMesh.LowRisePair)]
+        [TestCase("office", 12, CityMesh.OfficePair)]
+        [TestCase("commercial", 20, CityMesh.OfficePair)]
+        [TestCase("yes", 60, CityMesh.OfficePair)]
+        [TestCase("yes", 12, CityMesh.OtherPair)]
+        [TestCase("retail", 6, CityMesh.OtherPair)]
+        [TestCase("garage", 4, CityMesh.OtherPair)]
+        public void EachKindOfBuildingUsesItsOwnTextures(string type, float heightM, float pair)
         {
-            var building = Square("way/1", 30);
+            var building = Square("way/1", heightM);
             building.Type = type;
             var mesh = CityMesh.Build(new[] { building });
             try
@@ -368,8 +377,10 @@ namespace Formula9.Tests
             {
                 Assert.IsTrue(view.LoadAsync(new CityClient(new OneBuilding(), new Uri("http://localhost")), "toa-payoh", CancellationToken.None).IsCompleted);
                 var buildings = rig.GetComponentsInChildren<MeshRenderer>().First(r => r.name == "Buildings").sharedMaterial;
-                foreach (var property in new[] { "_WallHome", "_WallOther", "_WindowHome", "_WindowOther" })
+                Assert.AreEqual(10, CityView.BuildingTextures.Length, "a wall and a window for each of the five sets");
+                foreach (var property in CityView.BuildingTextures.Select(t => t.Property))
                 {
+                    Assert.IsTrue(buildings.HasProperty(property), property + " is in the shader");
                     var texture = buildings.GetTexture(property);
                     Assert.IsNotNull(texture, property);
                     Assert.AreEqual(TextureWrapMode.Repeat, texture.wrapMode, property + " tiles along the wall");
@@ -402,6 +413,38 @@ namespace Formula9.Tests
                 Assert.AreEqual(1, view.BuildingCount);
                 Assert.AreEqual(0, view.RoadCount);
                 Assert.IsFalse(rig.GetComponentsInChildren<MeshRenderer>().Any(r => r.name == "Roads"));
+            }
+            finally
+            {
+                view.Dispose();
+                UnityEngine.Object.DestroyImmediate(rig);
+            }
+        }
+
+        [Test]
+        public void EveryDepotStandsInTheCityWithAChargerPostThatShowsWhenItIsTaken()
+        {
+            var rig = new GameObject("City depot rig");
+            var view = new CityView(rig.transform, null);
+            try
+            {
+                var snapshot = (FullSnapshot)ContractParser.ParseMessage(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/snapshot.json")));
+                snapshot.Chargers.Add(new Charger { ChargerId = "charger-3", AggregateRevision = 1, PortCount = 1, PowerKw = 50, OccupiedVehicleIds = new List<string>() });
+                snapshot.Depots.Add(new Depot { DepotId = "depot-2", Position = new Position { XM = 900, YM = -600 }, ChargerIds = new List<string> { "charger-3" } });
+                view.Show(snapshot, new ShuttleMotion(), 0);
+                Assert.AreEqual(2, view.DepotCount);
+                var pad = rig.GetComponentsInChildren<Transform>().Single(t => t.name == "Depot depot-2");
+                Assert.AreEqual(new Vector3(900, 0.2f, -600), pad.position, "the pad lies on the ground at the backend's position");
+                Renderer Post(string id) => rig.GetComponentsInChildren<MeshRenderer>().Single(r => r.name == "Charger " + id);
+                Assert.AreEqual(904.5f, Post("charger-3").transform.position.x, 1e-3f, "a depot's only bay is at its middle, its post beside it");
+                Assert.AreEqual(-600, Post("charger-3").transform.position.z, 1e-3f, "level with the bay, not in the lane in or out");
+                var first = Post("charger-1").transform.position.x - (float)snapshot.Depots[0].Position.XM;
+                Assert.AreEqual(-19.5f, first, 1e-3f, "two bays sit 15 m either side, as the backend lays them out, each post on its outer side");
+                var free = Post("charger-3").sharedMaterial.color;
+                snapshot.Chargers.Single(c => c.ChargerId == "charger-3").OccupiedVehicleIds.Add("shuttle-01");
+                view.Show(snapshot, new ShuttleMotion(), 1);
+                Assert.AreNotEqual(free, Post("charger-3").sharedMaterial.color, "a taken charger changes colour");
+                Assert.AreEqual(free, Post("charger-1").sharedMaterial.color, "a free one keeps its colour");
             }
             finally
             {

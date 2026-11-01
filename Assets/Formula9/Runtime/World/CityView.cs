@@ -29,6 +29,12 @@ namespace Formula9.World
         private static readonly Color StopServed = new Color(0.153f, 0.682f, 0.376f);
         private static readonly Color StopDwelling = new Color(1, 0.84f, 0.2f);
         private static readonly Color WindscreenColor = new Color(0.08f, 0.12f, 0.16f);
+        // A depot is a pad with a charger post for each bay; the backend lays its bays out 30 m apart
+        private static readonly Vector3 DepotPadSize = new Vector3(60, 0.4f, 34), ChargerPostSize = new Vector3(2, 6, 2);
+        // Shuttles drive into a bay from in front and leave it behind, so a post stands beside its bay
+        private const float ChargerSpacingM = 30, ChargerGapM = 1;
+        private static readonly Color DepotPadColor = new Color(0.122f, 0.306f, 0.349f);
+        private static readonly Color ChargerFree = new Color(0.153f, 0.682f, 0.376f), ChargerTaken = new Color(1, 0.6f, 0.1f);
         private HashSet<string> served = new HashSet<string>();
 
         private readonly Transform root;
@@ -39,6 +45,7 @@ namespace Formula9.World
         private readonly List<GameObject> routeObjects = new List<GameObject>();
         private readonly List<GameObject> draftObjects = new List<GameObject>();
         private readonly Dictionary<string, (Material Material, Color Color)> stopMarkers = new Dictionary<string, (Material, Color)>();
+        private readonly Dictionary<string, Material> chargerPosts = new Dictionary<string, Material>();
         private readonly HashSet<string> dwelling = new HashSet<string>();
         private RouteDraftView shownDraft;
         private RouteEditPreview shownPreview;
@@ -66,12 +73,15 @@ namespace Formula9.World
             if (tiles != null) tiles.TileLoaded += RefreshTiles;
         }
 
-        // Wall and window textures in Resources/Formula9/Textures, by shader property. Without all four
-        // the buildings keep their plain colours rather than showing white where a texture is missing.
-        private static readonly (string Property, string File)[] BuildingTextures =
+        // Wall and window textures in Resources/Formula9/Textures, by shader property, one pair for each of
+        // CityMesh's texture sets. Without all of them the buildings keep their plain colours rather than
+        // showing white where a texture is missing.
+        public static readonly (string Property, string File)[] BuildingTextures =
         {
             ("_WallHome", "building_wall_home"), ("_WallOther", "building_wall_other"),
+            ("_WallHdb", "building_wall_hdb"), ("_WallLowRise", "building_wall_lowrise"), ("_WallOffice", "building_wall_office"),
             ("_WindowHome", "building_window_home"), ("_WindowOther", "building_window_other"),
+            ("_WindowHdb", "building_window_hdb"), ("_WindowLowRise", "building_window_lowrise"), ("_WindowOffice", "building_window_office"),
         };
 
         private static void ApplyBuildingTextures(Material material)
@@ -218,6 +228,41 @@ namespace Formula9.World
             var key = string.Join(";", snapshot.Routes.Select(r => $"{r.RouteId}:{r.Revision}")) + snapshot.Disruptions.Count;
             if (key != routesKey) { routesKey = key; BuildRoutes(snapshot, ordered); }
             NoteDwelling(snapshot, ordered);
+            RefreshChargers(snapshot);
+        }
+
+        public int DepotCount { get; private set; }
+
+        // A charger post shows green while it has a free port and amber once every port is taken.
+        private void RefreshChargers(FullSnapshot snapshot)
+        {
+            foreach (var charger in snapshot.Chargers ?? new List<Charger>())
+                if (chargerPosts.TryGetValue(charger.ChargerId, out var material))
+                    material.color = charger.OccupiedVehicleIds.Count < charger.PortCount ? ChargerFree : ChargerTaken;
+        }
+
+        private void BuildDepots(FullSnapshot snapshot)
+        {
+            chargerPosts.Clear();
+            DepotCount = 0;
+            foreach (var depot in snapshot.Depots)
+            {
+                var at = new Vector3((float)depot.Position.XM, 0, (float)depot.Position.YM);
+                var pad = Marker(PrimitiveType.Cube, DepotPadSize, DepotPadColor, "Depot " + depot.DepotId);
+                pad.position = at + Vector3.up * DepotPadSize.y / 2;
+                routeObjects.Add(pad.gameObject);
+                for (var i = 0; i < depot.ChargerIds.Count; i++)
+                {
+                    var offset = (i - (depot.ChargerIds.Count - 1) / 2f) * ChargerSpacingM;
+                    var post = Marker(PrimitiveType.Cube, ChargerPostSize, ChargerFree, "Charger " + depot.ChargerIds[i]);
+                    // On the bay's outer side (the middle bay's east side), clear of the lanes in and out
+                    var side = (offset < 0 ? -1 : 1) * (ShuttleSize.x / 2 + ChargerGapM + ChargerPostSize.x / 2);
+                    post.position = at + new Vector3(offset + side, ChargerPostSize.y / 2, 0);
+                    chargerPosts[depot.ChargerIds[i]] = post.GetComponent<MeshRenderer>().sharedMaterial;
+                    routeObjects.Add(post.gameObject);
+                }
+                DepotCount++;
+            }
         }
 
         // The live incidents and the traffic they back up, over the roads they happened on.
@@ -324,6 +369,7 @@ namespace Formula9.World
             routeObjects.Clear();
             stopMarkers.Clear();
             CutRoutesThroughBuildings(snapshot);
+            BuildDepots(snapshot);
             foreach (var route in snapshot.Routes)
             {
                 var serving = ordered.Select((v, index) => (v, index)).Where(p => p.v.RouteId == route.RouteId).Select(p => p.index).ToList();

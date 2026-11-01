@@ -29,9 +29,12 @@ namespace Formula9.World
         private const float EdgeToleranceM = 1e-3f;
         // Less of an outline than this left over is only thin strips, like the sides of a canopy over the road
         private const float MinLeftShare = 0.2f;
-        // Each vertex's first texture coordinate is (metres along the wall, metres up, texture pair, 1 on a
+        // Each vertex's first texture coordinate is (metres along the wall, metres up, texture set, 1 on a
         // roof), so CityBuilding.shader can tile walls and windows by real size and leave roofs plain.
-        public const float HomePair = 0, OtherPair = 1;
+        // A set is one wall texture and one window texture; the numbers match the shader's.
+        public const float HomePair = 0, OtherPair = 1, HdbPair = 2, LowRisePair = 3, OfficePair = 4;
+        // From this height (about eight storeys) a block of flats is a tower, not a low-rise home
+        public const float TowerM = 25;
 
         public static Mesh Build(IEnumerable<CityBuilding> buildings, IReadOnlyList<Corridor> corridors = null)
         {
@@ -83,13 +86,21 @@ namespace Formula9.World
             return Rect.MinMaxRect(min.x, min.y, max.x, max.y);
         }
 
-        // Which wall and window textures a building uses: 0 for homes (plaster walls, pale windows),
-        // 1 for everything else (concrete walls, framed windows). Homes are the types ColorFor tints as homes.
-        private static float TexturePair(CityBuilding building)
+        // Which wall and window textures a building uses. In Singapore OSM tags HDB blocks "residential" and
+        // private condominiums "apartments", so a tall "residential" block is HDB and a tall "apartments" one
+        // a private home. Houses, and any block of flats under TowerM, are low-rise homes. Offices, shops in
+        // towers (commercial), hotels and hospitals, and untagged towers look like offices; everything else,
+        // such as shops, schools and industry, keeps the plain concrete set.
+        public static float TexturePair(CityBuilding building)
         {
+            var tall = building.HeightM >= TowerM;
             switch (building.Type)
             {
-                case "house": case "residential": case "apartments": case "terrace": case "detached": return HomePair;
+                case "residential": return tall ? HdbPair : LowRisePair;
+                case "apartments": return tall ? HomePair : LowRisePair;
+                case "house": case "terrace": case "detached": case "semidetached_house": case "bungalow": return LowRisePair;
+                case "office": case "commercial": case "hotel": case "hospital": return OfficePair;
+                case "yes": return tall ? OfficePair : OtherPair;
                 default: return OtherPair;
             }
         }
