@@ -77,6 +77,146 @@
       "title": "Candidate",
       "type": "object"
     },
+    "ChargeBooking": {
+      "additionalProperties": true,
+      "description": "One shuttle's hold on a charger port over a window of simulation ticks.\n\nSCHEDULED holds a future slot. ACTIVE means the port is taken, from dispatch through charging\nuntil the shuttle has cleared the bay. COMPLETED, CANCELLED and MISSED are final. The window\nis an estimate: an overrunning ACTIVE booking has its end_tick extended by the backend.",
+      "properties": {
+        "booking_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Booking Id",
+          "type": "string"
+        },
+        "charger_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Charger Id",
+          "type": "string"
+        },
+        "end_tick": {
+          "minimum": 0,
+          "title": "End Tick",
+          "type": "integer"
+        },
+        "is_estimate": {
+          "const": true,
+          "default": true,
+          "title": "Is Estimate",
+          "type": "boolean"
+        },
+        "origin": {
+          "enum": [
+            "OPERATOR",
+            "CHARGE_NOW",
+            "SAFETY_RETURN"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "phase": {
+          "anyOf": [
+            {
+              "enum": [
+                "DROPPING_PASSENGERS",
+                "DRIVING_TO_CHARGER",
+                "CHARGING",
+                "LEAVING_BAY",
+                "RETURNING_TO_ROUTE"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Phase"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "set_down_stop_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Set Down Stop Id"
+        },
+        "start_tick": {
+          "minimum": 0,
+          "title": "Start Tick",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "SCHEDULED",
+            "ACTIVE",
+            "COMPLETED",
+            "CANCELLED",
+            "MISSED"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "status_reason": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status Reason"
+        },
+        "trip_path_m": {
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "title": "Trip Path M",
+          "type": "array"
+        },
+        "vehicle_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Vehicle Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "booking_id",
+        "revision",
+        "vehicle_id",
+        "charger_id",
+        "status",
+        "origin",
+        "start_tick",
+        "end_tick"
+      ],
+      "title": "ChargeBooking",
+      "type": "object"
+    },
     "ChargeOption": {
       "additionalProperties": true,
       "properties": {
@@ -253,6 +393,17 @@
           "minimum": 1,
           "title": "Port Count",
           "type": "integer"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Position"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "power_kw": {
           "exclusiveMinimum": 0,
@@ -1008,6 +1159,13 @@
             "$ref": "#/$defs/Candidate"
           },
           "title": "Candidates",
+          "type": "array"
+        },
+        "charge_bookings": {
+          "items": {
+            "$ref": "#/$defs/ChargeBooking"
+          },
+          "title": "Charge Bookings",
           "type": "array"
         },
         "charge_decision_deferrals": {

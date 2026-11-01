@@ -42,6 +42,7 @@ namespace Formula9.World
         private static readonly Color ApprovedDetour = new Color(0.949f, 0.6f, 0.29f);
         private static readonly Color OtherRoads = new Color(0.588f, 0.745f, 0.902f);
         private static readonly Color DepotColor = new Color(0.122f, 0.306f, 0.349f);
+        private static readonly Color ChargingTrip = new Color(0.925f, 0.102f, 0.6f);
         private static readonly Color[] ShuttlePalette =
         {
             // No green: planned routes are green, so a green shuttle would vanish on one.
@@ -54,6 +55,9 @@ namespace Formula9.World
         private FullSnapshot snapshot;
         private readonly VisualElement tileLayer = new VisualElement { pickingMode = PickingMode.Ignore };
         private readonly VisualElement drawing = new VisualElement { pickingMode = PickingMode.Ignore };
+        // The shuttles have a layer of their own: moving them must not redraw every road and stop
+        private readonly VisualElement vehicleLayer = new VisualElement { pickingMode = PickingMode.Ignore };
+        private readonly Dictionary<string, (Label Label, Vector2 PlacedAt)> vehicleLabels = new Dictionary<string, (Label, Vector2)>();
         private readonly VisualElement labels = new VisualElement { pickingMode = PickingMode.Ignore };
         private readonly Label credit = new Label { pickingMode = PickingMode.Ignore };
         private readonly List<Image> tileViews = new List<Image>();
@@ -72,9 +76,8 @@ namespace Formula9.World
         private readonly Action<bool> showLegend;
         private readonly Label scale = new Label { pickingMode = PickingMode.Ignore };
         private readonly Label banner = new Label { pickingMode = PickingMode.Ignore };
-        // Shuttles glide between snapshots instead of jumping to each one.
-        private readonly Dictionary<string, (Vector2 From, Vector2 To, float Start, float Duration)> tracks = new Dictionary<string, (Vector2, Vector2, float, float)>();
-        private float lastSnapshotAt;
+        // Shuttles drive between snapshots along the road, as in the 3D view, instead of jumping to each one.
+        private readonly ShuttleMotion motion = new ShuttleMotion();
 
         private MapTiles tiles;
         private TransitClient transit;
@@ -87,7 +90,7 @@ namespace Formula9.World
         private Vector2 requestedCenter = new Vector2(float.NaN, float.NaN), requestedSize;
         private float requestedScale;
 
-        public string SelectedId { get => selectedId; set { selectedId = value; drawing.MarkDirtyRepaint(); } }
+        public string SelectedId { get => selectedId; set { selectedId = value; vehicleLayer.MarkDirtyRepaint(); } }
         public bool ShowsIslandWhenEmpty => islandWhenEmpty && (tiles != null || transit != null);
         private readonly Dictionary<string, IncidentRecord> incidentMarkers = new Dictionary<string, IncidentRecord>();
         public event Action<string> IncidentSelected;
@@ -105,7 +108,7 @@ namespace Formula9.World
         public FleetMap()
         {
             pickingMode = PickingMode.Position;
-            foreach (var layer in new[] { tileLayer, drawing, labels })
+            foreach (var layer in new[] { tileLayer, drawing, vehicleLayer, labels })
             {
                 layer.style.position = UnityEngine.UIElements.Position.Absolute;
                 layer.style.left = layer.style.top = layer.style.right = layer.style.bottom = 0;
@@ -134,6 +137,8 @@ namespace Formula9.World
             legend.Add(legendRows);
             LegendRow(legendRows, "Planned route", PlannedRoute, "swatch-line");
             LegendRow(legendRows, "Approved detour", ApprovedDetour, "swatch-line");
+            LegendRow(legendRows, "Trip to or from a charger", ChargingTrip, "swatch-line");
+            LegendRow(legendRows, "Charger", Glyph.ChargerColor, "swatch-square");
             LegendRow(legendRows, "Road closed", RoadClosed, "swatch-band");
             proposedLegend = LegendRow(legendRows, "Proposed route", Proposed, "swatch-line");
             notClearedLegend = LegendRow(legendRows, "Not cleared for the shuttle", RoadNotCleared, "swatch-thin");
@@ -155,8 +160,9 @@ namespace Formula9.World
                 button.AddToClassList("map-button"); button.AddToClassList("map-text-button"); controls.Add(button);
             }
             Add(controls);
-            schedule.Execute(AnimationFrame).Every(33);
+            schedule.Execute(AnimationFrame).Every(16);
             drawing.generateVisualContent += Draw;
+            vehicleLayer.generateVisualContent += DrawVehicles;
             busStopTimer = schedule.Execute(RequestBusStops);
             busStopTimer.Pause();
             RegisterCallback<GeometryChangedEvent>(_ => Refresh());
@@ -196,7 +202,7 @@ namespace Formula9.World
             if (ClickEditor(point)) return;
             if (snapshot != null)
             {
-                var marker = incidentMarkers.OrderBy(kv => Vector2.Distance(Project(kv.Value.Position.x, kv.Value.Position.y), point)).FirstOrDefault();
+                var marker = incidentMarkers.Where(kv => snapshot.Incidents.Any(i => i.IncidentId == kv.Key && !IncidentEnded(i))).OrderBy(kv => Vector2.Distance(Project(kv.Value.Position.x, kv.Value.Position.y), point)).FirstOrDefault();
                 if (marker.Key != null && Vector2.Distance(Project(marker.Value.Position.x, marker.Value.Position.y), point) <= 16)
                 { IncidentSelected?.Invoke(marker.Key); return; }
                 var nearest = snapshot.Vehicles.OrderBy(v => Vector2.Distance(ShownAt(v), point)).FirstOrDefault();
@@ -243,28 +249,30 @@ namespace Formula9.World
             offline = value;
             banner.text = "Backend offline · positions frozen at the last report";
             banner.style.display = value ? DisplayStyle.Flex : DisplayStyle.None;
-            if (value) foreach (var id in tracks.Keys.ToList()) { var t = tracks[id]; tracks[id] = (t.To, t.To, t.Start, 0); }
+            if (value) motion.Clear();
             Refresh();
         }
 
         private void UpdateTracks(FullSnapshot next)
         {
             var now = Time.realtimeSinceStartup;
-            var duration = Mathf.Clamp(now - lastSnapshotAt, 0, 1);
-            lastSnapshotAt = now;
-            if (next == null || next.SessionId != snapshot?.SessionId) tracks.Clear();
+            if (next == null || next.SessionId != snapshot?.SessionId) motion.Clear();
             if (next == null) return;
+            motion.BeginSnapshot(next.Tick, now);
+            var routes = ShuttleMotion.Routes(next);
             foreach (var vehicle in next.Vehicles)
             {
-                var to = new Vector2((float)vehicle.Position.XM, (float)vehicle.Position.YM);
-                tracks[vehicle.VehicleId] = tracks.ContainsKey(vehicle.VehicleId) ? (ShownMetres(vehicle.VehicleId, to), to, now, duration) : (to, to, now, 0);
+                // A shuttle on a charging trip drives that trip's road, not its route
+                var trip = next.ChargeBookings.FirstOrDefault(b => b.VehicleId == vehicle.VehicleId && b.Status == "ACTIVE" && b.TripPathM.Count > 1);
+                routes.TryGetValue(vehicle.RouteId, out var road);
+                if (trip != null) road = trip.TripPathM.Select(p => new Vector2((float)p[0], (float)p[1])).ToList();
+                motion.SetTarget(vehicle.VehicleId, new Vector3((float)vehicle.Position.XM, 0, (float)vehicle.Position.YM), Quaternion.identity, now, road);
             }
         }
 
         private Vector2 ShownMetres(string id, Vector2 fallback)
         {
-            if (!tracks.TryGetValue(id, out var track)) return fallback;
-            return track.Duration <= 0 ? track.To : Vector2.Lerp(track.From, track.To, (Time.realtimeSinceStartup - track.Start) / track.Duration);
+            return motion.Sample(id, Time.realtimeSinceStartup, out var position, out _) ? new Vector2(position.x, position.z) : fallback;
         }
 
         private Vector2 ShownAt(FleetVehicle vehicle)
@@ -276,10 +284,22 @@ namespace Formula9.World
         private void AnimationFrame()
         {
             if (snapshot == null || contentRect.width < 1 || contentRect.height < 1) return;
-            var now = Time.realtimeSinceStartup;
-            var gliding = !offline && tracks.Values.Any(t => t.Duration > 0 && now < t.Start + t.Duration && t.From != t.To);
-            if (gliding) RefreshLabels();
-            if (gliding || draft?.Highlighted.Count > 0 || (!offline && snapshot.Incidents.Any(i => i.State != "RESOLVED"))) drawing.MarkDirtyRepaint();
+            var gliding = !offline && motion.IsGliding(Time.realtimeSinceStartup);
+            if (gliding) MoveVehicleLabels();
+            // An incident's ring pulses around its shuttle
+            if (gliding || (!offline && snapshot.Incidents.Any(i => i.State != "RESOLVED"))) vehicleLayer.MarkDirtyRepaint();
+            if (draft?.Highlighted.Count > 0) drawing.MarkDirtyRepaint();
+        }
+
+        // Labels are placed once per snapshot, as that is costly; between them a shuttle's label just follows it.
+        private void MoveVehicleLabels()
+        {
+            foreach (var vehicle in snapshot.Vehicles)
+                if (vehicleLabels.TryGetValue(vehicle.VehicleId, out var placed))
+                {
+                    var moved = ShownAt(vehicle) - placed.PlacedAt;
+                    placed.Label.style.translate = new Translate(moved.x, moved.y);
+                }
         }
 
         private static VisualElement LegendRow(VisualElement legend, string text, Color color, string swatchClass)
@@ -367,11 +387,13 @@ namespace Formula9.World
             RefreshCredit();
             RefreshOverlays();
             drawing.MarkDirtyRepaint();
+            vehicleLayer.MarkDirtyRepaint();
         }
 
         private void RefreshLabels()
         {
             labels.Clear();
+            vehicleLabels.Clear();
             placedLabels.Clear();
             busBoxes.Clear();
             // Shuttles matter most: a stop or depot name that would cover one waits until it has passed
@@ -382,7 +404,13 @@ namespace Formula9.World
             {
                 // The selected shuttle first; a label that would cover another is left out, as in the Qt map
                 foreach (var vehicle in snapshot.Vehicles.OrderBy(v => v.VehicleId == SelectedId ? 0 : 1).ThenBy(v => v.VehicleId, StringComparer.Ordinal))
-                    PlaceLabel(vehicle.VehicleId + (snapshot.Incidents.Any(i => i.VehicleId == vehicle.VehicleId && i.State != "RESOLVED") ? " !" : ""), ShownAt(vehicle), LabelStyle.Below, DotOutline);
+                {
+                    var at = ShownAt(vehicle);
+                    var label = PlaceLabel(vehicle.VehicleId + (snapshot.Incidents.Any(i => i.VehicleId == vehicle.VehicleId && i.State != "RESOLVED") ? " !" : ""), at, LabelStyle.Below, DotOutline);
+                    if (label != null) vehicleLabels[vehicle.VehicleId] = (label, at);
+                }
+                foreach (var depot in snapshot.Depots) PlaceLabel(DepotName(depot.DepotId), Project(depot.Position.XM, depot.Position.YM), LabelStyle.Below, DepotColor);
+                foreach (var charger in snapshot.Chargers.Where(c => c.Position != null)) PlaceLabel(charger.ChargerId, Project(charger.Position.XM, charger.Position.YM), LabelStyle.Below, DepotColor);
                 if (draft == null) foreach (var (stop, colors) in ServedStops()) PlaceLabel(RouteDraftView.StopName(stop.StopId), Project(stop.Position.XM, stop.Position.YM), LabelStyle.Beside, colors.Count > 0 ? colors[0] : StopColor);
             }
             // Bus stop names last, so they never push a shuttle or session stop label off the map
@@ -397,12 +425,18 @@ namespace Formula9.World
         private enum LabelStyle { Beside, Below }
 
         // Label sizes are not known until layout, so the box is an estimate from the font size.
-        private void PlaceLabel(string text, Vector2 point, LabelStyle placement, Color color)
+        private static bool IncidentEnded(Incident incident) => incident.State == "RESOLVED" || incident.State == "UNRESOLVED";
+
+        // "depot-toa-payoh-interchange" reads as "Depot: Toa Payoh Interchange"
+        private static string DepotName(string depotId) => "Depot: " + string.Join(" ", depotId.Replace("depot-", "").Split('-')
+            .Select(word => word.Length <= 1 ? word : char.ToUpperInvariant(word[0]) + word.Substring(1)));
+
+        private Label PlaceLabel(string text, Vector2 point, LabelStyle placement, Color color)
         {
             var width = text.Length * 6.5f + 12;
             var box = placement == LabelStyle.Below ? new Rect(point.x - width / 2, point.y + 18, width, 20) : new Rect(point.x + 10, point.y - 10, width, 20);
-            if (placedLabels.Any(other => other.Overlaps(box))) return;
-            if (placement == LabelStyle.Beside && busBoxes.Any(bus => bus.Overlaps(box))) return;
+            if (placedLabels.Any(other => other.Overlaps(box))) return null;
+            if (placement == LabelStyle.Beside && busBoxes.Any(bus => bus.Overlaps(box))) return null;
             placedLabels.Add(box);
             var label = new Label(text) { pickingMode = PickingMode.Ignore };
             label.style.position = UnityEngine.UIElements.Position.Absolute;
@@ -413,6 +447,7 @@ namespace Formula9.World
             label.style.paddingLeft = label.style.paddingRight = 6;
             label.style.borderTopLeftRadius = label.style.borderTopRightRadius = label.style.borderBottomLeftRadius = label.style.borderBottomRightRadius = 6;
             labels.Add(label);
+            return label;
         }
 
         // Credits, as the OSM and LTA licences require, and why bus stops are missing if they are.
@@ -545,13 +580,8 @@ namespace Formula9.World
         {
             var painter = mesh.painter2D;
             var realMap = OnRealMap;
-            if (BusStopsShown)
-                for (var i = 0; i < busStopPositions.Count; i++)
-                {
-                    var at = Project(busStopPositions[i].X, busStopPositions[i].Y);
-                    if (!contentRect.Contains(at) || ServedByARoute(busStops[i].Code)) continue;
-                    Dot(painter, at, BusStopColor, 5);
-                }
+            // While editing they stay under the road layer; otherwise over the lines, drawn below
+            if (draft != null || snapshot == null) DrawOtherBusStops(painter);
             if (draft != null) DrawRoadLayer(painter);
             else DrawClosedRoads(painter);
             if (snapshot != null)
@@ -574,6 +604,14 @@ namespace Formula9.World
                         else Line(painter, path, routeColor, 6);
                     }
                 }
+                // Where a shuttle is driving for a charge: its path is not a route, so it would otherwise be invisible
+                foreach (var booking in snapshot.ChargeBookings.Where(b => b.Status == "ACTIVE" && b.TripPathM.Count > 1))
+                {
+                    var trip = booking.TripPathM.Select(p => Project(p[0], p[1])).ToArray();
+                    Line(painter, trip, Color.white, 10);
+                    Line(painter, trip, ChargingTrip, 6);
+                }
+                if (draft == null) DrawOtherBusStops(painter);
                 // A stop wears the colours of the shuttles that serve it: an outer ring for the first,
                 // an inner one for a second where two share it
                 if (draft != null) DrawProposal(painter);
@@ -590,13 +628,15 @@ namespace Formula9.World
                     var at = Project(depot.Position.XM, depot.Position.YM);
                     Dot(painter, at, DepotColor, 9, false);
                 }
+                foreach (var charger in snapshot.Chargers.Where(c => c.Position != null))
+                    Glyph.DrawCharger(painter, Project(charger.Position.XM, charger.Position.YM), 26);
                 foreach (var item in incidentMarkers)
                 {
                     var active = snapshot.Incidents.FirstOrDefault(i => i.IncidentId == item.Key);
-                    if (active == null) continue;
+                    // A finished incident leaves the map; its record stays in the Incident Monitor
+                    if (active == null || IncidentEnded(active)) continue;
                     var at = Project(item.Value.Position.x, item.Value.Position.y);
-                    var color = active.State == "RESOLVED" || active.State == "UNRESOLVED"
-                        ? Frozen : item.Value.Kind == "ROAD_ACCIDENT" ? ApprovedDetour : RoadClosed;
+                    var color = item.Value.Kind == "ROAD_ACCIDENT" ? ApprovedDetour : RoadClosed;
                     // Network incidents can occur off the shuttle's route: render
                     // the incident edge itself, not only route closure overlays.
                     if (item.Value.Kind == "ROAD_BLOCK" &&
@@ -611,20 +651,36 @@ namespace Formula9.World
                     Dot(painter, at, color, 12);
                     Dot(painter, at, Color.white, 3, false);
                 }
-                var ordered = snapshot.Vehicles.OrderBy(v => v.VehicleId, StringComparer.Ordinal).ToList();
-                // An incident pulses, unless the position is too old to mean anything
-                var pulse = 0.5f + 0.5f * Mathf.Sin(Time.realtimeSinceStartup * 4);
-                for (var i = 0; i < ordered.Count; i++)
+            }
+        }
+
+        private void DrawVehicles(MeshGenerationContext mesh)
+        {
+            if (snapshot == null) return;
+            var painter = mesh.painter2D;
+            var ordered = snapshot.Vehicles.OrderBy(v => v.VehicleId, StringComparer.Ordinal).ToList();
+            // An incident pulses, unless the position is too old to mean anything
+            var pulse = 0.5f + 0.5f * Mathf.Sin(Time.realtimeSinceStartup * 4);
+            for (var i = 0; i < ordered.Count; i++)
+            {
+                var vehicle = ordered[i]; var at = ShownAt(vehicle);
+                if (!offline && snapshot.Incidents.Any(n => n.VehicleId == vehicle.VehicleId && n.State != "RESOLVED"))
                 {
-                    var vehicle = ordered[i]; var at = ShownAt(vehicle);
-                    if (!offline && snapshot.Incidents.Any(n => n.VehicleId == vehicle.VehicleId && n.State != "RESOLVED"))
-                    {
-                        painter.strokeColor = new Color(RoadClosed.r, RoadClosed.g, RoadClosed.b, 1 - 0.6f * pulse); painter.lineWidth = 3;
-                        painter.BeginPath(); painter.Arc(at, 10 + 8 * pulse, 0, 360); painter.Stroke();
-                    }
-                    if (vehicle.VehicleId == SelectedId) Dot(painter, at, new Color(0.47f, 0.8f, 0.82f, 0.7f), 22, false);
-                    Glyph.DrawBus(painter, at, 30, offline ? Frozen : ShuttleColor(i));
+                    painter.strokeColor = new Color(RoadClosed.r, RoadClosed.g, RoadClosed.b, 1 - 0.6f * pulse); painter.lineWidth = 3;
+                    painter.BeginPath(); painter.Arc(at, 10 + 8 * pulse, 0, 360); painter.Stroke();
                 }
+                if (vehicle.VehicleId == SelectedId) Dot(painter, at, new Color(0.47f, 0.8f, 0.82f, 0.7f), 22, false);
+                Glyph.DrawBus(painter, at, 30, offline ? Frozen : ShuttleColor(i));
+            }
+        }
+
+        private void DrawOtherBusStops(Painter2D painter)
+        {
+            if (!BusStopsShown) return;
+            for (var i = 0; i < busStopPositions.Count; i++)
+            {
+                var at = Project(busStopPositions[i].X, busStopPositions[i].Y);
+                if (contentRect.Contains(at) && !ServedByARoute(busStops[i].Code)) Dot(painter, at, BusStopColor, 5);
             }
         }
 

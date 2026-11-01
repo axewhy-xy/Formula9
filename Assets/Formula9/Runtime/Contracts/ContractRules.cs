@@ -25,7 +25,7 @@ namespace Formula9.Contracts
     public static class ContractRules
     {
         private static readonly HashSet<string> DecisionCommands =
-            new HashSet<string> { "APPROVE_ROUTE", "APPROVE_INCIDENT_OPTION", "RESERVE_CHARGER", "CONTINUE_SERVICE" };
+            new HashSet<string> { "APPROVE_ROUTE", "APPROVE_INCIDENT_OPTION", "RESERVE_CHARGER", "CONTINUE_SERVICE", "SCHEDULE_CHARGE", "CANCEL_CHARGE_BOOKING" };
 
         // -----------------------------------------------------------------------------------
         // Function: Check

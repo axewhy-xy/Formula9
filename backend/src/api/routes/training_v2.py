@@ -11,18 +11,19 @@ from fastapi import APIRouter, Depends, FastAPI, Header, Query, Request, Respons
 from fastapi.responses import JSONResponse
 from starlette.authentication import UnauthenticatedUser
 
-from contracts.v2.models import DispatcherCommand, Id, TrainingSession
+from contracts.v2.models import ChargeSchedulePreview, ChargeScheduleRequest, DispatcherCommand, Id, TrainingSession
 from contracts.v2.sessions import CreateSessionRequest, SessionListResponse
 from contracts.v2.route_edit import RouteApprovalRequest, RouteEditPreview, RouteEditRequest, RouteEditorContext, RouteOutcome
 from src.core.config import get_settings
 from src.core.training_telemetry import boundary
 from src.persistence.training_store import TrainingStore, TrainingStoreError
 from src.services.battery_decision import submit_battery_decision
+from src.services.charge_booking import BOOKING_COMMANDS, DEFAULT_CHARGE_S, preview_slot, submit_booking_command
 from src.services.incidents import IncidentService, get_incident_service
 from src.services.route_edit import RouteEditService, get_route_edit_service
 from src.services.route_outcome import route_outcome
 from src.services.training_sessions import TrainingSessionService
-from src.services.integrated_actor import SCENARIO_ID, services_for
+from src.services.integrated_actor import SCENARIO_ID, get_workflow_definition, services_for
 
 _store: TrainingStore | None = None
 _store_lock = Lock()
@@ -189,7 +190,20 @@ async def submit_command(session_id: str, command: DispatcherCommand,
         return (await asyncio.to_thread(incidents.decide, store, actor_id, command)).model_dump(mode="json")
     if command.command_type in {"RESERVE_CHARGER", "CONTINUE_SERVICE"}:
         return (await asyncio.to_thread(submit_battery_decision, store, actor_id, command)).model_dump(mode="json")
+    if command.command_type in BOOKING_COMMANDS:
+        return (await asyncio.to_thread(submit_booking_command, store, actor_id, command)).model_dump(mode="json")
     return (await asyncio.to_thread(store.accept, actor_id, command)).model_dump(mode="json")
+
+
+@router.post("/{session_id}/charge-schedule-previews", response_model=ChargeSchedulePreview)
+async def charge_schedule_preview(session_id: str, request: ChargeScheduleRequest,
+                                  actor_id: str = Depends(get_actor_id),
+                                  service: TrainingSessionService = Depends(get_training_service)) -> ChargeSchedulePreview:
+    snapshot = await service.snapshot(session_id)
+    if snapshot.scenario.scenario_id == SCENARIO_ID:
+        data = get_workflow_definition().data
+        return preview_slot(snapshot, request, data["charge_s"], data.get("charge_time_scale"))
+    return preview_slot(snapshot, request, DEFAULT_CHARGE_S)
 
 
 @router.post("/{session_id}/incident-previews")

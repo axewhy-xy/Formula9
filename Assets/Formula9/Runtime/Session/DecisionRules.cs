@@ -74,6 +74,26 @@ namespace Formula9.Session
                 new JObject { ["option_id"] = option.OptionId, ["option_revision"] = option.Revision });
         }
 
+        // A time slot on a charger; replacing moves that booking in one step. The backend checks it again.
+        public static DispatcherCommand ScheduleChargeCommand(FullSnapshot snapshot, string vehicleId, string chargerId, long startTick, string replacing, string reason)
+        {
+            if (snapshot.Session.Status != "RUNNING") throw new ArgumentException("Charging can only be scheduled while the session runs.");
+            var charger = snapshot.Chargers.SingleOrDefault(c => c.ChargerId == chargerId);
+            if (charger == null || snapshot.Vehicles.All(v => v.VehicleId != vehicleId)) throw new ArgumentException("Refresh and choose a current shuttle and charger.");
+            return Command(snapshot, "SCHEDULE_CHARGE", "CHARGER", chargerId, charger.AggregateRevision, reason,
+                new JObject { ["vehicle_id"] = vehicleId, ["start_tick"] = startTick, ["replaces_booking_id"] = replacing });
+        }
+
+        public static DispatcherCommand CancelChargeBookingCommand(FullSnapshot snapshot, string bookingId, string reason)
+        {
+            var booking = snapshot.ChargeBookings.SingleOrDefault(b => b.BookingId == bookingId);
+            if (snapshot.Session.Status != "RUNNING" || booking == null || booking.Status != "SCHEDULED")
+                throw new ArgumentException("That booking can no longer be cancelled.");
+            var charger = snapshot.Chargers.Single(c => c.ChargerId == booking.ChargerId);
+            return Command(snapshot, "CANCEL_CHARGE_BOOKING", "CHARGER", booking.ChargerId, charger.AggregateRevision, reason,
+                new JObject { ["booking_id"] = bookingId });
+        }
+
         public static DispatcherCommand IncidentCommand(FullSnapshot snapshot, string incidentId, string candidateId, string reason)
         {
             var incident = snapshot.Incidents.Single(i => i.IncidentId == incidentId);

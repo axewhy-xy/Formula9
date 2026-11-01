@@ -29,6 +29,26 @@ namespace Formula9.World
         }
 
         // The front of a bus, centred on a point, in the shuttle's colour.
+        public static readonly Color ChargerColor = new Color(0.98f, 0.75f, 0.14f);
+
+        // A lightning bolt on an amber disc, centred on the charger.
+        public static void DrawCharger(Painter2D painter, Vector2 center, float size)
+        {
+            var radius = size / 2;
+            painter.fillColor = Color.white;
+            painter.BeginPath(); painter.Arc(center, radius + 2, 0, 360); painter.Fill();
+            painter.fillColor = ChargerColor;
+            painter.BeginPath(); painter.Arc(center, radius, 0, 360); painter.Fill();
+            painter.fillColor = new Color(0.13f, 0.13f, 0.16f);
+            painter.BeginPath();
+            foreach (var (x, y, first) in new[] { (0.16f, -0.72f, true), (-0.46f, 0.12f, false), (-0.06f, 0.12f, false), (-0.16f, 0.72f, false), (0.46f, -0.14f, false), (0.06f, -0.14f, false) })
+            {
+                var point = center + new Vector2(x, y) * radius;
+                if (first) painter.MoveTo(point); else painter.LineTo(point);
+            }
+            painter.ClosePath(); painter.Fill();
+        }
+
         public static void DrawBus(Painter2D painter, Vector2 center, float size, Color body)
         {
             var s = size / 36;

@@ -207,5 +207,29 @@ namespace Formula9.Tests
             var loop = new List<Vector2> { new Vector2(0, 0), new Vector2(50, 0), new Vector2(50, 1), new Vector2(0, 1) };
             Assert.AreEqual(2, ShuttleMotion.PathBetween(loop, new Vector3(5, 0, 0), new Vector3(5, 0, 1)).Length, "the wrong part of the route");
         }
+
+        [Test]
+        public void TheMapKeepsDrawingOnlyWhileAShuttleIsOnItsWay()
+        {
+            var motion = new ShuttleMotion();
+            motion.SetTarget("a", Vector3.zero, Quaternion.identity, 0);
+            Assert.IsFalse(motion.IsGliding(0), "A new shuttle is placed at once");
+            motion.SetTarget("a", new Vector3(10, 0, 0), Quaternion.identity, 1);
+            Assert.IsTrue(motion.IsGliding(1.5f));
+            Assert.IsFalse(motion.IsGliding(5));
+        }
+
+        [Test]
+        public void TheMapsBusGoesRoundACornerInsteadOfCuttingIt()
+        {
+            var motion = new ShuttleMotion();
+            var road = new List<Vector2> { new Vector2(0, 0), new Vector2(20, 0), new Vector2(20, 20) };
+            motion.SetTarget("a", new Vector3(10, 0, 0), Quaternion.identity, 0, road);
+            motion.SetTarget("a", new Vector3(20, 0, 10), Quaternion.identity, 1, road);
+            // Half way along the road is the corner itself; a straight line would be at (15, 5)
+            motion.Sample("a", 1 + motion.Interval * 1.1f / 2, out var position, out _);
+            Assert.AreEqual(20, position.x, 0.01f);
+            Assert.AreEqual(0, position.z, 0.01f);
+        }
     }
 }

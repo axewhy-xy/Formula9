@@ -28,6 +28,7 @@ from contracts.v2.models import (
     validate_command_against_snapshot,
 )
 from src.energy.assessment import score_charge_decision
+from src.energy.bookings import finish_hold, record_hold
 from src.energy.chargers import ChargerConflict, ChargerState, release_port, reserve_port
 from src.energy.decisions import IN_SERVICE_STATES, OPTION_LIFETIME_TICKS, vehicle_option_ids, with_battery_decisions
 from src.energy.model import ENERGY_MODELS, EnergyModel, charge_battery_kwh
@@ -121,6 +122,7 @@ def apply_charger_reservation(store: TrainingStore, command: DispatcherCommand, 
     shuttle = next(v for v in proposed.vehicles if v.vehicle_id == vehicle.vehicle_id)
     shuttle.service_state = "RETURNING_TO_DEPOT"
     shuttle.aggregate_revision += 1
+    record_hold(proposed, vehicle.vehicle_id, charger.charger_id, proposed.tick, option.out_of_service_s, "CHARGE_NOW")
     model = ENERGY_MODELS.get(proposed.scenario.energy_model_revision)
     if model is not None:
         # Reissue the remaining offers: the reserved shuttle leaves service,
@@ -290,6 +292,7 @@ def finish_charging(snapshot: FullSnapshot, vehicle_id: str, charged_s: float) -
     shuttle.battery_kwh = battery_after
     shuttle.service_state = "STANDBY"
     shuttle.aggregate_revision += 1
+    finish_hold(proposed, vehicle_id)
     proposed = with_battery_decisions(model, proposed)
     proposed.event_sequence += 1
     event = Event(event_id=str(uuid4()), event_sequence=proposed.event_sequence, tick=proposed.tick,
