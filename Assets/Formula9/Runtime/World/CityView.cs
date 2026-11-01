@@ -72,12 +72,15 @@ namespace Formula9.World
             if (tiles != null) tiles.TileLoaded += RefreshTiles;
         }
 
-        // Wall and window textures in Resources/Formula9/Textures, by shader property. Without all four
-        // the buildings keep their plain colours rather than showing white where a texture is missing.
-        private static readonly (string Property, string File)[] BuildingTextures =
+        // Wall and window textures in Resources/Formula9/Textures, by shader property, one pair for each of
+        // CityMesh's texture sets. Without all of them the buildings keep their plain colours rather than
+        // showing white where a texture is missing.
+        public static readonly (string Property, string File)[] BuildingTextures =
         {
             ("_WallHome", "building_wall_home"), ("_WallOther", "building_wall_other"),
+            ("_WallHdb", "building_wall_hdb"), ("_WallLowRise", "building_wall_lowrise"), ("_WallOffice", "building_wall_office"),
             ("_WindowHome", "building_window_home"), ("_WindowOther", "building_window_other"),
+            ("_WindowHdb", "building_window_hdb"), ("_WindowLowRise", "building_window_lowrise"), ("_WindowOffice", "building_window_office"),
         };
 
         private static void ApplyBuildingTextures(Material material)

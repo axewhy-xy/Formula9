@@ -271,13 +271,24 @@ glTFast's shaders to *Always Included Shaders* so player builds render them.
 
 The real-streets city textures its buildings' walls: plain wall on the ground floor (3.5 m, like an
 HDB void deck or a shop front) and windows above it, tinted by each building's colour. Roofs stay
-plain. Homes (residential, apartments, house, terrace, detached) use one pair of textures and every
-other building the second. `CityMesh` gives each wall vertex its distance along the outline and its
-height in metres, so `CityBuilding.shader` tiles the textures at their real size; the sizes are
-material properties (`_WallTileM`, `_WindowTileM`, `_GroundFloorM`).
+plain. Each building uses one of five sets of a wall and a window texture, chosen in
+`CityMesh.TexturePair` from its OpenStreetMap type and height (25 m, about eight storeys, makes a tower):
 
-The textures are in `Resources/Formula9/Textures`, from ambientCG under CC0 (free to use without
-attribution):
+| Set | Buildings |
+| --- | --- |
+| HDB | `residential` towers (OSM tags HDB blocks `residential`) |
+| Home | `apartments` towers (private condominiums) |
+| Low-rise | houses, terraces, detached and semi-detached houses, and `residential` or `apartments` under 25 m |
+| Office | `office`, `commercial`, `hotel`, `hospital`, and untagged (`yes`) towers |
+| Other | everything else: shops, schools, industry, garages |
+
+`CityMesh` gives each wall vertex its distance along the outline and its height in metres, so
+`CityBuilding.shader` tiles the textures at their real size; the sizes are material properties, one a
+set (`_TileHome`, `_TileOther`, `_TileHdb`, `_TileLowRise`, `_TileOffice`: wall in xy, windows in zw),
+with `_GroundFloorM` for the plain ground floor.
+
+The textures are in `Resources/Formula9/Textures`, all CC0 (free to use without attribution), from
+ambientCG, ShareTextures and Poly Haven:
 
 | File | Source |
 | --- | --- |

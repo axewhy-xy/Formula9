@@ -61,7 +61,9 @@ namespace Formula9.Tests
                 for (var wall = 0; wall < 4; wall++)
                 {
                     float start = wall * 10, end = start + 10;
-                    var expected = new[] { new Vector4(start, 0, 0, 0), new Vector4(start, 30, 0, 0), new Vector4(end, 30, 0, 0), new Vector4(end, 0, 0, 0) };
+                    // A 30 m residential block is an HDB tower, so its walls carry the HDB set
+                    const float set = CityMesh.HdbPair;
+                    var expected = new[] { new Vector4(start, 0, set, 0), new Vector4(start, 30, set, 0), new Vector4(end, 30, set, 0), new Vector4(end, 0, set, 0) };
                     for (var corner = 0; corner < 4; corner++)
                         Assert.Less(Vector4.Distance(expected[corner], uvs[wall * 4 + corner]), 1e-3f, $"wall {wall}, corner {corner}");
                 }
@@ -70,14 +72,21 @@ namespace Formula9.Tests
             finally { UnityEngine.Object.DestroyImmediate(mesh); }
         }
 
-        [TestCase("residential", CityMesh.HomePair)]
-        [TestCase("apartments", CityMesh.HomePair)]
-        [TestCase("retail", CityMesh.OtherPair)]
-        [TestCase("office", CityMesh.OtherPair)]
-        [TestCase("garage", CityMesh.OtherPair)]
-        public void HomesAndOtherBuildingsUseTheirOwnTextures(string type, float pair)
+        [TestCase("residential", 40, CityMesh.HdbPair)]
+        [TestCase("residential", 12, CityMesh.LowRisePair)]
+        [TestCase("apartments", 40, CityMesh.HomePair)]
+        [TestCase("apartments", 12, CityMesh.LowRisePair)]
+        [TestCase("house", 8, CityMesh.LowRisePair)]
+        [TestCase("terrace", 8, CityMesh.LowRisePair)]
+        [TestCase("office", 12, CityMesh.OfficePair)]
+        [TestCase("commercial", 20, CityMesh.OfficePair)]
+        [TestCase("yes", 60, CityMesh.OfficePair)]
+        [TestCase("yes", 12, CityMesh.OtherPair)]
+        [TestCase("retail", 6, CityMesh.OtherPair)]
+        [TestCase("garage", 4, CityMesh.OtherPair)]
+        public void EachKindOfBuildingUsesItsOwnTextures(string type, float heightM, float pair)
         {
-            var building = Square("way/1", 30);
+            var building = Square("way/1", heightM);
             building.Type = type;
             var mesh = CityMesh.Build(new[] { building });
             try
@@ -368,8 +377,10 @@ namespace Formula9.Tests
             {
                 Assert.IsTrue(view.LoadAsync(new CityClient(new OneBuilding(), new Uri("http://localhost")), "toa-payoh", CancellationToken.None).IsCompleted);
                 var buildings = rig.GetComponentsInChildren<MeshRenderer>().First(r => r.name == "Buildings").sharedMaterial;
-                foreach (var property in new[] { "_WallHome", "_WallOther", "_WindowHome", "_WindowOther" })
+                Assert.AreEqual(10, CityView.BuildingTextures.Length, "a wall and a window for each of the five sets");
+                foreach (var property in CityView.BuildingTextures.Select(t => t.Property))
                 {
+                    Assert.IsTrue(buildings.HasProperty(property), property + " is in the shader");
                     var texture = buildings.GetTexture(property);
                     Assert.IsNotNull(texture, property);
                     Assert.AreEqual(TextureWrapMode.Repeat, texture.wrapMode, property + " tiles along the wall");
