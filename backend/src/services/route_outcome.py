@@ -34,7 +34,10 @@ def route_outcome(store: TrainingStore, session_id: str, route_id: str) -> Route
     if route is None:
         raise TrainingStoreError("INVALID_REFERENCE", "Route was not found")
     events = _events(store, session_id, snapshot.event_sequence)
-    approval = next((e for e in reversed(events) if e.event_type == "ROUTE_APPROVED" and e.entity_id == route_id), None)
+    # A shuttle re-routed at an incident is still running the decision approved for it before the trip
+    riders = {v.vehicle_id for v in snapshot.vehicles if v.route_id == route_id}
+    approval = next((e for e in reversed(events) if e.event_type == "ROUTE_APPROVED" and
+                     (e.entity_id == route_id or riders.intersection(e.data.get("target_vehicle_ids") or []))), None)
     outcome = RouteOutcome(session_id=session_id, route_id=route_id, route_revision=route.revision, state="NOT_APPROVED")
     if approval is None:
         return outcome

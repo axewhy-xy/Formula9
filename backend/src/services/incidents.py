@@ -264,7 +264,9 @@ class IncidentService:
                 disruption.active_until_tick is not None and snapshot.tick < disruption.active_until_tick):
                 evidence = self._evidence(store, previous, incident)
                 previous_options = evidence.data["options"]
-                if any(option["dependencies"] != self._dependencies(snapshot, incident) for option in previous_options.values()):
+                # The shuttle stays held for as long as the road is closed, so the choice must stay open too.
+                expired = any(c.incident_id == incident.incident_id and c.expires_at_tick < snapshot.tick for c in snapshot.candidates)
+                if expired or any(option["dependencies"] != self._dependencies(snapshot, incident) for option in previous_options.values()):
                     incident.aggregate_revision += 1
                     snapshot.candidates = [c for c in snapshot.candidates if c.incident_id != incident.incident_id]
                     incident.candidate_ids = []
@@ -354,10 +356,17 @@ class IncidentService:
         action = option["action"]
         # Recompute wait consequences at decision time, not at option-generation time.
         consequence = dict(option["estimated_consequence"])
+        # The operator's own detour from the route editor, in place of the planned one.
+        chosen = command.payload.get("directed_edge_ids")
+        if chosen is not None and (action != "ROAD_DETOUR" or not isinstance(chosen, list) or not 0 < len(chosen) <= 1024
+                                   or not all(isinstance(edge, str) for edge in chosen)):
+            raise TrainingStoreError("INVALID_PAYLOAD", "Only a road detour takes a list of directed road segments")
         if action == "ROAD_DETOUR":
-            refreshed = self._road_preview(snapshot, incident)
-            if not refreshed.approvable or refreshed.directed_edge_ids != option["directed_edge_ids"]:
+            refreshed = (self._route_service(snapshot, incident).chosen_continuation(snapshot, incident.vehicle_id, chosen)
+                         if chosen else self._road_preview(snapshot, incident))
+            if not refreshed.approvable or refreshed.directed_edge_ids != (chosen or option["directed_edge_ids"]):
                 raise TrainingStoreError("NO_FEASIBLE_ROUTE", "Road detour no longer passes validation")
+            consequence = refreshed.edited.model_dump(mode="json")
             route = next(r for r in snapshot.routes if r.route_id == shuttle.route_id)
             detour = RouteRevision(route_id=incident.incident_id + "-detour", revision=1,
                                   scene_revision=snapshot.scene_revision, directed_edge_ids=refreshed.directed_edge_ids,
@@ -402,7 +411,7 @@ class IncidentService:
             "estimated_additional_service_delay_s": round(response_s + consequence["duration_s"] - option["baseline"]["duration_s"], 6),
             "estimated_additional_energy_kwh": round(self.routes._fixture["auxiliary_kw"] * response_s / 3600 +
                                                      consequence["energy_kwh"] - option["baseline"]["energy_kwh"], 6),
-            "rule_outcomes": option["checks"] if action == "ROAD_DETOUR" else [c.model_dump(mode="json") for c in continuation.checks],
+            "rule_outcomes": [c.model_dump(mode="json") for c in (refreshed if action == "ROAD_DETOUR" else continuation).checks],
             "energy_model_revision": snapshot.scenario.energy_model_revision,
             "consequence_model": "m2_route_detour.json declared comparison parameters",
         }
