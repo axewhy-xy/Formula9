@@ -8,6 +8,7 @@ using Formula9.Backend;
 using Formula9.Contracts;
 using UnityEngine;
 using UnityEngine.Rendering;
+using HealthbarGames;
 
 namespace Formula9.World
 {
@@ -92,12 +93,30 @@ namespace Formula9.World
         public Bounds Bounds { get; private set; }
         public string IncidentStatus => incidents.Status;
 
-        public CityView(Transform parent, MapTiles tiles, TransitClient transit = null)
+        // The city can be opened with the legacy two-argument constructor, the
+        // LTA transit client, the traffic-light prefab, or both dependencies.
+        // Use the four-argument overload when supplying both optional features.
+        private readonly List<GameObject> trafficLightObjects = new List<GameObject>();
+        public int TrafficLightCount { get; private set; }
+        private readonly GameObject trafficLightPrefab;
+        private IReadOnlyList<CityRoad> loadedRoads = Array.Empty<CityRoad>();
+
+        public CityView(Transform parent, MapTiles tiles)
+            : this(parent, tiles, (TransitClient)null, (GameObject)null) { }
+
+        public CityView(Transform parent, MapTiles tiles, TransitClient transit)
+            : this(parent, tiles, transit, (GameObject)null) { }
+
+        public CityView(Transform parent, MapTiles tiles, GameObject trafficLightPrefab)
+            : this(parent, tiles, (TransitClient)null, trafficLightPrefab) { }
+
+        public CityView(Transform parent, MapTiles tiles, TransitClient transit, GameObject trafficLightPrefab)
         {
             root = new GameObject("City").transform;
             root.SetParent(parent, false);
             this.tiles = tiles;
             this.transit = transit;
+            this.trafficLightPrefab = trafficLightPrefab;
             buildingMaterial = Own(new Material(Shader.Find("Formula9/CityBuilding")));
             ApplyBuildingTextures(buildingMaterial);
             lineMaterial = Own(new Material(Shader.Find("Sprites/Default")));
@@ -146,8 +165,7 @@ namespace Formula9.World
             city.GetComponent<MeshRenderer>().sharedMaterial = buildingMaterial;
             BuildGround();
             await LoadRoadsAsync(client, area, cancellation);
-            // Buildings become visible immediately; LTA shelters arrive as soon
-            // as the independent bounded bus-stop requests finish.
+            // Buildings and roads load first. LTA shelters are fetched independently.
             if (transit != null)
             {
                 busStopCancellation?.Cancel();
@@ -156,6 +174,13 @@ namespace Formula9.World
                 _ = LoadLtaSheltersAsync(busStopCancellation.Token);
             }
             else Debug.LogWarning("[CityView] No TransitClient connected: LTA bus-stop shelters cannot be loaded.");
+
+            // Keep main's traffic light rendering as a separate optional visual.
+            try { await LoadTrafficLightsAsync(client, area, cancellation); }
+            catch (Exception error) when (!(error is OperationCanceledException))
+            {
+                Debug.LogWarning("[CityView] Traffic-light visuals unavailable: " + error.Message);
+            }
         }
 
         public void SetVisible(bool visible) { if (root != null) root.gameObject.SetActive(visible); }
@@ -173,6 +198,7 @@ namespace Formula9.World
             }
             cancellation.ThrowIfCancellationRequested();
             RoadCount = roads.Count;
+            loadedRoads = roads;
             roadSegments.Clear();
             foreach (var cityRoad in roads)
             {
@@ -560,6 +586,84 @@ namespace Formula9.World
             }
         }
 
+        private async Task LoadTrafficLightsAsync(CityClient client, string area, CancellationToken cancellation)
+        {
+            var prefab = trafficLightPrefab != null ? trafficLightPrefab :
+                Resources.Load<GameObject>("Formula9/TrafficLights");
+            if (prefab == null)
+            {
+                Debug.LogWarning("Traffic light prefab is missing. Skipping traffic light rendering.");
+                return;
+            }
+
+            List<CitySignalTrafficLight> signals;
+            try
+            {
+                signals = await client.GetSignalTrafficLightAsync(area, cancellation);
+            }
+
+            catch (Exception error) when (!(error is OperationCanceledException))
+            {
+                Debug.LogWarning("Failed to load traffic signals from backend: " + error.Message);
+                return;
+            }
+
+            cancellation.ThrowIfCancellationRequested();
+
+            var filteredSignals = TrafficLightPlacement.OnePerPole(signals);
+
+            TrafficLightCount = filteredSignals.Count;
+            if (filteredSignals.Count > 0 && TrafficLightManager.Instance != null)
+            {
+                var first = filteredSignals[0];
+                TrafficLightManager.Instance.InitializeTiming(new CitySignalTiming
+                {
+                    GreenS = (int)first.GL_duration,
+                    YellowS = (int)first.YL_duration,
+                    AllRedS = (int)first.RL_duration,
+                });
+                if (traffic != null) TrafficLightManager.Instance.SetClock(() => traffic.SignalClockS);
+            }
+
+            var trafficLightsContainer = new GameObject("TrafficLights");
+            trafficLightsContainer.transform.SetParent(root, false);
+
+            foreach (var signal in filteredSignals)
+            {
+                var pose = TrafficLightPlacement.Place(signal, loadedRoads);
+
+                var lightObj = UnityEngine.Object.Instantiate(prefab, pose.Position, pose.Rotation, trafficLightsContainer.transform);
+                lightObj.name = $"TrafficLight_{signal.Id ?? signal.Junction}";
+                if (pose.Mirrored) lightObj.transform.localScale = new Vector3(-1, 1, 1);
+
+                trafficLightObjects.Add(lightObj);
+                var lightScript = lightObj.GetComponentInChildren<HaloTrafficLight>();
+                if (lightScript == null)
+                {
+                    Debug.LogWarning($"[CityView] FAILED: Instantiated prefab for '{lightObj.name}' is missing the HaloTrafficLight component!");
+                }
+
+                if (TrafficLightManager.Instance == null)
+                {
+                    Debug.LogWarning("[CityView] FAILED: TrafficLightManager.Instance returned null!");
+                }
+
+                if (lightScript != null && TrafficLightManager.Instance != null)
+                {
+                    string junctionId = signal.Junction ?? signal.Id ?? "default_junction";
+                    int offsetS = (int)signal.OffsetS;
+                    int phase = signal.Phase;
+
+                    TrafficLightManager.Instance.RegisterTrafficLight(lightScript, junctionId, offsetS, phase);
+                    //Debug.LogWarning($"[CityView] Spawned & Registered light for junction: {junctionId}, Phase: {signal.Phase}, Offset: {signal.OffsetS}");
+                }
+            }
+
+            Debug.LogWarning(filteredSignals.Count < signals.Count
+            ? $"Successfully rendered {TrafficLightCount} unique traffic lights (filtered out {signals.Count - TrafficLightCount} duplicates)."
+            : $"Successfully rendered {TrafficLightCount} traffic lights into the 3D map.");
+        }
+
         // Pale speckle that the road colours tint. Its mipmaps average out to flat colour far away.
         private static Texture2D AsphaltGrain()
         {
@@ -905,6 +1009,7 @@ namespace Formula9.World
             traffic?.Dispose();
             traffic = null;
             if (root != null) WorldBuilder.Remove(root.gameObject);
+            trafficLightObjects.Clear();
             foreach (var item in owned)
             {
                 if (Application.isPlaying) UnityEngine.Object.Destroy(item);
