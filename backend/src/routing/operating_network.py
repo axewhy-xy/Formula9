@@ -86,6 +86,12 @@ class OperatingNetwork:
         shuttle can't use is still driven, so validation can point at it; between waypoints the
         plan keeps to roads it may use. Returns the edges, or the waypoint that could not be reached.
         """
+        best, unreached = self._through(start_node, end_node, stops, waypoints, closed, config)
+        return (best[1], unreached) if best else ([], unreached)
+
+    def _through(self, start_node: int, end_node: int, stops: list[list[str]], waypoints: list[str],
+                 closed: set[str], config: dict, incoming_edge: str | None = None):
+        """The best plan as (length, edges), or None with the waypoint that could not be reached."""
         choices = [[key, *([twin_id(key)] if twin_id(key) in self.edges else [])] for key in waypoints]
         usable = {key for key in self.edges if key not in closed and self.fit_status(key, config) == FITS}
         usable.update(key for options in [*choices, *stops] for key in options)
@@ -94,36 +100,42 @@ class OperatingNetwork:
         # is closed all along. Allowed only for such a waypoint, so validation reports each one.
         anywhere = _Planner(self, set(self.edges))
         sequence = [list(options) for options in stops]
-        best = planner.route(start_node, end_node, sequence)
+        best = planner.route(start_node, end_node, sequence, incoming_edge=incoming_edge)
         for waypoint, options in zip(waypoints, choices):
-            placed = (self._place(planner, start_node, end_node, sequence, options)
-                      or self._place(anywhere, start_node, end_node, sequence, options))
+            placed = (self._place(planner, start_node, end_node, sequence, options, incoming_edge)
+                      or self._place(anywhere, start_node, end_node, sequence, options, incoming_edge))
             if placed is None:
-                return [], waypoint
+                return None, waypoint
             best, sequence = placed
             if best is not None and any(key not in usable for key in best[1]):
                 planner = anywhere
-        return (best[1], None) if best else ([], None)
+        return best, None
 
     @staticmethod
-    def _place(planner: "_Planner", start_node: int, end_node: int, sequence: list[list[str]], options: list[str]):
+    def _place(planner: "_Planner", start_node: int, end_node: int, sequence: list[list[str]], options: list[str],
+               incoming_edge: str | None = None):
         placed = None
         for position in range(len(sequence) + 1):
             candidate = [*sequence[:position], options, *sequence[position:]]
-            result = planner.route(start_node, end_node, candidate)
+            result = planner.route(start_node, end_node, candidate, incoming_edge=incoming_edge)
             if result is not None and (placed is None or result[0] < placed[0][0]):
                 placed = (result, candidate)
         return placed
 
-    def continuation(self, prefix: list[str], end_node: int, stops: list[list[str]],
-                     closed: set[str], config: dict) -> list[str]:
-        """Keep the driven prefix and plan from its last road, respecting its next turn."""
+    def continuation(self, prefix: list[str], end_node: int, stops: list[list[str]], closed: set[str], config: dict,
+                     waypoints: list[str] = ()) -> tuple[list[str], str | None]:
+        """Keep the driven prefix and plan from its last road through any waypoints, respecting its next turn.
+
+        Only a picked road may be closed or unfit, so validation can point at it. Returns the edges,
+        or the waypoint that could not be reached.
+        """
         if not prefix or any(edge not in self.edges or edge in closed for edge in prefix):
-            return []
-        usable = {key for key in self.edges if key not in closed and self.fit_status(key, config) == FITS}
-        result = _Planner(self, usable).route(self.edges[prefix[-1]]["target"], end_node, stops,
-                                              incoming_edge=prefix[-1])
-        return prefix + result[1] if result else []
+            return [], None
+        open_stops = [[key for key in options if key not in closed and self.fit_status(key, config) == FITS]
+                      for options in stops]
+        best, unreached = self._through(self.edges[prefix[-1]]["target"], end_node, open_stops, list(waypoints),
+                                        closed, config, incoming_edge=prefix[-1])
+        return (prefix + best[1] if best else []), unreached
 
 
 class _Planner:

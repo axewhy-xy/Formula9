@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Formula9.Contracts;
+using Formula9.Session;
 
 namespace Formula9.UI
 {
@@ -30,7 +31,7 @@ namespace Formula9.UI
         public static int Stage(FullSnapshot snapshot, bool routeClosed, bool hasDraft, RouteEditPreview preview)
         {
             if (snapshot == null) return 0;
-            if (snapshot.Session.Status != "READY") return 4;
+            if (snapshot.Session.Status != "READY" && DecisionRules.HeldIncident(snapshot) == null) return 4;
             if (!routeClosed) return 3;
             if (preview != null) return preview.Approvable ? 3 : 2;
             return hasDraft ? 2 : 1;

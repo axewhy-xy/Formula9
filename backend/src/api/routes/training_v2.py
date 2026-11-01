@@ -124,7 +124,7 @@ def route_editor(session_id: str, route_id: str,
                  service: RouteEditService = Depends(get_route_edit_service)) -> RouteEditorContext:
     baseline = store.snapshot(session_id)
     service, _ = services_for(baseline, routes=service)
-    return service.editor_context(baseline, route_id)
+    return service.for_route(baseline, route_id).editor_context(baseline, route_id)
 
 
 @router.get("/{session_id}/routes/{route_id}/outcome", response_model=RouteOutcome)
@@ -144,7 +144,7 @@ def route_preview(session_id: str, draft: RouteEditRequest,
         snapshot = store.snapshot(session_id)
         service, _ = services_for(snapshot, routes=service)
         fields.update(boundary(snapshot))
-        result = service.preview(snapshot, draft)
+        result = service.for_route(snapshot, draft.route_id).draft_preview(snapshot, draft)
         fields.update(preview_id=result.preview_id, outcome=result.validation)
         return result
 
