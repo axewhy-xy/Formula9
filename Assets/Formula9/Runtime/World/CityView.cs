@@ -45,12 +45,14 @@ namespace Formula9.World
         private string shownHighlights, shownWaypoints, shownClosures;
         private string routesKey, hiddenShuttle;
         private Material buildingMaterial, lineMaterial;
+        private readonly CityIncidents incidents;
         private List<CityBuilding> buildings;
         private Mesh buildingMesh;
 
         public int BuildingCount { get; private set; }
         public int RoadCount { get; private set; }
         public Bounds Bounds { get; private set; }
+        public string IncidentStatus => incidents.Status;
 
         public CityView(Transform parent, MapTiles tiles)
         {
@@ -60,6 +62,7 @@ namespace Formula9.World
             buildingMaterial = Own(new Material(Shader.Find("Formula9/CityBuilding")));
             ApplyBuildingTextures(buildingMaterial);
             lineMaterial = Own(new Material(Shader.Find("Sprites/Default")));
+            incidents = new CityIncidents(root, buildingMaterial, lineMaterial);
             if (tiles != null) tiles.TileLoaded += RefreshTiles;
         }
 
@@ -217,6 +220,12 @@ namespace Formula9.World
             NoteDwelling(snapshot, ordered);
         }
 
+        // The live incidents and the traffic they back up, over the roads they happened on.
+        public void ShowIncidents(IEnumerable<IncidentRecord> records, FullSnapshot snapshot, IReadOnlyList<DraftRoad> network, float now) =>
+            incidents.Show(records, snapshot, network, now);
+
+        public bool TryGetIncidentSite(string incidentId, out Vector2 site) => incidents.TryGetSite(incidentId, out site);
+
         // A route is a paler shade of its shuttle, so the shuttle stands out on its own road.
         private static Color RouteTint(Color shuttle)
         {
@@ -366,6 +375,7 @@ namespace Formula9.World
             foreach (var pair in shuttles)
                 if (motion.Sample(pair.Key, now, out var position, out var rotation))
                     pair.Value.SetPositionAndRotation(position, rotation);
+            incidents.Tick(now, id => shuttles.TryGetValue(id, out var shuttle) ? shuttle : null);
         }
 
         public bool TryGetShuttle(string id, out Vector3 position)
@@ -400,6 +410,7 @@ namespace Formula9.World
         public void Dispose()
         {
             if (tiles != null) tiles.TileLoaded -= RefreshTiles;
+            incidents.Dispose();
             if (root != null) WorldBuilder.Remove(root.gameObject);
             foreach (var item in owned)
             {

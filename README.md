@@ -280,11 +280,17 @@ The textures are in `Resources/Formula9/Textures`, from ambientCG under CC0 (fre
 attribution):
 
 | File | Source |
-|---|---|
+| --- | --- |
 | `building_wall_home.png` | [Plaster001](https://ambientcg.com/view?id=Plaster001) |
 | `building_wall_other.png` | [Concrete034](https://ambientcg.com/view?id=Concrete034) |
 | `building_window_home.png` | [Facade006](https://ambientcg.com/view?id=Facade006) |
 | `building_window_other.png` | [Facade019A](https://ambientcg.com/view?id=Facade019A) |
+| `building_wall_hdb.png` | [Plaster002](https://ambientcg.com/a/Plaster002) |
+| `building_window_hdb.png` | [Facade 1](https://www.sharetextures.com/textures/other/facade_1) |
+| `building_wall_lowrise.png` | [Plaster Brick Pattern](https://polyhaven.com/a/plaster_brick_pattern) |
+| `building_window_lowrise.png` | [Facade018A](https://ambientcg.com/a/Facade018A) |
+| `building_wall_office.png` | [Exterior Wall Cladding 03](https://polyhaven.com/a/exterior_wall_cladding_03) |
+| `building_window_office.png` | [Facade005](https://ambientcg.com/a/Facade005) |
 
 ## Alerts
 
@@ -350,8 +356,9 @@ set FORMULA9_E2E_BACKEND_URL=http://127.0.0.1:8010
 Never point `FORMULA9_E2E_BACKEND_URL` at the team's shared backend. The `Render` test draws the real scene and needs a GPU,
 so it is skipped under `-nographics`; set `FORMULA9_RENDER_OUT` to a `.png` path to keep the
 image. `RouteWalkthrough`, in the same category, plays the routing exercise through the real UI in Play
-mode and keeps a picture and a log line per step in `FORMULA9_WALKTHROUGH_OUT`; it also needs
-`FORMULA9_BACKEND_URL` at the isolated backend.
+mode and keeps a picture and a log line per step in `FORMULA9_WALKTHROUGH_OUT`. It signs up
+throwaway users too, so it is skipped unless `FORMULA9_BACKEND_URL` is also set, at the isolated
+backend.
 
 The workflow tests also cover stale route graph replies, inclusive offer expiry ticks,
 lost approval replies, readiness payloads, and canonical mesh picks against the shared

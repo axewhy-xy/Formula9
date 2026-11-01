@@ -27,7 +27,7 @@ namespace Formula9.UI
         private readonly DropdownField routes, incidents, candidates;
         private readonly TextField routeReason, chargeReason, incidentReason;
         private readonly Label routeProblem, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes, incidentData, incidentReport, selection;
-        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowClosure, approve, routeStart, routeWatch, previewIncident, approveIncident, history, debrief;
+        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowClosure, routeDriver, approve, routeStart, routeWatch, previewIncident, approveIncident, rerouteIncident, history, debrief;
         private readonly FleetMap evidenceMap;
         private readonly VisualElement routeStages, routeWaypoints, routeIssues, routeMetrics, routeDecide, routeFeedback, routeApply, routeOutcomePanel, routeOutcomeRows, fleetTable;
         private readonly List<VisualElement> operationalViews;
@@ -39,7 +39,7 @@ namespace Formula9.UI
         private List<RouteWaypoint> draft = new List<RouteWaypoint>();
         private int historyIndex;
         private long draftRevision, checkedRevision = -1, requestGeneration, incidentGeneration;
-        private string dependencies, boundary, incidentBoundary, ledgerSession;
+        private string dependencies, boundary, incidentBoundary, ledgerSession, heldIncident, heldVehicle;
         private bool routeBusy, incidentBusy, reloadContext, previewQueued, suggesting, outcomeBusy;
         private float acceptedAt, outcomeAt;
         private long outcomeSequence = -1;
@@ -89,8 +89,9 @@ namespace Formula9.UI
             Bind(root, "camera-overview", () => world.Overview());
 
             routes = root.Q<DropdownField>("routes");
-            routes.RegisterValueChangedCallback(_ => { ResetDraft(); dependencies = null; RequestContext(); });
+            routes.RegisterValueChangedCallback(_ => { ResetDraft(); dependencies = null; RequestContext(); if (world.Driving) DriveRoute(); });
             Bind(root, "refresh", RequestContext);
+            routeDriver = Bind(root, "route-driver", ToggleDriverView);
             routeStages = root.Q("route-stages");
             foreach (var stage in RoutePresenter.Stages) { var chip = new Label(stage); chip.AddToClassList("route-stage"); routeStages.Add(chip); }
             routeProblem = root.Q<Label>("route-problem");
@@ -137,6 +138,7 @@ namespace Formula9.UI
             incidentTable = Table(root.Q("incident-table-host"), "", "Incident ID", "Shuttle ID", "State", "Detected tick", "Options");
             candidateTable = Table(root.Q("candidate-table-host"), "", "Candidate", "Action", "Validation", "Expires tick", "Assumptions");
             Bind(root, "incident-focus", FocusIncident);
+            rerouteIncident = Bind(root, "incident-reroute", ShowRoutePlanning);
             candidates = root.Q<DropdownField>("candidates");
             candidates.RegisterValueChangedCallback(_ => { ClearIncidentPreview(); UpdateActions(); });
             incidentReason = root.Q<TextField>("incident-reason");
@@ -180,7 +182,7 @@ namespace Formula9.UI
             var currentBoundary = s == null ? null : $"{s.SessionId}/{s.SessionEpoch}";
             if (boundary != currentBoundary)
             {
-                boundary = currentBoundary; dependencies = null; context = null; requestGeneration++; approvedDraft = null;
+                boundary = currentBoundary; dependencies = null; context = null; requestGeneration++; approvedDraft = null; heldIncident = heldVehicle = null;
                 if (ledgerSession != s?.SessionId) { ledger.Clear(); ledgerSession = s?.SessionId; }
                 routeReason.value = chargeReason.value = incidentReason.value = "";
                 draft = new List<RouteWaypoint>(); draftHistory.Clear(); draftHistory.Add(new List<RouteWaypoint>()); historyIndex = 0;
@@ -198,7 +200,8 @@ namespace Formula9.UI
                 draft = new List<RouteWaypoint>(); draftHistory.Clear(); draftHistory.Add(new List<RouteWaypoint>()); historyIndex = 0;
                 outcomeSequence = -1;
             }
-            Choices(routes, s.Routes.Select(r => r.RouteId));
+            Choices(routes, DecisionRules.SelectableRoutes(s));
+            FollowHeldIncident(s);
             var changed = DecisionRules.RouteDependencies(s, routes.value);
             if (changed != dependencies)
             {
@@ -235,8 +238,9 @@ namespace Formula9.UI
                     "If there are no affected route edges, there is no effect on operations.";
             else
                 incidentData.text = $"{(selectedIncident.IncidentId.Contains("road_accident") ? "ROAD ACCIDENT" : "ROAD BLOCK")} | {selectedIncident.State}\n" +
-                    "This incident requires operator review. Select an option and preview its consequences before approval.";
+                    "This incident requires operator review. Select an option and preview its consequences before approval, or re-route the shuttle on the map.";
             incidentDecisions.style.display = s.Incidents.Count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
+            rerouteIncident.style.display = selectedIncident != null && selectedIncident.IncidentId == heldIncident ? DisplayStyle.Flex : DisplayStyle.None;
             candidates.style.display = hasOptions ? DisplayStyle.Flex : DisplayStyle.None;
             incidentReason.style.display = hasOptions ? DisplayStyle.Flex : DisplayStyle.None;
             previewIncident.style.display = hasOptions ? DisplayStyle.Flex : DisplayStyle.None;
@@ -275,11 +279,14 @@ namespace Formula9.UI
             routeClear.SetEnabled(edit && (draft.Count > 0 || preview != null));
             approve.SetEnabled(edit && !routeBusy && preview != null && preview.Approvable && DecisionRules.RoutePreviewMatches(s, preview) && !string.IsNullOrWhiteSpace(routeReason.value));
             routeApplyNote.text = RoutePresenter.ApprovalNote(s, preview, routeReason.value);
-            routes.SetEnabled(!session.HasPendingCommand && !routeBusy);
+            routes.SetEnabled(!session.HasPendingCommand && !routeBusy && heldIncident == null);
             var routeClosed = s != null && TrainingPresenter.AssignedRouteIsClosed(s);
             routeStart.style.display = s?.Session.Status == "READY" && !routeClosed ? DisplayStyle.Flex : DisplayStyle.None;
             routeStart.SetEnabled(Current && s?.Session.Status == "READY" && !routeClosed);
             routeWatch.style.display = s != null && s.Session.Status != "READY" && outcome?.VehicleId != null ? DisplayStyle.Flex : DisplayStyle.None;
+            routeDriver.SetEnabled(world.Driving || (world.CanDrive && RouteVehicle() != null));
+            routeDriver.text = world.Driving ? "Leave driver view" : "Driver view";
+            routeDriver.EnableInClassList("segment-selected", world.Driving);
             foreach (var button in offerTable.Query<Button>().ToList()) { var option = s?.ChargeOptions.FirstOrDefault(o => o.OptionId == (string)button.userData); button.SetEnabled(option != null && OfferOpen(s, option)); }
             var candidate = s?.Candidates.FirstOrDefault(c => c.CandidateId == candidates.value && c.IncidentId == incidents.value);
             var decision = Current && !incidentBusy && s?.Session.Status == "RUNNING" && candidate?.Validation == "PASS" && candidate.ExpiresAtTick >= s.Tick &&
@@ -294,7 +301,37 @@ namespace Formula9.UI
             if (draftView != null && draftView.Editable != (edit && shownPage == RoutePage)) ShowDraftInViews();
         }
 
-        private bool Editable(FullSnapshot s) => Current && context != null && s?.Session.Status == "READY";
+        private bool Editable(FullSnapshot s) => Current && context != null && (s?.Session.Status == "READY" || DecisionRules.ReroutableRoute(s) == context.RouteId);
+
+        private static bool Drafting(FullSnapshot s) => s?.Session.Status == "READY" || DecisionRules.HeldIncident(s) != null;
+
+        // A closure holding a shuttle brings the route editor to that shuttle's route, whatever the
+        // operator was looking at. A decision, or the road reopening, ends it and leaves the editor there.
+        // Someone in a driver's seat stays in it, in the shuttle they chose, until they leave it.
+        private void FollowHeldIncident(FullSnapshot s)
+        {
+            var held = DecisionRules.HeldIncident(s);
+            if (held?.IncidentId == heldIncident) return;
+            heldIncident = held?.IncidentId;
+            heldVehicle = held?.VehicleId ?? heldVehicle;
+            var route = s.Vehicles.FirstOrDefault(v => v.VehicleId == heldVehicle)?.RouteId;
+            if (route != null) routes.SetValueWithoutNotify(route);
+            ResetDraft();
+            RenderWaypoints();
+            dependencies = null;
+            if (held == null)
+            {
+                // A route is edited on the map; running, it is watched in 3D, or from the driver's seat
+                if (shownPage == RoutePage && heldVehicle != null && !world.Driving) world.WatchShuttle(heldVehicle);
+                return;
+            }
+            Choices(incidents, s.Incidents.Select(i => i.IncidentId));
+            incidents.SetValueWithoutNotify(held.IncidentId);
+            if (!world.Driving) SelectVehicle(held.VehicleId);
+            notify($"{held.VehicleId} is held at a road closure. Route it round the closure, or choose another option in the Incident Monitor.");
+            ShowPage(RoutePage);
+            if (!world.Driving) world.ShowMap(true);
+        }
 
         private void InvalidateRoute()
         {
@@ -315,7 +352,7 @@ namespace Formula9.UI
             draftView.Highlighted = RoutePresenter.Highlighted(preview);
             var s = session.Store.Snapshot;
             draftView.Editable = Editable(s) && shownPage == RoutePage;
-            world.SetRouteDraft(context, draft.Where(w => w.EdgeId == null).Select(w => w.NodeId).ToList(), preview, draftView, shownPage == RoutePage && s?.Session.Status == "READY");
+            world.SetRouteDraft(context, draft.Where(w => w.EdgeId == null).Select(w => w.NodeId).ToList(), preview, draftView, shownPage == RoutePage && Drafting(s));
         }
 
         private void ResetDraft()
@@ -402,6 +439,14 @@ namespace Formula9.UI
         private async Task ApproveRoute()
         {
             if (!Current || preview == null) return;
+            var s = session.Store.Snapshot;
+            if (s.Session.Status != "READY")
+            {
+                // FollowHeldIncident clears the draft once a snapshot shows the incident decided; a refusal keeps it.
+                if (await session.SubmitAsync(DecisionRules.RerouteCommand(s, preview, routeReason.value))) await session.RefreshAsync();
+                InvalidateRoute(); Render();
+                return;
+            }
             var approved = (preview.RouteId, preview.RouteRevision);
             if (!await session.ApproveRouteAsync(preview, routeReason.value)) return;
             // Render clears the draft once a snapshot shows the route's new revision; a refresh may
@@ -415,7 +460,36 @@ namespace Formula9.UI
         {
             var s = session.Store.Snapshot;
             if (!Current || s?.Session.Status != "READY") return;
-            if (await session.SendControlAsync("START")) { WatchRoute(); await session.RefreshAsync(); }
+            if (await session.SendControlAsync("START")) { if (!world.Driving) WatchRoute(); await session.RefreshAsync(); }
+        }
+
+        // The shuttle this route's driver view rides in: the selected one if it is on this route.
+        private string RouteVehicle()
+        {
+            var onRoute = session.Store.Snapshot?.Vehicles.Where(v => v.RouteId == routes.value).OrderBy(v => v.VehicleId, StringComparer.Ordinal).Select(v => v.VehicleId).ToList();
+            if (onRoute == null) return null;
+            return onRoute.Contains(world.SelectedId) ? world.SelectedId : outcome?.VehicleId ?? onRoute.FirstOrDefault();
+        }
+
+        private void DriveRoute()
+        {
+            var vehicle = RouteVehicle();
+            if (vehicle == null) return;
+            SelectVehicle(vehicle);
+            world.DriveSelected();
+        }
+
+        private void ToggleDriverView()
+        {
+            if (world.Driving)
+            {
+                world.StopDriving();
+                // A closure that came up during the drive is waiting on the map
+                var held = DecisionRules.HeldIncident(session.Store.Snapshot);
+                if (held != null) { SelectVehicle(held.VehicleId); world.ShowMap(true); }
+            }
+            else DriveRoute();
+            UpdateActions();
         }
 
         private void WatchRoute()
@@ -500,12 +574,12 @@ namespace Formula9.UI
             if (routeProblem == null) return;
             routeProblem.text = RoutePresenter.Problem(context, s);
             routeShowClosure.style.display = context != null && context.Edges.Any(e => e.Closed) ? DisplayStyle.Flex : DisplayStyle.None;
-            var ready = s?.Session.Status == "READY";
             var routeClosed = s != null && TrainingPresenter.AssignedRouteIsClosed(s);
-            routeDecide.style.display = ready && routeClosed ? DisplayStyle.Flex : DisplayStyle.None;
-            routeFeedback.style.display = ready && routeClosed ? DisplayStyle.Flex : DisplayStyle.None;
-            routeApply.style.display = ready && routeClosed ? DisplayStyle.Flex : DisplayStyle.None;
-            routeOutcomePanel.style.display = ready && routeClosed ? DisplayStyle.None : DisplayStyle.Flex;
+            var deciding = Drafting(s) && routeClosed;
+            routeDecide.style.display = deciding ? DisplayStyle.Flex : DisplayStyle.None;
+            routeFeedback.style.display = deciding ? DisplayStyle.Flex : DisplayStyle.None;
+            routeApply.style.display = deciding ? DisplayStyle.Flex : DisplayStyle.None;
+            routeOutcomePanel.style.display = deciding ? DisplayStyle.None : DisplayStyle.Flex;
             RenderStages(s);
             RenderOutcome(s);
         }
@@ -710,7 +784,9 @@ namespace Formula9.UI
         private void FocusIncident()
         {
             var incident = session.Store.Snapshot?.Incidents.FirstOrDefault(i => i.IncidentId == incidents.value);
-            if (incident != null) { SelectVehicle(incident.VehicleId); world.FocusSelected(); }
+            if (incident == null) return;
+            SelectVehicle(incident.VehicleId);
+            if (!world.FocusIncident(incident.IncidentId)) world.FocusSelected();
         }
 
         private void ClearEvidence()
@@ -752,8 +828,8 @@ namespace Formula9.UI
             foreach (var view in operationalViews) view.style.display = index == 0 || index == RoutePage ? DisplayStyle.Flex : DisplayStyle.None;
             var entering = index == RoutePage && shownPage != RoutePage;
             shownPage = index;
-            // A route is edited on the map; running, it is watched in 3D
-            if (entering && session.Store.Snapshot?.Session.Status == "READY") world.ShowMap(true);
+            // A route is edited on the map; running, it is watched in 3D. Leaving a driver's seat is the driver's call.
+            if (entering && Drafting(session.Store.Snapshot) && !world.Driving) world.ShowMap(true);
             ShowDraftInViews();
             RenderWaypoints();
             RenderFeedback();

@@ -136,6 +136,21 @@ namespace Formula9.Tests
         }
 
         [Test]
+        public void AShuttleHeldAtAClosureSendsTheExerciseBackToItsDetour()
+        {
+            var snapshot = new FullSnapshot
+            {
+                Session = new TrainingSession { Status = "RUNNING" },
+                Incidents = new List<Incident> { new Incident { IncidentId = "closure", State = "OPTIONS_READY" } },
+                Candidates = new List<Candidate> { new Candidate { IncidentId = "closure", Action = "ROAD_DETOUR" } },
+            };
+            Assert.AreEqual(1, RoutePresenter.Stage(snapshot, true, false, null));
+            Assert.AreEqual(3, RoutePresenter.Stage(snapshot, true, true, Preview("PASS", 150)));
+            snapshot.Incidents[0].State = "EXECUTING";
+            Assert.AreEqual(4, RoutePresenter.Stage(snapshot, true, false, null));
+        }
+
+        [Test]
         public void TheOutcomeSaysWhetherServiceWasPreservedAndAtWhatCost()
         {
             var outcome = new RouteOutcome

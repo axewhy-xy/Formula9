@@ -10,6 +10,7 @@
             <ui:Label name="incident-data" class="workspace-text" />
             <ui:VisualElement name="candidate-table-host" />
             <ui:Button name="incident-focus" text="Focus incident shuttle" />
+            <ui:Button name="incident-reroute" text="Re-route on the map" tooltip="Choose the roads the held shuttle takes round the closure." style="display: none;" />
             <ui:DropdownField name="candidates" label="Option" />
             <ui:TextField name="incident-reason" label="Decision reason" max-length="2048" />
             <ui:VisualElement class="row">
