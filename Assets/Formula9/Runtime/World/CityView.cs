@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -46,23 +47,50 @@ namespace Formula9.World
         private string routesKey, hiddenShuttle;
         private Material buildingMaterial, lineMaterial;
         private readonly CityIncidents incidents;
+        private readonly TransitClient transit;
+        private readonly BusStopShelterFactory busStopShelters;
+        private CancellationTokenSource busStopCancellation;
+        private readonly List<(Vector2 A, Vector2 B, float HalfWidth, bool Service)> roadSegments =
+            new List<(Vector2, Vector2, float, bool)>();
+        private readonly Dictionary<string, (Vector2 Move, float Yaw)> shelterOverrides =
+            new Dictionary<string, (Vector2, float)>(StringComparer.Ordinal);
+        private bool disposed;
+        // Divide the city's bounding box into smaller LTA queries to avoid huge
+        // responses and to keep requests limited to the displayed 3D district.
+        private const float LtaQueryCellMetres = 1250f;
+        private const float LtaQueryMarginMetres = 75f;
+        private const int MaxLtaQueries = 64;
+        // Bus-stop pins are not guaranteed to be at the physical shelter centre.
+        // Adjust ONLY shelters that extend into the nearest road. Do not shift all pins.
+        private const float OrientationRoadMatchMetres = 35f;
+        private const float KerbGapM = 0.45f;
+        private const float MaxAutomaticMoveM = 8f;
+        private const float ShelterHalfDepthM = 1.3f * BusStopShelterFactory.ShelterScale;
         private List<CityBuilding> buildings;
         private Mesh buildingMesh;
 
         public int BuildingCount { get; private set; }
         public int RoadCount { get; private set; }
+        public int LtaBusStopCount { get; private set; }
+        public bool LtaBusStopsLoaded { get; private set; }
+        public string BusStopSource => transit != null &&
+            !string.IsNullOrEmpty(transit.Attribution) && transit.Attribution.Contains("LTA")
+            ? "LTA" : "mapped";
         public Bounds Bounds { get; private set; }
         public string IncidentStatus => incidents.Status;
 
-        public CityView(Transform parent, MapTiles tiles)
+        public CityView(Transform parent, MapTiles tiles, TransitClient transit = null)
         {
             root = new GameObject("City").transform;
             root.SetParent(parent, false);
             this.tiles = tiles;
+            this.transit = transit;
             buildingMaterial = Own(new Material(Shader.Find("Formula9/CityBuilding")));
             ApplyBuildingTextures(buildingMaterial);
             lineMaterial = Own(new Material(Shader.Find("Sprites/Default")));
             incidents = new CityIncidents(root, buildingMaterial, lineMaterial);
+            busStopShelters = new BusStopShelterFactory();
+            LoadShelterOverrides();
             if (tiles != null) tiles.TileLoaded += RefreshTiles;
         }
 
@@ -101,6 +129,16 @@ namespace Formula9.World
             city.GetComponent<MeshRenderer>().sharedMaterial = buildingMaterial;
             BuildGround();
             await LoadRoadsAsync(client, area, cancellation);
+            // Buildings become visible immediately; LTA shelters arrive as soon
+            // as the independent bounded bus-stop requests finish.
+            if (transit != null)
+            {
+                busStopCancellation?.Cancel();
+                busStopCancellation?.Dispose();
+                busStopCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+                _ = LoadLtaSheltersAsync(busStopCancellation.Token);
+            }
+            else Debug.LogWarning("[CityView] No TransitClient connected: LTA bus-stop shelters cannot be loaded.");
         }
 
         public void SetVisible(bool visible) { if (root != null) root.gameObject.SetActive(visible); }
@@ -117,6 +155,20 @@ namespace Formula9.World
             }
             cancellation.ThrowIfCancellationRequested();
             RoadCount = roads.Count;
+            roadSegments.Clear();
+            foreach (var cityRoad in roads)
+            {
+                Vector2? previous = null;
+                foreach (var (x, y) in cityRoad.Points)
+                {
+                    var current = new Vector2((float)x, (float)y);
+                    if (previous.HasValue && (current - previous.Value).sqrMagnitude > 0.01f)
+                        roadSegments.Add((previous.Value, current,
+                            Mathf.Clamp(RoadMesh.HalfWidth(cityRoad), 2.5f, 18f),
+                            string.Equals(cityRoad.Class, "service", StringComparison.OrdinalIgnoreCase)));
+                    previous = current;
+                }
+            }
             var surface = Shader.Find("Formula9/CityRoad");
             var grain = Own(AsphaltGrain());
             var materials = new Material[RoadMesh.LayerCount];
@@ -131,6 +183,200 @@ namespace Formula9.World
             var renderer = road.GetComponent<MeshRenderer>();
             renderer.sharedMaterials = materials;
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        }
+
+        // The same LTA client supplies FleetMap's 2D bus-stop dots. Here its
+        // coordinates are used only in the real Singapore 3D CityView.
+        private async Task LoadLtaSheltersAsync(CancellationToken cancellation)
+        {
+            try
+            {
+                // CityMesh bounds are Unity metres (X east, Z north); MapGeo
+                // converts them to LTA latitude/longitude for bounded queries.
+                var minX = Bounds.min.x - LtaQueryMarginMetres;
+                var maxX = Bounds.max.x + LtaQueryMarginMetres;
+                var minZ = Bounds.min.z - LtaQueryMarginMetres;
+                var maxZ = Bounds.max.z + LtaQueryMarginMetres;
+                var width = Mathf.Max(1f, maxX - minX);
+                var height = Mathf.Max(1f, maxZ - minZ);
+                var cellSize = LtaQueryCellMetres;
+                var cols = Mathf.Max(1, Mathf.CeilToInt(width / cellSize));
+                var rows = Mathf.Max(1, Mathf.CeilToInt(height / cellSize));
+                while ((long)cols * rows > MaxLtaQueries)
+                {
+                    cellSize *= 1.5f;
+                    cols = Mathf.Max(1, Mathf.CeilToInt(width / cellSize));
+                    rows = Mathf.Max(1, Mathf.CeilToInt(height / cellSize));
+                }
+
+                var unique = new Dictionary<string, BusStop>(StringComparer.Ordinal);
+                var failedCells = 0;
+                for (var row = 0; row < rows; row++)
+                {
+                    for (var col = 0; col < cols; col++)
+                    {
+                        cancellation.ThrowIfCancellationRequested();
+                        var westM = minX + col * cellSize;
+                        var eastM = Mathf.Min(maxX, westM + cellSize);
+                        var southM = minZ + row * cellSize;
+                        var northM = Mathf.Min(maxZ, southM + cellSize);
+                        var southWest = MapGeo.ToLatLon(westM, southM);
+                        var northEast = MapGeo.ToLatLon(eastM, northM);
+                        try
+                        {
+                            // Matches the exact signature already used by FleetMap:
+                            // (south latitude, west longitude, north latitude, east longitude, token).
+                            var stops = await transit.GetBusStopsAsync(
+                                southWest.Latitude, southWest.Longitude,
+                                northEast.Latitude, northEast.Longitude, cancellation);
+                            cancellation.ThrowIfCancellationRequested();
+                            foreach (var stop in stops)
+                            {
+                                if (string.IsNullOrWhiteSpace(stop.Code)) continue;
+                                var local = MapGeo.ToLocal(new LatLon(stop.Latitude, stop.Longitude));
+                                if (local.X < minX || local.X > maxX || local.Y < minZ || local.Y > maxZ)
+                                    continue;
+                                unique[stop.Code] = stop;
+                            }
+                        }
+                        catch (OperationCanceledException) { throw; }
+                        catch (Exception error)
+                        {
+                            failedCells++;
+                            Debug.LogWarning($"[CityView] LTA bus-stop area {col},{row} unavailable: {error.Message}");
+                        }
+                    }
+                }
+
+                cancellation.ThrowIfCancellationRequested();
+                if (disposed) return;
+                var placements = new List<BusStopShelterFactory.Placement>(unique.Count);
+                var autoMoved = 0;
+                var cappedMoves = 0;
+                var noRoadMatch = 0;
+                var manual = 0;
+                var cappedStopCodes = new List<string>();
+                var unmatchedStopCodes = new List<string>();
+                foreach (var stop in unique.Values)
+                {
+                    var local = MapGeo.ToLocal(new LatLon(stop.Latitude, stop.Longitude));
+                    var pin = new Vector2((float)local.X, (float)local.Y);
+                    bool moved, capped, matched;
+                    var placed = PositionShelter(pin, out moved, out capped, out matched);
+                    if (moved) autoMoved++;
+                    if (capped) { cappedMoves++; cappedStopCodes.Add(stop.Code); }
+                    if (!matched) { noRoadMatch++; unmatchedStopCodes.Add(stop.Code); }
+                    if (shelterOverrides.TryGetValue(stop.Code, out var correction))
+                    {
+                        var corrected = placed.Position + new Vector3(correction.Move.x, 0f, correction.Move.y);
+                        placed = new BusStopShelterFactory.Placement(stop.Code, corrected,
+                            Quaternion.Euler(0f, correction.Yaw, 0f) * placed.Rotation);
+                        manual++;
+                    }
+                    else placed.StopId = stop.Code;
+                    placements.Add(placed);
+                }
+                busStopShelters.Build(root, placements);
+                LtaBusStopCount = placements.Count;
+                LtaBusStopsLoaded = true;
+                Debug.Log($"[CityView] Created {LtaBusStopCount} procedural {BusStopSource} bus-stop shelters " +
+                    $"within the displayed 3D city. Area queries: {cols * rows}; failed: {failedCells}. " +
+                    $"Roadside adjusted: {autoMoved}; capped: {cappedMoves}; no nearby road: {noRoadMatch}; " +
+                    $"manual overrides: {manual}.");
+                if (cappedMoves > 0)
+                    Debug.LogWarning($"[CityView] {cappedMoves} LTA shelters needed >{MaxAutomaticMoveM}m " +
+                        "adjustment to fully clear the road. Example stop codes: " +
+                        string.Join(", ", cappedStopCodes.Take(20)) + ". Use placement overrides for these.");
+                if (noRoadMatch > 0)
+                    Debug.LogWarning("[CityView] No nearby mapped road for example stop codes: " +
+                        string.Join(", ", unmatchedStopCodes.Take(20)) +
+                        ". Their original LTA coordinates were preserved.");
+                if (BusStopSource != "LTA")
+                    Debug.LogWarning("[CityView] TransitClient is not attributed to LTA; verify the provider if LTA-only coverage is required.");
+                if (failedCells > 0)
+                    Debug.LogWarning("[CityView] LTA shelter coverage is partial because one or more area requests failed.");
+            }
+            catch (OperationCanceledException) { /* city closed or changed */ }
+            catch (Exception error)
+            {
+                if (!disposed)
+                    Debug.LogWarning("[CityView] Could not build the LTA 3D shelters: " + error.Message);
+            }
+        }
+
+        // Find the road edge, not simply the nearest road CENTRE. Some stops lie
+        // near a parallel service road or at a junction; prefer non-service roads
+        // when equally near. Retain a genuine LTA sidewalk pin wherever possible.
+        private BusStopShelterFactory.Placement PositionShelter(Vector2 pin,
+            out bool moved, out bool capped, out bool matched)
+        {
+            moved = capped = matched = false;
+            var bestScore = float.PositiveInfinity;
+            var nearest = Vector2.zero;
+            var tangent = Vector2.right;
+            var halfWidth = 0f;
+            foreach (var road in roadSegments)
+            {
+                var line = road.B - road.A;
+                if (line.sqrMagnitude < 0.001f) continue;
+                var t = Mathf.Clamp01(Vector2.Dot(pin - road.A, line) / line.sqrMagnitude);
+                var onRoad = road.A + t * line;
+                var dist = Vector2.Distance(pin, onRoad);
+                if (dist > OrientationRoadMatchMetres + road.HalfWidth) continue;
+                var score = Mathf.Abs(dist - road.HalfWidth) + (road.Service ? 6f : 0f);
+                if (score >= bestScore) continue;
+                bestScore = score;
+                nearest = onRoad;
+                tangent = line.normalized;
+                halfWidth = road.HalfWidth;
+                matched = true;
+            }
+            if (!matched)
+                return new BusStopShelterFactory.Placement(null,
+                    new Vector3(pin.x, 0, pin.y), Quaternion.identity);
+
+            var away = pin - nearest;
+            if (away.sqrMagnitude < 0.01f)
+                away = new Vector2(-tangent.y, tangent.x);
+            var outward = away.normalized;
+            // The whole paved base should remain beyond the edge of the carriageway.
+            var desiredDistance = halfWidth + ShelterHalfDepthM + KerbGapM;
+            var currentDistance = Vector2.Dot(pin - nearest, outward);
+            var missingDistance = Mathf.Max(0f, desiredDistance - currentDistance);
+            capped = missingDistance > MaxAutomaticMoveM;
+            var adjustment = Mathf.Min(missingDistance, MaxAutomaticMoveM);
+            moved = adjustment > 0.02f;
+            var finalPosition = pin + outward * adjustment;
+            // In the generated shelter, local -Z is its road-facing front.
+            var facing = Quaternion.LookRotation(new Vector3(outward.x, 0f, outward.y), Vector3.up);
+            return new BusStopShelterFactory.Placement(null,
+                new Vector3(finalPosition.x, 0f, finalPosition.y), facing);
+        }
+
+        // Optional per-stop fine tuning WITHOUT recompiling C#.
+        // File: Assets/Formula9/Resources/Formula9/placement_overrides.csv
+        // stop_code,east_m,north_m,yaw_delta_degrees
+        // All values are relative to the automatically corrected placement.
+        private void LoadShelterOverrides()
+        {
+            var asset = Resources.Load<TextAsset>("Formula9/placement_overrides");
+            if (asset == null) return;
+            var lines = asset.text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var line in lines)
+            {
+                var row = line.Trim();
+                if (row.Length == 0 || row.StartsWith("#") || row.StartsWith("stop_code")) continue;
+                var columns = row.Split(',');
+                if (columns.Length != 4 || string.IsNullOrWhiteSpace(columns[0]) ||
+                    !float.TryParse(columns[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var east) ||
+                    !float.TryParse(columns[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var north) ||
+                    !float.TryParse(columns[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var yaw))
+                {
+                    Debug.LogWarning("[CityView] Ignoring invalid shelter placement row: " + row);
+                    continue;
+                }
+                shelterOverrides[columns[0].Trim()] = (new Vector2(east, north), yaw);
+            }
         }
 
         // Pale speckle that the road colours tint. Its mipmaps average out to flat colour far away.
@@ -324,6 +570,8 @@ namespace Formula9.World
             routeObjects.Clear();
             stopMarkers.Clear();
             CutRoutesThroughBuildings(snapshot);
+            // Physical shelters are populated separately from ALL LTA stops.
+            // Route cylinders remain for served/dwelling operational status.
             foreach (var route in snapshot.Routes)
             {
                 var serving = ordered.Select((v, index) => (v, index)).Where(p => p.v.RouteId == route.RouteId).Select(p => p.index).ToList();
@@ -339,8 +587,11 @@ namespace Formula9.World
                 }
                 foreach (var stop in route.StopsM)
                 {
-                    var marker = Marker(PrimitiveType.Cylinder, new Vector3(16, 3, 16), color, "Stop " + stop.StopId);
-                    marker.position = new Vector3((float)stop.Position.XM, 3, (float)stop.Position.YM);
+                    // Preserve the existing stop-status marker and dwelling/served colour behaviour.
+                    // Small elevated status badge: don't cover the physical shelter
+                    // with the older 16-metre-wide solid cylinder.
+                    var marker = Marker(PrimitiveType.Cylinder, new Vector3(2f, 0.2f, 2f), color, "Stop " + stop.StopId);
+                    marker.position = new Vector3((float)stop.Position.XM, 4f, (float)stop.Position.YM);
                     stopMarkers[stop.StopId] = (marker.GetComponent<MeshRenderer>().sharedMaterial, color);
                     routeObjects.Add(marker.gameObject);
                 }
@@ -409,8 +660,14 @@ namespace Formula9.World
 
         public void Dispose()
         {
+            if (disposed) return;
+            disposed = true;
+            busStopCancellation?.Cancel();
+            busStopCancellation?.Dispose();
+            busStopCancellation = null;
             if (tiles != null) tiles.TileLoaded -= RefreshTiles;
             incidents.Dispose();
+            busStopShelters.Dispose();
             if (root != null) WorldBuilder.Remove(root.gameObject);
             foreach (var item in owned)
             {

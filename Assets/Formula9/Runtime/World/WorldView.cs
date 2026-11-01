@@ -247,7 +247,7 @@ namespace Formula9.World
             Resize();
             if (city == null)
             {
-                city = new CityView(transform, tiles);
+                city = new CityView(transform, tiles, transit);
                 cityCancellation = new CancellationTokenSource();
                 SetReady(false, "Loading 3D buildings…");
                 cityLoad = LoadCityAsync(city, cityCancellation.Token);
@@ -263,7 +263,9 @@ namespace Formula9.World
                 RefreshHud();
                 SetReady(true, driving
                     ? $"Driver view · {selectedId} · drag to look around"
-                    : $"3D city · {city.BuildingCount} buildings · right-drag orbit, left-drag pan, wheel zoom");
+                    : $"3D city · {city.BuildingCount} buildings · " +
+                      (city.LtaBusStopsLoaded ? $"{city.LtaBusStopCount} {city.BusStopSource} bus-stop shelters" : "loading bus-stop shelters") +
+                      " · right-drag orbit, left-drag pan, wheel zoom");
             }
         }
 

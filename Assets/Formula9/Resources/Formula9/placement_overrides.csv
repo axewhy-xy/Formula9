@@ -1,0 +1,4 @@
+# Per-stop optional adjustments; remove '# ' to activate a row.
+# Values are relative to auto placement, in local metres; yaw delta is degrees.
+stop_code,east_m,north_m,yaw_delta_degrees
+# 12345,2.0,-1.5,15
