@@ -447,8 +447,8 @@ namespace Formula9.Tests
         // Function: GoingToTheMapLeavesDriverView
         // -----------------------------------------------------------------------------------
         // Description:
-        //     The 2D map, which a closure holding a shuttle opens by itself, takes the camera out
-        //     of the shuttle, so the toggle does not claim otherwise.
+        //     The 2D map takes the camera out of the shuttle, so the toggle does not claim
+        //     otherwise.
         [Test]
         public void GoingToTheMapLeavesDriverView()
         {

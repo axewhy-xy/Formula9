@@ -307,6 +307,7 @@ namespace Formula9.UI
 
         // A closure holding a shuttle brings the route editor to that shuttle's route, whatever the
         // operator was looking at. A decision, or the road reopening, ends it and leaves the editor there.
+        // Someone in a driver's seat stays in it, in the shuttle they chose, until they leave it.
         private void FollowHeldIncident(FullSnapshot s)
         {
             var held = DecisionRules.HeldIncident(s);
@@ -326,10 +327,10 @@ namespace Formula9.UI
             }
             Choices(incidents, s.Incidents.Select(i => i.IncidentId));
             incidents.SetValueWithoutNotify(held.IncidentId);
-            SelectVehicle(held.VehicleId);
+            if (!world.Driving) SelectVehicle(held.VehicleId);
             notify($"{held.VehicleId} is held at a road closure. Route it round the closure, or choose another option in the Incident Monitor.");
             ShowPage(RoutePage);
-            world.ShowMap(true);
+            if (!world.Driving) world.ShowMap(true);
         }
 
         private void InvalidateRoute()
@@ -480,7 +481,13 @@ namespace Formula9.UI
 
         private void ToggleDriverView()
         {
-            if (world.Driving) world.StopDriving();
+            if (world.Driving)
+            {
+                world.StopDriving();
+                // A closure that came up during the drive is waiting on the map
+                var held = DecisionRules.HeldIncident(session.Store.Snapshot);
+                if (held != null) { SelectVehicle(held.VehicleId); world.ShowMap(true); }
+            }
             else DriveRoute();
             UpdateActions();
         }
@@ -821,8 +828,8 @@ namespace Formula9.UI
             foreach (var view in operationalViews) view.style.display = index == 0 || index == RoutePage ? DisplayStyle.Flex : DisplayStyle.None;
             var entering = index == RoutePage && shownPage != RoutePage;
             shownPage = index;
-            // A route is edited on the map; running, it is watched in 3D
-            if (entering && Drafting(session.Store.Snapshot)) world.ShowMap(true);
+            // A route is edited on the map; running, it is watched in 3D. Leaving a driver's seat is the driver's call.
+            if (entering && Drafting(session.Store.Snapshot) && !world.Driving) world.ShowMap(true);
             ShowDraftInViews();
             RenderWaypoints();
             RenderFeedback();

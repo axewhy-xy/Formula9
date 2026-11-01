@@ -31,8 +31,7 @@ namespace Formula9.Tests
         [UnityTest, Timeout(1500000)]
         public IEnumerator TheExerciseFromClosureToOutcome()
         {
-            if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FORMULA9_WALKTHROUGH_OUT"))) Assert.Ignore("Set FORMULA9_WALKTHROUGH_OUT to a folder");
-            if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null) Assert.Ignore("No GPU (-nographics)");
+            RequireSetup();
             EditorSceneManager.OpenScene("Assets/Scenes/Formula9.unity");
             yield return new EnterPlayMode();
 
@@ -122,6 +121,8 @@ namespace Formula9.Tests
                 Note("Outcome during hold: " + Text("route-outcome-headline") + " | " + Text("route-outcome-notes"));
                 yield return Seconds(3);
                 Note("Outcome 3 s into the hold: " + Text("route-outcome-headline") + " | " + Text("route-outcome-notes"));
+                // The hold opened the map
+                Press("view-world");
                 yield return Shoot("3d-incident-hold");
 
                 var incidentNav = root.Q("nav-items").Query<Button>().ToList().First(b => b.Query<Label>().ToList().Any(l => l.text == "Incident Monitor"));
@@ -143,6 +144,8 @@ namespace Formula9.Tests
                 var pictures = 0;
                 while (!Text("route-outcome-headline").StartsWith("Service") && Time.realtimeSinceStartup - began < 1100)
                 {
+                    // The decision leaves the map up, and a later closure opens it again
+                    if (UnityEngine.Object.FindFirstObjectByType<WorldView>().ShowingMap) Press("view-world");
                     yield return Seconds(30);
                     Note($"{Time.realtimeSinceStartup - began:0}s HUD: {Text("world-hud")}");
                     if (pictures < 12) yield return Shoot($"3d-run-{++pictures}");
@@ -150,6 +153,7 @@ namespace Formula9.Tests
                 Note("Outcome: " + Text("route-outcome-headline"));
                 Note("Rows: " + Rows("route-outcome-rows"));
                 Note("Notes: " + Text("route-outcome-notes"));
+                if (UnityEngine.Object.FindFirstObjectByType<WorldView>().ShowingMap) Press("view-world");
                 yield return Shoot("outcome-3d");
                 Press("view-map");
                 yield return Frames(3);
@@ -168,8 +172,7 @@ namespace Formula9.Tests
         [UnityTest, Timeout(1500000)]
         public IEnumerator TheIncidentsPlayOutInTheCity()
         {
-            if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FORMULA9_WALKTHROUGH_OUT"))) Assert.Ignore("Set FORMULA9_WALKTHROUGH_OUT to a folder");
-            if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null) Assert.Ignore("No GPU (-nographics)");
+            RequireSetup();
             EditorSceneManager.OpenScene("Assets/Scenes/Formula9.unity");
             yield return new EnterPlayMode();
 
@@ -216,7 +219,10 @@ namespace Formula9.Tests
 
                 var world = UnityEngine.Object.FindFirstObjectByType<WorldView>();
                 var workspaceIncident = root.Q<DropdownField>("incidents");
-                yield return Until(() => Text("world-hud").Contains("Road block"), "the first road block", 120);
+                // A closure holding the shuttle opens the map, and only the 3D view has the incident's line
+                yield return Until(() => world.ShowingMap, "the first road block to open the map", 120);
+                Press("view-world");
+                yield return Until(() => Text("world-hud").Contains("Road block"), "the first road block");
                 Note("HUD: " + Text("world-hud"));
                 Note("Focus: " + world.FocusIncident(workspaceIncident.choices.Last()));
                 yield return Seconds(1);
@@ -246,6 +252,8 @@ namespace Formula9.Tests
                 var shownAccident = false; var sawSlow = false;
                 while ((!shownAccident || !sawSlow) && Time.realtimeSinceStartup - began < 1100)
                 {
+                    // The decision leaves the map up, and a later closure opens it again
+                    if (world.ShowingMap) Press("view-world");
                     yield return Seconds(2);
                     if (!shownAccident && Text("world-hud").Contains("Road accident"))
                     {
@@ -279,6 +287,14 @@ namespace Formula9.Tests
                 LogAssert.ignoreFailingMessages = false;
             }
             yield return new ExitPlayMode();
+        }
+
+        // These sign up throwaway accounts, so an unset backend must not fall through to the shared default.
+        private static void RequireSetup()
+        {
+            if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FORMULA9_WALKTHROUGH_OUT"))) Assert.Ignore("Set FORMULA9_WALKTHROUGH_OUT to a folder");
+            if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FORMULA9_BACKEND_URL"))) Assert.Ignore("Set FORMULA9_BACKEND_URL to an isolated test backend");
+            if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null) Assert.Ignore("No GPU (-nographics)");
         }
 
         private IEnumerator ProposeAndReport(string edge, string name)
