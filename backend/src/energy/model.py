@@ -185,6 +185,30 @@ def charge_battery_kwh(model: EnergyModel,battery_kwh: float,capacity_kwh: float
 
 """
 # -----------------------------------------------------------------------------------
+# Function: seconds_to_full
+# -----------------------------------------------------------------------------------
+Description:
+    This function returns how long a charge to full takes from this battery
+    level, so a lower battery means a longer charge. time_scale speeds the
+    charger up for training (a real full charge takes the better part of an
+    hour); auxiliary use while charging is counted.
+
+Args:
+    model (EnergyModel): The energy parameters.
+    battery_kwh (float): Battery level when charging starts, in kWh.
+    capacity_kwh (float): Battery capacity in kWh.
+    charger_power_kw (float): The charger's rated power in kW.
+    time_scale (float): How many times faster than real time it charges.
+
+Returns:
+    float: Seconds until full.
+"""
+def seconds_to_full(model: EnergyModel, battery_kwh: float, capacity_kwh: float, charger_power_kw: float, time_scale: float) -> float:
+    net_kw = charger_power_kw * time_scale * model.charge_efficiency - model.auxiliary_kw
+    return max(0.0, capacity_kwh - battery_kwh) / net_kw * 3600
+
+"""
+# -----------------------------------------------------------------------------------
 # Function: use_energy
 # -----------------------------------------------------------------------------------
 Description:

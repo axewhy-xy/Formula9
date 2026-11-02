@@ -36,8 +36,8 @@
                 <ui:Button name="logout" text="Log out" />
             </ui:VisualElement>
 
-            <ui:VisualElement class="content-card">
-                <ui:VisualElement class="row">
+            <ui:VisualElement name="content-card" class="content-card">
+                <ui:VisualElement class="row session-tools">
                     <ui:DropdownField name="scenario" class="scenario" />
                     <ui:Button name="create" text="Create training session" class="primary" />
                     <ui:TextField name="session-id" class="session-id" max-length="128" placeholder-text="Backend session ID" />
@@ -46,14 +46,14 @@
                     <ui:Toggle name="mute" label="Mute alerts" class="mute" tooltip="Mute training audio alerts" />
                 </ui:VisualElement>
 
-                <ui:VisualElement class="row">
+                <ui:VisualElement class="row session-tools">
                     <ui:DropdownField name="sessions" label="Existing sessions" class="sessions" />
                     <ui:Button name="refresh-sessions" text="Refresh list" />
                     <ui:Button name="more-sessions" text="Show more" tooltip="List older sessions too." style="display: none;" />
                     <ui:Label name="capacity" text="Session list not loaded" class="muted" />
                 </ui:VisualElement>
 
-                <ui:VisualElement class="row">
+                <ui:VisualElement class="row session-tools">
                     <ui:Button name="delete-session" text="Delete permanently…" tooltip="Remove the selected archived, completed or failed session and all of its history, for everyone." />
                     <ui:Button name="purge-sessions" text="Delete old sessions…" tooltip="Remove every finished session except the most recent ones." />
                     <ui:Button name="reclaim-disk" text="Reclaim disk space" tooltip="Return space freed by deletions to the disk. Archive all live sessions first." />
@@ -61,13 +61,14 @@
 
                 <ui:VisualElement class="row">
                     <ui:Label name="title" text="Fleet training" class="title" />
+                    <ui:Button name="session-toggle" text="Session options" tooltip="Show or hide session creation, joining and deletion." style="display: none;" />
                     <ui:Button name="start" text="Start scenario" />
                     <ui:Button name="pause" text="Pause" />
                     <ui:Button name="resume" text="Resume" />
                     <ui:Button name="archive" text="Archive session" tooltip="End this attempt and release its runtime slot. History remains available." />
                 </ui:VisualElement>
 
-                <ui:Label name="status" text="No training session selected" class="status" />
+                <ui:Label name="status" text="No training session selected" class="status session-tools" />
                 <ui:Label name="message" class="message" />
 
                 <ui:VisualElement name="view-bar" class="view-bar">

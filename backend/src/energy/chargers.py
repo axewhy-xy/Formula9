@@ -19,7 +19,8 @@ Description:
     errors and raise ValueError instead.
 
     Functions never change a ChargerState in place; they return a new list
-    of chargers. Time-slot reservations, swaps and outages are M3.
+    of chargers. Time-slot reservations are in bookings.py; swaps and outages
+    are M3.
 """
 from dataclasses import dataclass
 

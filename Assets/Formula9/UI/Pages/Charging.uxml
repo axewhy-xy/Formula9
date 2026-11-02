@@ -1,14 +1,66 @@
 <ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:f9="Formula9.World" xmlns:f9ui="Formula9.UI">
     <Style src="project://database/Assets/Formula9/UI/Formula9App.uss" />
-    <ui:ScrollView class="workspace-page">
-        <ui:Label text="Charging" class="page-title" />
-        <!-- The tables' columns are set in TrainingWorkspace.cs; their rows come from the backend. -->
-        <ui:Label text="Authoritative battery state" class="workspace-text" />
-        <ui:VisualElement name="battery-table-host" />
-        <ui:Label text="Authoritative charger occupancy" class="workspace-text" />
-        <ui:VisualElement name="charger-table-host" />
-        <ui:Label text="Battery decisions (backend estimates)" class="workspace-text" />
-        <ui:TextField name="charge-reason" max-length="2048" placeholder-text="Reason for the charging decision (required)" />
-        <ui:VisualElement name="offer-table-host" />
+    <!-- One screen, as designed: it only scrolls if the window is too small to hold it. -->
+    <ui:ScrollView class="workspace-page page-form charge-page">
+        <ui:VisualElement class="charge-header">
+            <ui:Label text="Charging Operations" class="charge-title" />
+            <ui:Label name="charge-clock" class="charge-clock" />
+            <ui:VisualElement name="charge-stages" class="route-stages charge-stages" />
+            <ui:VisualElement name="charge-lock" class="charge-lock">
+                <ui:Label name="charge-lock-text" class="charge-lock-text" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+        <!-- Everything below is filled in by ChargingPage.cs; its values come from the backend. -->
+        <ui:VisualElement name="charge-kpis" class="charge-kpis" />
+
+        <ui:VisualElement class="charge-columns">
+            <ui:VisualElement class="charge-card charge-queue">
+                <ui:Label text="Charging Priority Queue" class="route-card-title" />
+                <ui:VisualElement name="charge-queue-host" />
+            </ui:VisualElement>
+            <ui:VisualElement class="charge-card charge-column">
+                <ui:Label name="charge-decision-title" text="Decision" class="route-card-title" />
+                <ui:VisualElement name="charge-choices" />
+            </ui:VisualElement>
+            <ui:VisualElement class="charge-card charge-column">
+                <ui:Label text="Fleet Impact (if applied)" class="route-card-title" />
+                <ui:VisualElement name="charge-impact" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+
+        <ui:VisualElement class="charge-card charge-schedule">
+            <ui:VisualElement class="charge-header">
+                <ui:Label text="Charging Schedule" class="route-card-title" />
+                <ui:VisualElement name="charge-draft-controls" class="charge-draft-controls">
+                    <ui:Label name="charge-draft-line" class="charge-draft-line" />
+                    <ui:Button name="charge-earlier" text="30 s earlier" />
+                    <ui:Button name="charge-later" text="30 s later" />
+                    <ui:DropdownField name="charge-draft-charger" />
+                </ui:VisualElement>
+                <ui:VisualElement class="charge-segments">
+                    <ui:Button name="charge-view-live" text="Live Plan" tooltip="Only what the backend has confirmed." />
+                    <ui:Button name="charge-view-draft" text="Draft Plan" tooltip="Confirmed bookings plus your unapplied draft. A draft reserves nothing until it is applied." />
+                </ui:VisualElement>
+            </ui:VisualElement>
+            <ui:VisualElement name="charge-timeline" class="charge-timeline" />
+        </ui:VisualElement>
+
+        <ui:VisualElement class="charge-columns charge-bottom">
+            <ui:VisualElement class="charge-card charge-exceptions-card">
+                <ui:Label text="Exceptions &amp; Alerts" class="route-card-title" />
+                <ui:ScrollView class="charge-list"><ui:VisualElement name="charge-exceptions" /></ui:ScrollView>
+            </ui:VisualElement>
+            <ui:VisualElement class="charge-card charge-bookings-card">
+                <ui:Label text="Charging Bookings" class="route-card-title" />
+                <ui:ScrollView class="charge-list"><ui:VisualElement name="charge-bookings-host" /></ui:ScrollView>
+            </ui:VisualElement>
+            <ui:VisualElement class="charge-card charge-apply-card">
+                <ui:Label name="charge-verdict" class="route-verdict charge-verdict" />
+                <ui:ScrollView class="charge-issues-list"><ui:VisualElement name="charge-issues" /></ui:ScrollView>
+                <ui:Label name="charge-assumptions" style="display: none;" />
+                <ui:TextField name="charge-reason" max-length="512" placeholder-text="Reason (also used to cancel a booking)" />
+                <ui:Button name="charge-apply" text="Apply decision" class="charge-apply" />
+            </ui:VisualElement>
+        </ui:VisualElement>
     </ui:ScrollView>
 </ui:UXML>

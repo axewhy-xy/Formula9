@@ -701,3 +701,109 @@
     color: rgb(255, 255, 255);
     background-color: rgba(15, 30, 38, 0.85);
 }
+
+/* The session tools fold away on the Charging page */
+.session-tools-hidden .session-tools { display: none; }
+
+/* Charging page: one screen at the reference resolution */
+.charge-page .unity-scroll-view__content-container { flex-grow: 1; }
+.charge-header { flex-direction: row; align-items: center; flex-shrink: 0; }
+.charge-title { font-size: 18px; -unity-font-style: bold; margin-right: 12px; color: rgb(15, 76, 92); }
+.charge-clock { color: rgb(51, 71, 75); font-size: 12px; margin-right: 12px; }
+.route-stages.charge-stages { flex-grow: 1; margin: 0; }
+.charge-stages .route-stage { height: 24px; font-size: 12px; }
+.charge-lock { flex-grow: 1; flex-basis: 0; padding: 1px 10px; border-radius: 6px; border-width: 0; background-color: rgb(220, 38, 38); }
+.charge-lock-text { color: rgb(255, 255, 255); -unity-font-style: bold; white-space: normal; }
+.charge-kpis { flex-direction: row; flex-shrink: 0; margin: 6px 0; }
+.charge-kpi { flex-direction: row; align-items: center; flex-grow: 1; flex-basis: 0; margin-right: 6px; padding: 4px 10px; border-width: 0; border-left-width: 5px; border-radius: 6px; }
+.charge-tone-teal { background-color: rgb(204, 243, 238); border-left-color: rgb(13, 148, 136); color: rgb(15, 94, 88); }
+.charge-tone-green { background-color: rgb(209, 247, 222); border-left-color: rgb(22, 163, 74); color: rgb(20, 90, 50); }
+.charge-tone-blue { background-color: rgb(214, 232, 255); border-left-color: rgb(37, 99, 235); color: rgb(30, 64, 175); }
+.charge-tone-violet { background-color: rgb(233, 224, 255); border-left-color: rgb(124, 58, 237); color: rgb(91, 33, 182); }
+.charge-tone-amber { background-color: rgb(255, 238, 190); border-left-color: rgb(217, 119, 6); color: rgb(146, 64, 14); }
+.charge-tone-red { background-color: rgb(255, 219, 219); border-left-color: rgb(220, 38, 38); color: rgb(153, 27, 27); }
+.charge-kpi-title { font-size: 12px; -unity-font-style: bold; }
+.charge-kpi-value { font-size: 18px; -unity-font-style: bold; margin-right: 8px; }
+.charge-card { padding: 6px 10px; margin: 0 6px 6px 0; border-width: 1px; border-top-width: 3px; border-color: rgb(205, 222, 222); border-top-color: rgb(13, 148, 136); border-radius: 6px; background-color: rgb(255, 255, 255); min-width: 0; }
+.charge-card .route-card-title { margin-bottom: 3px; color: rgb(15, 76, 92); }
+.charge-columns { flex-direction: row; flex-shrink: 0; }
+.charge-column { flex-grow: 1; flex-basis: 0; }
+.charge-queue { flex-grow: 1.2; flex-basis: 0; }
+.charge-queue .data-table { min-height: 0; margin-bottom: 0; }
+.charge-queue .data-cell { min-width: 0; padding: 3px 6px; white-space: nowrap; font-size: 12px; }
+.charge-queue-row:hover { background-color: rgb(238, 244, 244); }
+.charge-queue-selected, .charge-queue-selected:hover { background-color: rgb(190, 240, 228); border-left-width: 4px; border-left-color: rgb(13, 148, 136); }
+.charge-queue-name { -unity-font-style: bold; }
+.charge-battery { flex-direction: row; align-items: center; }
+.charge-battery-gauge { width: 42px; height: 10px; flex-shrink: 0; margin-right: 5px; border-width: 1px; border-color: rgb(120, 140, 145); border-radius: 3px; background-color: rgb(236, 241, 241); overflow: hidden; }
+.charge-battery-fill { height: 100%; }
+.charge-battery-text { font-size: 12px; -unity-font-style: bold; margin: 0; padding: 0; }
+.charge-battery-low { background-color: rgb(220, 38, 38); }
+.charge-battery-mid { background-color: rgb(245, 158, 11); }
+.charge-battery-good { background-color: rgb(22, 163, 74); }
+.charge-chip { align-self: flex-start; padding: 1px 8px; margin: 0; border-radius: 9px; font-size: 11px; -unity-font-style: bold; white-space: nowrap; color: rgb(255, 255, 255); background-color: rgb(107, 114, 128); }
+.charge-chip-green { background-color: rgb(21, 128, 61); }
+.charge-chip-blue { background-color: rgb(29, 78, 216); }
+.charge-chip-amber { background-color: rgb(251, 191, 36); color: rgb(69, 39, 5); }
+.charge-chip-red { background-color: rgb(220, 38, 38); }
+.charge-chip-teal { background-color: rgb(15, 118, 110); }
+.charge-chip-pink { background-color: rgb(190, 24, 120); }
+.charge-urgency-charging { background-color: rgb(190, 24, 120); color: rgb(255, 255, 255); }
+.charge-chip-grey { background-color: rgb(107, 114, 128); }
+
+.charge-urgency-critical { background-color: rgb(220, 38, 38); color: rgb(255, 255, 255); }
+.charge-urgency-high { background-color: rgb(194, 65, 12); color: rgb(255, 255, 255); }
+.charge-urgency-medium { background-color: rgb(251, 191, 36); color: rgb(69, 39, 5); }
+.charge-urgency-low { background-color: rgb(21, 128, 61); color: rgb(255, 255, 255); }
+.charge-urgency-none { background-color: rgb(107, 114, 128); color: rgb(255, 255, 255); }
+.app Button.charge-choice { height: auto; min-height: 36px; margin: 0 0 3px 0; padding: 2px 10px; flex-direction: column; align-items: flex-start; justify-content: center; border-radius: 6px; background-color: rgb(255, 255, 255); border-width: 1px; border-color: rgb(211, 222, 222); }
+.app Button.charge-choice-selected, .app Button.charge-choice-selected:hover { border-width: 2px; border-color: rgb(22, 163, 74); background-color: rgb(209, 247, 222); }
+.charge-choice-title { -unity-font-style: bold; font-size: 13px; margin: 0; padding: 0; }
+.charge-choice-detail { font-size: 11px; color: rgb(51, 71, 75); white-space: normal; -unity-text-align: middle-left; margin: 0; padding: 0; }
+.charge-hint { font-size: 11px; color: rgb(90, 108, 112); white-space: normal; }
+.charge-impact-row { flex-direction: row; justify-content: space-between; margin-bottom: 5px; }
+.charge-impact-value { -unity-font-style: bold; color: rgb(21, 128, 61); }
+.charge-impact-worse { color: rgb(220, 38, 38); }
+.charge-schedule { flex-shrink: 0; }
+.charge-schedule > .charge-header { justify-content: space-between; min-height: 28px; }
+.charge-segments { flex-direction: row; flex-shrink: 0; }
+.app .charge-segments Button { height: 26px; margin: 0 0 0 4px; }
+.charge-timeline { flex-shrink: 0; }
+.charge-time-row { flex-direction: row; height: 26px; flex-shrink: 0; margin-bottom: 2px; }
+.charge-track-label { width: 120px; flex-shrink: 0; -unity-text-align: middle-left; font-size: 12px; }
+.charge-track { flex-grow: 1; flex-basis: 0; position: relative; background-color: rgb(226, 236, 238); border-radius: 4px; }
+.charge-track-marks { background-color: rgba(0, 0, 0, 0); }
+.charge-time-mark { position: absolute; bottom: 2px; font-size: 11px; color: rgb(90, 108, 112); }
+.charge-now { position: absolute; top: -1px; bottom: -1px; width: 3px; background-color: rgb(220, 38, 38); }
+.charge-block { position: absolute; top: 2px; bottom: 2px; border-radius: 4px; border-width: 2px; justify-content: center; overflow: hidden; padding: 0 6px; }
+.charge-block-label { font-size: 11px; -unity-font-style: bold; white-space: nowrap; margin: 0; padding: 0; -unity-text-align: middle-left; flex-grow: 1; color: rgb(255, 255, 255); }
+.charge-block-live { background-color: rgb(29, 78, 216); border-color: rgb(30, 58, 138); }
+.charge-block-active { background-color: rgb(21, 128, 61); border-color: rgb(20, 83, 45); }
+.charge-block-draft { background-color: rgb(251, 191, 36); border-color: rgb(180, 83, 9); }
+.charge-block-draft .charge-block-label { color: rgb(69, 39, 5); }
+.charge-block-dragging { opacity: 0.3; }
+.charge-block-ghost { top: auto; bottom: auto; border-width: 2px; }
+.charge-draft-controls { flex-direction: row; align-items: center; flex-grow: 1; margin: 0 8px; }
+.charge-draft-line { flex-grow: 1; font-size: 12px; -unity-font-style: bold; -unity-text-align: middle-right; margin-right: 8px; }
+.app .charge-draft-controls Button { height: 26px; margin: 0 4px 0 0; font-size: 12px; }
+.charge-draft-controls .unity-base-field { margin: 0; min-width: 110px; }
+.charge-bottom { flex-grow: 1; min-height: 130px; }
+.charge-list { height: 104px; flex-shrink: 0; }
+.charge-exceptions-card { flex-grow: 0.8; flex-basis: 0; }
+.charge-bookings-card { flex-grow: 1.5; flex-basis: 0; }
+.charge-bookings-card .data-table { min-height: 0; margin-bottom: 0; }
+.charge-bookings-card .data-cell { min-width: 0; padding: 3px 6px; font-size: 12px; white-space: nowrap; }
+.charge-apply-card { flex-grow: 0.8; flex-basis: 0; margin-right: 0; }
+.charge-verdict { margin-bottom: 2px; font-size: 13px; }
+.charge-issues-list { height: 32px; flex-shrink: 0; }
+.charge-issues-list .route-card-text { font-size: 11px; margin-bottom: 0; }
+.app Button.charge-apply { height: 32px; margin: 4px 0 0 0; color: rgb(255, 255, 255); -unity-font-style: bold; font-size: 14px; border-width: 0; background-color: rgb(21, 128, 61); }
+.app Button.charge-apply:hover { background-color: rgb(22, 101, 52); }
+.charge-exception { padding: 3px 8px; margin-bottom: 3px; font-size: 12px; -unity-font-style: bold; border-left-width: 5px; border-left-color: rgb(217, 119, 6); background-color: rgb(255, 238, 190); color: rgb(146, 64, 14); white-space: normal; }
+.charge-exception-severe { border-left-color: rgb(220, 38, 38); background-color: rgb(255, 219, 219); color: rgb(153, 27, 27); }
+.data-cell.charge-actions { flex-direction: row; }
+.data-cell.charge-actions Button { height: 22px; margin: 0 4px 0 0; padding: 0 6px; font-size: 11px; }
+
+.charge-stages .route-stage-done { color: rgb(255, 255, 255); background-color: rgb(34, 197, 94); }
+.charge-stages .route-stage-current { color: rgb(255, 255, 255); background-color: rgb(13, 148, 136); }
+.charge-segments Button.segment-selected { color: rgb(255, 255, 255); background-color: rgb(13, 148, 136); }

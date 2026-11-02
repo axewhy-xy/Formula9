@@ -39,7 +39,7 @@ namespace Formula9.Session
     //     backend could no longer confirm them.
     public sealed class CommandOutcome
     {
-        public string CommandId, IdempotencyKey, Status, TargetType, TargetId, FailureCode;
+        public string CommandId, IdempotencyKey, Status, TargetType, TargetId, FailureCode, CommandType;
         public long TargetRevision;
         public long? AppliedTick;
         public bool Confirmed;
@@ -634,8 +634,10 @@ namespace Formula9.Session
                     RetryLater(command, attempt, statusOnly);
                     return;
                 }
-                CommandLedgerChanged?.Invoke(CommandOutcome.From(reply));
-                CommandFinished?.Invoke(CommandOutcome.From(reply));
+                var outcome = CommandOutcome.From(reply);
+                outcome.CommandType = command.Command.CommandType;
+                CommandLedgerChanged?.Invoke(outcome);
+                CommandFinished?.Invoke(outcome);
                 if (reply.Status == "QUEUED") RetryLater(command, attempt, statusOnly);
                 else FinishPending(null);
                 return;

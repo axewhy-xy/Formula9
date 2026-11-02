@@ -549,12 +549,18 @@ namespace Formula9.UI
                 case "QUEUED":
                     return $"Decision {outcome.CommandId} for {outcome.TargetId} is QUEUED and durably accepted; awaiting authoritative outcome.";
                 case "APPLIED":
+                    if (outcome.CommandType == "SCHEDULE_CHARGE") return $"Charging slot booked on {outcome.TargetId}";
+                    if (outcome.CommandType == "CANCEL_CHARGE_BOOKING") return $"Charging booking on {outcome.TargetId} cancelled";
                     if (outcome.TargetType == "VEHICLE") return $"Shuttle {outcome.TargetId} kept in service";
                     if (outcome.TargetType == "CHARGER") return $"Charger {outcome.TargetId} reserved";
                     return $"Decision {outcome.CommandId} APPLIED for {outcome.TargetId} at tick {outcome.AppliedTick?.ToString() ?? "unknown"}.";
                 case "REJECTED":
                     if (outcome.TargetType == "SESSION" && outcome.FailureCode == "UNKNOWN_CONSTRAINT")
                         return "Can't start yet: a shuttle's route crosses a closed road. Approve a detour, then start again.";
+                    if (outcome.CommandType == "SCHEDULE_CHARGE" || outcome.CommandType == "CANCEL_CHARGE_BOOKING")
+                        return outcome.FailureCode == "STALE_REVISION" ? $"{outcome.TargetId} changed just now. Check the slot again."
+                            : outcome.FailureCode == "CHARGER_CONFLICT" ? $"That slot on {outcome.TargetId} is already taken."
+                            : $"The charging change was refused: {outcome.FailureCode ?? "no code"}.";
                     return $"Decision {outcome.CommandId} REJECTED for {outcome.TargetId}: {outcome.FailureCode ?? "no code"}.";
                 case "NEEDS_RECONFIRMATION":
                     return $"Decision {outcome.CommandId} for {outcome.TargetId} needs reconfirmation after recovery; review and submit again.";

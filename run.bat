@@ -45,8 +45,9 @@ if exist "%~dp0backend\.venv\Scripts\python.exe" (
     set PYTHON="%~dp0backend\.venv\Scripts\python.exe"
     exit /b 0
 )
+rem Compare the exact code: the Python Install Manager's py fails with a negative code, which "if not errorlevel 1" counts as success.
 py -3.12 -V >nul 2>&1
-if not errorlevel 1 (
+if "%ERRORLEVEL%"=="0" (
     set PYTHON=py -3.12
     exit /b 0
 )
@@ -54,6 +55,7 @@ if exist "%LocalAppData%\Programs\Python\Python312\python.exe" (
     set PYTHON="%LocalAppData%\Programs\Python\Python312\python.exe"
     exit /b 0
 )
-python -V 2>nul | findstr /b "Python 3.1" >nul
-if not errorlevel 1 set PYTHON=python
+rem No pipe here: piping from a command that is not installed ends this whole script.
+python -c "import sys; raise SystemExit(sys.version_info[:2] != (3, 12))" >nul 2>&1
+if "%ERRORLEVEL%"=="0" set PYTHON=python
 exit /b 0

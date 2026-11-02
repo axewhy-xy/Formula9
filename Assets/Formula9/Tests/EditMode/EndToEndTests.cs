@@ -204,6 +204,54 @@ namespace Formula9.Tests
             yield return Control("ARCHIVE", "ARCHIVED");
         }
 
+        // A time slot goes through the backend's check, then is booked, moved and cancelled.
+        [UnityTest]
+        public IEnumerator AChargingSlotIsCheckedBookedMovedAndCancelledOnTheRealBackend()
+        {
+            yield return SignUpAndLogIn();
+            session.Scenario = SessionController.IntegratedScenario;
+            yield return Await(session.CreateAsync());
+            var api = new TrainingApi(transport, auth, backend);
+            var s = session.Store.Snapshot;
+            var route = s.Vehicles[0].RouteId;
+            var context = api.GetRouteEditorAsync(s.SessionId, route); yield return Await(context);
+            var draft = api.PreviewRouteAsync(s.SessionId, new RouteEditRequest { RouteId = route, ExpectedRouteRevision = context.Result.RouteRevision, DraftRevision = 1 });
+            yield return Await(draft);
+            var before = outcomes.Count;
+            yield return Await(session.ApproveRouteAsync(draft.Result, "Use validated bypass before departure"));
+            yield return PollUntil(() => outcomes.Skip(before).Any(o => o.Status == "APPLIED"), "detour approval");
+            yield return Await(session.RefreshAsync());
+            yield return Control("START", "RUNNING");
+
+            s = session.Store.Snapshot;
+            var (charger, start) = UI.ChargingPresenter.SuggestSlot(s);
+            start += 2000;
+            var check = api.PreviewChargeScheduleAsync(s.SessionId, new ChargeScheduleRequest { VehicleId = "shuttle-01", ChargerId = charger, StartTick = start });
+            yield return Await(check);
+            Assert.AreNotEqual("FAIL", check.Result.Validation, string.Join("; ", check.Result.Issues.Select(i => i.Message)));
+
+            before = outcomes.Count;
+            yield return Await(session.SubmitAsync(DecisionRules.ScheduleChargeCommand(s, "shuttle-01", charger, start, null, "Book ahead to keep cover")));
+            yield return PollUntil(() => outcomes.Skip(before).Any(o => o.Status == "APPLIED"), "slot booking");
+            yield return Await(session.RefreshAsync());
+            var booked = session.Store.Snapshot.ChargeBookings.Single(b => b.VehicleId == "shuttle-01" && b.Status == "SCHEDULED");
+            Assert.AreEqual(start, booked.StartTick);
+
+            before = outcomes.Count;
+            yield return Await(session.SubmitAsync(DecisionRules.ScheduleChargeCommand(session.Store.Snapshot, "shuttle-01", charger, start + 400, booked.BookingId, "Later keeps more cover")));
+            yield return PollUntil(() => outcomes.Skip(before).Any(o => o.Status == "APPLIED"), "slot move");
+            yield return Await(session.RefreshAsync());
+            var moved = session.Store.Snapshot.ChargeBookings.Single(b => b.VehicleId == "shuttle-01" && b.Status == "SCHEDULED");
+            Assert.AreEqual(start + 400, moved.StartTick);
+            Assert.AreNotEqual(booked.BookingId, moved.BookingId);
+
+            before = outcomes.Count;
+            yield return Await(session.SubmitAsync(DecisionRules.CancelChargeBookingCommand(session.Store.Snapshot, moved.BookingId, "No longer needed")));
+            yield return PollUntil(() => outcomes.Skip(before).Any(o => o.Status == "APPLIED"), "slot cancel");
+            yield return Await(session.RefreshAsync());
+            Assert.IsFalse(session.Store.Snapshot.ChargeBookings.Any(b => b.VehicleId == "shuttle-01" && b.Status == "SCHEDULED"));
+        }
+
         // -----------------------------------------------------------------------------------
         // Function: IntegratedExerciseApprovesDetourChargingAndIncidentDecisions
         // -----------------------------------------------------------------------------------

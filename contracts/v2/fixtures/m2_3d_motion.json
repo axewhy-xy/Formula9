@@ -70,6 +70,7 @@
       },
       "snapshot": {
         "candidates": [],
+        "charge_bookings": [],
         "charge_decision_deferrals": {},
         "charge_option_revisions": {},
         "charge_options": [],
@@ -640,6 +641,7 @@
       },
       "snapshot": {
         "candidates": [],
+        "charge_bookings": [],
         "charge_decision_deferrals": {},
         "charge_option_revisions": {},
         "charge_options": [],
@@ -1218,6 +1220,7 @@
       },
       "snapshot": {
         "candidates": [],
+        "charge_bookings": [],
         "charge_decision_deferrals": {},
         "charge_option_revisions": {},
         "charge_options": [],
@@ -1796,6 +1799,7 @@
       },
       "snapshot": {
         "candidates": [],
+        "charge_bookings": [],
         "charge_decision_deferrals": {},
         "charge_option_revisions": {},
         "charge_options": [],
@@ -2374,6 +2378,7 @@
       },
       "snapshot": {
         "candidates": [],
+        "charge_bookings": [],
         "charge_decision_deferrals": {},
         "charge_option_revisions": {},
         "charge_options": [],

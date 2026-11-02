@@ -20,6 +20,7 @@ from uuid import uuid4
 from contracts.v2.models import Event
 from src.persistence.training_store import TrainingStoreError
 from src.services.battery_decision import submit_battery_decision
+from src.services.charge_booking import BOOKING_COMMANDS, submit_booking_command
 from src.services.incidents import IncidentService
 
 logger = logging.getLogger(__name__)
@@ -160,6 +161,10 @@ def submit_workflow(store, actor, actor_id, command, checkpoint):
             if forecast is not None and not forecast.reaches_depot_above_reserve:
                 return store.apply(receipt.command_id, rejection_code="NO_FEASIBLE_ROUTE"), None
         result = submit_battery_decision(unit, actor_id, command, rebuild_decisions=staged.battery_decisions)
+    elif kind in BOOKING_COMMANDS:
+        result = submit_booking_command(unit, actor_id, command, charge_s=staged.definition.data["charge_s"],
+                                        charge_time_scale=staged.definition.data.get("charge_time_scale"),
+                                        rebuild_decisions=staged.battery_decisions)
     else:
         raise TrainingStoreError("INVALID_TRANSITION", "Create a new attempt to reset this scenario")
     return result, staged if result.status == "APPLIED" else None

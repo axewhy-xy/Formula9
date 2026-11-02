@@ -44,6 +44,39 @@ namespace Formula9.Contracts
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
+    /// <summary>One shuttle's hold on a charger port over a window of simulation ticks.</summary>
+    public sealed partial class ChargeBooking
+    {
+        [JsonProperty("booking_id", Required = Required.Always)]
+        public string BookingId { get; set; }
+        [JsonProperty("charger_id", Required = Required.Always)]
+        public string ChargerId { get; set; }
+        [JsonProperty("end_tick", Required = Required.Always)]
+        public long EndTick { get; set; }
+        [JsonProperty("is_estimate", Required = Required.Default)]
+        public bool IsEstimate { get; set; } = true;
+        [JsonProperty("origin", Required = Required.Always)]
+        public string Origin { get; set; }
+        [JsonProperty("phase", Required = Required.Default)]
+        public string Phase { get; set; }
+        [JsonProperty("revision", Required = Required.Always)]
+        public long Revision { get; set; }
+        [JsonProperty("set_down_stop_id", Required = Required.Default)]
+        public string SetDownStopId { get; set; }
+        [JsonProperty("start_tick", Required = Required.Always)]
+        public long StartTick { get; set; }
+        [JsonProperty("status", Required = Required.Always)]
+        public string Status { get; set; }
+        [JsonProperty("status_reason", Required = Required.Default)]
+        public string StatusReason { get; set; }
+        [JsonProperty("trip_path_m", Required = Required.Default)]
+        public List<List<double>> TripPathM { get; set; } = new List<List<double>>();
+        [JsonProperty("vehicle_id", Required = Required.Always)]
+        public string VehicleId { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
     /// <summary>ChargeOption from the shared v2 contract.</summary>
     public sealed partial class ChargeOption
     {
@@ -81,6 +114,75 @@ namespace Formula9.Contracts
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
+    /// <summary>ChargeScheduleIssue from the shared v2 contract.</summary>
+    public sealed partial class ChargeScheduleIssue
+    {
+        [JsonProperty("blocking", Required = Required.Always)]
+        public bool Blocking { get; set; }
+        [JsonProperty("code", Required = Required.Always)]
+        public string Code { get; set; }
+        [JsonProperty("message", Required = Required.Always)]
+        public string Message { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>The backend's assessment of a requested slot. It reserves nothing.</summary>
+    public sealed partial class ChargeSchedulePreview
+    {
+        [JsonProperty("assumptions", Required = Required.Always)]
+        public List<string> Assumptions { get; set; }
+        [JsonProperty("battery_after_kwh", Required = Required.Always)]
+        public double BatteryAfterKwh { get; set; }
+        [JsonProperty("battery_at_start_kwh", Required = Required.Always)]
+        public double BatteryAtStartKwh { get; set; }
+        [JsonProperty("charger_id", Required = Required.Always)]
+        public string ChargerId { get; set; }
+        [JsonProperty("charger_revision", Required = Required.Always)]
+        public long ChargerRevision { get; set; }
+        [JsonProperty("end_tick", Required = Required.Always)]
+        public long EndTick { get; set; }
+        [JsonProperty("is_estimate", Required = Required.Default)]
+        public bool IsEstimate { get; set; } = true;
+        [JsonProperty("issues", Required = Required.Always)]
+        public List<ChargeScheduleIssue> Issues { get; set; }
+        [JsonProperty("loops_after", Required = Required.AllowNull)]
+        public long? LoopsAfter { get; set; }
+        [JsonProperty("min_in_service_vehicles", Required = Required.Always)]
+        public long MinInServiceVehicles { get; set; }
+        [JsonProperty("out_of_service_s", Required = Required.Always)]
+        public double OutOfServiceS { get; set; }
+        [JsonProperty("replaces_booking_id", Required = Required.Default)]
+        public string ReplacesBookingId { get; set; }
+        [JsonProperty("session_id", Required = Required.Always)]
+        public string SessionId { get; set; }
+        [JsonProperty("start_tick", Required = Required.Always)]
+        public long StartTick { get; set; }
+        [JsonProperty("tick", Required = Required.Always)]
+        public long Tick { get; set; }
+        [JsonProperty("validation", Required = Required.Always)]
+        public string Validation { get; set; }
+        [JsonProperty("vehicle_id", Required = Required.Always)]
+        public string VehicleId { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>A slot the operator wants checked; replaces_booking_id moves an existing SCHEDULED booking.</summary>
+    public sealed partial class ChargeScheduleRequest
+    {
+        [JsonProperty("charger_id", Required = Required.Always)]
+        public string ChargerId { get; set; }
+        [JsonProperty("replaces_booking_id", Required = Required.Default)]
+        public string ReplacesBookingId { get; set; }
+        [JsonProperty("start_tick", Required = Required.Always)]
+        public long StartTick { get; set; }
+        [JsonProperty("vehicle_id", Required = Required.Always)]
+        public string VehicleId { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
     /// <summary>Charger from the shared v2 contract.</summary>
     public sealed partial class Charger
     {
@@ -92,6 +194,8 @@ namespace Formula9.Contracts
         public List<string> OccupiedVehicleIds { get; set; }
         [JsonProperty("port_count", Required = Required.Always)]
         public long PortCount { get; set; }
+        [JsonProperty("position", Required = Required.Default)]
+        public Position Position { get; set; }
         [JsonProperty("power_kw", Required = Required.Always)]
         public double PowerKw { get; set; }
         // Additive 2.x fields from a newer backend are kept, not rejected.
@@ -367,6 +471,8 @@ namespace Formula9.Contracts
     {
         [JsonProperty("candidates", Required = Required.Always)]
         public List<Candidate> Candidates { get; set; }
+        [JsonProperty("charge_bookings", Required = Required.Default)]
+        public List<ChargeBooking> ChargeBookings { get; set; } = new List<ChargeBooking>();
         [JsonProperty("charge_decision_deferrals", Required = Required.Default)]
         public Dictionary<string, long> ChargeDecisionDeferrals { get; set; } = new Dictionary<string, long>();
         [JsonProperty("charge_option_revisions", Required = Required.Default)]
