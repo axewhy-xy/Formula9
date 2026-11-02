@@ -252,7 +252,7 @@ namespace Formula9.Tests
                 Assert.AreEqual(half, BoundsOf(mesh, RoadMesh.AsphaltLayer).max.x, 1e-3f, "two lanes each way");
                 Assert.AreEqual(half + RoadMesh.KerbM, BoundsOf(mesh, RoadMesh.KerbLayer).max.x, 1e-3f);
                 Assert.AreEqual(0, mesh.GetTriangles(RoadMesh.MarkingLayer).Length, "legacy marking triangles are removed");
-                Assert.AreEqual(100, BoundsOf(mesh, RoadMesh.AsphaltLayer).max.z, 1e-3f, "asphalt reaches the last endpoint");
+                Assert.AreEqual(107, BoundsOf(mesh, RoadMesh.AsphaltLayer).max.z, 1e-3f, "asphalt reaches the last endpoint");
                 var uv1 = new List<Vector4>(); mesh.GetUVs(1, uv1);
                 var uv2 = new List<Vector4>(); mesh.GetUVs(2, uv2);
                 Assert.AreEqual(mesh.vertexCount, uv1.Count);
@@ -312,12 +312,23 @@ namespace Formula9.Tests
                 Assert.IsTrue(asphalt.Any(i => vertices[i].x > 0f && vertices[i].x < 100f && uv1[i].w == 1f && uv2[i].x > 0f),
                     "outgoing lane paint begins after the junction");
                 // At the two-arm node (500,100) neither road requires a junction cutoff.
-                Assert.IsTrue(asphalt.Any(i => Mathf.Abs(vertices[i].x - 500f) < 1e-3f && Mathf.Abs(vertices[i].z - 100f) < 1e-3f &&
-                    uv1[i].w == 1f && Mathf.Abs(uv2[i].x) < 1e-4f && uv2[i].w < .5f),
-                    "lane paint stays enabled and untrimmed where exactly two roads meet");
+                float asphaltHalf = RoadMesh.LaneWidthM + RoadMesh.ShoulderM;
+                // The centre vertex belongs to an unmarked rounded Cap(). The textured
+                // ribbon crosses the node at x = 500 +/- asphaltHalf, z = 100.
+                bool UntrimmedAtNode(int i) =>
+                    Mathf.Abs(vertices[i].z - 100f) < 1e-3f &&
+                    Mathf.Abs(Mathf.Abs(vertices[i].x - 500f) - asphaltHalf) < 1e-3f &&
+                    uv1[i].w == 1f && Mathf.Abs(uv2[i].x) < 1e-4f && uv2[i].w < .5f;
+                Assert.IsTrue(asphalt.Any(i => UntrimmedAtNode(i) &&
+                    Mathf.Abs(uv1[i].y - 100f / 24f) < 1e-4f),
+                    "incoming textured road reaches the two-road connection");
+                Assert.IsTrue(asphalt.Any(i => UntrimmedAtNode(i) &&
+                    Mathf.Abs(uv1[i].y) < 1e-4f),
+                    "outgoing textured road begins at the same connection");
             }
             finally { UnityEngine.Object.DestroyImmediate(mesh); }
         }
+
 
         [Test]
         public void AServiceRoadHasNoLinesAndABrokenRoadIsLeftOut()
