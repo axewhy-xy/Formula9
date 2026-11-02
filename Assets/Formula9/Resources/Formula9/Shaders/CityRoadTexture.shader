@@ -76,32 +76,57 @@ Shader "Formula9/CityRoadTexture"
                 // 92%, and a dashed centre at 50%. It supplies BOTH the paint
                 // pattern and grain. The lane model only picks which source
                 // column to sample; it draws no geometric divider quads.
-                float bareU = (across < 0.5)
-                    ? (0.17 + across * 0.52)
-                    : (0.57 + (across - 0.5) * 0.52); // grain away from paint
-                float sourceU = bareU;
+                
+// Continuous asphalt UVs that avoid sampling painted regions.
+                float bareU = 0.20 + across * 0.16;
+
                 float lanePosition = across * max(1.0, lanes);
                 float nearest = floor(lanePosition + 0.5);
                 float offset = lanePosition - nearest;
-                if (lanes >= 1.0 && fade > 0.05)
+
+// Calculate painted UVs separately from asphalt UVs.
+                float paintU = 0.5 + offset * 0.5;
+                float validMark = 0.0;
+
+                if (lanes >= 1.0)
                 {
-                    if (nearest <= 0.0 && abs(offset) < 0.15)
-                        sourceU = 0.076 + offset * 0.5;
-                    else if (nearest >= lanes && abs(offset) < 0.15)
-                        sourceU = 0.923 + offset * 0.5;
-                    else if (nearest > 0.0 && nearest < lanes && abs(offset) < 0.15)
-                        sourceU = 0.5 + offset * 0.5;
+                    if (nearest <= 0.0)
+                    {
+                        paintU = 0.076 + offset * 0.5;
+                        validMark = 1.0;
+                    }
+                    else if (nearest >= lanes)
+                    {
+                        paintU = 0.923 + offset * 0.5;
+                        validMark = 1.0;
+                    }
+                    else
+                    {
+                        validMark = 1.0;
+                    }
                 }
-                // sourceU switches abruptly between image columns, so explicit
-                // gradients avoid false mip-level jumps and blurry seams.
-                // Calculate derivatives unconditionally (before sampling).
+
+// Calculate stable gradients for each texture sample.
+                float2 bareDx = float2(ddx(across) * 0.16, ddx(along));
+                float2 bareDy = float2(ddy(across) * 0.16, ddy(along));
+
                 float2 paintDx = float2(ddx(lanePosition) * 0.5, ddx(along));
                 float2 paintDy = float2(ddy(lanePosition) * 0.5, ddy(along));
-                float2 bareDx = float2(ddx(across) * 0.52, ddx(along));
-                float2 bareDy = float2(ddy(across) * 0.52, ddy(along));
+
+// Sample asphalt and paint independently.
                 fixed4 bare = tex2Dgrad(_MainTex, float2(bareU, along), bareDx, bareDy);
-                fixed4 painted = tex2Dgrad(_MainTex, float2(sourceU, along), paintDx, paintDy);
-                fixed4 result = lerp(bare, painted, fade);
+
+                fixed4 painted = tex2Dgrad(_MainTex, float2(paintU, along), paintDx, paintDy);
+
+// Smooth the marking boundaries to avoid hard seams.
+                float feather = max(fwidth(lanePosition), 0.005);
+                float markingBand = 1.0 - smoothstep(0.15 - feather,0.15 + feather,abs(offset));
+
+                float markingMask = fade * validMark * markingBand;
+
+// Blend the samples without discontinuous UV selection.
+                fixed4 result = lerp(bare, painted, markingMask);
+
                 result.rgb = saturate(result.rgb * _Color.rgb);
                 // For bidirectional roads, show two clearly separated yellow
                 // centre stripes instead of a confusing dashed white centre.
