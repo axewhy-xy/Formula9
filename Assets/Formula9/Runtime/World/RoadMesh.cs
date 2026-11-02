@@ -17,14 +17,8 @@ namespace Formula9.World
         public const float ShoulderM = 0.6f, KerbM = 0.55f;
         // Just above the ground, under the routes
         public const float SurfaceY = 0.1f;
-        // Kerb polygons must sit BELOW asphalt; coplanar submeshes produce dark
-        // triangle fans at junctions due to depth-buffer competition.
-        public const float KerbSurfaceY = SurfaceY - 0.055f;
-        public const float LegacyLineY = SurfaceY + 0.015f;
         // Lines stop this far short of the widest road at a junction, leaving it plain asphalt
         private const float JunctionClearanceM = 1;
-        // Car parks and driveways between blocks are not lined
-        private const string UnmarkedClass = "service";
         // A bend sharper than this gets a round corner, because its mitre is cut short
         private const float SharpBendCosine = 0.7f, MaxMitre = 2;
         private const int CapSides = 12;
@@ -32,7 +26,27 @@ namespace Formula9.World
 
         public static float HalfWidth(CityRoad road) => (road.Oneway ? road.Lanes : road.Lanes * 2) * LaneWidthM / 2 + ShoulderM;
 
-        public static Mesh Build(IEnumerable<CityRoad> roads)
+        private static bool IsUnmarkedClass(string roadClass)
+        {
+            switch ((roadClass ?? string.Empty).ToLowerInvariant())
+            {
+                case "service":
+                case "path":
+                case "footway":
+                case "pedestrian":
+                case "cycleway":
+                case "steps":
+                case "track":
+                case "construction":
+                case "platform":
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
+       public static Mesh Build(IEnumerable<CityRoad> roads)
         {
             var list = roads.Select(road => (Road: road, Points: Line(road))).Where(r => r.Points.Count >= 2).ToList();
             var ends = new Dictionary<long, List<float>>();
@@ -47,68 +61,66 @@ namespace Formula9.World
 
             var vertices = new List<Vector3>(); var lines = new List<Vector4>();
             var textureCoords = new List<Vector4>();
+            var fadeCoords = new List<Vector4>();
             var layers = Enumerable.Range(0, LayerCount).Select(_ => new List<int>()).ToArray();
+
+            // Draw only the asphalt ribbon. The old circular endpoint/bend Cap()
+            // emitted a fan of zero-UV triangles at every sharp vertex. Under the
+            // textured road shader those polygons had different colours from the
+            // neighbouring road, creating dark star and triangle artifacts.
             void Surface(List<Vector2> points, float halfWidth, List<int> triangles, float height)
             {
-                Ribbon(points, halfWidth, null, 0, 0, 0, 0, vertices, lines, triangles, height);
-                for (var i = 0; i < points.Count; i++)
-                    if (i == 0 || i == points.Count - 1 || IsSharp(points[i - 1], points[i], points[i + 1])) Cap(points[i], halfWidth, vertices, lines, triangles, height);
+                Ribbon(points, halfWidth, null, 0, 0, 0, 0,
+                    vertices, lines, triangles, height);
             }
             // Kerbs are two OUTER edge strips, not another full-width road polygon.
             // Full-width kerb underlays used to show through adjacent road junctions
             // as thick grey bars whenever road surfaces failed to coincide exactly.
             foreach (var (road, points) in list)
                 KerbEdges(points, HalfWidth(road), vertices, lines, layers[KerbLayer]);
-            // The user-supplied two-lane road texture is projected along the
-            // same ribbon as the asphalt. TEXCOORD1: across [0..1], distance
-            // along the road (in texture repeats), actual total lanes, fade.
-            // This DOES NOT change legacy TEXCOORD0 or the public Build API.
+
+            // TEXCOORD1: road width, texture repeats, signed lane count, marked flag.
+            // TEXCOORD2: fade start/end (metres), fade span (metres), unused.
+            // Cutoff data is constant for each road and evaluated PER PIXEL, not
+            // interpolated from sparse polyline vertices.
             while (textureCoords.Count < vertices.Count) textureCoords.Add(Vector4.zero);
+            while (fadeCoords.Count < vertices.Count) fadeCoords.Add(Vector4.zero);
             foreach (var (road, points) in list)
             {
                 int first = vertices.Count;
                 Surface(points, HalfWidth(road), layers[AsphaltLayer], SurfaceY);
                 while (textureCoords.Count < vertices.Count) textureCoords.Add(Vector4.zero);
+                while (fadeCoords.Count < vertices.Count) fadeCoords.Add(Vector4.zero);
                 var along = Along(points);
                 float length = along[along.Count - 1];
-                float fromCut = Clearance(road.FromNode);
-                float toCut = Clearance(road.ToNode);
+                // Never erase an entire short road connecting two junctions.
+                float fromCut = Mathf.Min(Clearance(road.FromNode), length * .25f);
+                float toCut = Mathf.Min(Clearance(road.ToNode), length * .25f);
+                float fadeSpan = Mathf.Min(1.2f, Mathf.Max(.10f, length * .12f));
+                bool marked = !IsUnmarkedClass(road.Class);
                 // Our backend's two-way Lanes represents lanes per direction.
                 int totalLanes = road.Oneway ? road.Lanes : road.Lanes * 2;
                 totalLanes = Mathf.Max(1, totalLanes);
                 for (int i = 0; i < points.Count; i++)
                 {
-                    float fade = 1f;
-                    if (fromCut > 0f)
-                        fade = Mathf.Min(fade, Mathf.Clamp01((along[i] - fromCut) / 2f));
-                    if (toCut > 0f)
-                        fade = Mathf.Min(fade, Mathf.Clamp01((length - along[i] - toCut) / 2f));
-                    float v = along[i] / 24f; // Four source-image dash cycles / 24 metres
+                    float v = along[i] / 24f; // Source texture's dash cycle
                     float signedLanes = road.Oneway ? totalLanes : -totalLanes;
-                    textureCoords[first + i * 2] = new Vector4(1f, v, signedLanes, fade);
-                    textureCoords[first + i * 2 + 1] = new Vector4(0f, v, signedLanes, fade);
+                    var paintData = new Vector4(fromCut, length - toCut, fadeSpan,
+                        toCut > 0f ? 1f : 0f);
+                    textureCoords[first + i * 2] = new Vector4(1f, v, signedLanes, marked ? 1f : 0f);
+                    textureCoords[first + i * 2 + 1] = new Vector4(0f, v, signedLanes, marked ? 1f : 0f);
+                    fadeCoords[first + i * 2] = paintData;
+                    fadeCoords[first + i * 2 + 1] = paintData;
                 }
-                // Fan/cap polygons are deliberately bare asphalt; their zero
-                // lane-count UV prevents a starburst of texture marks.
+                // Every asphalt vertex now has valid lane UVs. There are no
+                // cap/fan polygons to create triangles with zero lane UVs.
             }
-            foreach (var (road, points) in list)
-            {
-                if (road.Class == UnmarkedClass) continue;
-                var along = Along(points);
-                var from = Clearance(road.FromNode); var to = along[along.Count - 1] - Clearance(road.ToNode);
-                if (from >= to) continue;
-                var (cut, cutAlong) = Slice(points, along, from, to);
-                // In lanes: a one-way road counts from its edge, a two-way road from its centre line
-                var middleLane = road.Oneway ? road.Lanes / 2f : 0;
-                Ribbon(cut, HalfWidth(road), cutAlong, middleLane, HalfWidth(road) / LaneWidthM, road.Lanes, road.Oneway ? 0 : 1, vertices, lines, layers[MarkingLayer], LegacyLineY);
-            }
-
-            // Legacy marking submesh adds more vertices after asphalt. Keep the
-            // secondary UV array exactly the same length as the mesh vertices.
-            while (textureCoords.Count < vertices.Count) textureCoords.Add(Vector4.zero);
+            // The deleted CityRoadMarkings shader no longer consumes the legacy
+            // submesh. Do not generate invisible geometry merely to delete it later.
+            // Lane paint is sampled by CityRoadTexture on the asphalt submesh.
 
             var mesh = new Mesh { name = "City roads", indexFormat = IndexFormat.UInt32 };
-            mesh.SetVertices(vertices); mesh.SetUVs(0, lines); mesh.SetUVs(1, textureCoords);
+            mesh.SetVertices(vertices); mesh.SetUVs(0, lines); mesh.SetUVs(1, textureCoords); mesh.SetUVs(2, fadeCoords);
             mesh.subMeshCount = LayerCount;
             for (var i = 0; i < LayerCount; i++) mesh.SetTriangles(layers[i], i);
             mesh.RecalculateNormals(); mesh.RecalculateBounds();
@@ -204,10 +216,10 @@ namespace Formula9.World
             void Quad(Vector2 a, Vector2 b, Vector2 c, Vector2 d)
             {
                 int index = vertices.Count;
-                vertices.Add(Ground(a, KerbSurfaceY));
-                vertices.Add(Ground(b, KerbSurfaceY));
-                vertices.Add(Ground(c, KerbSurfaceY));
-                vertices.Add(Ground(d, KerbSurfaceY));
+                vertices.Add(Ground(a, SurfaceY));
+                vertices.Add(Ground(b, SurfaceY));
+                vertices.Add(Ground(c, SurfaceY));
+                vertices.Add(Ground(d, SurfaceY));
                 for (int k = 0; k < 4; k++) lines.Add(Vector4.zero);
                 triangles.AddRange(new[] { index, index + 1, index + 2,
                     index, index + 2, index + 3 });

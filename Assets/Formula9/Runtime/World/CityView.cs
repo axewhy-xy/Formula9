@@ -219,11 +219,8 @@ namespace Formula9.World
                 var surface = Shader.Find("Formula9/CityRoadAsh");
                 if (surface == null || !surface.isSupported)
                 {
-                    Debug.LogWarning("[CityView] CityRoadAsh unavailable; using fallback road shader.");
-                    surface = Shader.Find("Formula9/CityRoad");
-                    if (surface == null || !surface.isSupported) surface = Shader.Find("Unlit/Texture");
-                    if (surface == null || !surface.isSupported) surface = Shader.Find("Sprites/Default");
-                    if (surface == null) throw new InvalidOperationException("No usable road shader found");
+                    Debug.LogWarning("[CityView] CityRoadAsh Shader is unavailable ");
+                    
                 }
                 var grain = Own(AsphaltGrain());
                 var roadTexture = Resources.Load<Texture2D>("Formula9/Textures/road_lane_texture");
@@ -258,6 +255,7 @@ namespace Formula9.World
                 materials[RoadMesh.KerbLayer].SetInt("_StencilComp", (int)CompareFunction.NotEqual);
                 materials[RoadMesh.KerbLayer].SetInt("_StencilPass", (int)StencilOp.Keep);
                 materials[RoadMesh.KerbLayer].SetInt("_StencilWriteMask", 0);
+
                 materials[RoadMesh.AsphaltLayer].SetInt("_StencilRef", 1);
                 materials[RoadMesh.AsphaltLayer].SetInt("_StencilComp", (int)CompareFunction.Always);
                 materials[RoadMesh.AsphaltLayer].SetInt("_StencilPass", (int)StencilOp.Replace);
@@ -266,22 +264,19 @@ namespace Formula9.World
                 // compatibility, but that encoded-UV shader layer is never rendered
                 // by this view. Standard lines are now sampled from the user-provided texture
                 // by CityRoadTexture, not drawn as additional meshes.
-                var oldLineShader = Shader.Find("Formula9/CityRoadMarkings");
-                bool useLegacyPaint = !texturedRoads && oldLineShader != null && oldLineShader.isSupported;
-                materials[RoadMesh.MarkingLayer] = Own(new Material(useLegacyPaint ? oldLineShader : surface)
-                    { name = useLegacyPaint ? "Legacy fallback lane markings" : "Unused legacy paint submesh",
-                      color = useLegacyPaint ? MarkingColor : Color.clear });
-                materials[RoadMesh.AsphaltLayer].renderQueue = (int)RenderQueue.Geometry + 1;
-                materials[RoadMesh.KerbLayer].renderQueue = (int)RenderQueue.Geometry + 2;
+              
+                materials[RoadMesh.MarkingLayer] = Own(new Material(surface)
+                    { name = "Unused legacy paint submesh",
+                      color = Color.clear });
+                materials[RoadMesh.KerbLayer].renderQueue = (int)RenderQueue.Geometry + 1;
+                materials[RoadMesh.AsphaltLayer].renderQueue = (int)RenderQueue.Geometry + 2;
                 materials[RoadMesh.MarkingLayer].renderQueue = (int)RenderQueue.Geometry + 3;
 
-                var road = new GameObject("OSM roads (RoadMesh)", typeof(MeshFilter), typeof(MeshRenderer));
+                var road = new GameObject("Roads", typeof(MeshFilter), typeof(MeshRenderer));
                 road.transform.SetParent(root, false);
                 var geometry = Own(RoadMesh.Build(roads));
-                // Disable only the legacy shader-encoded lane layer. Keep the
-                // asphalt and kerb submeshes and all existing RoadMesh tests.
-                if (!useLegacyPaint)
-                    geometry.SetTriangles(Array.Empty<int>(), RoadMesh.MarkingLayer);
+                
+                geometry.SetTriangles(Array.Empty<int>(), RoadMesh.MarkingLayer);
                 // The old kerb ribbon still crosses neighbouring roads at complex
                 // junctions. Keep RoadMesh's public API for EditMode tests, but
                 // hide only the kerb submesh in THIS 3D view. This removes the
@@ -293,7 +288,7 @@ namespace Formula9.World
                 renderer.shadowCastingMode = ShadowCastingMode.Off;
                 renderer.receiveShadows = false;
                 Debug.Log($"[CityView] RoadMesh built {RoadCount} backend roads; " +
-                    $"textured={texturedRoads}; kerbsHidden=true; fallbackLaneShader={useLegacyPaint}; tint={AsphaltColor}");
+                    $"textured={texturedRoads}; kerbsHidden=true; tint={AsphaltColor}");
 
                 // The LTA dataset contributes special paint ONLY. Standard lane
                 // separators and edges are sampled from the user-supplied road texture.
