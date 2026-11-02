@@ -276,7 +276,7 @@ namespace Formula9.World
                 road.transform.SetParent(root, false);
                 var geometry = Own(RoadMesh.Build(roads));
                 
-                geometry.SetTriangles(Array.Empty<int>(), RoadMesh.MarkingLayer);
+                // MarkingLayer is already empty in RoadMesh.Build().
                 // The old kerb ribbon still crosses neighbouring roads at complex
                 // junctions. Keep RoadMesh's public API for EditMode tests, but
                 // hide only the kerb submesh in THIS 3D view. This removes the
