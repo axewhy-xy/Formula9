@@ -485,6 +485,7 @@ class TrainingStore:
             "START": "SESSION", "PAUSE": "SESSION", "RESUME": "SESSION", "RESET": "SESSION", "ARCHIVE": "SESSION",
             "APPROVE_ROUTE": "ROUTE", "APPROVE_INCIDENT_OPTION": "INCIDENT",
             "RESERVE_CHARGER": "CHARGER", "CONTINUE_SERVICE": "VEHICLE",
+            "SCHEDULE_CHARGE": "CHARGER", "CANCEL_CHARGE_BOOKING": "CHARGER",
         }[command.command_type]
         if command.target_type != expected_target:
             raise TrainingStoreError("INVALID_PAYLOAD", "Command type and target type do not match")

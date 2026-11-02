@@ -59,6 +59,7 @@ QUERY = """
 (
   way["highway"~"^(primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street|service)$"]
      ["service"!~"^(parking_aisle|driveway)$"]({box});
+  way["highway"="service"]["bus"="yes"]({box});
   node["highway"="bus_stop"]({box});
   nwr["amenity"="bus_station"]({box});
 );
@@ -116,7 +117,9 @@ class Network:
         self.way_nodes = {}
         for way in (e for e in elements if e["type"] == "way" and "highway" in e.get("tags", {})):
             tags = way["tags"]
-            if tags.get("access") in ("private", "no"):
+            # Roads only buses may use lead into an interchange; depot trips use them, loops do not
+            bus_only = tags.get("bus") == "yes" and tags.get("access") in ("private", "no")
+            if tags.get("access") in ("private", "no") and not bus_only:
                 continue
             oneway = tags.get("oneway") in ("yes", "true", "1") or tags.get("junction") in ("roundabout", "circular")
             nodes = [n for n in way["nodes"] if n in self.position]
@@ -124,10 +127,11 @@ class Network:
                 nodes.reverse()
                 oneway = True
             graphs = [self.access]
-            if tags["highway"] in LOOP_ROADS:
+            if tags["highway"] in LOOP_ROADS and not bus_only:
                 graphs.append(self.loop)
-            self.tags[way["id"]] = tags
-            self.way_nodes[way["id"]] = nodes
+            if not bus_only:
+                self.tags[way["id"]] = tags
+                self.way_nodes[way["id"]] = nodes
             for a, b in zip(nodes, nodes[1:]):
                 length = math.dist(self.position[a], self.position[b])
                 for graph in graphs:
@@ -398,15 +402,17 @@ def split_peer_routes(data: dict, net: Network, used: set[str]) -> None:
 
 
 def connector(net: Network, start_point, start_node, depot):
-    """Real roads from a loop's start to a depot, ending just inside it."""
-    # The nearest road the loop can drive to: the closest one may be a cut-off piece inside the site
-    reachable = nx.descendants(net.access, start_node) | {start_node}
-    entry = min(reachable, key=lambda n: math.dist(net.position[n], depot))
-    path = nx.dijkstra_path(net.access, start_node, entry, weight="length")
-    points = [tuple(start_point)] + net.points(path)
-    inside = (float(round(depot[0])), float(round(depot[1])) + 25.0)
-    points = simplify(points, 2.0) + [inside]
-    return [list(p) for index, p in enumerate(points) if index == 0 or p != points[index - 1]]
+    """Real roads from a loop's start to the nearest point to the depot, and from the nearest point back.
+
+    The way out is its own path: most roads here are one-way, so it is not the way in reversed, and
+    it may leave from another point, as a road that reaches the depot may run on out of the area.
+    """
+    nearest = lambda nodes: min(nodes, key=lambda n: math.dist(net.position[n], depot))
+    entry = nearest(nx.descendants(net.access, start_node) | {start_node})
+    leave = nearest(nx.ancestors(net.access, start_node) | {start_node})
+    way_in = [tuple(start_point)] + net.points(nx.dijkstra_path(net.access, start_node, entry, weight="length"))
+    way_out = net.points(nx.dijkstra_path(net.access, leave, start_node, weight="length")) + [tuple(start_point)]
+    return [list(p) for p in simplify(way_in, 2.0)], [list(p) for p in simplify(way_out, 2.0)]
 
 
 def build(osm: dict, base: dict, area: dict) -> dict:
@@ -503,17 +509,18 @@ def build(osm: dict, base: dict, area: dict) -> dict:
         at = [float(round(place[0])), float(round(place[1]))]
         first, second = f"charger-{index * 2 + 1}", f"charger-{index * 2 + 2}"
         # Roads are chosen from the exact place, as for the original depot, so its paths stay the same
-        roads = {
+        trips = {
             route_edit["route_id"]: connector(net, net.position[main[0]], main[0], place),
             "route-peer-b": connector(net, peers[0]["ring"][0], peers[0]["start_node"], place),
             "route-peer-c": connector(net, peers[1]["ring"][0], peers[1]["start_node"], place),
         }
         # The second shuttle on each loop leaves it for the depot the same way
-        roads["route-peer-d"] = roads["route-peer-b"]
-        roads["route-peer-e"] = roads["route-peer-c"]
+        trips["route-peer-d"] = trips["route-peer-b"]
+        trips["route-peer-e"] = trips["route-peer-c"]
         data["depots"].append({"depot_id": f"depot-{slug(name)}", "position_m": at,
                                "bays": {first: [round(at[0] - 15, 2), at[1]], second: [round(at[0] + 15, 2), at[1]]},
-                               "connectors": roads})
+                               "connectors": {route: way_in for route, (way_in, _) in trips.items()},
+                               "exits": {route: way_out for route, (_, way_out) in trips.items()}})
     data["assumptions"][0] = (f"Real {area['name']} road geometry and LTA bus stop positions from OpenStreetMap, simplified "
                               "to at most 64 waypoints a loop; energy-r1 estimates. Lanes, signals and traffic are not modelled.")
     data["assumptions"][1] = ("Shuttle-01 dwells at its loop entrance junction for 12 seconds; an obstruction on the first "

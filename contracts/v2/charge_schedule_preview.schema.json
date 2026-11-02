@@ -1,0 +1,174 @@
+{
+  "$defs": {
+    "ChargeScheduleIssue": {
+      "additionalProperties": true,
+      "properties": {
+        "blocking": {
+          "title": "Blocking",
+          "type": "boolean"
+        },
+        "code": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "blocking"
+      ],
+      "title": "ChargeScheduleIssue",
+      "type": "object"
+    }
+  },
+  "$id": "https://formula9.local/contracts/v2/charge_schedule_preview.schema.json",
+  "additionalProperties": true,
+  "description": "The backend's assessment of a requested slot. It reserves nothing.",
+  "properties": {
+    "assumptions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Assumptions",
+      "type": "array"
+    },
+    "battery_after_kwh": {
+      "minimum": 0,
+      "title": "Battery After Kwh",
+      "type": "number"
+    },
+    "battery_at_start_kwh": {
+      "minimum": 0,
+      "title": "Battery At Start Kwh",
+      "type": "number"
+    },
+    "charger_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Charger Id",
+      "type": "string"
+    },
+    "charger_revision": {
+      "minimum": 0,
+      "title": "Charger Revision",
+      "type": "integer"
+    },
+    "end_tick": {
+      "minimum": 0,
+      "title": "End Tick",
+      "type": "integer"
+    },
+    "is_estimate": {
+      "const": true,
+      "default": true,
+      "title": "Is Estimate",
+      "type": "boolean"
+    },
+    "issues": {
+      "items": {
+        "$ref": "#/$defs/ChargeScheduleIssue"
+      },
+      "title": "Issues",
+      "type": "array"
+    },
+    "loops_after": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Loops After"
+    },
+    "min_in_service_vehicles": {
+      "minimum": 0,
+      "title": "Min In Service Vehicles",
+      "type": "integer"
+    },
+    "out_of_service_s": {
+      "minimum": 0,
+      "title": "Out Of Service S",
+      "type": "number"
+    },
+    "replaces_booking_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Replaces Booking Id"
+    },
+    "session_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Session Id",
+      "type": "string"
+    },
+    "start_tick": {
+      "minimum": 0,
+      "title": "Start Tick",
+      "type": "integer"
+    },
+    "tick": {
+      "minimum": 0,
+      "title": "Tick",
+      "type": "integer"
+    },
+    "validation": {
+      "enum": [
+        "PASS",
+        "WARN",
+        "FAIL"
+      ],
+      "title": "Validation",
+      "type": "string"
+    },
+    "vehicle_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Vehicle Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "session_id",
+    "tick",
+    "vehicle_id",
+    "charger_id",
+    "start_tick",
+    "end_tick",
+    "validation",
+    "issues",
+    "charger_revision",
+    "out_of_service_s",
+    "battery_at_start_kwh",
+    "battery_after_kwh",
+    "loops_after",
+    "min_in_service_vehicles",
+    "assumptions"
+  ],
+  "title": "ChargeSchedulePreview",
+  "type": "object"
+}

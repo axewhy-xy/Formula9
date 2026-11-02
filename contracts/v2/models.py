@@ -185,6 +185,7 @@ class Charger(WireModel):
     port_count: Annotated[int, Field(ge=1)]
     power_kw: Annotated[float, Field(gt=0)]
     occupied_vehicle_ids: list[Id]
+    position: Position | None = None
 
 class Depot(WireModel):
     depot_id: Id
@@ -239,13 +240,77 @@ class ChargeOption(WireModel):
         return self
 
 
+class ChargeBooking(WireModel):
+    """One shuttle's hold on a charger port over a window of simulation ticks.
+
+    SCHEDULED holds a future slot. ACTIVE means the port is taken, from dispatch through charging
+    until the shuttle has cleared the bay. COMPLETED, CANCELLED and MISSED are final. The window
+    is an estimate: an overrunning ACTIVE booking has its end_tick extended by the backend.
+    """
+    booking_id: Id
+    revision: Revision
+    vehicle_id: Id
+    charger_id: Id
+    status: Literal["SCHEDULED", "ACTIVE", "COMPLETED", "CANCELLED", "MISSED"]
+    origin: Literal["OPERATOR", "CHARGE_NOW", "SAFETY_RETURN"]
+    start_tick: Tick
+    end_tick: Tick
+    status_reason: Text | None = None
+    # While ACTIVE: what the shuttle is doing now, the way it is driving, and where its riders get off.
+    phase: Literal["DROPPING_PASSENGERS", "DRIVING_TO_CHARGER", "CHARGING", "LEAVING_BAY", "RETURNING_TO_ROUTE"] | None = None
+    trip_path_m: list[Annotated[list[FiniteFloat], Field(min_length=2, max_length=2)]] = Field(default_factory=list)
+    set_down_stop_id: Id | None = None
+    is_estimate: Literal[True] = True
+
+    @model_validator(mode="after")
+    def window_is_ordered(self) -> "ChargeBooking":
+        if self.end_tick <= self.start_tick:
+            raise ValueError("charge booking must end after it starts")
+        return self
+
+
+class ChargeScheduleRequest(WireModel):
+    """A slot the operator wants checked; replaces_booking_id moves an existing SCHEDULED booking."""
+    vehicle_id: Id
+    charger_id: Id
+    start_tick: Tick
+    replaces_booking_id: Id | None = None
+
+
+class ChargeScheduleIssue(WireModel):
+    code: Id
+    message: Text
+    blocking: bool
+
+
+class ChargeSchedulePreview(WireModel):
+    """The backend's assessment of a requested slot. It reserves nothing."""
+    session_id: Id
+    tick: Tick
+    vehicle_id: Id
+    charger_id: Id
+    start_tick: Tick
+    end_tick: Tick
+    replaces_booking_id: Id | None = None
+    validation: Literal["PASS", "WARN", "FAIL"]
+    issues: list[ChargeScheduleIssue]
+    charger_revision: Revision
+    out_of_service_s: Annotated[FiniteFloat, Field(ge=0)]
+    battery_at_start_kwh: Annotated[FiniteFloat, Field(ge=0)]
+    battery_after_kwh: Annotated[FiniteFloat, Field(ge=0)]
+    loops_after: Annotated[int, Field(ge=0)] | None
+    min_in_service_vehicles: Annotated[int, Field(ge=0)]
+    assumptions: list[str]
+    is_estimate: Literal[True] = True
+
+
 class DispatcherCommand(WireModel):
     contract_version: Annotated[str, Field(pattern=r"^2\.[0-9]+$")]
     command_id: Id
     idempotency_key: Id
     session_id: Id
     command_type: Literal["START", "PAUSE", "RESUME", "RESET", "ARCHIVE", "APPROVE_ROUTE", "APPROVE_INCIDENT_OPTION", "RESERVE_CHARGER",
-                          "CONTINUE_SERVICE"]
+                          "CONTINUE_SERVICE", "SCHEDULE_CHARGE", "CANCEL_CHARGE_BOOKING"]
     expected_epoch: Revision
     expected_revision: Revision
     target_type: Literal["SESSION", "ROUTE", "INCIDENT", "CHARGER", "VEHICLE"]
@@ -257,7 +322,8 @@ class DispatcherCommand(WireModel):
     def reason_for_decision(self) -> "DispatcherCommand":
         if not supported_version(self.contract_version):
             raise ValueError("unsupported contract major version")
-        if self.command_type in {"APPROVE_ROUTE", "APPROVE_INCIDENT_OPTION", "RESERVE_CHARGER", "CONTINUE_SERVICE"} and not self.reason:
+        if self.command_type in {"APPROVE_ROUTE", "APPROVE_INCIDENT_OPTION", "RESERVE_CHARGER", "CONTINUE_SERVICE",
+                                 "SCHEDULE_CHARGE", "CANCEL_CHARGE_BOOKING"} and not self.reason:
             raise ValueError("decision command requires reason")
         return self
 
@@ -308,6 +374,7 @@ class FullSnapshot(Envelope):
     # A shuttle at zero loops cannot fall further, so it is never deferred: a 0 entry means
     # "not deferred" and is dropped on load (earlier builds stored them; they must still load).
     charge_decision_deferrals: dict[Id, Annotated[int, Field(ge=0)]] = Field(default_factory=dict)
+    charge_bookings: list[ChargeBooking] = Field(default_factory=list)
 
     @field_validator("charge_decision_deferrals")
     @classmethod
@@ -405,6 +472,15 @@ class FullSnapshot(Envelope):
                 raise ValueError("charge option without a charger cannot gain battery")
             if option.min_in_service_vehicles is not None and option.min_in_service_vehicles > len(self.vehicles):
                 raise ValueError("charge option min_in_service_vehicles exceeds the fleet size")
+        booking_ids = [b.booking_id for b in self.charge_bookings]
+        if len(booking_ids) != len(set(booking_ids)):
+            raise ValueError("duplicate charge booking ID")
+        live_vehicles = [b.vehicle_id for b in self.charge_bookings if b.status in {"SCHEDULED", "ACTIVE"}]
+        if len(live_vehicles) != len(set(live_vehicles)):
+            raise ValueError("vehicle has more than one live charge booking")
+        for booking in self.charge_bookings:
+            if booking.vehicle_id not in vehicle_ids or booking.charger_id not in charger_ids:
+                raise ValueError("charge booking references an unknown vehicle or charger")
         return self
 
 

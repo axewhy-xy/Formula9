@@ -26,7 +26,7 @@ from contracts.v2.models import (
     ChargeOption, Depot, EnergyForecast, FleetVehicle, FullSnapshot, RouteRevision, transition_allowed,
 )
 from .forecast import loop_energy_kwh, loops_remaining, reserve_kwh, reserve_margin_kwh
-from .model import EnergyModel, auxiliary_energy_kwh, charge_battery_kwh, drive_energy_kwh, require_non_negative, use_energy
+from .model import EnergyModel, auxiliary_energy_kwh, charge_battery_kwh, drive_energy_kwh, require_non_negative, seconds_to_full, use_energy
 
 LOW_LOOPS = 3                # at or below this many loops, a shuttle needs a battery decision
 IN_SERVICE_STATES = {"IN_SERVICE", "DWELLING", "DETOURING"}  # shuttles actively serving the route
@@ -168,7 +168,8 @@ def charge_options(model: EnergyModel, snapshot: FullSnapshot, charge_s: float =
                    depot_speed_mps: float | None = None,
                    parking_distances_m: dict[tuple[str, str], float] | None = None,
                    depot_choices: dict[str, str] | None = None,
-                   return_distances_m: dict[str, float] | None = None) -> list[ChargeOption]:
+                   return_distances_m: dict[str, float] | None = None,
+                   charge_time_scale: float | None = None) -> list[ChargeOption]:
     if parking_distances_m is not None:
         if depot_distances_m is None or depot_speed_mps is None or depot_speed_mps <= 0:
             raise ValueError("Parking estimates require depot distances and a positive depot speed")
@@ -229,8 +230,15 @@ def charge_options(model: EnergyModel, snapshot: FullSnapshot, charge_s: float =
             ))
         # Only a charger at the depot the distance was measured to; any charger without a choice
         chosen = depot_chargers.get((depot_choices or {}).get(vehicle.vehicle_id))
+        # ...and not one another shuttle has booked for the time this charge would take
+        fixed_charge_s = charge_s
+        if charge_time_scale:  # to full, so the emptier the battery the longer it holds the port
+            power = max((c.power_kw for c in snapshot.chargers), default=1.0)
+            charge_s = seconds_to_full(model, vehicle.battery_kwh, vehicle.battery_capacity_kwh, power, charge_time_scale)
+        hold_end = snapshot.tick + math.ceil(((forecast.next_depot_eta_s or 0.0) + charge_s) / 0.05)
         charger = next((c for c in sorted(snapshot.chargers, key=lambda c: c.charger_id)
-                        if len(c.occupied_vehicle_ids) < c.port_count and (chosen is None or c.charger_id in chosen)), None)
+                        if len(c.occupied_vehicle_ids) < c.port_count and (chosen is None or c.charger_id in chosen)
+                        and _clear_of_bookings(snapshot, c, vehicle.vehicle_id, hold_end)), None)
         if charger is not None:
             route = routes[vehicle.route_id]
             loop = loop_energy_kwh(model, route.distance_m, route.estimated_duration_s)
@@ -240,8 +248,10 @@ def charge_options(model: EnergyModel, snapshot: FullSnapshot, charge_s: float =
             arrival = vehicle.battery_kwh
             if depot_distances_m is not None:
                 arrival, _ = use_energy(model, arrival, depot_distances_m[vehicle.vehicle_id], travel_s)
+            if charge_time_scale:
+                charge_s = seconds_to_full(model, arrival, vehicle.battery_capacity_kwh, charger.power_kw, charge_time_scale)
             after = charge_battery_kwh(model, arrival, vehicle.battery_capacity_kwh,
-                                       charger.power_kw, charge_s)
+                                       charger.power_kw * (charge_time_scale or 1.0), charge_s)
             if depot_distances_m is not None:
                 after, _ = use_energy(model, after, parking_m, charge_s + parking_s)
             options.append(ChargeOption(
@@ -266,10 +276,35 @@ def charge_options(model: EnergyModel, snapshot: FullSnapshot, charge_s: float =
                              else [f"{charger.charger_id} stays free for {int(charge_s // 60)} minutes"]),
                 min_in_service_vehicles=len(serving - {vehicle.vehicle_id}),
             ))
+        charge_s = fixed_charge_s
     return [_keep_or_revise(option, offered.get(option.option_id),
                             snapshot.charge_option_revisions.get(option.option_id, 0),
                             vehicles[option.vehicle_id], snapshot.tick)
             for option in options]
+
+"""
+# -----------------------------------------------------------------------------------
+# Function: _clear_of_bookings
+# -----------------------------------------------------------------------------------
+Description:
+    This function says whether a charger keeps a port free from now until hold_end, counting the
+    other shuttles' live time-slot bookings. Charge-now offers use it so they never take a slot
+    another shuttle has booked.
+
+Args:
+    snapshot (FullSnapshot): The training snapshot.
+    charger (Charger): The charger.
+    vehicle_id (str): The shuttle being offered the charge.
+    hold_end (int): The tick the charge would end.
+
+Returns:
+    bool: True if a port stays free.
+"""
+def _clear_of_bookings(snapshot: FullSnapshot, charger, vehicle_id: str, hold_end: int) -> bool:
+    held = sum(1 for b in snapshot.charge_bookings
+               if b.charger_id == charger.charger_id and b.vehicle_id != vehicle_id
+               and b.status == "SCHEDULED" and b.start_tick < hold_end)
+    return len(charger.occupied_vehicle_ids) + held < charger.port_count
 
 """
 # -----------------------------------------------------------------------------------
@@ -356,13 +391,15 @@ def with_battery_decisions(model: EnergyModel, snapshot: FullSnapshot, charge_s:
                            depot_speed_mps: float | None = None,
                            parking_distances_m: dict[tuple[str, str], float] | None = None,
                            depot_choices: dict[str, str] | None = None,
-                           return_distances_m: dict[str, float] | None = None) -> FullSnapshot:
+                           return_distances_m: dict[str, float] | None = None,
+                           charge_time_scale: float | None = None) -> FullSnapshot:
     result = snapshot.model_copy(deep=True)
     result.energy_forecasts = energy_forecasts(model, snapshot, depot_distances_m=depot_distances_m, depot_speed_mps=depot_speed_mps,
                                                depot_choices=depot_choices)
     result.charge_options = charge_options(model, snapshot, charge_s, depot_distances_m=depot_distances_m,
                                           depot_speed_mps=depot_speed_mps, parking_distances_m=parking_distances_m,
-                                          depot_choices=depot_choices, return_distances_m=return_distances_m)
+                                          depot_choices=depot_choices, return_distances_m=return_distances_m,
+                                          charge_time_scale=charge_time_scale)
     result.charge_option_revisions = {**snapshot.charge_option_revisions,
                                       **{o.option_id: o.revision for o in result.charge_options}}
     loops = {f.vehicle_id: f.loops_remaining for f in result.energy_forecasts}

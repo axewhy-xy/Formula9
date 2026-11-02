@@ -35,6 +35,14 @@ namespace Formula9.Backend
 
         // These endpoints have no shared JSON schema. Validate their embedded snapshots through
         // the normal parser; never put a hypothetical or historical snapshot in the live store.
+        public async Task<ChargeSchedulePreview> PreviewChargeScheduleAsync(string id, ChargeScheduleRequest request, CancellationToken cancellation = default)
+        {
+            var value = ContractParser.Parse<ChargeSchedulePreview>(await SendTrainingAsync("POST", $"/{Segment(id)}/charge-schedule-previews", ContractParser.Serialize(request), cancellation));
+            if (value.SessionId != id || value.VehicleId != request.VehicleId || value.ChargerId != request.ChargerId || value.StartTick != request.StartTick)
+                throw new ContractException("Charge slot check does not match the request");
+            return value;
+        }
+
         public async Task<JObject> PreviewIncidentAsync(DispatcherCommand command, CancellationToken cancellation = default)
         {
             var value = ReadDocument(await SendTrainingAsync("POST", $"/{Segment(command.SessionId)}/incident-previews", ContractParser.Serialize(command), cancellation));

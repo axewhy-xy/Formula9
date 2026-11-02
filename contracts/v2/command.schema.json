@@ -19,7 +19,9 @@
         "APPROVE_ROUTE",
         "APPROVE_INCIDENT_OPTION",
         "RESERVE_CHARGER",
-        "CONTINUE_SERVICE"
+        "CONTINUE_SERVICE",
+        "SCHEDULE_CHARGE",
+        "CANCEL_CHARGE_BOOKING"
       ],
       "title": "Command Type",
       "type": "string"

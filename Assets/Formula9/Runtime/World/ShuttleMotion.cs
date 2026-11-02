@@ -132,6 +132,20 @@ namespace Formula9.World
         }
 
         // -----------------------------------------------------------------------------------
+        // Function: IsGliding
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function says whether any shuttle is still on its way to its pose, so a view
+        //     that only redraws on change knows to keep drawing.
+        //
+        // Args:
+        //     now (float): The current time in seconds.
+        //
+        // Returns:
+        //     bool: True while a glide is running.
+        public bool IsGliding(float now) => tracks.Values.Any(t => t.Duration > 0 && now < t.Start + t.Duration);
+
+        // -----------------------------------------------------------------------------------
         // Function: Clear
         // -----------------------------------------------------------------------------------
         // Description:

@@ -26,6 +26,8 @@ Description:
 
 import os
 
+import pytest
+
 from backend.src.routing import graph_loader
 
 os.environ.setdefault(
@@ -47,3 +49,22 @@ os.environ.setdefault(
 os.environ.setdefault(graph_loader.ENV_REQUESTS_TIMEOUT, "60")
 
 graph_loader.configure_network_settings()
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "real_charge_rate: use the scenario's charge-to-full timing")
+
+
+@pytest.fixture(autouse=True)
+def fixed_charge_time(request):
+    """The integrated scenario charges to full, which takes minutes of ticks. Tests of everything
+    else use its short fixed charge, so they stay quick; test_charge_bookings opts into the real rate."""
+    if request.node.get_closest_marker("real_charge_rate"):
+        yield
+        return
+    from src.services.integrated_actor import get_workflow_definition
+    data = get_workflow_definition().data
+    saved = data.get("charge_time_scale")
+    data["charge_time_scale"] = None
+    yield
+    data["charge_time_scale"] = saved

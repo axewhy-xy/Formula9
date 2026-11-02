@@ -1,0 +1,48 @@
+{
+  "$id": "https://formula9.local/contracts/v2/charge_schedule_request.schema.json",
+  "additionalProperties": true,
+  "description": "A slot the operator wants checked; replaces_booking_id moves an existing SCHEDULED booking.",
+  "properties": {
+    "charger_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Charger Id",
+      "type": "string"
+    },
+    "replaces_booking_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Replaces Booking Id"
+    },
+    "start_tick": {
+      "minimum": 0,
+      "title": "Start Tick",
+      "type": "integer"
+    },
+    "vehicle_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Vehicle Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "vehicle_id",
+    "charger_id",
+    "start_tick"
+  ],
+  "title": "ChargeScheduleRequest",
+  "type": "object"
+}
