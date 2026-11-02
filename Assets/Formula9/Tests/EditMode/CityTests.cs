@@ -251,8 +251,17 @@ namespace Formula9.Tests
                 var half = 2 * RoadMesh.LaneWidthM + RoadMesh.ShoulderM;
                 Assert.AreEqual(half, BoundsOf(mesh, RoadMesh.AsphaltLayer).max.x, 1e-3f, "two lanes each way");
                 Assert.AreEqual(half + RoadMesh.KerbM, BoundsOf(mesh, RoadMesh.KerbLayer).max.x, 1e-3f);
-                Assert.AreEqual(half, BoundsOf(mesh, RoadMesh.MarkingLayer).max.x, 1e-3f);
-                Assert.AreEqual(100, BoundsOf(mesh, RoadMesh.MarkingLayer).max.z, 1e-3f, "lines run the whole way when nothing joins");
+                Assert.AreEqual(0, mesh.GetTriangles(RoadMesh.MarkingLayer).Length, "legacy marking triangles are removed");
+                Assert.AreEqual(107, BoundsOf(mesh, RoadMesh.AsphaltLayer).max.z, 1e-3f, "asphalt reaches the last endpoint");
+                var uv1 = new List<Vector4>(); mesh.GetUVs(1, uv1);
+                var uv2 = new List<Vector4>(); mesh.GetUVs(2, uv2);
+                Assert.AreEqual(mesh.vertexCount, uv1.Count);
+                Assert.AreEqual(mesh.vertexCount, uv2.Count);
+                var asphalt = mesh.GetTriangles(RoadMesh.AsphaltLayer);
+                Assert.IsTrue(asphalt.Any(i => uv1[i].z == -4 && uv1[i].w == 1f), "two-way road has four textured lanes");
+                Assert.IsTrue(asphalt.Any(i => Mathf.Abs(uv1[i].x - 1f) < 1e-4f), "one texture edge present");
+                Assert.IsTrue(asphalt.Any(i => Mathf.Abs(uv1[i].x) < 1e-4f && uv1[i].w == 1f), "opposite texture edge present");
+                Assert.IsTrue(asphalt.Any(i => uv1[i].w == 1f && Mathf.Abs(uv1[i].y - 100f / 24f) < 1e-4f), "textured lane coordinates reach the endpoint");
                 foreach (var normal in mesh.normals) Assert.Greater(normal.y, 0.99f);
                 Assert.AreEqual(RoadMesh.SurfaceY, mesh.bounds.center.y, 1e-3f, "flat, over the ground");
             }
@@ -265,18 +274,16 @@ namespace Formula9.Tests
             var mesh = RoadMesh.Build(new[] { Road("primary", true, 3, 1, 2, (0, 0), (100, 0)) });
             try
             {
-                var bounds = BoundsOf(mesh, RoadMesh.MarkingLayer);
+                var bounds = BoundsOf(mesh, RoadMesh.AsphaltLayer);
                 var half = 1.5f * RoadMesh.LaneWidthM + RoadMesh.ShoulderM;
                 Assert.AreEqual(half, bounds.max.z, 1e-3f);
                 Assert.AreEqual(-half, bounds.min.z, 1e-3f);
-                var uvs = new List<Vector4>(); mesh.GetUVs(0, uvs);
-                var triangles = mesh.GetTriangles(RoadMesh.MarkingLayer);
-                var lanes = triangles.Select(i => uvs[i].x).ToList();
-                var overhang = RoadMesh.ShoulderM / RoadMesh.LaneWidthM;
-                Assert.AreEqual(-overhang, lanes.Min(), 1e-3f, "lane 0 is one edge");
-                Assert.AreEqual(3 + overhang, lanes.Max(), 1e-3f, "lane 3 the other");
-                Assert.AreEqual(3, uvs[triangles[0]].z);
-                Assert.AreEqual(0, uvs[triangles[0]].w, "one-way");
+                Assert.AreEqual(0, mesh.GetTriangles(RoadMesh.MarkingLayer).Length, "no legacy lane-marking geometry");
+                var uv1 = new List<Vector4>(); mesh.GetUVs(1, uv1);
+                var asphalt = mesh.GetTriangles(RoadMesh.AsphaltLayer);
+                Assert.IsTrue(asphalt.Any(i => uv1[i].w == 1f && uv1[i].z == 3f && Mathf.Abs(uv1[i].x) < 1e-4f), "first edge: three one-way lanes");
+                Assert.IsTrue(asphalt.Any(i => uv1[i].w == 1f && uv1[i].z == 3f && Mathf.Abs(uv1[i].x - 1f) < 1e-4f), "other edge: three one-way lanes");
+                Assert.IsTrue(asphalt.Any(i => uv1[i].w == 1f && Mathf.Abs(uv1[i].y - 100f / 24f) < 1e-4f), "texture distance follows the full road");
             }
             finally { UnityEngine.Object.DestroyImmediate(mesh); }
         }
@@ -294,14 +301,34 @@ namespace Formula9.Tests
             });
             try
             {
+                Assert.AreEqual(0, mesh.GetTriangles(RoadMesh.MarkingLayer).Length, "shader handles all ordinary marking fades");
+                var uv1 = new List<Vector4>(); mesh.GetUVs(1, uv1);
+                var uv2 = new List<Vector4>(); mesh.GetUVs(2, uv2);
                 var vertices = mesh.vertices;
-                var lined = mesh.GetTriangles(RoadMesh.MarkingLayer).Select(i => vertices[i]).ToList();
-                var asphaltHalf = RoadMesh.LaneWidthM + RoadMesh.ShoulderM;
-                Assert.IsFalse(lined.Any(v => Mathf.Abs(v.x) < asphaltHalf && Mathf.Abs(v.z) < asphaltHalf), "the junction is plain asphalt");
-                Assert.IsTrue(lined.Any(v => v.x > 490 && Mathf.Approximately(v.z, 100)), "two roads alone just meet, so their lines reach the shared point");
+                var asphalt = mesh.GetTriangles(RoadMesh.AsphaltLayer);
+                // At the three-arm node, both incoming and outgoing roads have a nonzero clearance.
+                Assert.IsTrue(asphalt.Any(i => vertices[i].x < -95f && uv1[i].w == 1f && uv2[i].w > .5f && uv2[i].y < 100f),
+                    "incoming lane paint ends before the three-way junction");
+                Assert.IsTrue(asphalt.Any(i => vertices[i].x > 0f && vertices[i].x < 100f && uv1[i].w == 1f && uv2[i].x > 0f),
+                    "outgoing lane paint begins after the junction");
+                // At the two-arm node (500,100) neither road requires a junction cutoff.
+                float asphaltHalf = RoadMesh.LaneWidthM + RoadMesh.ShoulderM;
+                // The centre vertex belongs to an unmarked rounded Cap(). The textured
+                // ribbon crosses the node at x = 500 +/- asphaltHalf, z = 100.
+                bool UntrimmedAtNode(int i) =>
+                    Mathf.Abs(vertices[i].z - 100f) < 1e-3f &&
+                    Mathf.Abs(Mathf.Abs(vertices[i].x - 500f) - asphaltHalf) < 1e-3f &&
+                    uv1[i].w == 1f && Mathf.Abs(uv2[i].x) < 1e-4f && uv2[i].w < .5f;
+                Assert.IsTrue(asphalt.Any(i => UntrimmedAtNode(i) &&
+                    Mathf.Abs(uv1[i].y - 100f / 24f) < 1e-4f),
+                    "incoming textured road reaches the two-road connection");
+                Assert.IsTrue(asphalt.Any(i => UntrimmedAtNode(i) &&
+                    Mathf.Abs(uv1[i].y) < 1e-4f),
+                    "outgoing textured road begins at the same connection");
             }
             finally { UnityEngine.Object.DestroyImmediate(mesh); }
         }
+
 
         [Test]
         public void AServiceRoadHasNoLinesAndABrokenRoadIsLeftOut()
@@ -316,6 +343,9 @@ namespace Formula9.Tests
                 Assert.Greater(mesh.GetTriangles(RoadMesh.AsphaltLayer).Length, 0);
                 Assert.AreEqual(0, mesh.GetTriangles(RoadMesh.MarkingLayer).Length);
                 Assert.Less(mesh.bounds.max.z, 6, "nothing at the broken road's point");
+                var uv1 = new List<Vector4>(); mesh.GetUVs(1, uv1);
+                var asphalt = mesh.GetTriangles(RoadMesh.AsphaltLayer);
+                Assert.IsFalse(asphalt.Any(i => uv1[i].w > .5f), "service asphalt must disable textured lane markings");
             }
             finally { UnityEngine.Object.DestroyImmediate(mesh); }
         }
@@ -357,8 +387,9 @@ namespace Formula9.Tests
                 Assert.AreEqual(1, view.RoadCount);
                 var materials = rig.GetComponentsInChildren<MeshRenderer>().First(r => r.name == "Roads").sharedMaterials;
                 Assert.AreEqual(RoadMesh.LayerCount, materials.Length);
-                Assert.Less(materials[RoadMesh.KerbLayer].renderQueue, materials[RoadMesh.AsphaltLayer].renderQueue);
                 Assert.Less(materials[RoadMesh.AsphaltLayer].renderQueue, materials[RoadMesh.MarkingLayer].renderQueue);
+                Assert.Less(materials[RoadMesh.KerbLayer].renderQueue, materials[RoadMesh.AsphaltLayer].renderQueue);
+               
                 Assert.Greater(materials[RoadMesh.KerbLayer].renderQueue, (int)RenderQueue.Geometry, "after the ground and buildings");
             }
             finally

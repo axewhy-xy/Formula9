@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Formula9.Backend;
 using Formula9.Contracts;
 using UnityEngine;
+using UnityEngine.Rendering;
 using HealthbarGames;
 
 namespace Formula9.World
@@ -54,6 +56,25 @@ namespace Formula9.World
         private string routesKey, hiddenShuttle;
         private Material buildingMaterial, lineMaterial;
         private readonly CityIncidents incidents;
+        private readonly TransitClient transit;
+        private readonly BusStopShelterFactory busStopShelters;
+        private CancellationTokenSource busStopCancellation;
+        private readonly List<(Vector2 A, Vector2 B, float HalfWidth, bool Service)> roadSegments =
+            new List<(Vector2, Vector2, float, bool)>();
+        private readonly Dictionary<string, (Vector2 Move, float Yaw)> shelterOverrides =
+            new Dictionary<string, (Vector2, float)>(StringComparer.Ordinal);
+        private bool disposed;
+        // Divide the city's bounding box into smaller LTA queries to avoid huge
+        // responses and to keep requests limited to the displayed 3D district.
+        private const float LtaQueryCellMetres = 1250f;
+        private const float LtaQueryMarginMetres = 75f;
+        private const int MaxLtaQueries = 64;
+        // Bus-stop pins are not guaranteed to be at the physical shelter centre.
+        // Adjust ONLY shelters that extend into the nearest road. Do not shift all pins.
+        private const float OrientationRoadMatchMetres = 35f;
+        private const float KerbGapM = 0.45f;
+        private const float MaxAutomaticMoveM = 8f;
+        private const float ShelterHalfDepthM = 1.3f * BusStopShelterFactory.ShelterScale;
         private List<CityBuilding> buildings;
         private Mesh buildingMesh;
         private CityTrafficRenderer traffic;
@@ -64,26 +85,44 @@ namespace Formula9.World
 
         public int BuildingCount { get; private set; }
         public int RoadCount { get; private set; }
+        public int LtaBusStopCount { get; private set; }
+        public bool LtaBusStopsLoaded { get; private set; }
+        public string BusStopSource => transit != null &&
+            !string.IsNullOrEmpty(transit.Attribution) && transit.Attribution.Contains("LTA")
+            ? "LTA" : "mapped";
         public Bounds Bounds { get; private set; }
         public string IncidentStatus => incidents.Status;
 
+        // The city can be opened with the legacy two-argument constructor, the
+        // LTA transit client, the traffic-light prefab, or both dependencies.
+        // Use the four-argument overload when supplying both optional features.
         private readonly List<GameObject> trafficLightObjects = new List<GameObject>();
         public int TrafficLightCount { get; private set; }
         private readonly GameObject trafficLightPrefab;
         private IReadOnlyList<CityRoad> loadedRoads = Array.Empty<CityRoad>();
 
-        public CityView(Transform parent, MapTiles tiles, GameObject trafficLightPrefab = null)
+        public CityView(Transform parent, MapTiles tiles)
+            : this(parent, tiles, (TransitClient)null, (GameObject)null) { }
+
+        public CityView(Transform parent, MapTiles tiles, TransitClient transit)
+            : this(parent, tiles, transit, (GameObject)null) { }
+
+        public CityView(Transform parent, MapTiles tiles, GameObject trafficLightPrefab)
+            : this(parent, tiles, (TransitClient)null, trafficLightPrefab) { }
+
+        public CityView(Transform parent, MapTiles tiles, TransitClient transit, GameObject trafficLightPrefab)
         {
             root = new GameObject("City").transform;
             root.SetParent(parent, false);
             this.tiles = tiles;
-
+            this.transit = transit;
             this.trafficLightPrefab = trafficLightPrefab;
-
             buildingMaterial = Own(new Material(Shader.Find("Formula9/CityBuilding")));
             ApplyBuildingTextures(buildingMaterial);
             lineMaterial = Own(new Material(Shader.Find("Sprites/Default")));
             incidents = new CityIncidents(root, buildingMaterial, lineMaterial);
+            busStopShelters = new BusStopShelterFactory();
+            LoadShelterOverrides();
             traffic = new CityTrafficRenderer();
             if (tiles != null) tiles.TileLoaded += RefreshTiles;
         }
@@ -126,8 +165,22 @@ namespace Formula9.World
             city.GetComponent<MeshRenderer>().sharedMaterial = buildingMaterial;
             BuildGround();
             await LoadRoadsAsync(client, area, cancellation);
+            // Buildings and roads load first. LTA shelters are fetched independently.
+            if (transit != null)
+            {
+                busStopCancellation?.Cancel();
+                busStopCancellation?.Dispose();
+                busStopCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+                _ = LoadLtaSheltersAsync(busStopCancellation.Token);
+            }
+            else Debug.LogWarning("[CityView] No TransitClient connected: LTA bus-stop shelters cannot be loaded.");
 
-            await LoadTrafficLightsAsync(client, area, cancellation);
+            // Keep main's traffic light rendering as a separate optional visual.
+            try { await LoadTrafficLightsAsync(client, area, cancellation); }
+            catch (Exception error) when (!(error is OperationCanceledException))
+            {
+                Debug.LogWarning("[CityView] Traffic-light visuals unavailable: " + error.Message);
+            }
         }
 
         public void SetVisible(bool visible) { if (root != null) root.gameObject.SetActive(visible); }
@@ -145,20 +198,166 @@ namespace Formula9.World
             }
             cancellation.ThrowIfCancellationRequested();
             RoadCount = roads.Count;
-            var surface = Shader.Find("Formula9/CityRoad");
-            var grain = Own(AsphaltGrain());
-            var materials = new Material[RoadMesh.LayerCount];
-            materials[RoadMesh.KerbLayer] = Own(new Material(surface) { color = KerbColor, mainTexture = grain });
-            materials[RoadMesh.AsphaltLayer] = Own(new Material(surface) { color = AsphaltColor, mainTexture = grain });
-            materials[RoadMesh.MarkingLayer] = Own(new Material(Shader.Find("Formula9/CityRoadMarkings")) { color = MarkingColor });
-            // In this order, after the ground and buildings have written their depth
-            for (var i = 0; i < materials.Length; i++) materials[i].renderQueue = (int)UnityEngine.Rendering.RenderQueue.Geometry + 1 + i;
-            var road = new GameObject("Roads", typeof(MeshFilter), typeof(MeshRenderer));
-            road.transform.SetParent(root, false);
-            road.GetComponent<MeshFilter>().sharedMesh = Own(RoadMesh.Build(roads));
-            var renderer = road.GetComponent<MeshRenderer>();
-            renderer.sharedMaterials = materials;
-            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            loadedRoads = roads;
+            roadSegments.Clear();
+            foreach (var cityRoad in roads)
+            {
+                Vector2? previous = null;
+                foreach (var (x, y) in cityRoad.Points)
+                {
+                    var current = new Vector2((float)x, (float)y);
+                    if (previous.HasValue && (current - previous.Value).sqrMagnitude > 0.01f)
+                        roadSegments.Add((previous.Value, current,
+                            Mathf.Clamp(RoadMesh.HalfWidth(cityRoad), 2.5f, 18f),
+                            string.Equals(cityRoad.Class, "service", StringComparison.OrdinalIgnoreCase)));
+                    previous = current;
+                }
+            }
+            try
+            {
+                // Original road geometry and kerbs are generated by RoadMesh; no replacement renderer.
+                var surface = Shader.Find("Formula9/CityRoadAsh");
+                if (surface == null || !surface.isSupported)
+                {
+                    Debug.LogWarning("[CityView] CityRoadAsh Shader is unavailable ");
+                    
+                }
+                var grain = Own(AsphaltGrain());
+                var roadTexture = Resources.Load<Texture2D>("Formula9/Textures/road_lane_texture");
+                var textureShader = Shader.Find("Formula9/CityRoadTexture");
+                bool texturedRoads = roadTexture != null && textureShader != null && textureShader.isSupported;
+                if (!texturedRoads)
+                    Debug.LogWarning("[CityView] Road texture or CityRoadTexture shader unavailable; " +
+                        "falling back to plain ash-grey roads so the 3D map can still load. " +
+                        "Check Resources/Formula9/Textures/road_lane_texture and shader import errors.");
+                if (roadTexture != null)
+                {
+                    roadTexture.wrapMode = TextureWrapMode.Repeat;
+                    roadTexture.filterMode = FilterMode.Bilinear;
+                    roadTexture.anisoLevel = 8;
+                }
+                var materials = new Material[RoadMesh.LayerCount];
+                materials[RoadMesh.KerbLayer] = Own(new Material(surface) { name = "City kerbs", color = KerbColor, mainTexture = grain });
+                materials[RoadMesh.AsphaltLayer] = Own(new Material(texturedRoads ? textureShader : surface)
+                {
+                    name = texturedRoads ? "Textured ash-grey lanes (user image)" : "Ash-grey fallback asphalt",
+                    color = texturedRoads ? new Color(1.34f, 1.36f, 1.39f, 1f) : AsphaltColor,
+                    mainTexture = texturedRoads ? roadTexture : grain
+                });
+                // These materials share one shader but DIFFERENT stencil behaviour:
+                // kerbs never affect the mask; asphalt writes 1 only where the road is.
+                // LTA paint will require stencil 1, clipping mismatched GIS lines
+                // at the visible asphalt boundary.
+                // Mask kerbs against ALL road asphalt, not only their own road.
+                // We draw asphalt first, writing stencil 1. Kerbs are drawn later
+                // only in pixels with no asphalt, eliminating grey junction bars.
+                materials[RoadMesh.KerbLayer].SetInt("_StencilRef", 1);
+                materials[RoadMesh.KerbLayer].SetInt("_StencilComp", (int)CompareFunction.NotEqual);
+                materials[RoadMesh.KerbLayer].SetInt("_StencilPass", (int)StencilOp.Keep);
+                materials[RoadMesh.KerbLayer].SetInt("_StencilWriteMask", 0);
+
+                materials[RoadMesh.AsphaltLayer].SetInt("_StencilRef", 1);
+                materials[RoadMesh.AsphaltLayer].SetInt("_StencilComp", (int)CompareFunction.Always);
+                materials[RoadMesh.AsphaltLayer].SetInt("_StencilPass", (int)StencilOp.Replace);
+                materials[RoadMesh.AsphaltLayer].SetInt("_StencilWriteMask", 255);
+                // RoadMesh.Build retains its historical third submesh for EditMode
+                // compatibility, but that encoded-UV shader layer is never rendered
+                // by this view. Standard lines are now sampled from the user-provided texture
+                // by CityRoadTexture, not drawn as additional meshes.
+              
+                materials[RoadMesh.MarkingLayer] = Own(new Material(surface)
+                    { name = "Unused legacy paint submesh",
+                      color = Color.clear });
+                materials[RoadMesh.KerbLayer].renderQueue = (int)RenderQueue.Geometry + 1;
+                materials[RoadMesh.AsphaltLayer].renderQueue = (int)RenderQueue.Geometry + 2;
+                materials[RoadMesh.MarkingLayer].renderQueue = (int)RenderQueue.Geometry + 3;
+
+                var road = new GameObject("Roads", typeof(MeshFilter), typeof(MeshRenderer));
+                road.transform.SetParent(root, false);
+                var geometry = Own(RoadMesh.Build(roads));
+                
+                // MarkingLayer is already empty in RoadMesh.Build().
+                // The old kerb ribbon still crosses neighbouring roads at complex
+                // junctions. Keep RoadMesh's public API for EditMode tests, but
+                // hide only the kerb submesh in THIS 3D view. This removes the
+                // thick grey overlaid bars without changing road geometry or JSON.
+                geometry.SetTriangles(Array.Empty<int>(), RoadMesh.KerbLayer);
+                road.GetComponent<MeshFilter>().sharedMesh = geometry;
+                var renderer = road.GetComponent<MeshRenderer>();
+                renderer.sharedMaterials = materials;
+                renderer.shadowCastingMode = ShadowCastingMode.Off;
+                renderer.receiveShadows = false;
+                Debug.Log($"[CityView] RoadMesh built {RoadCount} backend roads; " +
+                    $"textured={texturedRoads}; kerbsHidden=true; tint={AsphaltColor}");
+
+                // The LTA dataset contributes special paint ONLY. Standard lane
+                // separators and edges are sampled from the user-supplied road texture.
+                LtaMappedRoadPaint.Result mappedPaint = null;
+                if (string.Equals(area, "toa-payoh", StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        mappedPaint = LtaMappedRoadPaint.Build(roads);
+                        var paintRoot = new GameObject("LTA special crossings, arrows, yellow boxes (3D)").transform;
+                        paintRoot.SetParent(root, false);
+                        var paintMaterials = new Dictionary<LtaMappedRoadPaint.PaintColour, Material>();
+                        foreach (var (kind, color) in new[]
+                        {
+                            (LtaMappedRoadPaint.PaintColour.White, new Color(1f, 1f, .97f)),
+                            (LtaMappedRoadPaint.PaintColour.Yellow, new Color(1f, .88f, .03f)),
+                            (LtaMappedRoadPaint.PaintColour.Red, new Color(.80f, .16f, .18f)),
+                        })
+                        {
+                            var mat = Own(new Material(surface)
+                            {
+                                name = "LTA special paint " + kind,
+                                color = color,
+                                mainTexture = Texture2D.whiteTexture,
+                                renderQueue = (int)RenderQueue.Geometry + 10
+                            });
+                            mat.SetInt("_StencilRef", 1);
+                            mat.SetInt("_StencilComp", (int)CompareFunction.Equal);
+                            mat.SetInt("_StencilPass", (int)StencilOp.Keep);
+                            mat.SetInt("_StencilWriteMask", 0);
+                            mat.SetInt("_ZWrite", 0);
+                            paintMaterials.Add(kind, mat);
+                        }
+                        foreach (var piece in mappedPaint.Meshes)
+                        {
+                            Own(piece.Mesh);
+                            var obj = new GameObject(piece.Mesh.name, typeof(MeshFilter), typeof(MeshRenderer));
+                            obj.transform.SetParent(paintRoot, false);
+                            obj.GetComponent<MeshFilter>().sharedMesh = piece.Mesh;
+                            var visual = obj.GetComponent<MeshRenderer>();
+                            visual.sharedMaterial = paintMaterials[piece.Colour];
+                            visual.shadowCastingMode = ShadowCastingMode.Off;
+                            visual.receiveShadows = false;
+                        }
+                        Debug.Log($"[CityView] LTA special paint: " +
+                            $"{mappedPaint.YellowBoxLineFeatures} yellow box paths, " +
+                            $"{mappedPaint.GroundStopLineFeatures} transverse stop/edge features, " +
+                            $"{mappedPaint.GroundArrowFeatures} mapped arrows, " +
+                            $"{mappedPaint.ZebraCrossings} zebra crossings and " +
+                            $"{mappedPaint.SignalCrossings} signal crossings.");
+                    }
+                    catch (Exception error)
+                    {
+                        Debug.LogWarning("[CityView] LTA special paint unavailable: " + error.Message +
+                            ". Textured standard lane markings will still render.");
+                    }
+                }
+
+                // No secondary generated lane-line mesh. Ordinary solid edges and
+                // dashed boundaries are now sampled directly from road_lane_texture.
+                // LTA paint above remains separate for crossings, arrows and boxes.
+                Debug.Log("[CityView] Textured lane markings enabled using Resources/Formula9/Textures/road_lane_texture.");
+
+            }
+            catch (Exception error) when (!(error is OperationCanceledException))
+            {
+                Debug.LogError("[CityView] Road visuals failed, but the city can continue loading: " + error);
+            }
+
             CityTrafficData trafficData = null;
             try { trafficData = await client.GetTrafficAsync(area, cancellation); }
             catch (Exception error) when (!(error is OperationCanceledException))
@@ -180,10 +379,213 @@ namespace Formula9.World
             traffic?.Rebuild(roads, trafficData, signals);
         }
 
+        // The same LTA client supplies FleetMap's 2D bus-stop dots. Here its
+        // coordinates are used only in the real Singapore 3D CityView.
+        private async Task LoadLtaSheltersAsync(CancellationToken cancellation)
+        {
+            try
+            {
+                // CityMesh bounds are Unity metres (X east, Z north); MapGeo
+                // converts them to LTA latitude/longitude for bounded queries.
+                var minX = Bounds.min.x - LtaQueryMarginMetres;
+                var maxX = Bounds.max.x + LtaQueryMarginMetres;
+                var minZ = Bounds.min.z - LtaQueryMarginMetres;
+                var maxZ = Bounds.max.z + LtaQueryMarginMetres;
+                var width = Mathf.Max(1f, maxX - minX);
+                var height = Mathf.Max(1f, maxZ - minZ);
+                var cellSize = LtaQueryCellMetres;
+                var cols = Mathf.Max(1, Mathf.CeilToInt(width / cellSize));
+                var rows = Mathf.Max(1, Mathf.CeilToInt(height / cellSize));
+                while ((long)cols * rows > MaxLtaQueries)
+                {
+                    cellSize *= 1.5f;
+                    cols = Mathf.Max(1, Mathf.CeilToInt(width / cellSize));
+                    rows = Mathf.Max(1, Mathf.CeilToInt(height / cellSize));
+                }
+
+                var unique = new Dictionary<string, BusStop>(StringComparer.Ordinal);
+                var failedCells = 0;
+                for (var row = 0; row < rows; row++)
+                {
+                    for (var col = 0; col < cols; col++)
+                    {
+                        cancellation.ThrowIfCancellationRequested();
+                        var westM = minX + col * cellSize;
+                        var eastM = Mathf.Min(maxX, westM + cellSize);
+                        var southM = minZ + row * cellSize;
+                        var northM = Mathf.Min(maxZ, southM + cellSize);
+                        var southWest = MapGeo.ToLatLon(westM, southM);
+                        var northEast = MapGeo.ToLatLon(eastM, northM);
+                        try
+                        {
+                            // Matches the exact signature already used by FleetMap:
+                            // (south latitude, west longitude, north latitude, east longitude, token).
+                            var stops = await transit.GetBusStopsAsync(
+                                southWest.Latitude, southWest.Longitude,
+                                northEast.Latitude, northEast.Longitude, cancellation);
+                            cancellation.ThrowIfCancellationRequested();
+                            foreach (var stop in stops)
+                            {
+                                if (string.IsNullOrWhiteSpace(stop.Code)) continue;
+                                var local = MapGeo.ToLocal(new LatLon(stop.Latitude, stop.Longitude));
+                                if (local.X < minX || local.X > maxX || local.Y < minZ || local.Y > maxZ)
+                                    continue;
+                                unique[stop.Code] = stop;
+                            }
+                        }
+                        catch (OperationCanceledException) { throw; }
+                        catch (Exception error)
+                        {
+                            failedCells++;
+                            Debug.LogWarning($"[CityView] LTA bus-stop area {col},{row} unavailable: {error.Message}");
+                        }
+                    }
+                }
+
+                cancellation.ThrowIfCancellationRequested();
+                if (disposed) return;
+                var placements = new List<BusStopShelterFactory.Placement>(unique.Count);
+                var autoMoved = 0;
+                var cappedMoves = 0;
+                var noRoadMatch = 0;
+                var manual = 0;
+                var cappedStopCodes = new List<string>();
+                var unmatchedStopCodes = new List<string>();
+                foreach (var stop in unique.Values)
+                {
+                    var local = MapGeo.ToLocal(new LatLon(stop.Latitude, stop.Longitude));
+                    var pin = new Vector2((float)local.X, (float)local.Y);
+                    bool moved, capped, matched;
+                    var placed = PositionShelter(pin, out moved, out capped, out matched);
+                    if (moved) autoMoved++;
+                    if (capped) { cappedMoves++; cappedStopCodes.Add(stop.Code); }
+                    if (!matched) { noRoadMatch++; unmatchedStopCodes.Add(stop.Code); }
+                    if (shelterOverrides.TryGetValue(stop.Code, out var correction))
+                    {
+                        var corrected = placed.Position + new Vector3(correction.Move.x, 0f, correction.Move.y);
+                        placed = new BusStopShelterFactory.Placement(stop.Code, corrected,
+                            Quaternion.Euler(0f, correction.Yaw, 0f) * placed.Rotation);
+                        manual++;
+                    }
+                    else placed.StopId = stop.Code;
+                    placements.Add(placed);
+                }
+                busStopShelters.Build(root, placements);
+                LtaBusStopCount = placements.Count;
+                LtaBusStopsLoaded = true;
+                Debug.Log($"[CityView] Created {LtaBusStopCount} procedural {BusStopSource} bus-stop shelters " +
+                    $"within the displayed 3D city. Area queries: {cols * rows}; failed: {failedCells}. " +
+                    $"Roadside adjusted: {autoMoved}; capped: {cappedMoves}; no nearby road: {noRoadMatch}; " +
+                    $"manual overrides: {manual}.");
+                if (cappedMoves > 0)
+                    Debug.LogWarning($"[CityView] {cappedMoves} LTA shelters needed >{MaxAutomaticMoveM}m " +
+                        "adjustment to fully clear the road. Example stop codes: " +
+                        string.Join(", ", cappedStopCodes.Take(20)) + ". Use placement overrides for these.");
+                if (noRoadMatch > 0)
+                    Debug.LogWarning("[CityView] No nearby mapped road for example stop codes: " +
+                        string.Join(", ", unmatchedStopCodes.Take(20)) +
+                        ". Their original LTA coordinates were preserved.");
+                if (BusStopSource != "LTA")
+                    Debug.LogWarning("[CityView] TransitClient is not attributed to LTA; verify the provider if LTA-only coverage is required.");
+                if (failedCells > 0)
+                    Debug.LogWarning("[CityView] LTA shelter coverage is partial because one or more area requests failed.");
+            }
+            catch (OperationCanceledException) { /* city closed or changed */ }
+            catch (Exception error)
+            {
+                if (!disposed)
+                    Debug.LogWarning("[CityView] Could not build the LTA 3D shelters: " + error.Message);
+            }
+        }
+
+        // Find the road edge, not simply the nearest road CENTRE. Some stops lie
+        // near a parallel service road or at a junction; prefer non-service roads
+        // when equally near. Retain a genuine LTA sidewalk pin wherever possible.
+        private BusStopShelterFactory.Placement PositionShelter(Vector2 pin,
+            out bool moved, out bool capped, out bool matched)
+        {
+            moved = capped = matched = false;
+            var bestScore = float.PositiveInfinity;
+            var nearest = Vector2.zero;
+            var tangent = Vector2.right;
+            var halfWidth = 0f;
+            foreach (var road in roadSegments)
+            {
+                var line = road.B - road.A;
+                // Very short OSM fragments around an intersection often produce
+                // unstable orientations. A shelter should follow a real segment.
+                if (line.sqrMagnitude < 4f) continue;
+                var t = Mathf.Clamp01(Vector2.Dot(pin - road.A, line) / line.sqrMagnitude);
+                var onRoad = road.A + t * line;
+                var dist = Vector2.Distance(pin, onRoad);
+                if (dist > OrientationRoadMatchMetres + road.HalfWidth) continue;
+                // Prefer a road with an interior closest point instead of an
+                // endpoint of an unrelated slip road or junction fragment.
+                var endpointPenalty = (t < .025f || t > .975f) ? 3f : 0f;
+                var score = Mathf.Abs(dist - road.HalfWidth) + dist * .08f +
+                    endpointPenalty + (road.Service ? 6f : 0f);
+                if (score >= bestScore) continue;
+                bestScore = score;
+                nearest = onRoad;
+                tangent = line.normalized;
+                halfWidth = road.HalfWidth;
+                matched = true;
+            }
+            if (!matched)
+                return new BusStopShelterFactory.Placement(null,
+                    new Vector3(pin.x, 0, pin.y), Quaternion.identity);
+
+            // The previous version faced the raw pin-to-road vector. Near
+            // segment endpoints this can be diagonal, rotating the shelter
+            // into the road. Use the chosen ROAD TANGENT for orientation.
+            var roadNormal = new Vector2(-tangent.y, tangent.x);
+            float side = Vector2.Dot(pin - nearest, roadNormal) < 0f ? -1f : 1f;
+            var outward = roadNormal * side;
+            // The whole paved base should remain beyond the edge of the carriageway.
+            var desiredDistance = halfWidth + ShelterHalfDepthM + KerbGapM;
+            var currentDistance = Vector2.Dot(pin - nearest, outward);
+            var missingDistance = Mathf.Max(0f, desiredDistance - currentDistance);
+            capped = missingDistance > MaxAutomaticMoveM;
+            var adjustment = Mathf.Min(missingDistance, MaxAutomaticMoveM);
+            moved = adjustment > 0.02f;
+            var finalPosition = pin + outward * adjustment;
+            // In the generated shelter, local -Z is its road-facing front.
+            var facing = Quaternion.LookRotation(new Vector3(outward.x, 0f, outward.y), Vector3.up);
+            return new BusStopShelterFactory.Placement(null,
+                new Vector3(finalPosition.x, 0f, finalPosition.y), facing);
+        }
+
+        // Optional per-stop fine tuning WITHOUT recompiling C#.
+        // File: Assets/Formula9/Resources/Formula9/placement_overrides.csv
+        // stop_code,east_m,north_m,yaw_delta_degrees
+        // All values are relative to the automatically corrected placement.
+        private void LoadShelterOverrides()
+        {
+            var asset = Resources.Load<TextAsset>("Formula9/placement_overrides");
+            if (asset == null) return;
+            var lines = asset.text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var line in lines)
+            {
+                var row = line.Trim();
+                if (row.Length == 0 || row.StartsWith("#") || row.StartsWith("stop_code")) continue;
+                var columns = row.Split(',');
+                if (columns.Length != 4 || string.IsNullOrWhiteSpace(columns[0]) ||
+                    !float.TryParse(columns[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var east) ||
+                    !float.TryParse(columns[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var north) ||
+                    !float.TryParse(columns[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var yaw))
+                {
+                    Debug.LogWarning("[CityView] Ignoring invalid shelter placement row: " + row);
+                    continue;
+                }
+                shelterOverrides[columns[0].Trim()] = (new Vector2(east, north), yaw);
+            }
+        }
+
         private async Task LoadTrafficLightsAsync(CityClient client, string area, CancellationToken cancellation)
         {
-            var trafficLightPrefab = Resources.Load<GameObject>("Formula9/TrafficLights");
-            if (trafficLightPrefab == null)
+            var prefab = trafficLightPrefab != null ? trafficLightPrefab :
+                Resources.Load<GameObject>("Formula9/TrafficLights");
+            if (prefab == null)
             {
                 Debug.LogWarning("Traffic light prefab is missing. Skipping traffic light rendering.");
                 return;
@@ -225,7 +627,7 @@ namespace Formula9.World
             {
                 var pose = TrafficLightPlacement.Place(signal, loadedRoads);
 
-                var lightObj = UnityEngine.Object.Instantiate(trafficLightPrefab, pose.Position, pose.Rotation, trafficLightsContainer.transform);
+                var lightObj = UnityEngine.Object.Instantiate(prefab, pose.Position, pose.Rotation, trafficLightsContainer.transform);
                 lightObj.name = $"TrafficLight_{signal.Id ?? signal.Junction}";
                 if (pose.Mirrored) lightObj.transform.localScale = new Vector3(-1, 1, 1);
 
@@ -483,6 +885,8 @@ namespace Formula9.World
             routeObjects.Clear();
             stopMarkers.Clear();
             CutRoutesThroughBuildings(snapshot);
+            // Physical LTA shelters are populated separately from route markers.
+            // Preserve the depot/charger objects provided by main.
             BuildDepots(snapshot);
             foreach (var route in snapshot.Routes)
             {
@@ -503,8 +907,11 @@ namespace Formula9.World
                 }
                 foreach (var stop in route.StopsM)
                 {
-                    var marker = Marker(PrimitiveType.Cylinder, new Vector3(16, 3, 16), color, "Stop " + stop.StopId);
-                    marker.position = new Vector3((float)stop.Position.XM, 3, (float)stop.Position.YM);
+                    // Preserve the existing stop-status marker and dwelling/served colour behaviour.
+                    // Small elevated status badge: don't cover the physical shelter
+                    // with the older 16-metre-wide solid cylinder.
+                    var marker = Marker(PrimitiveType.Cylinder, new Vector3(2f, 0.2f, 2f), color, "Stop " + stop.StopId);
+                    marker.position = new Vector3((float)stop.Position.XM, 4f, (float)stop.Position.YM);
                     stopMarkers[stop.StopId] = (marker.GetComponent<MeshRenderer>().sharedMaterial, color);
                     routeObjects.Add(marker.gameObject);
                 }
@@ -590,11 +997,18 @@ namespace Formula9.World
 
         public void Dispose()
         {
+            if (disposed) return;
+            disposed = true;
+            busStopCancellation?.Cancel();
+            busStopCancellation?.Dispose();
+            busStopCancellation = null;
             if (tiles != null) tiles.TileLoaded -= RefreshTiles;
             incidents.Dispose();
+            busStopShelters.Dispose();
             traffic?.Dispose();
             traffic = null;
             if (root != null) WorldBuilder.Remove(root.gameObject);
+            trafficLightObjects.Clear();
             foreach (var item in owned)
             {
                 if (Application.isPlaying) UnityEngine.Object.Destroy(item);
