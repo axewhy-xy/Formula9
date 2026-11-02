@@ -355,10 +355,11 @@ namespace Formula9.Tests
             {
                 Assert.IsTrue(view.LoadAsync(new CityClient(new OneBuilding(), new Uri("http://localhost")), "toa-payoh", CancellationToken.None).IsCompleted);
                 Assert.AreEqual(1, view.RoadCount);
-                var materials = rig.GetComponentsInChildren<MeshRenderer>().First(r => r.name == "Roads").sharedMaterials;
+                var materials = rig.GetComponentsInChildren<MeshRenderer>().First(r => r.name == "OSM roads (RoadMesh)").sharedMaterials;
                 Assert.AreEqual(RoadMesh.LayerCount, materials.Length);
-                Assert.Less(materials[RoadMesh.KerbLayer].renderQueue, materials[RoadMesh.AsphaltLayer].renderQueue);
                 Assert.Less(materials[RoadMesh.AsphaltLayer].renderQueue, materials[RoadMesh.MarkingLayer].renderQueue);
+                Assert.Less(materials[RoadMesh.KerbLayer].renderQueue, materials[RoadMesh.AsphaltLayer].renderQueue);
+               
                 Assert.Greater(materials[RoadMesh.KerbLayer].renderQueue, (int)RenderQueue.Geometry, "after the ground and buildings");
             }
             finally
