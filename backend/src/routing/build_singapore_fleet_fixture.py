@@ -532,6 +532,10 @@ def build(osm: dict, base: dict, area: dict) -> dict:
 LOW_BATTERY_SHUTTLE = 4
 # Energy it has to spare on arriving at the depot, as in the original authored fixture
 LOW_BATTERY_SLACK_KWH = 0.33
+# Index of shuttle-03 and its start: 20.8% of 40 kWh, just above the client's 20% battery low
+# sound, so a trainee hears it within the first minutes of driving
+NEAR_LOW_SHUTTLE = 2
+NEAR_LOW_BATTERY_KWH = 8.32
 
 
 def low_battery_kwh(actor, index: int) -> float:
@@ -599,6 +603,7 @@ def main(argv: list[str] | None = None) -> int:
             from src.services.integrated_actor import IntegratedSessionActor
             probe = IntegratedSessionActor(0, session_id="fixture-probe")
             data["initial_battery_kwh"][LOW_BATTERY_SHUTTLE] = low_battery_kwh(probe, LOW_BATTERY_SHUTTLE)
+            data["initial_battery_kwh"][NEAR_LOW_SHUTTLE] = NEAR_LOW_BATTERY_KWH
         except ValueError as error:
             print(error, file=sys.stderr)
             return 1
