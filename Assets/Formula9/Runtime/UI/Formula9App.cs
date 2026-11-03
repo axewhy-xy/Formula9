@@ -353,11 +353,11 @@ namespace Formula9.UI
             var toggleBtn = root.Q<Button>("nav-toggle-btn");
             var navPanel = root.Q("nav-panel");
             bool isCollapsed = false;
-            toggleBtn?.RegisterCallback<ClickEvent>(_ =>
+            toggleBtn.clicked+=() =>
             {
                 isCollapsed = !isCollapsed;
                 navPanel?.EnableInClassList("collapsed", isCollapsed);
-            });
+            };
         }
 
         // -----------------------------------------------------------------------------------

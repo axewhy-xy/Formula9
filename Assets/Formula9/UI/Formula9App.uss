@@ -181,6 +181,7 @@
     flex-shrink: 0;
     padding: 18px 10px;
     background-color: rgb(16, 84, 100);
+    overflow:hidden;
     transition: width 0.2s ease;
 }
 
@@ -188,14 +189,19 @@
     flex-direction: row; 
     align-items: center; 
     margin-bottom: 12px;
+    padding-left:4px;
 }
-
+.nav-item Label,
 .brand-names { 
     margin-left: 8px; 
+    white-space:nowrap;
+    flex-shrink:0;
+    opacity:1;
+    transition: opacity 0.12s ease 0.1s;
 }
 
-.brand-name { font-size: 18px; -unity-font-style: bold; color: rgb(255, 255, 255); }
-.brand-tagline { font-size: 9px; letter-spacing: 2px; color: rgb(185, 216, 218); }
+.brand-name { font-size: 22px; -unity-font-style: bold; color: rgb(255, 255, 255); }
+.brand-tagline { font-size: 10px; letter-spacing: 3px; color: rgb(185, 216, 218); }
 
 .app Button.nav-toggle-btn {
     width: 100%;
@@ -232,20 +238,20 @@
 }
 
 .nav-panel.collapsed .brand-row {
-    justify-content: center;
+    height: auto;
+    justify-content:flex-start;
 }
 
 .nav-panel.collapsed .brand-names {
+    opacity:0;
     display: none;
-}
-
-.nav-panel.collapsed .nav-toggle-btn {
-    padding-left: 0;
+    transition: opacity 0.1s ease;
 }
 
 .nav-panel.collapsed .nav-item {
-    padding-left: 0;
-    justify-content: center;
+    height: 44px;
+    padding-left: 9px;
+    justify-content:flex-start;
 }
 
 .nav-panel.collapsed .nav-item-icon {
@@ -254,12 +260,14 @@
 
 .nav-panel.collapsed .nav-item Label {
     display: none;
+    opacity:0;
+    transition:opacity 0.1s ease;
 }
 
 .app Button.nav-item {
     height: 44px;
     margin: 0 0 6px 0;
-    padding: 0 0 0 12px;
+    padding: 0 0 0 9px;
     flex-direction: row;
     align-items: center;
     color: rgb(230, 242, 242);
