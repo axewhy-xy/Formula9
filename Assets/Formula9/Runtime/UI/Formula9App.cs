@@ -55,7 +55,7 @@ namespace Formula9.UI
         private Label dialogText;
         private Func<Task> dialogAction;
 
-        private VisualElement loginScreen, trainingScreen, fleet, confirmRow, fleetPanel, sessionPlayback;
+        private VisualElement loginScreen, trainingScreen, fleet, confirmRow, fleetPanel, sessionPlayback, sessionCard;
         private TextField fleetSearch;
         private VisualElement fleetEmpty;
         private Label fleetTitle;
@@ -66,6 +66,7 @@ namespace Formula9.UI
         private Label signUpHint, loginError, title, user, capacity, status, message, worldStatus, sessionBadge, sessionDiagnostics;
         private Foldout sessionDetails;
         private string sessionBadgeClass;
+        private readonly SessionStatusPresenter sessionStatusPresenter = new SessionStatusPresenter();
         private Button forgot, submit, modeSwitch, start, pause, resume, archive, refreshSessions;
         private DropdownField scenario, sessions;
 
@@ -272,6 +273,7 @@ namespace Formula9.UI
         private void BindTraining(VisualElement root)
         {
             trainingScreen = root.Q("training-host");
+            sessionCard = root.Q("content-card");
             title = root.Q<Label>("title");
             user = root.Q<Label>("user");
             capacity = root.Q<Label>("capacity");
@@ -279,7 +281,11 @@ namespace Formula9.UI
             sessionBadge = root.Q<Label>("session-badge");
             sessionDiagnostics = root.Q<Label>("session-diagnostics");
             sessionDetails = root.Q<Foldout>("session-details");
-            sessionDetails.RegisterValueChangedCallback(change => sessionDetails.EnableInClassList("session-details-expanded", change.newValue));
+            sessionDetails.RegisterValueChangedCallback(change =>
+            {
+                sessionDetails.EnableInClassList("session-details-expanded", change.newValue);
+                if (change.newValue) RenderSessionDiagnostics(session.Store.Snapshot);
+            });
             message = root.Q<Label>("message");
             ShowMessage("");
             worldStatus = root.Q<Label>("world-status");
@@ -692,13 +698,10 @@ namespace Formula9.UI
             var snapshot = session.Store.Snapshot;
             var worldReady = world != null && world.Ready;
             var controls = TrainingPresenter.Controls(snapshot, session.Available, worldReady);
-            // Keep one relevant simulation action at the end of the toolbar, even when offline.
-            var sessionState = snapshot?.Session.Status;
-            start.style.display = sessionState == "READY" ? DisplayStyle.Flex : DisplayStyle.None;
-            pause.style.display = sessionState == "RUNNING" ? DisplayStyle.Flex : DisplayStyle.None;
-            resume.style.display = sessionState == "PAUSED" ? DisplayStyle.Flex : DisplayStyle.None;
-            sessionPlayback.style.display = sessionState == "READY" || sessionState == "RUNNING" || sessionState == "PAUSED"
-                ? DisplayStyle.Flex : DisplayStyle.None;
+            start.style.display = controls.StartVisible ? DisplayStyle.Flex : DisplayStyle.None;
+            pause.style.display = controls.PauseVisible ? DisplayStyle.Flex : DisplayStyle.None;
+            resume.style.display = controls.ResumeVisible ? DisplayStyle.Flex : DisplayStyle.None;
+            sessionPlayback.style.display = controls.PlaybackVisible ? DisplayStyle.Flex : DisplayStyle.None;
             if (world != null)
             {
                 worldStatus.text = world.Diagnostic;
@@ -730,38 +733,31 @@ namespace Formula9.UI
         // Keep the operator's state readable; retain snapshot diagnostics behind an expandable section.
         private void RenderSessionStatus(FullSnapshot snapshot)
         {
-            var offline = snapshot != null && !session.Available;
-            var state = snapshot == null ? "NONE" : offline ? "OFFLINE" : snapshot.Session.Status;
-            sessionBadge.text = state switch
-            {
-                "NONE" => "No session",
-                "DRAFT" => "Draft",
-                "READY" => "Ready",
-                "RUNNING" => "Running",
-                "PAUSED" => "Paused",
-                "RECOVERING" => "Recovering",
-                "COMPLETED" => "Completed",
-                "ARCHIVED" => "Archived",
-                "FAILED" => "Failed",
-                "OFFLINE" => "Offline",
-                _ => "Unknown",
-            };
-            var badgeClass = "session-badge-" + state.ToLowerInvariant();
-            if (sessionBadgeClass != badgeClass)
+            var view = sessionStatusPresenter.Present(snapshot, session.Available);
+            if (sessionBadge.text != view.BadgeText) sessionBadge.text = view.BadgeText;
+            if (sessionBadgeClass != view.BadgeClass)
             {
                 if (sessionBadgeClass != null) sessionBadge.RemoveFromClassList(sessionBadgeClass);
-                sessionBadge.AddToClassList(badgeClass);
-                sessionBadgeClass = badgeClass;
+                sessionBadge.AddToClassList(view.BadgeClass);
+                sessionBadgeClass = view.BadgeClass;
             }
-            sessionBadge.tooltip = offline
-                ? "Live updates unavailable. Last received simulation state: " + snapshot.Session.Status.ToLowerInvariant() + "."
-                : "Current simulation state: " + sessionBadge.text.ToLowerInvariant() + ".";
-            status.text = snapshot == null ? "Create or join a training session to begin."
-                : $"Session: {snapshot.SessionId} · " + (offline ? "Offline · showing last received state" : "Connected");
-            status.EnableInClassList("session-summary-offline", offline);
+            if (sessionBadge.tooltip != view.Tooltip) sessionBadge.tooltip = view.Tooltip;
+            if (status.text != view.Summary) status.text = view.Summary;
+            status.EnableInClassList("session-summary-offline", view.Offline);
             sessionDetails.style.display = snapshot == null ? DisplayStyle.None : DisplayStyle.Flex;
-            sessionDiagnostics.text = snapshot == null ? "" : TrainingPresenter.StatusLine(snapshot, session.Available);
-            if (snapshot == null) sessionDetails.value = false;
+            if (snapshot == null)
+            {
+                sessionDetails.value = false;
+                sessionDiagnostics.text = sessionStatusPresenter.Diagnostics(null, false);
+            }
+            else if (sessionDetails.value) RenderSessionDiagnostics(snapshot);
+        }
+
+        private void RenderSessionDiagnostics(FullSnapshot snapshot)
+        {
+            if (sessionCard.ClassListContains("session-compact")) return;
+            var text = sessionStatusPresenter.Diagnostics(snapshot, session.Available);
+            if (sessionDiagnostics.text != text) sessionDiagnostics.text = text;
         }
 
         // -----------------------------------------------------------------------------------

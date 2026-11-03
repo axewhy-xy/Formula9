@@ -37,7 +37,8 @@ namespace Formula9.UI
         private readonly ChargingPage charging;
         private readonly Button sessionToggle;
         private readonly VisualElement sessionCard;
-        private bool sessionToolsOpen;
+        private bool? sessionToolsOpen;
+        private string sessionToolsState;
         private readonly VisualElement incidentTable, candidateTable, eventsTable, ledgerTable;
         private readonly List<List<RouteWaypoint>> draftHistory = new List<List<RouteWaypoint>> { new List<RouteWaypoint>() };
         private List<RouteWaypoint> draft = new List<RouteWaypoint>();
@@ -68,7 +69,7 @@ namespace Formula9.UI
         }
         public event Action IncidentSelected;
         public event Action<string> SectionChanged;
-        private const int RoutePage = 1, ReportsPage = 4, ScenariosPage = 5, MaxLedgerEntries = 200;
+        private const int RoutePage = 1, ChargingPageIndex = 2, ReportsPage = 4, ScenariosPage = 5, MaxLedgerEntries = 200;
         private int shownPage;
         private readonly VisualElement incidentDecisions;
 
@@ -131,7 +132,7 @@ namespace Formula9.UI
             charging = new ChargingPage(root, api, session, run, notify, () => Current);
             sessionCard = root.Q("content-card");
             sessionToggle = root.Q<Button>("session-toggle");
-            sessionToggle.clicked += () => { sessionToolsOpen = !sessionToolsOpen; FitSessionControls(); };
+            sessionToggle.clicked += ToggleSessionTools;
 
             incidentDecisions = root.Q("incident-decisions");
             incidents = root.Q<DropdownField>("incidents");
@@ -184,7 +185,7 @@ namespace Formula9.UI
             var currentBoundary = s == null ? null : $"{s.SessionId}/{s.SessionEpoch}";
             if (boundary != currentBoundary)
             {
-                sessionToolsOpen = false;
+                sessionToolsOpen = null;
                 boundary = currentBoundary; dependencies = null; context = null; requestGeneration++; approvedDraft = null; heldIncident = heldVehicle = null;
                 if (ledgerSession != s?.SessionId) { ledger.Clear(); ledgerSession = s?.SessionId; }
                 charging.Reset();
@@ -193,6 +194,12 @@ namespace Formula9.UI
                 preview = null; draftView = null; outcome = null; outcomeSequence = -1; suggesting = false;
                 ClearIncidentPreview(); ClearEvidence(); incidentReport.text = "";
                 world.SetRouteDraft(null, null, null);
+            }
+            var setupState = s?.Session?.Status;
+            if (sessionToolsState != setupState)
+            {
+                if (TrainingPresenter.IsTerminalSession(setupState)) sessionToolsOpen = null;
+                sessionToolsState = setupState;
             }
             FitSessionControls();
             if (s == null) { UpdateActions(); return; }
@@ -780,14 +787,20 @@ namespace Formula9.UI
             return token.Type == JTokenType.Null ? "Unavailable" : token.ToString();
         }
 
-        // Keep setup visible before joining; fold it away during training until asked for.
+        private void ToggleSessionTools()
+        {
+            sessionToolsOpen = !TrainingPresenter.SessionSetup(session.Store.Snapshot, shownPage == ChargingPageIndex, sessionToolsOpen).ToolsVisible;
+            FitSessionControls();
+        }
+
+        // Finished attempts reopen setup; Charging keeps its one-screen layout while tools are closed.
         private void FitSessionControls()
         {
-            var joined = session.Store.Snapshot != null;
-            var showTools = !joined || sessionToolsOpen;
-            sessionToggle.style.display = joined ? DisplayStyle.Flex : DisplayStyle.None;
-            sessionCard.EnableInClassList("session-tools-hidden", !showTools);
-            sessionToggle.text = showTools ? "Hide session options" : "Session options";
+            var setup = TrainingPresenter.SessionSetup(session.Store.Snapshot, shownPage == ChargingPageIndex, sessionToolsOpen);
+            sessionToggle.style.display = setup.ToggleVisible ? DisplayStyle.Flex : DisplayStyle.None;
+            sessionCard.EnableInClassList("session-tools-hidden", !setup.ToolsVisible);
+            sessionCard.EnableInClassList("session-compact", setup.Compact);
+            sessionToggle.text = setup.ToolsVisible ? "Hide session options" : "Session options";
         }
 
         private void ShowPage(int index)

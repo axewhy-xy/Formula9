@@ -26,6 +26,61 @@ namespace Formula9.Tests
             public Task<HttpResponse> SendAsync(HttpRequest request, CancellationToken cancellation = default) => Reply(request);
         }
 
+        [TestCase("ARCHIVED")]
+        [TestCase("COMPLETED")]
+        [TestCase("FAILED")]
+        public async Task ChargingFoldsTheStatusBarAndFinishedAttemptsReopenSetup(string terminalState)
+        {
+            var raw = Fixture("snapshot"); raw["session"]["status"] = "RUNNING";
+            var context = Fixture("route_editor_context");
+            context["route_id"] = raw["routes"][0]["route_id"].DeepClone();
+            context["route_revision"] = raw["routes"][0]["revision"].DeepClone();
+            var backend = new Backend();
+            backend.Reply = request =>
+            {
+                var path = request.Url.AbsolutePath;
+                if (path.EndsWith("/snapshot")) return Task.FromResult(new HttpResponse { Status = 200, Body = raw.ToString() });
+                if (path.EndsWith("/editor")) return Task.FromResult(new HttpResponse { Status = 200, Body = context.ToString() });
+                if (path.EndsWith("/outcome")) return Task.FromResult(new HttpResponse { Failure = HttpFailure.Incomplete });
+                var replay = Fixture("event_replay"); replay["events"] = new JArray(); replay["has_more"] = false;
+                replay["after_sequence"] = raw["event_sequence"].DeepClone(); replay["next_sequence"] = raw["event_sequence"].DeepClone();
+                return Task.FromResult(new HttpResponse { Status = 200, Body = replay.ToString() });
+            };
+            var auth = new AuthSession(); auth.Begin("trainee", "token", 3600);
+            var api = new TrainingApi(backend, auth, new Uri("http://backend.test"));
+            var session = new SessionController(api, auth);
+            var root = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/Formula9/UI/Formula9App.uxml").CloneTree();
+            var rig = new GameObject("Session toolbar test"); var world = rig.AddComponent<WorldView>();
+            var errors = new List<Exception>();
+            async void Run(Task task) { try { await task; } catch (Exception error) { errors.Add(error); } }
+            try
+            {
+                world.Attach(root.Q("world"), new SceneLoader(backend, new Uri("http://backend.test")));
+                var workspace = new TrainingWorkspace(root, api, session, world, Run, _ => { });
+                var card = root.Q("content-card");
+                Assert.IsFalse(card.ClassListContains("session-tools-hidden"));
+                await session.JoinAsync((string)raw["session_id"]);
+                Assert.IsTrue(card.ClassListContains("session-tools-hidden"));
+                Assert.IsFalse(card.ClassListContains("session-compact"), "Fleet keeps its status bar");
+                var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+                typeof(TrainingWorkspace).GetMethod("ShowPage", flags).Invoke(workspace, new object[] { 2 });
+                Assert.IsTrue(card.ClassListContains("session-compact"), "Charging folds the extra status row and header spacing");
+                var toggle = typeof(TrainingWorkspace).GetMethod("ToggleSessionTools", flags);
+                toggle.Invoke(workspace, null);
+                Assert.IsFalse(card.ClassListContains("session-tools-hidden"));
+                Assert.IsFalse(card.ClassListContains("session-compact"));
+                toggle.Invoke(workspace, null);
+                Assert.IsTrue(card.ClassListContains("session-tools-hidden"), "explicitly closed before the session ends");
+                raw["session"]["status"] = terminalState;
+                raw["snapshot_id"] = Guid.NewGuid().ToString();
+                await session.RefreshAsync();
+                Assert.IsFalse(card.ClassListContains("session-tools-hidden"), "Create and Join must reappear when the attempt ends");
+                Assert.IsFalse(card.ClassListContains("session-compact"));
+                Assert.IsEmpty(errors);
+            }
+            finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
+        }
+
         [Test]
         public async Task RoadsArrivingAfterARevisionChangeReloadBeforeEnablingTheEditor()
         {

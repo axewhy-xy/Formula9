@@ -371,6 +371,7 @@
 .session-heading { flex-direction: row; flex-wrap: wrap; align-items: center; flex-grow: 1; flex-basis: 340px; flex-shrink: 1; min-width: 200px; margin: 4px 12px 4px 0; }
 .session-title { flex-grow: 0; flex-shrink: 1; min-width: 0; white-space: normal; margin: 4px 10px 4px 0; }
 .session-badge { flex-shrink: 0; padding: 4px 10px; margin: 4px 0; border-radius: 12px; font-size: 12px; -unity-font-style: bold; color: rgb(74, 93, 97); background-color: rgb(236, 241, 242); }
+.session-badge-unknown { color: rgb(74, 93, 97); background-color: rgb(236, 241, 242); }
 .session-badge-ready { color: rgb(26, 106, 106); background-color: rgb(224, 243, 242); }
 .session-badge-running, .session-badge-completed { color: rgb(22, 101, 52); background-color: rgb(220, 245, 228); }
 .session-badge-paused, .session-badge-recovering { color: rgb(117, 76, 12); background-color: rgb(255, 242, 209); }
@@ -412,6 +413,10 @@
 .session-details { flex-shrink: 0; color: rgb(74, 93, 97); }
 .session-details-expanded { flex-grow: 1; flex-basis: 100%; margin-top: 6px; }
 .session-diagnostics { white-space: normal; padding: 8px 10px; margin-top: 4px; border-radius: 6px; background-color: rgb(244, 247, 247); font-size: 12px; }
+.session-compact .session-header { padding-bottom: 0; margin-bottom: 8px; border-bottom-width: 0; }
+.session-compact .session-heading, .session-compact .session-utilities, .session-compact .session-playback,
+.session-compact .session-title, .session-compact .session-badge { margin-top: 0; margin-bottom: 0; }
+.session-compact .session-status-bar { display: none; }
 
 .view-bar {
     flex-direction: row;

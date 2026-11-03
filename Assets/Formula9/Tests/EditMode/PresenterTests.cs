@@ -145,6 +145,133 @@ namespace Formula9.Tests
             Assert.IsFalse(none.Start || none.Pause || none.Resume || none.Archive);
         }
 
+        [TestCase("READY", true, false, false)]
+        [TestCase("RUNNING", false, true, false)]
+        [TestCase("PAUSED", false, false, true)]
+        [TestCase("DRAFT", false, false, false)]
+        [TestCase("RECOVERING", false, false, false)]
+        [TestCase("COMPLETED", false, false, false)]
+        [TestCase("ARCHIVED", false, false, false)]
+        [TestCase("FAILED", false, false, false)]
+        public void RelevantControlsStayVisibleWhenOffline(string state, bool start, bool pause, bool resume)
+        {
+            var s = WithStatus(state);
+            foreach (var available in new[] { true, false })
+            {
+                var controls = TrainingPresenter.Controls(s, available, true);
+                CollectionAssert.AreEqual(new[] { start, pause, resume },
+                    new[] { controls.StartVisible, controls.PauseVisible, controls.ResumeVisible });
+                Assert.AreEqual(start || pause || resume, controls.PlaybackVisible);
+                Assert.AreEqual(available && start, controls.Start);
+                Assert.AreEqual(available && pause, controls.Pause);
+                Assert.AreEqual(available && resume, controls.Resume);
+            }
+            Assert.IsFalse(TrainingPresenter.Controls(null, true, true).PlaybackVisible);
+        }
+
+        [TestCase("DRAFT", "Draft", "session-badge-draft")]
+        [TestCase("READY", "Ready", "session-badge-ready")]
+        [TestCase("RUNNING", "Running", "session-badge-running")]
+        [TestCase("PAUSED", "Paused", "session-badge-paused")]
+        [TestCase("RECOVERING", "Recovering", "session-badge-recovering")]
+        [TestCase("COMPLETED", "Completed", "session-badge-completed")]
+        [TestCase("ARCHIVED", "Archived", "session-badge-archived")]
+        [TestCase("FAILED", "Failed", "session-badge-failed")]
+        public void BadgesDescribeEverySessionState(string state, string text, string style)
+        {
+            var view = TrainingPresenter.SessionStatus(WithStatus(state), true);
+            Assert.AreEqual(text, view.BadgeText);
+            Assert.AreEqual(style, view.BadgeClass);
+            Assert.AreEqual("Session: session-001 · Connected", view.Summary);
+            Assert.IsFalse(view.Offline);
+        }
+
+        [TestCase("unexpected-status")]
+        [TestCase("")]
+        [TestCase(null)]
+        public void UnknownStatesHaveASafeBadgeAndOfflineExplanation(string state)
+        {
+            var s = WithStatus("RUNNING"); s.Session.Status = state;
+            var view = TrainingPresenter.SessionStatus(s, true);
+            Assert.AreEqual("Unknown", view.BadgeText);
+            Assert.AreEqual("session-badge-unknown", view.BadgeClass);
+            Assert.AreEqual("Current simulation state: unknown.", view.Tooltip);
+            var offline = TrainingPresenter.SessionStatus(s, false);
+            Assert.AreEqual("Offline", offline.BadgeText);
+            Assert.AreEqual("session-badge-offline", offline.BadgeClass);
+            Assert.IsTrue(offline.Offline);
+            Assert.AreEqual("Live updates unavailable. Last received simulation state: unknown.", offline.Tooltip);
+            StringAssert.Contains("showing last received state", offline.Summary);
+        }
+
+        [TestCase("ARCHIVED")]
+        [TestCase("COMPLETED")]
+        [TestCase("FAILED")]
+        public void FinishedSessionsDefaultToVisibleSetup(string state)
+        {
+            foreach (var charging in new[] { true, false })
+            {
+                var setup = TrainingPresenter.SessionSetup(WithStatus(state), charging, null);
+                Assert.IsTrue(setup.ToolsVisible);
+                Assert.IsTrue(setup.ToggleVisible);
+                Assert.IsFalse(setup.Compact);
+            }
+        }
+
+        [Test]
+        public void ChargingIsCompactUntilSetupIsExplicitlyOpened()
+        {
+            var s = WithStatus("RUNNING");
+            var compact = TrainingPresenter.SessionSetup(s, true, null);
+            Assert.IsTrue(compact.Compact);
+            Assert.IsFalse(compact.ToolsVisible);
+            var open = TrainingPresenter.SessionSetup(s, true, true);
+            Assert.IsTrue(open.ToolsVisible);
+            Assert.IsFalse(open.Compact);
+            Assert.IsFalse(TrainingPresenter.SessionSetup(s, false, null).Compact);
+            var empty = TrainingPresenter.SessionSetup(null, true, false);
+            Assert.IsTrue(empty.ToolsVisible);
+            Assert.IsFalse(empty.ToggleVisible);
+            Assert.IsFalse(empty.Compact);
+        }
+
+        [Test]
+        public void StatusTextIsReusedUntilItsInputsChange()
+        {
+            var presenter = new SessionStatusPresenter();
+            var s = WithStatus("RUNNING");
+            var initial = presenter.Present(s, true);
+            s.Tick++; s.SnapshotId = "a-new-snapshot";
+            var next = presenter.Present(s, true);
+            Assert.AreSame(initial.Summary, next.Summary);
+            Assert.AreSame(initial.Tooltip, next.Tooltip);
+            var offline = presenter.Present(s, false);
+            Assert.AreEqual("Offline", offline.BadgeText);
+            StringAssert.Contains("running", offline.Tooltip);
+            s.Session.Status = "PAUSED";
+            StringAssert.Contains("paused", presenter.Present(s, false).Tooltip);
+            Assert.AreEqual("Paused", presenter.Present(s, true).BadgeText);
+            s.SessionId = "another-session";
+            StringAssert.Contains("another-session", presenter.Present(s, true).Summary);
+            Assert.AreEqual(TrainingPresenter.NoSession, presenter.Present(null, false).Summary);
+        }
+
+        [Test]
+        public void DiagnosticsAreCachedAndRefreshWhenRequestedForANewerSnapshot()
+        {
+            var presenter = new SessionStatusPresenter();
+            var s = WithStatus("RUNNING");
+            var initial = presenter.Diagnostics(s, true);
+            Assert.AreSame(initial, presenter.Diagnostics(s, true));
+            s.Tick++; s.SnapshotId = "latest-snapshot";
+            presenter.Present(s, true);
+            var current = presenter.Diagnostics(s, true);
+            StringAssert.Contains("latest-snapshot", current);
+            StringAssert.Contains("tick " + s.Tick, current);
+            StringAssert.EndsWith("stale/offline", presenter.Diagnostics(s, false));
+            Assert.AreEqual("", presenter.Diagnostics(null, false));
+        }
+
         // -----------------------------------------------------------------------------------
         // Function: StartWaitsWhileAnAssignedRouteCrossesAnActiveClosure
         // -----------------------------------------------------------------------------------
