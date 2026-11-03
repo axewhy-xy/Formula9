@@ -100,6 +100,7 @@ namespace Formula9.World
         public int TrafficLightCount { get; private set; }
         private readonly GameObject trafficLightPrefab;
         private IReadOnlyList<CityRoad> loadedRoads = Array.Empty<CityRoad>();
+        private readonly GameObject shuttlePrefab;
 
         public CityView(Transform parent, MapTiles tiles)
             : this(parent, tiles, (TransitClient)null, (GameObject)null) { }
@@ -117,6 +118,12 @@ namespace Formula9.World
             this.tiles = tiles;
             this.transit = transit;
             this.trafficLightPrefab = trafficLightPrefab;
+
+            // load the shuttle prefab once.
+            shuttlePrefab = Resources.Load<GameObject>("Formula9/ShuttleBus");
+            if (shuttlePrefab == null)
+                Debug.LogWarning("ShuttleBus prefab missing; using cubes.");
+
             buildingMaterial = Own(new Material(Shader.Find("Formula9/CityBuilding")));
             ApplyBuildingTextures(buildingMaterial);
             lineMaterial = Own(new Material(Shader.Find("Sprites/Default")));
@@ -736,7 +743,12 @@ namespace Formula9.World
                 var heading = (float)vehicle.HeadingDeg * Mathf.Deg2Rad;
                 var facing = Quaternion.LookRotation(new Vector3(Mathf.Cos(heading), 0, Mathf.Sin(heading)));
                 if (!shuttles.ContainsKey(vehicle.VehicleId))
-                    shuttles[vehicle.VehicleId] = Shuttle(FleetMap.ShuttleColor(i), "Shuttle " + vehicle.VehicleId);
+                    {
+                        shuttles[vehicle.VehicleId] = Shuttle(
+                            FleetMap.ShuttleColor(i),
+                            "Shuttle " + vehicle.VehicleId);
+                    }
+
                 routes.TryGetValue(vehicle.RouteId ?? "", out var route);
                 motion.SetTarget(vehicle.VehicleId, at, facing, now, route);
             }
@@ -868,15 +880,24 @@ namespace Formula9.World
             draftObjects.Add(bar.gameObject);
         }
 
-        // A box with a dark windscreen at its front, so which way it is going reads from any angle.
         private Transform Shuttle(Color color, string name)
         {
-            var body = Marker(PrimitiveType.Cube, ShuttleSize, color, name);
-            var screen = Marker(PrimitiveType.Cube, Vector3.one, WindscreenColor, name + " windscreen");
-            screen.SetParent(body, false);
-            screen.localPosition = new Vector3(0, 0.2f, 0.5f);
-            screen.localScale = new Vector3(0.86f, 0.4f, 0.04f);
-            return body;
+            if (shuttlePrefab == null)
+                return Marker(PrimitiveType.Cube, ShuttleSize, color, name);
+
+            var bus = UnityEngine.Object.Instantiate(shuttlePrefab, root, false);
+            bus.name = name;
+
+            var appearance = bus.GetComponent<ShuttleAppearance>();
+
+            if (appearance != null)
+                appearance.ApplyFleetColor(color);
+            else
+                Debug.LogWarning(
+                    "Add ShuttleAppearance to the ShuttleBus prefab.",
+                    bus);
+
+            return bus.transform;
         }
 
         private void BuildRoutes(FullSnapshot snapshot, List<FleetVehicle> ordered)
