@@ -288,6 +288,58 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
+        // Function: TheBackendDroppingAndComingBackIsReportedOnceEach
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A joined session's failing polls report one drop, and the first poll that succeeds
+        //     again reports one return.
+        [Test]
+        public async Task TheBackendDroppingAndComingBackIsReportedOnceEach()
+        {
+            var changes = new List<bool>();
+            controller.ConnectionChanged += changes.Add;
+            await controller.JoinAsync(SessionId);
+            Assert.IsEmpty(changes, "joining is not a reconnection");
+            backend.SnapshotReply = new HttpResponse { Failure = HttpFailure.Incomplete };
+            await controller.RefreshAsync();
+            await controller.RefreshAsync();
+            CollectionAssert.AreEqual(new[] { false }, changes, "one drop, however many polls fail");
+            backend.SnapshotReply = null;
+            await controller.RefreshAsync();
+            await controller.RefreshAsync();
+            CollectionAssert.AreEqual(new[] { false, true }, changes, "one return");
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: JoiningLeavingAndResyncingAreNotConnectionChanges
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Availability also changes when joining, leaving or resyncing, but none of those is the
+        //     backend dropping. A drop that ends in leaving reports no return.
+        [Test]
+        public async Task JoiningLeavingAndResyncingAreNotConnectionChanges()
+        {
+            var changes = new List<bool>();
+            controller.ConnectionChanged += changes.Add;
+            await controller.JoinAsync(SessionId);
+            await controller.JoinAsync(SessionId);
+            backend.SnapshotReply = Json(new JObject { ["not"] = "a snapshot" });
+            await controller.RefreshAsync();
+            backend.SnapshotReply = null;
+            await controller.RefreshAsync();
+            controller.Leave();
+            Assert.IsEmpty(changes);
+
+            await controller.JoinAsync(SessionId);
+            backend.SnapshotReply = new HttpResponse { Failure = HttpFailure.Incomplete };
+            await controller.RefreshAsync();
+            controller.Leave();
+            backend.SnapshotReply = null;
+            await controller.JoinAsync(SessionId);
+            CollectionAssert.AreEqual(new[] { false }, changes, "leaving ends the drop without a return");
+        }
+
+        // -----------------------------------------------------------------------------------
         // Function: JoiningAnUnknownSessionDoesNotLeaveTheCurrentOne
         // -----------------------------------------------------------------------------------
         // Description:
