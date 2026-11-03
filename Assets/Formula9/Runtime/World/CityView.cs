@@ -930,7 +930,7 @@ namespace Formula9.World
                     // Small elevated status badge: don't cover the physical shelter
                     // with the older 16-metre-wide solid cylinder.
                     var marker = Marker(PrimitiveType.Cylinder, new Vector3(6f, 0.05f, 6f), color, "Stop " + stop.StopId);
-                    marker.position = new Vector3((float)stop.Position.XM, RoadMesh.SurfaceY + 0.1f, (float)stop.Position.YM);
+                    marker.position = new Vector3((float)stop.Position.XM, 4f, (float)stop.Position.YM);
                     stopMarkers[stop.StopId] = (marker.GetComponent<MeshRenderer>().sharedMaterial, color);
                     routeObjects.Add(marker.gameObject);
                 }
