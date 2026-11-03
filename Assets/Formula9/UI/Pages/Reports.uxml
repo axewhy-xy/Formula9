@@ -2,12 +2,30 @@
     <Style src="project://database/Assets/Formula9/UI/Formula9App.uss" />
     <ui:ScrollView class="workspace-page">
         <ui:Label text="Reports" class="page-title" />
+        <ui:Label text="Records observed by this client in the selected session. Older records leave the retained window." class="reports-help" />
         <ui:VisualElement class="tabs">
             <ui:Button name="reports-tab-log" text="Log (latest 1000)" class="tab-item" />
             <ui:Button name="reports-tab-commands" text="Commands (latest 200)" class="tab-item" />
         </ui:VisualElement>
-        <!-- The tables' headings and columns are set in TrainingWorkspace.cs; their rows come from the backend. -->
-        <ui:VisualElement name="reports-log-panel"><ui:VisualElement name="events-table-host" /></ui:VisualElement>
-        <ui:VisualElement name="reports-commands-panel" style="display: none;"><ui:VisualElement name="ledger-table-host" /></ui:VisualElement>
+        <ui:VisualElement name="reports-log-panel">
+            <ui:VisualElement class="reports-filters">
+                <ui:TextField name="reports-event-search" label="Search events" placeholder-text="Event ID, entity ID or event type" max-length="256" class="reports-search" tooltip="Case-insensitive. Every search word must match an event ID, entity ID or event type." />
+                <ui:DropdownField name="reports-event-type" label="Event type" class="reports-select" />
+                <ui:Button name="reports-events-clear" text="Clear filters" />
+            </ui:VisualElement>
+            <ui:Label name="reports-event-count" class="reports-count" />
+            <ui:Label name="reports-event-empty" class="reports-empty" />
+            <ui:VisualElement name="events-table-host" />
+        </ui:VisualElement>
+        <ui:VisualElement name="reports-commands-panel" style="display: none;">
+            <ui:VisualElement class="reports-filters">
+                <ui:TextField name="reports-command-search" label="Search commands" placeholder-text="Command ID, target, status or failure code" max-length="256" class="reports-search" tooltip="Case-insensitive. Every search word must match a command ID, target, status or failure code." />
+                <ui:DropdownField name="reports-command-status" label="Status" class="reports-select" />
+                <ui:Button name="reports-commands-clear" text="Clear filters" />
+            </ui:VisualElement>
+            <ui:Label name="reports-command-count" class="reports-count" />
+            <ui:Label name="reports-command-empty" class="reports-empty" />
+            <ui:VisualElement name="ledger-table-host" />
+        </ui:VisualElement>
     </ui:ScrollView>
 </ui:UXML>
