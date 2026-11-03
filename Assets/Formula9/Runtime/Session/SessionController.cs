@@ -73,8 +73,8 @@ namespace Formula9.Session
     //     Attributes: Store, SessionId, Session and Available describe the joined session;
     //     HasPendingCommand and CreationPending tell whether a command or creation is unresolved;
     //     Scenario is used for the next creation (an unresolved creation keeps the one it started
-    //     with). Events report accepted snapshots and events, recovery events, availability,
-    //     command outcomes, the command ledger (including submissions with an unknown outcome and
+    //     with). Events report accepted snapshots and events, recovery events, availability, the
+    //     backend dropping and coming back while a session is joined, command outcomes, the command ledger (including submissions with an unknown outcome and
     //     complete refusals, so a report never silently omits a command), errors, and leaving a
     //     session.
     public sealed class SessionController
@@ -110,6 +110,8 @@ namespace Formula9.Session
         private long epoch = -1;
         private long eventCursor = -1;
         private bool resyncPending;
+        // True after a poll of the joined session failed, until one succeeds again.
+        private bool connectionLost;
         private string joiningSessionId;
         private object snapshotRequest, eventsRequest, commandRequest, createRequest;
         private string creationKey, creationOwner, creationScenario;
@@ -129,6 +131,10 @@ namespace Formula9.Session
         // Durable events a recovery appended before the new epoch's snapshot.
         public event Action<IReadOnlyList<Event>> RecoveryEventsReceived;
         public event Action<bool> AvailabilityChanged;
+        // False when a joined session's poll first fails, true when one succeeds again. Unlike
+        // AvailabilityChanged it ignores joining, leaving and resyncing, which are not the
+        // backend dropping.
+        public event Action<bool> ConnectionChanged;
         public event Action<CommandOutcome> CommandFinished;
         // Includes submissions with an unknown outcome and complete HTTP refusals, so the
         // report does not silently omit commands that never produced a journaled receipt.
@@ -251,6 +257,8 @@ namespace Formula9.Session
             if (pending != null && pending.Command.SessionId != sessionId)
                 FinishPending(Unconfirmed("SESSION_RECOVERING"));
             joiningSessionId = sessionId;
+            // A drop belongs to the session it happened in; rejoining that one can still report its return.
+            if (sessionId != SessionId) connectionLost = false;
             SetAvailable(false);
             // Requests for the previous join are abandoned; their replies are ignored by generation.
             snapshotRequest = eventsRequest = commandRequest = null;
@@ -275,6 +283,7 @@ namespace Formula9.Session
             Session = null;
             epoch = eventCursor = -1;
             resyncPending = false;
+            connectionLost = false;
             Store.Select(null);
             SetAvailable(false);
             SessionLeft?.Invoke();
@@ -445,6 +454,8 @@ namespace Formula9.Session
                     Error($"Training session {sessionId} no longer exists; it was permanently deleted.");
                     return;
                 }
+                // An error reply means the backend is still answering; only no reply is a drop.
+                if (error is NoReplyException) LoseConnection();
                 SetAvailable(false);
                 Error(error is ContractException ? $"Invalid v2 snapshot: {error.Message}" : $"Join/refresh failed: {error.Message}");
                 return;
@@ -478,6 +489,7 @@ namespace Formula9.Session
             Session = snapshot.Session;
             if (epochChanged && pending != null && pending.Command.SessionId == sessionId) pending.StatusOnly = true;
             SetAvailable(true);
+            if (connectionLost) { connectionLost = false; ConnectionChanged?.Invoke(true); }
             SnapshotAccepted?.Invoke(snapshot, resetEvents);
             if (recovered) _ = RequestRecoveryEventsAsync(sessionId, recoveredAfter, snapshot.EventSequence);
             if (pending != null && pending.Command.SessionId == sessionId && pending.StatusOnly) _ = RunPendingAsync(0);
@@ -511,6 +523,7 @@ namespace Formula9.Session
                 if (error is ContractException) await ResyncAsync($"Invalid v2 events: {error.Message}");
                 else
                 {
+                    if (error is NoReplyException) LoseConnection();
                     SetAvailable(false);
                     Error($"Event replay failed: {error.Message}");
                 }
@@ -780,6 +793,19 @@ namespace Formula9.Session
             var outcome = Unconfirmed(failure);
             outcome.Status = status; outcome.FailureCode = failure;
             CommandLedgerChanged?.Invoke(outcome);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: LoseConnection
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function reports the backend dropping, once per drop, while a session is joined.
+        //     Callers pass only NoReplyException failures: an error reply means the backend is up.
+        private void LoseConnection()
+        {
+            if (connectionLost || SessionId == null) return;
+            connectionLost = true;
+            ConnectionChanged?.Invoke(false);
         }
 
         // -----------------------------------------------------------------------------------

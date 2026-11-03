@@ -152,16 +152,22 @@ namespace Formula9.UI
             session.EventsAccepted += _ => { if (session.Store.Snapshot != null) world.SetIncidentEvents(session.Store.Events); };
             session.RecoveryEventsReceived += _ => { if (session.Store.Snapshot != null) world.SetIncidentEvents(session.Store.Events); };
             session.RecoveryEventsReceived += events => alerts.OnEvents(events, true);
+            // No event says a battery is low, so the snapshots are watched for it.
+            var battery = new BatteryWatch(player.Play, () => alerts.Muted);
+            session.SnapshotAccepted += (snapshot, _) => battery.OnSnapshot(snapshot);
+            session.ConnectionChanged += connected =>
+            {
+                // The reconnect cue plays on the same snapshot; a battery that ran low meanwhile waits a poll.
+                if (connected) battery.HoldNextCue();
+                if (!alerts.Muted) player.Play(connected ? AlertPlayer.ReconnectCue : AlertPlayer.DisconnectCue);
+            };
 
-            // Interface sounds from amee's review.
+            // Interface sounds from amee's consultation with Vuk: only the major buttons click.
             var root = GetComponent<UIDocument>().rootVisualElement;
             var uiPlayer = new GameObject("Interface sounds").AddComponent<UiSoundPlayer>();
             uiPlayer.transform.SetParent(transform, false);
             var uiSounds = new UiSounds(uiPlayer.Play);
-            // amee's hover buttons are all on the main simulator, so the login page stays silent.
-            uiSounds.Attach(root.Q("training-host"));
-            start.clicked += uiSounds.StartClicked;
-            root.Q<Button>("route-start").clicked += uiSounds.StartClicked;
+            foreach (var name in UiSounds.MajorButtons) root.Q<Button>(name).clicked += uiSounds.MajorPressed;
             world.RouteNodeSelected += _ => uiSounds.PointPicked();
             world.RoadClicked += (_, __) => uiSounds.PointPicked();
             world.ViewChanged += Render;
@@ -750,7 +756,7 @@ namespace Formula9.UI
                     : row.BatteryPercent < 50 ? new Color(0.949f, 0.6f, 0.29f) : new Color(0.153f, 0.682f, 0.376f);
                 gauge.Add(fill);
                 top.Add(gauge);
-                top.Add(new Label($"{Mathf.RoundToInt((float)row.BatteryPercent)}%") { tooltip = row.Battery });
+                top.Add(new Label($"{row.BatteryPercent:0}%") { tooltip = row.Battery });
                 text.Add(top);
 
                 var status = new VisualElement();
