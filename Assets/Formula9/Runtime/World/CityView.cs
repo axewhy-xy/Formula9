@@ -466,15 +466,34 @@ namespace Formula9.World
             draftObjects.Add(bar.gameObject);
         }
 
-        // A box with a dark windscreen at its front, so which way it is going reads from any angle.
+        // Keep the bus's textured details, and paint only its dedicated bodywork material.
         private Transform Shuttle(Color color, string name)
         {
-            var body = Marker(PrimitiveType.Cube, ShuttleSize, color, name);
-            var screen = Marker(PrimitiveType.Cube, Vector3.one, WindscreenColor, name + " windscreen");
-            screen.SetParent(body, false);
-            screen.localPosition = new Vector3(0, 0.2f, 0.5f);
-            screen.localScale = new Vector3(0.86f, 0.4f, 0.04f);
-            return body;
+            var prefab = Resources.Load<GameObject>("Formula9/ShuttleBus");
+
+            if (prefab == null)
+            {
+                Debug.LogWarning("ShuttleBus prefab missing; using a cube.");
+                return Marker(PrimitiveType.Cube, ShuttleSize, color, name);
+            }
+
+            var bus = UnityEngine.Object.Instantiate(prefab, root, false);
+            bus.name = name;
+            Material paint = null;
+            foreach (var renderer in bus.GetComponentsInChildren<MeshRenderer>(true))
+            {
+                var materials = renderer.sharedMaterials;
+                for (var i = 0; i < materials.Length; i++)
+                {
+                    var source = materials[i];
+                    if (source == null || source.name != "color") continue;
+                    if (paint == null) paint = Own(new Material(source) { name = name + " paint", color = color });
+                    materials[i] = paint;
+                }
+                renderer.sharedMaterials = materials;
+            }
+
+            return bus.transform;
         }
 
         private void BuildRoutes(FullSnapshot snapshot, List<FleetVehicle> ordered)
@@ -503,8 +522,9 @@ namespace Formula9.World
                 }
                 foreach (var stop in route.StopsM)
                 {
-                    var marker = Marker(PrimitiveType.Cylinder, new Vector3(16, 3, 16), color, "Stop " + stop.StopId);
-                    marker.position = new Vector3((float)stop.Position.XM, 3, (float)stop.Position.YM);
+                    // A flat stop badge stays visible without hiding a bus parked at the stop.
+                    var marker = Marker(PrimitiveType.Cylinder, new Vector3(6f, 0.05f, 6f), color, "Stop " + stop.StopId);
+                    marker.position = new Vector3((float)stop.Position.XM, RoadMesh.SurfaceY + 0.1f, (float)stop.Position.YM);
                     stopMarkers[stop.StopId] = (marker.GetComponent<MeshRenderer>().sharedMaterial, color);
                     routeObjects.Add(marker.gameObject);
                 }
