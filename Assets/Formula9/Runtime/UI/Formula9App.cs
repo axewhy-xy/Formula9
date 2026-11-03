@@ -55,7 +55,7 @@ namespace Formula9.UI
         private Label dialogText;
         private Func<Task> dialogAction;
 
-        private VisualElement loginScreen, trainingScreen, fleet, confirmRow, fleetPanel;
+        private VisualElement loginScreen, trainingScreen, fleet, confirmRow, fleetPanel, sessionPlayback;
         private TextField fleetSearch;
         private VisualElement fleetEmpty;
         private Label fleetTitle;
@@ -63,7 +63,9 @@ namespace Formula9.UI
         private Button viewMap, viewWorld;
         private const string RememberedUserKey = "login.rememberedUser";
         private TextField username, password, confirm, sessionId;
-        private Label signUpHint, loginError, title, user, capacity, status, message, worldStatus;
+        private Label signUpHint, loginError, title, user, capacity, status, message, worldStatus, sessionBadge, sessionDiagnostics;
+        private Foldout sessionDetails;
+        private string sessionBadgeClass;
         private Button forgot, submit, modeSwitch, start, pause, resume, archive, refreshSessions;
         private DropdownField scenario, sessions;
 
@@ -274,6 +276,10 @@ namespace Formula9.UI
             user = root.Q<Label>("user");
             capacity = root.Q<Label>("capacity");
             status = root.Q<Label>("status");
+            sessionBadge = root.Q<Label>("session-badge");
+            sessionDiagnostics = root.Q<Label>("session-diagnostics");
+            sessionDetails = root.Q<Foldout>("session-details");
+            sessionDetails.RegisterValueChangedCallback(change => sessionDetails.EnableInClassList("session-details-expanded", change.newValue));
             message = root.Q<Label>("message");
             ShowMessage("");
             worldStatus = root.Q<Label>("world-status");
@@ -285,6 +291,7 @@ namespace Formula9.UI
             pause = root.Q<Button>("pause");
             resume = root.Q<Button>("resume");
             archive = root.Q<Button>("archive");
+            sessionPlayback = root.Q("session-playback");
             refreshSessions = root.Q<Button>("refresh-sessions");
             fleetPanel = root.Q("fleet-panel");
             fleetTitle = root.Q<Label>("fleet-title");
@@ -677,6 +684,13 @@ namespace Formula9.UI
             var snapshot = session.Store.Snapshot;
             var worldReady = world != null && world.Ready;
             var controls = TrainingPresenter.Controls(snapshot, session.Available, worldReady);
+            // Keep one relevant simulation action at the end of the toolbar, even when offline.
+            var sessionState = snapshot?.Session.Status;
+            start.style.display = sessionState == "READY" ? DisplayStyle.Flex : DisplayStyle.None;
+            pause.style.display = sessionState == "RUNNING" ? DisplayStyle.Flex : DisplayStyle.None;
+            resume.style.display = sessionState == "PAUSED" ? DisplayStyle.Flex : DisplayStyle.None;
+            sessionPlayback.style.display = sessionState == "READY" || sessionState == "RUNNING" || sessionState == "PAUSED"
+                ? DisplayStyle.Flex : DisplayStyle.None;
             if (world != null)
             {
                 worldStatus.text = world.Diagnostic;
@@ -690,9 +704,9 @@ namespace Formula9.UI
             archive.SetEnabled(controls.Archive);
             workspace?.Render();
             world?.SetOffline(snapshot != null && !session.Available);
+            RenderSessionStatus(snapshot);
             if (snapshot == null)
             {
-                status.text = TrainingPresenter.NoSession;
                 title.text = TrainingPresenter.ScenarioTitle(session.Scenario);
                 fleetTitle.text = "Fleet List (0)";
                 fleet.Clear();
@@ -701,9 +715,45 @@ namespace Formula9.UI
                 return;
             }
             title.text = TrainingPresenter.Title(snapshot);
-            status.text = TrainingPresenter.StatusLine(snapshot, session.Available);
             sessionId.SetValueWithoutNotify(snapshot.SessionId);
             RenderFleet(snapshot);
+        }
+
+        // Keep the operator's state readable; retain snapshot diagnostics behind an expandable section.
+        private void RenderSessionStatus(FullSnapshot snapshot)
+        {
+            var offline = snapshot != null && !session.Available;
+            var state = snapshot == null ? "NONE" : offline ? "OFFLINE" : snapshot.Session.Status;
+            sessionBadge.text = state switch
+            {
+                "NONE" => "No session",
+                "DRAFT" => "Draft",
+                "READY" => "Ready",
+                "RUNNING" => "Running",
+                "PAUSED" => "Paused",
+                "RECOVERING" => "Recovering",
+                "COMPLETED" => "Completed",
+                "ARCHIVED" => "Archived",
+                "FAILED" => "Failed",
+                "OFFLINE" => "Offline",
+                _ => "Unknown",
+            };
+            var badgeClass = "session-badge-" + state.ToLowerInvariant();
+            if (sessionBadgeClass != badgeClass)
+            {
+                if (sessionBadgeClass != null) sessionBadge.RemoveFromClassList(sessionBadgeClass);
+                sessionBadge.AddToClassList(badgeClass);
+                sessionBadgeClass = badgeClass;
+            }
+            sessionBadge.tooltip = offline
+                ? "Live updates unavailable. Last received simulation state: " + snapshot.Session.Status.ToLowerInvariant() + "."
+                : "Current simulation state: " + sessionBadge.text.ToLowerInvariant() + ".";
+            status.text = snapshot == null ? "Create or join a training session to begin."
+                : $"Session: {snapshot.SessionId} · " + (offline ? "Offline · showing last received state" : "Connected");
+            status.EnableInClassList("session-summary-offline", offline);
+            sessionDetails.style.display = snapshot == null ? DisplayStyle.None : DisplayStyle.Flex;
+            sessionDiagnostics.text = snapshot == null ? "" : TrainingPresenter.StatusLine(snapshot, session.Available);
+            if (snapshot == null) sessionDetails.value = false;
         }
 
         // -----------------------------------------------------------------------------------

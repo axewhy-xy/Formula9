@@ -280,6 +280,48 @@
 .sessions { flex-grow: 1; flex-basis: 300px; margin-right: 8px; }
 .muted { color: rgb(74, 93, 97); white-space: normal; }
 
+/* The current simulation action sits at the right; setup and maintenance stay secondary. */
+.session-header {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    flex-shrink: 0;
+    padding-bottom: 8px;
+    margin-bottom: 10px;
+    border-bottom-width: 1px;
+    border-bottom-color: rgb(220, 230, 230);
+}
+
+.session-heading { flex-direction: row; flex-wrap: wrap; align-items: center; flex-grow: 1; flex-basis: 340px; flex-shrink: 1; min-width: 200px; margin: 4px 12px 4px 0; }
+.session-title { flex-grow: 0; flex-shrink: 1; min-width: 0; white-space: normal; margin: 4px 10px 4px 0; }
+.session-badge { flex-shrink: 0; padding: 4px 10px; margin: 4px 0; border-radius: 12px; font-size: 12px; -unity-font-style: bold; color: rgb(74, 93, 97); background-color: rgb(236, 241, 242); }
+.session-badge-ready { color: rgb(26, 106, 106); background-color: rgb(224, 243, 242); }
+.session-badge-running, .session-badge-completed { color: rgb(22, 101, 52); background-color: rgb(220, 245, 228); }
+.session-badge-paused, .session-badge-recovering { color: rgb(117, 76, 12); background-color: rgb(255, 242, 209); }
+.session-badge-offline, .session-badge-failed { color: rgb(151, 57, 57); background-color: rgb(252, 232, 232); }
+.session-utilities, .session-playback { flex-direction: row; align-items: center; flex-shrink: 0; margin: 4px 0; }
+.session-utilities { padding-right: 16px; }
+.session-playback { margin-left: auto; padding-left: 16px; border-left-width: 1px; border-left-color: rgb(211, 222, 222); }
+.session-create-group, .session-join-group { flex-direction: row; flex-wrap: wrap; align-items: center; flex-grow: 1; flex-basis: 440px; margin: 4px 0; }
+.session-create-group { margin-right: 16px; }
+.session-create-group .scenario { flex-grow: 1; flex-shrink: 1; min-width: 200px; }
+.session-maintenance { flex-shrink: 0; margin-bottom: 8px; color: rgb(74, 93, 97); }
+.session-maintenance .row { margin-top: 8px; }
+
+.app Button.session-button { border-width: 1px; }
+.app Button.session-primary { color: rgb(255, 255, 255); background-color: rgb(26, 106, 106); border-color: rgb(26, 106, 106); -unity-font-style: bold; }
+.app Button.session-primary:hover { background-color: rgb(19, 85, 85); border-color: rgb(19, 85, 85); }
+.app Button.session-secondary { color: rgb(26, 106, 106); background-color: rgb(255, 255, 255); border-color: rgb(26, 106, 106); -unity-font-style: bold; }
+.app Button.session-secondary:hover { background-color: rgb(229, 243, 242); }
+.app Button.session-pause { color: rgb(88, 57, 10); background-color: rgb(250, 205, 111); border-color: rgb(210, 160, 60); -unity-font-style: bold; }
+.app Button.session-pause:hover { background-color: rgb(242, 190, 85); }
+.app Button.session-quiet { color: rgb(74, 93, 97); background-color: rgb(255, 255, 255); border-color: rgb(211, 222, 222); }
+.app Button.session-quiet:hover { background-color: rgb(238, 244, 244); }
+.app Button.session-caution { color: rgb(151, 57, 57); background-color: rgb(255, 255, 255); border-color: rgb(222, 188, 188); }
+.app Button.session-caution:hover { background-color: rgb(252, 239, 239); border-color: rgb(188, 103, 103); }
+.app Button.session-main-action { min-width: 140px; margin-right: 0; }
+.app Button.session-button:disabled, .app Button.session-button:disabled:hover { color: rgb(139, 153, 156); background-color: rgb(238, 243, 243); border-color: rgb(220, 230, 230); }
+
 .message {
     white-space: normal;
     margin-bottom: 6px;
@@ -288,6 +330,12 @@
 }
 
 .status { white-space: normal; margin-bottom: 10px; }
+.session-status-bar { flex-direction: row; flex-wrap: wrap; align-items: center; flex-shrink: 0; margin-bottom: 8px; }
+.session-summary { flex-grow: 1; flex-shrink: 1; flex-basis: 240px; margin: 0 12px 0 0; color: rgb(74, 93, 97); }
+.session-summary-offline { color: rgb(151, 57, 57); -unity-font-style: bold; }
+.session-details { flex-shrink: 0; color: rgb(74, 93, 97); }
+.session-details-expanded { flex-grow: 1; flex-basis: 100%; margin-top: 6px; }
+.session-diagnostics { white-space: normal; padding: 8px 10px; margin-top: 4px; border-radius: 6px; background-color: rgb(244, 247, 247); font-size: 12px; }
 
 .view-bar {
     flex-direction: row;
@@ -702,7 +750,7 @@
     background-color: rgba(15, 30, 38, 0.85);
 }
 
-/* The session tools fold away on the Charging page */
+/* Session setup folds away after joining, on every training page. */
 .session-tools-hidden .session-tools { display: none; }
 
 /* Charging page: one screen at the reference resolution */

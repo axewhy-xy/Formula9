@@ -68,7 +68,7 @@ namespace Formula9.UI
         }
         public event Action IncidentSelected;
         public event Action<string> SectionChanged;
-        private const int RoutePage = 1, ChargingPageIndex = 2, ReportsPage = 4, ScenariosPage = 5, MaxLedgerEntries = 200;
+        private const int RoutePage = 1, ReportsPage = 4, ScenariosPage = 5, MaxLedgerEntries = 200;
         private int shownPage;
         private readonly VisualElement incidentDecisions;
 
@@ -184,6 +184,7 @@ namespace Formula9.UI
             var currentBoundary = s == null ? null : $"{s.SessionId}/{s.SessionEpoch}";
             if (boundary != currentBoundary)
             {
+                sessionToolsOpen = false;
                 boundary = currentBoundary; dependencies = null; context = null; requestGeneration++; approvedDraft = null; heldIncident = heldVehicle = null;
                 if (ledgerSession != s?.SessionId) { ledger.Clear(); ledgerSession = s?.SessionId; }
                 charging.Reset();
@@ -193,6 +194,7 @@ namespace Formula9.UI
                 ClearIncidentPreview(); ClearEvidence(); incidentReport.text = "";
                 world.SetRouteDraft(null, null, null);
             }
+            FitSessionControls();
             if (s == null) { UpdateActions(); return; }
             // An applied approval moves its route to a new revision, which finishes the draft. A queued
             // or rejected one never does, so its draft stays for another try.
@@ -778,13 +780,14 @@ namespace Formula9.UI
             return token.Type == JTokenType.Null ? "Unavailable" : token.ToString();
         }
 
-        // The Charging page needs the whole screen, so its session tools fold away until asked for.
+        // Keep setup visible before joining; fold it away during training until asked for.
         private void FitSessionControls()
         {
-            var charging = shownPage == ChargingPageIndex;
-            sessionToggle.style.display = charging ? DisplayStyle.Flex : DisplayStyle.None;
-            sessionCard.EnableInClassList("session-tools-hidden", charging && !sessionToolsOpen);
-            sessionToggle.text = sessionToolsOpen ? "Hide session options" : "Session options";
+            var joined = session.Store.Snapshot != null;
+            var showTools = !joined || sessionToolsOpen;
+            sessionToggle.style.display = joined ? DisplayStyle.Flex : DisplayStyle.None;
+            sessionCard.EnableInClassList("session-tools-hidden", !showTools);
+            sessionToggle.text = showTools ? "Hide session options" : "Session options";
         }
 
         private void ShowPage(int index)
