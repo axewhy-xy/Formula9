@@ -257,6 +257,8 @@ namespace Formula9.Session
             if (pending != null && pending.Command.SessionId != sessionId)
                 FinishPending(Unconfirmed("SESSION_RECOVERING"));
             joiningSessionId = sessionId;
+            // A drop belongs to the session it happened in; rejoining that one can still report its return.
+            if (sessionId != SessionId) connectionLost = false;
             SetAvailable(false);
             // Requests for the previous join are abandoned; their replies are ignored by generation.
             snapshotRequest = eventsRequest = commandRequest = null;
@@ -452,7 +454,8 @@ namespace Formula9.Session
                     Error($"Training session {sessionId} no longer exists; it was permanently deleted.");
                     return;
                 }
-                if (!(error is ContractException)) LoseConnection();
+                // An error reply means the backend is still answering; only no reply is a drop.
+                if (error is NoReplyException) LoseConnection();
                 SetAvailable(false);
                 Error(error is ContractException ? $"Invalid v2 snapshot: {error.Message}" : $"Join/refresh failed: {error.Message}");
                 return;
@@ -520,7 +523,7 @@ namespace Formula9.Session
                 if (error is ContractException) await ResyncAsync($"Invalid v2 events: {error.Message}");
                 else
                 {
-                    LoseConnection();
+                    if (error is NoReplyException) LoseConnection();
                     SetAvailable(false);
                     Error($"Event replay failed: {error.Message}");
                 }
@@ -797,6 +800,7 @@ namespace Formula9.Session
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function reports the backend dropping, once per drop, while a session is joined.
+        //     Callers pass only NoReplyException failures: an error reply means the backend is up.
         private void LoseConnection()
         {
             if (connectionLost || SessionId == null) return;

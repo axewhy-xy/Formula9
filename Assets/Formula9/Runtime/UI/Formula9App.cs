@@ -157,6 +157,8 @@ namespace Formula9.UI
             session.SnapshotAccepted += (snapshot, _) => battery.OnSnapshot(snapshot);
             session.ConnectionChanged += connected =>
             {
+                // The reconnect cue plays on the same snapshot; a battery that ran low meanwhile waits a poll.
+                if (connected) battery.HoldNextCue();
                 if (!alerts.Muted) player.Play(connected ? AlertPlayer.ReconnectCue : AlertPlayer.DisconnectCue);
             };
 
@@ -754,7 +756,7 @@ namespace Formula9.UI
                     : row.BatteryPercent < 50 ? new Color(0.949f, 0.6f, 0.29f) : new Color(0.153f, 0.682f, 0.376f);
                 gauge.Add(fill);
                 top.Add(gauge);
-                top.Add(new Label($"{Mathf.RoundToInt((float)row.BatteryPercent)}%") { tooltip = row.Battery });
+                top.Add(new Label($"{row.BatteryPercent:0}%") { tooltip = row.Battery });
                 text.Add(top);
 
                 var status = new VisualElement();

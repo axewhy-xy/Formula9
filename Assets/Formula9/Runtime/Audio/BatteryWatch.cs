@@ -37,6 +37,7 @@ namespace Formula9.Audio
         private readonly Func<bool> muted;
         private readonly HashSet<string> low = new HashSet<string>();
         private string sessionId;
+        private bool holding, held;
 
         // -----------------------------------------------------------------------------------
         // Function: BatteryWatch (constructor)
@@ -58,8 +59,8 @@ namespace Formula9.Audio
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function tells whether a shuttle's battery reads LowPercent or less on screen.
-        //     The gauges round to whole percents, so a battery below LowPercent + 0.5 already shows
-        //     LowPercent, and the sound plays when the operator first sees that number.
+        //     Both gauges format with "0", which rounds halves up, so a battery below LowPercent + 0.5
+        //     already shows LowPercent, and the sound plays when the operator first sees that number.
         //
         // Args:
         //     vehicle (FleetVehicle): The shuttle.
@@ -68,6 +69,15 @@ namespace Formula9.Audio
         //     bool: True when its battery is low.
         public static bool IsLow(FleetVehicle vehicle) =>
             vehicle.BatteryCapacityKwh > 0 && 100 * vehicle.BatteryKwh / vehicle.BatteryCapacityKwh < LowPercent + 0.5;
+
+        // -----------------------------------------------------------------------------------
+        // Function: HoldNextCue
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function makes a drop seen in the next snapshot sound one snapshot later. The
+        //     reconnect cue plays on the snapshot that ends an outage, so a battery that ran low
+        //     during it would otherwise sound on top of it.
+        public void HoldNextCue() => holding = true;
 
         // -----------------------------------------------------------------------------------
         // Function: OnSnapshot
@@ -83,14 +93,17 @@ namespace Formula9.Audio
         {
             if (snapshot?.Vehicles == null) return;
             var joined = snapshot.SessionId != sessionId;
-            if (joined) { sessionId = snapshot.SessionId; low.Clear(); }
+            if (joined) { sessionId = snapshot.SessionId; low.Clear(); held = false; }
             var dropped = false;
             foreach (var vehicle in snapshot.Vehicles)
             {
                 if (!IsLow(vehicle)) low.Remove(vehicle.VehicleId);
                 else if (low.Add(vehicle.VehicleId)) dropped = true;
             }
-            if (dropped && !joined && !muted()) play?.Invoke(Cue);
+            var sound = (dropped && !joined) || held;
+            held = holding && sound;
+            holding = false;
+            if (sound && !held && !muted()) play?.Invoke(Cue);
         }
     }
 }

@@ -340,6 +340,49 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
+        // Function: AnErrorReplyIsNotADrop
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A backend that answers with an error is still up, so failing snapshots and event
+        //     replays with error replies report no connection change.
+        [Test]
+        public async Task AnErrorReplyIsNotADrop()
+        {
+            var changes = new List<bool>();
+            controller.ConnectionChanged += changes.Add;
+            await controller.JoinAsync(SessionId);
+            backend.SnapshotReply = Error(503, "QUEUE_FULL");
+            await controller.RefreshAsync();
+            backend.SnapshotReply = null;
+            backend.OnEvents = _ => Error(500, "INTERNAL");
+            await controller.RefreshAsync();
+            Assert.IsEmpty(changes);
+            Assert.IsNotEmpty(errors, "the failures are still reported as errors");
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: JoiningAnotherSessionAfterADropIsNotAReturn
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A drop belongs to the session it happened in, so joining a different session
+        //     afterwards reports no return.
+        [Test]
+        public async Task JoiningAnotherSessionAfterADropIsNotAReturn()
+        {
+            var changes = new List<bool>();
+            controller.ConnectionChanged += changes.Add;
+            await controller.JoinAsync(SessionId);
+            backend.SnapshotReply = new HttpResponse { Failure = HttpFailure.Incomplete };
+            await controller.RefreshAsync();
+            backend.SnapshotReply = null;
+            backend.Snapshot = (JObject)backend.Snapshot.DeepClone();
+            backend.Snapshot["session_id"] = backend.Snapshot["session"]["session_id"] = "session-002";
+            await controller.JoinAsync("session-002");
+            Assert.AreEqual("session-002", controller.SessionId);
+            CollectionAssert.AreEqual(new[] { false }, changes);
+        }
+
+        // -----------------------------------------------------------------------------------
         // Function: JoiningAnUnknownSessionDoesNotLeaveTheCurrentOne
         // -----------------------------------------------------------------------------------
         // Description:

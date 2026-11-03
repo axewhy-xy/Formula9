@@ -94,6 +94,44 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
+        // Function: LowMatchesTheGaugeTextAtTheBoundary
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Both gauges print the battery with "0", so IsLow is true exactly when that text
+        //     reads LowPercent or less, including at the half.
+        [Test]
+        public void LowMatchesTheGaugeTextAtTheBoundary()
+        {
+            foreach (var percent in new[] { 19.5, 20.4999, 20.5, 20.5001, 21 })
+            {
+                var vehicle = Snapshot("s", percent).Vehicles[0];
+                Assert.AreEqual(int.Parse($"{percent:0}") <= BatteryWatch.LowPercent, BatteryWatch.IsLow(vehicle), $"{percent}%");
+            }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: AfterAReconnectADropWaitsOneSnapshot
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A drop in the snapshot that ends an outage sounds one snapshot later instead of on
+        //     top of the reconnect cue; a hold with no drop changes nothing after it.
+        [Test]
+        public void AfterAReconnectADropWaitsOneSnapshot()
+        {
+            watch.OnSnapshot(Snapshot("s", 30, 30));
+            watch.HoldNextCue();
+            watch.OnSnapshot(Snapshot("s", 10, 30));
+            Assert.IsEmpty(played, "held on the reconnect snapshot");
+            watch.OnSnapshot(Snapshot("s", 10, 30));
+            CollectionAssert.AreEqual(new[] { BatteryWatch.Cue }, played, "sounds on the next one");
+
+            watch.HoldNextCue();
+            watch.OnSnapshot(Snapshot("s", 10, 30));
+            watch.OnSnapshot(Snapshot("s", 10, 10));
+            Assert.AreEqual(2, played.Count, "a hold with no drop does not delay a later drop");
+        }
+
+        // -----------------------------------------------------------------------------------
         // Function: ChargingBackUpRearmsIt
         // -----------------------------------------------------------------------------------
         // Description:
