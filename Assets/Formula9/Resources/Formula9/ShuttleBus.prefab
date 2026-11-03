@@ -9,6 +9,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 5965109084490909415}
+  - component: {fileID: 403208106782291570}
   m_Layer: 0
   m_Name: ShuttleBus
   m_TagString: Untagged
@@ -32,6 +33,19 @@ Transform:
   - {fileID: 952689721445692662}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &403208106782291570
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 918839816597621977}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 282f6acfbef76cd4c9e3926042bb7c6f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  bodyPaintMaterial: {fileID: 2100000, guid: 1e8e151a8b55e354eb269aed5818e217, type: 2}
 --- !u!1001 &5505093679112290284
 PrefabInstance:
   m_ObjectHideFlags: 0

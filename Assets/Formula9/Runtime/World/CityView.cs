@@ -100,6 +100,7 @@ namespace Formula9.World
         public int TrafficLightCount { get; private set; }
         private readonly GameObject trafficLightPrefab;
         private IReadOnlyList<CityRoad> loadedRoads = Array.Empty<CityRoad>();
+        private readonly GameObject shuttlePrefab;
 
         public CityView(Transform parent, MapTiles tiles)
             : this(parent, tiles, (TransitClient)null, (GameObject)null) { }
@@ -117,6 +118,12 @@ namespace Formula9.World
             this.tiles = tiles;
             this.transit = transit;
             this.trafficLightPrefab = trafficLightPrefab;
+
+            // load the shuttle prefab once.
+            shuttlePrefab = Resources.Load<GameObject>("Formula9/ShuttleBus");
+            if (shuttlePrefab == null)
+                Debug.LogWarning("ShuttleBus prefab missing; using cubes.");
+
             buildingMaterial = Own(new Material(Shader.Find("Formula9/CityBuilding")));
             ApplyBuildingTextures(buildingMaterial);
             lineMaterial = Own(new Material(Shader.Find("Sprites/Default")));
@@ -736,7 +743,12 @@ namespace Formula9.World
                 var heading = (float)vehicle.HeadingDeg * Mathf.Deg2Rad;
                 var facing = Quaternion.LookRotation(new Vector3(Mathf.Cos(heading), 0, Mathf.Sin(heading)));
                 if (!shuttles.ContainsKey(vehicle.VehicleId))
-                    shuttles[vehicle.VehicleId] = Shuttle(FleetMap.ShuttleColor(i), "Shuttle " + vehicle.VehicleId);
+                    {
+                        shuttles[vehicle.VehicleId] = Shuttle(
+                            FleetMap.ShuttleColor(i),
+                            "Shuttle " + vehicle.VehicleId);
+                    }
+
                 routes.TryGetValue(vehicle.RouteId ?? "", out var route);
                 motion.SetTarget(vehicle.VehicleId, at, facing, now, route);
             }
@@ -868,32 +880,22 @@ namespace Formula9.World
             draftObjects.Add(bar.gameObject);
         }
 
-        // Keep the bus's textured details, and paint only its dedicated bodywork material.
         private Transform Shuttle(Color color, string name)
         {
-            var prefab = Resources.Load<GameObject>("Formula9/ShuttleBus");
-
-            if (prefab == null)
-            {
-                Debug.LogWarning("ShuttleBus prefab missing; using a cube.");
+            if (shuttlePrefab == null)
                 return Marker(PrimitiveType.Cube, ShuttleSize, color, name);
-            }
 
-            var bus = UnityEngine.Object.Instantiate(prefab, root, false);
+            var bus = UnityEngine.Object.Instantiate(shuttlePrefab, root, false);
             bus.name = name;
-            Material paint = null;
-            foreach (var renderer in bus.GetComponentsInChildren<MeshRenderer>(true))
-            {
-                var materials = renderer.sharedMaterials;
-                for (var i = 0; i < materials.Length; i++)
-                {
-                    var source = materials[i];
-                    if (source == null || source.name != "color") continue;
-                    if (paint == null) paint = Own(new Material(source) { name = name + " paint", color = color });
-                    materials[i] = paint;
-                }
-                renderer.sharedMaterials = materials;
-            }
+
+            var appearance = bus.GetComponent<ShuttleAppearance>();
+
+            if (appearance != null)
+                appearance.ApplyFleetColor(color);
+            else
+                Debug.LogWarning(
+                    "Add ShuttleAppearance to the ShuttleBus prefab.",
+                    bus);
 
             return bus.transform;
         }
@@ -929,7 +931,7 @@ namespace Formula9.World
                     // Preserve the existing stop-status marker and dwelling/served colour behaviour.
                     // Small elevated status badge: don't cover the physical shelter
                     // with the older 16-metre-wide solid cylinder.
-                    var marker = Marker(PrimitiveType.Cylinder, new Vector3(6f, 0.05f, 6f), color, "Stop " + stop.StopId);
+                    var marker = Marker(PrimitiveType.Cylinder, new Vector3(2f, 0.2f, 2f), color, "Stop " + stop.StopId);
                     marker.position = new Vector3((float)stop.Position.XM, 4f, (float)stop.Position.YM);
                     stopMarkers[stop.StopId] = (marker.GetComponent<MeshRenderer>().sharedMaterial, color);
                     routeObjects.Add(marker.gameObject);
