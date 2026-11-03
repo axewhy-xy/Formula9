@@ -350,6 +350,14 @@ namespace Formula9.UI
             clock.schedule.Execute(() => clock.text = DateTime.Now.ToString("d MMM yyyy    HH:mm", CultureInfo.InvariantCulture)).Every(10000);
             clock.text = DateTime.Now.ToString("d MMM yyyy    HH:mm", CultureInfo.InvariantCulture);
             Render();
+            var toggleBtn = root.Q<Button>("nav-toggle-btn");
+            var navPanel = root.Q("nav-panel");
+            bool isCollapsed = false;
+            toggleBtn?.RegisterCallback<ClickEvent>(_ =>
+            {
+                isCollapsed = !isCollapsed;
+                navPanel?.EnableInClassList("collapsed", isCollapsed);
+            });
         }
 
         // -----------------------------------------------------------------------------------

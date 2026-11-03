@@ -7,7 +7,7 @@
     <ui:Template name="Scenarios" src="project://database/Assets/Formula9/UI/Pages/Scenarios.uxml" />
     <Style src="project://database/Assets/Formula9/UI/Formula9App.uss" />
     <ui:VisualElement name="training" class="training">
-        <ui:VisualElement class="nav-panel">
+        <ui:VisualElement name="nav-panel" class="nav-panel">
             <ui:VisualElement name="brand" class="brand-row">
                 <f9:Glyph kind="Bus" tint="#FFFFFF" size="36" />
                 <ui:VisualElement class="brand-names">
@@ -15,6 +15,9 @@
                     <ui:Label text="FLEET MANAGER" class="brand-tagline" />
                 </ui:VisualElement>
             </ui:VisualElement>
+            <ui:Button name="nav-toggle-btn" class="nav-toggle-btn" tooltip="Toggle sidebar">
+                <ui:Label text="‹" class="nav-toggle-icon" picking-mode="Ignore" />
+            </ui:Button>
             <ui:VisualElement name="nav-items" class="nav-items">
                 <ui:Button name="nav-fleet" class="nav-item" tooltip="Fleet Overview"><f9:Glyph kind="Bus" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Fleet Overview" picking-mode="Ignore" /></ui:Button>
                 <ui:Button name="nav-route" class="nav-item" tooltip="Route Planning"><f9:Glyph kind="Pin" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Route Planning" picking-mode="Ignore" /></ui:Button>
