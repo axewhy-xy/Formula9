@@ -35,11 +35,12 @@ namespace Formula9.UI
         private readonly Label evidenceStatus;
         private readonly List<FullSnapshot> historySnapshots = new List<FullSnapshot>();
         private readonly ChargingPage charging;
+        private readonly ReportsPage reports;
         private readonly Button sessionToggle;
         private readonly VisualElement sessionCard;
         private bool? sessionToolsOpen;
         private string sessionToolsState;
-        private readonly VisualElement incidentTable, candidateTable, eventsTable, ledgerTable;
+        private readonly VisualElement incidentTable, candidateTable;
         private readonly List<List<RouteWaypoint>> draftHistory = new List<List<RouteWaypoint>> { new List<RouteWaypoint>() };
         private List<RouteWaypoint> draft = new List<RouteWaypoint>();
         private int historyIndex;
@@ -157,8 +158,7 @@ namespace Formula9.UI
             historySample = root.Q<SliderInt>("history-sample");
             historySample.RegisterValueChangedCallback(_ => ShowHistorySample());
 
-            ledgerTable = Table(root.Q("ledger-table-host"), "", "Command ID", "Target", "Status", "Failure code", "Effective tick");
-            eventsTable = Table(root.Q("events-table-host"), "", "Event ID", "Sequence", "Tick", "Type", "Entity ID");
+            reports = new ReportsPage(root);
             session.SnapshotAccepted += (_, __) => { acceptedAt = Time.realtimeSinceStartup; Render(); };
             session.EventsAccepted += _ => RenderReports();
             session.AvailabilityChanged += _ => { if (!session.Available) { InvalidateRoute(); ClearIncidentPreview(); } Render(); };
@@ -202,7 +202,7 @@ namespace Formula9.UI
                 sessionToolsState = setupState;
             }
             FitSessionControls();
-            if (s == null) { UpdateActions(); return; }
+            if (s == null) { RenderReports(); UpdateActions(); return; }
             // An applied approval moves its route to a new revision, which finishes the draft. A queued
             // or rejected one never does, so its draft stays for another try.
             if (approvedDraft is (string approvedRoute, long basedOn) && s.Routes.Any(r => r.RouteId == approvedRoute && r.Revision > basedOn))
@@ -769,11 +769,7 @@ namespace Formula9.UI
             evidenceStatus.text = $"Historical simulation · sample {historySample.value + 1}/{historySnapshots.Count} · tick {sample.Tick}.";
         }
 
-        private void RenderReports()
-        {
-            Rows(ledgerTable, ledger.Select(o => new[] { o.CommandId, $"{o.TargetType} {o.TargetId}", o.Status, string.IsNullOrEmpty(o.FailureCode) ? "—" : o.FailureCode, o.AppliedTick?.ToString() ?? "—" }));
-            Rows(eventsTable, session.Store.Events.Select(e => new[] { e.EventId, e.EventSequence.ToString(), e.Tick.ToString(), e.EventType, e.EntityId }));
-        }
+        private void RenderReports() => reports.Render(session.Store.SelectedSessionId, session.Store.Events, ledger);
 
         // Human-readable nested fields preserve the backend's assumptions, evidence and rubric.
         private static string FormatDocument(JToken token, int depth = 0)
@@ -842,7 +838,7 @@ namespace Formula9.UI
             foreach (var column in columns) { var cell = new Label(column); cell.AddToClassList("data-cell"); cell.AddToClassList("data-heading"); head.Add(cell); }
             var rows = new VisualElement(); rows.AddToClassList("data-table-body"); body.Add(rows); return rows;
         }
-        private static void Rows(VisualElement table, IEnumerable<string[]> values)
+        internal static void Rows(VisualElement table, IEnumerable<string[]> values)
         {
             table.Clear();
             foreach (var row in values)

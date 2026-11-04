@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Formula9.Backend;
+using Formula9.Contracts;
 using Formula9.Session;
 using Formula9.UI;
 using Formula9.World;
@@ -258,6 +259,57 @@ namespace Formula9.Tests
                 workspace.Render();
                 Assert.IsTrue(world.ShowingMap, "not driving: the closure opens the map");
                 Assert.AreEqual("shuttle-01", world.SelectedId, "on the held shuttle");
+            }
+            finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
+        }
+
+        [Test]
+        public async Task LeavingASessionClearsItsReportsAndFilters()
+        {
+            var raw = Fixture("snapshot");
+            var backend = new Backend();
+            backend.Reply = request =>
+            {
+                var path = request.Url.AbsolutePath;
+                if (path.EndsWith("/snapshot")) return Task.FromResult(new HttpResponse { Status = 200, Body = raw.ToString() });
+                if (path.EndsWith("/commands"))
+                    return Task.FromResult(new HttpResponse { Status = 409, Body = "{\"error\":{\"code\":\"STALE_REVISION\",\"message\":\"Refresh the session\"}}" });
+                if (path.EndsWith("/events"))
+                {
+                    var replay = Fixture("event_replay"); replay["events"] = new JArray(); replay["has_more"] = false;
+                    replay["after_sequence"] = raw["event_sequence"].DeepClone(); replay["next_sequence"] = raw["event_sequence"].DeepClone();
+                    return Task.FromResult(new HttpResponse { Status = 200, Body = replay.ToString() });
+                }
+                return Task.FromResult(new HttpResponse { Failure = HttpFailure.Incomplete });
+            };
+            var auth = new AuthSession(); auth.Begin("trainee", "token", 3600);
+            var api = new TrainingApi(backend, auth, new Uri("http://backend.test"));
+            var session = new SessionController(api, auth);
+            var root = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/Formula9/UI/Formula9App.uxml").CloneTree();
+            var rig = new GameObject("Reports session boundary test"); var world = rig.AddComponent<WorldView>();
+            try
+            {
+                world.Attach(root.Q("world"), new SceneLoader(backend, new Uri("http://backend.test")));
+                var workspace = new TrainingWorkspace(root, api, session, world, _ => { }, _ => { });
+                await session.JoinAsync((string)raw["session_id"]);
+                var observed = ContractParser.Parse<EventReplay>(Fixture("event_replay").ToString()).Events.Single();
+                observed.EventSequence = session.Store.LastEventSequence + 1;
+                Assert.IsNull(session.Store.AcceptEvents(session.SessionId, session.Store.Snapshot.SessionEpoch, new[] { observed }));
+                workspace.Render();
+                Assert.IsTrue(await session.SendControlAsync("PAUSE"));
+                Assert.AreEqual("Showing 1 of 1 retained events", root.Q<Label>("reports-event-count").text);
+                Assert.AreEqual("Showing 1 of 1 retained commands", root.Q<Label>("reports-command-count").text);
+                root.Q<TextField>("reports-event-search").SetValueWithoutNotify("shuttle-01");
+                root.Q<DropdownField>("reports-command-status").SetValueWithoutNotify("NOT_ACCEPTED");
+
+                session.Leave();
+
+                Assert.AreEqual("Showing 0 of 0 retained events", root.Q<Label>("reports-event-count").text);
+                Assert.AreEqual("Showing 0 of 0 retained commands", root.Q<Label>("reports-command-count").text);
+                Assert.IsEmpty(root.Q<TextField>("reports-event-search").value);
+                Assert.AreEqual("All statuses", root.Q<DropdownField>("reports-command-status").value);
+                Assert.AreEqual(DisplayStyle.None, root.Q("events-table-host").style.display.value);
+                Assert.AreEqual(DisplayStyle.None, root.Q("ledger-table-host").style.display.value);
             }
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
         }
