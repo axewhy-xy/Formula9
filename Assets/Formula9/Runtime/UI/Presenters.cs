@@ -114,15 +114,68 @@ namespace Formula9.UI
     // Class: SessionControls
     // -----------------------------------------------------------------------------------
     // Description:
-    //     This struct says which session controls (Start, Pause, Resume, Archive) are enabled, and
-    //     why Start is not.
+    //     This struct controls visibility and enablement for Start, Pause, Resume and Archive,
+    //     including why Start is unavailable.
     public readonly struct SessionControls
     {
         public readonly bool Start, Pause, Resume, Archive;
+        public readonly bool StartVisible, PauseVisible, ResumeVisible, PlaybackVisible;
         public readonly string StartHint;
-        public SessionControls(bool start, bool pause, bool resume, bool archive, string startHint)
+        public SessionControls(bool ready, bool running, bool paused, bool available, bool startAllowed, string startHint)
         {
-            Start = start; Pause = pause; Resume = resume; Archive = archive; StartHint = startHint;
+            StartVisible = ready; PauseVisible = running; ResumeVisible = paused;
+            PlaybackVisible = ready || running || paused;
+            Start = available && ready && startAllowed;
+            Pause = available && running; Resume = available && paused;
+            Archive = available && PlaybackVisible; StartHint = startHint;
+        }
+    }
+
+    public readonly struct SessionSetupView
+    {
+        public readonly bool ToolsVisible, ToggleVisible, Compact;
+        public SessionSetupView(bool toolsVisible, bool toggleVisible, bool compact)
+        { ToolsVisible = toolsVisible; ToggleVisible = toggleVisible; Compact = compact; }
+    }
+
+    public readonly struct SessionStatusView
+    {
+        public readonly string BadgeText, BadgeClass, Tooltip, Summary;
+        public readonly bool Offline;
+        public SessionStatusView(string badgeText, string badgeClass, string tooltip, string summary, bool offline)
+        { BadgeText = badgeText; BadgeClass = badgeClass; Tooltip = tooltip; Summary = summary; Offline = offline; }
+    }
+
+    // Snapshot ticks change every poll; the operator's summary usually does not.
+    public sealed class SessionStatusPresenter
+    {
+        private (bool Joined, string Session, string State, bool Available)? statusKey;
+        private SessionStatusView status;
+        private (string Session, long Epoch, string Snapshot, long Tick, string State, bool Available)? diagnosticsKey;
+        private string diagnostics;
+
+        public SessionStatusView Present(FullSnapshot snapshot, bool available)
+        {
+            var key = (snapshot != null, snapshot?.SessionId, snapshot?.Session?.Status, snapshot != null && available);
+            if (statusKey != key)
+            {
+                status = TrainingPresenter.SessionStatus(snapshot, available);
+                statusKey = key;
+            }
+            return status;
+        }
+
+        // Called only while the diagnostics section is expanded and visible.
+        public string Diagnostics(FullSnapshot snapshot, bool available)
+        {
+            if (snapshot == null) { diagnosticsKey = null; diagnostics = null; return ""; }
+            var key = (snapshot.SessionId, snapshot.Session.SessionEpoch, snapshot.SnapshotId, snapshot.Tick, snapshot.Session.Status, available);
+            if (diagnosticsKey != key)
+            {
+                diagnostics = TrainingPresenter.StatusLine(snapshot, available);
+                diagnosticsKey = key;
+            }
+            return diagnostics;
         }
     }
 
@@ -177,7 +230,39 @@ namespace Formula9.UI
             ? "Singapore, real streets · incidents, detours, charging"
             : "3D fleet exercise · road, ramp and obstruction";
 
-        public const string NoSession = "No training session selected";
+        public const string NoSession = "Create or join a training session to begin.";
+
+        public static bool IsTerminalSession(string status) => status == "ARCHIVED" || status == "COMPLETED" || status == "FAILED";
+
+        public static SessionSetupView SessionSetup(FullSnapshot snapshot, bool charging, bool? toolsOpen)
+        {
+            var joined = snapshot != null;
+            var showTools = !joined || (toolsOpen ?? IsTerminalSession(snapshot.Session?.Status));
+            return new SessionSetupView(showTools, joined, charging && !showTools);
+        }
+
+        private static (string Text, string Class) SessionBadge(string state) => state switch
+        {
+            "DRAFT" => ("Draft", "session-badge-draft"),
+            "READY" => ("Ready", "session-badge-ready"),
+            "RUNNING" => ("Running", "session-badge-running"),
+            "PAUSED" => ("Paused", "session-badge-paused"),
+            "RECOVERING" => ("Recovering", "session-badge-recovering"),
+            "COMPLETED" => ("Completed", "session-badge-completed"),
+            "ARCHIVED" => ("Archived", "session-badge-archived"),
+            "FAILED" => ("Failed", "session-badge-failed"),
+            _ => ("Unknown", "session-badge-unknown"),
+        };
+
+        public static SessionStatusView SessionStatus(FullSnapshot snapshot, bool available)
+        {
+            if (snapshot == null) return new SessionStatusView("No session", "session-badge-none", NoSession, NoSession, false);
+            var known = SessionBadge(snapshot.Session?.Status);
+            var offline = !available;
+            return new SessionStatusView(offline ? "Offline" : known.Text, offline ? "session-badge-offline" : known.Class,
+                (offline ? "Live updates unavailable. Last received simulation state: " : "Current simulation state: ") + known.Text.ToLowerInvariant() + ".",
+                $"Session: {snapshot.SessionId} · " + (offline ? "Offline · showing last received state" : "Connected"), offline);
+        }
 
         // -----------------------------------------------------------------------------------
         // Function: Title
@@ -229,19 +314,15 @@ namespace Formula9.UI
         //     SessionControls: The enabled controls and Start's hint.
         public static SessionControls Controls(FullSnapshot snapshot, bool available, bool spatialReady)
         {
-            if (snapshot == null) return new SessionControls(false, false, false, false, null);
-            var status = snapshot.Session.Status;
+            var status = snapshot?.Session?.Status;
+            if (snapshot == null) return new SessionControls(false, false, false, false, false, null);
             var routeClosed = AssignedRouteIsClosed(snapshot);
             var needsGeometry = snapshot.Spatial != null && !spatialReady;
             string hint = null;
             if (needsGeometry) hint = "Required 3D geometry must render before starting this scenario.";
             else if (routeClosed && status == "READY") hint = "A shuttle's route crosses a closed road. Approve a detour first.";
-            return new SessionControls(
-                available && !needsGeometry && status == "READY" && !routeClosed,
-                available && status == "RUNNING",
-                available && status == "PAUSED",
-                available && (status == "READY" || status == "RUNNING" || status == "PAUSED"),
-                hint);
+            return new SessionControls(status == "READY", status == "RUNNING", status == "PAUSED", available,
+                !needsGeometry && !routeClosed, hint);
         }
 
         // -----------------------------------------------------------------------------------

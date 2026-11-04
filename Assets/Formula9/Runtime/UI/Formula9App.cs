@@ -55,7 +55,7 @@ namespace Formula9.UI
         private Label dialogText;
         private Func<Task> dialogAction;
 
-        private VisualElement loginScreen, trainingScreen, fleet, confirmRow, fleetPanel;
+        private VisualElement loginScreen, trainingScreen, fleet, confirmRow, fleetPanel, sessionPlayback, sessionCard;
         private TextField fleetSearch;
         private VisualElement fleetEmpty;
         private Label fleetTitle;
@@ -63,7 +63,10 @@ namespace Formula9.UI
         private Button viewMap, viewWorld;
         private const string RememberedUserKey = "login.rememberedUser";
         private TextField username, password, confirm, sessionId;
-        private Label signUpHint, loginError, title, user, capacity, status, message, worldStatus;
+        private Label signUpHint, loginError, title, user, capacity, status, message, worldStatus, sessionBadge, sessionDiagnostics;
+        private Foldout sessionDetails;
+        private string sessionBadgeClass;
+        private readonly SessionStatusPresenter sessionStatusPresenter = new SessionStatusPresenter();
         private Button forgot, submit, modeSwitch, start, pause, resume, archive, refreshSessions;
         private DropdownField scenario, sessions;
 
@@ -270,10 +273,19 @@ namespace Formula9.UI
         private void BindTraining(VisualElement root)
         {
             trainingScreen = root.Q("training-host");
+            sessionCard = root.Q("content-card");
             title = root.Q<Label>("title");
             user = root.Q<Label>("user");
             capacity = root.Q<Label>("capacity");
             status = root.Q<Label>("status");
+            sessionBadge = root.Q<Label>("session-badge");
+            sessionDiagnostics = root.Q<Label>("session-diagnostics");
+            sessionDetails = root.Q<Foldout>("session-details");
+            sessionDetails.RegisterValueChangedCallback(change =>
+            {
+                sessionDetails.EnableInClassList("session-details-expanded", change.newValue);
+                if (change.newValue) RenderSessionDiagnostics(session.Store.Snapshot);
+            });
             message = root.Q<Label>("message");
             ShowMessage("");
             worldStatus = root.Q<Label>("world-status");
@@ -285,6 +297,7 @@ namespace Formula9.UI
             pause = root.Q<Button>("pause");
             resume = root.Q<Button>("resume");
             archive = root.Q<Button>("archive");
+            sessionPlayback = root.Q("session-playback");
             refreshSessions = root.Q<Button>("refresh-sessions");
             fleetPanel = root.Q("fleet-panel");
             fleetTitle = root.Q<Label>("fleet-title");
@@ -349,7 +362,7 @@ namespace Formula9.UI
             start.clicked += () => Run(session.SendControlAsync("START"));
             pause.clicked += () => Run(session.SendControlAsync("PAUSE"));
             resume.clicked += () => Run(session.SendControlAsync("RESUME"));
-            archive.clicked += () => Run(session.SendControlAsync("ARCHIVE"));
+            archive.clicked += ConfirmArchive;
 
             // The clock in the top bar, to the minute
             var clock = root.Q<Label>("clock");
@@ -565,6 +578,17 @@ namespace Formula9.UI
             }));
 
         // -----------------------------------------------------------------------------------
+        // Function: ConfirmArchive
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function asks before archiving the joined session. Archive sits next to Start,
+        //     Pause and Resume, so a slip must not end the attempt. If the session can no longer
+        //     be archived by the time the trainee confirms, nothing is sent.
+        private void ConfirmArchive() => Confirm(
+            "Archive this session? The attempt ends and its runtime slot is released. Its history remains available.",
+            "Archive session", () => archive.enabledSelf ? session.SendControlAsync("ARCHIVE") : Task.CompletedTask);
+
+        // -----------------------------------------------------------------------------------
         // Function: Confirm
         // -----------------------------------------------------------------------------------
         // Description:
@@ -685,6 +709,10 @@ namespace Formula9.UI
             var snapshot = session.Store.Snapshot;
             var worldReady = world != null && world.Ready;
             var controls = TrainingPresenter.Controls(snapshot, session.Available, worldReady);
+            start.style.display = controls.StartVisible ? DisplayStyle.Flex : DisplayStyle.None;
+            pause.style.display = controls.PauseVisible ? DisplayStyle.Flex : DisplayStyle.None;
+            resume.style.display = controls.ResumeVisible ? DisplayStyle.Flex : DisplayStyle.None;
+            sessionPlayback.style.display = controls.PlaybackVisible ? DisplayStyle.Flex : DisplayStyle.None;
             if (world != null)
             {
                 worldStatus.text = world.Diagnostic;
@@ -698,9 +726,9 @@ namespace Formula9.UI
             archive.SetEnabled(controls.Archive);
             workspace?.Render();
             world?.SetOffline(snapshot != null && !session.Available);
+            RenderSessionStatus(snapshot);
             if (snapshot == null)
             {
-                status.text = TrainingPresenter.NoSession;
                 title.text = TrainingPresenter.ScenarioTitle(session.Scenario);
                 fleetTitle.text = "Fleet List (0)";
                 fleet.Clear();
@@ -709,9 +737,38 @@ namespace Formula9.UI
                 return;
             }
             title.text = TrainingPresenter.Title(snapshot);
-            status.text = TrainingPresenter.StatusLine(snapshot, session.Available);
             sessionId.SetValueWithoutNotify(snapshot.SessionId);
             RenderFleet(snapshot);
+        }
+
+        // Keep the operator's state readable; retain snapshot diagnostics behind an expandable section.
+        private void RenderSessionStatus(FullSnapshot snapshot)
+        {
+            var view = sessionStatusPresenter.Present(snapshot, session.Available);
+            if (sessionBadge.text != view.BadgeText) sessionBadge.text = view.BadgeText;
+            if (sessionBadgeClass != view.BadgeClass)
+            {
+                if (sessionBadgeClass != null) sessionBadge.RemoveFromClassList(sessionBadgeClass);
+                sessionBadge.AddToClassList(view.BadgeClass);
+                sessionBadgeClass = view.BadgeClass;
+            }
+            if (sessionBadge.tooltip != view.Tooltip) sessionBadge.tooltip = view.Tooltip;
+            if (status.text != view.Summary) status.text = view.Summary;
+            status.EnableInClassList("session-summary-offline", view.Offline);
+            sessionDetails.style.display = snapshot == null ? DisplayStyle.None : DisplayStyle.Flex;
+            if (snapshot == null)
+            {
+                sessionDetails.value = false;
+                sessionDiagnostics.text = sessionStatusPresenter.Diagnostics(null, false);
+            }
+            else if (sessionDetails.value) RenderSessionDiagnostics(snapshot);
+        }
+
+        private void RenderSessionDiagnostics(FullSnapshot snapshot)
+        {
+            if (sessionCard.ClassListContains("session-compact")) return;
+            var text = sessionStatusPresenter.Diagnostics(snapshot, session.Available);
+            if (sessionDiagnostics.text != text) sessionDiagnostics.text = text;
         }
 
         // -----------------------------------------------------------------------------------
