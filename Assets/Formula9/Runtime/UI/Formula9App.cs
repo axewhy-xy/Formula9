@@ -362,7 +362,7 @@ namespace Formula9.UI
             start.clicked += () => Run(session.SendControlAsync("START"));
             pause.clicked += () => Run(session.SendControlAsync("PAUSE"));
             resume.clicked += () => Run(session.SendControlAsync("RESUME"));
-            archive.clicked += () => Run(session.SendControlAsync("ARCHIVE"));
+            archive.clicked += ConfirmArchive;
 
             // The clock in the top bar, to the minute
             var clock = root.Q<Label>("clock");
@@ -576,6 +576,17 @@ namespace Formula9.UI
                 var deleted = await api.PurgeSessionsAsync(KeptByPurge);
                 return deleted == 0 ? "No old sessions to delete." : $"Deleted {deleted} old training sessions.";
             }));
+
+        // -----------------------------------------------------------------------------------
+        // Function: ConfirmArchive
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function asks before archiving the joined session. Archive sits next to Start,
+        //     Pause and Resume, so a slip must not end the attempt. If the session can no longer
+        //     be archived by the time the trainee confirms, nothing is sent.
+        private void ConfirmArchive() => Confirm(
+            "Archive this session? The attempt ends and its runtime slot is released. Its history remains available.",
+            "Archive session", () => archive.enabledSelf ? session.SendControlAsync("ARCHIVE") : Task.CompletedTask);
 
         // -----------------------------------------------------------------------------------
         // Function: Confirm
