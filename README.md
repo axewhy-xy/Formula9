@@ -232,6 +232,10 @@ the world view are **Fleet**, **Route planning**, **Charging**, **Incidents** an
   replay alert sounds. **Focus incident shuttle** selects and focuses its 3D vehicle.
 - **Reports:** inspect the latest 1,000 events and 200 commands observed in the selected
   session by this running client, including pending confirmation, refusal and final status.
+  Search each tab by IDs, event type, target, status or failure code; every search word must
+  match a displayed field, ignoring case. Combine search with the event-type or command-status
+  dropdown, review the matching count, or use **Clear filters**. Filters survive incoming
+  records and reset when switching sessions.
   These are bounded client records; they are not a server-wide ledger or an export.
 - **3D interaction:** click rendered geometry to select an entity; select a fleet row and use
   **Follow selected** or **Overview**. Right-drag orbits, middle-drag pans and the wheel zooms.

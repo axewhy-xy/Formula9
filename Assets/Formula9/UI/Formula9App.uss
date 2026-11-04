@@ -438,6 +438,14 @@
 }
 
 .workspace-page { flex-grow: 1; min-height: 0; }
+.reports-help { white-space: normal; color: rgb(92, 107, 112); margin-bottom: 12px; }
+.reports-filters { flex-direction: row; flex-wrap: wrap; align-items: flex-end; margin-bottom: 8px; }
+.reports-filters > .reports-search { flex-grow: 1; flex-basis: 280px; min-width: 220px; margin-right: 12px; }
+.reports-filters > .reports-select { flex-grow: 1; flex-basis: 220px; min-width: 180px; margin-right: 8px; }
+.reports-filters .unity-base-field__label { min-width: 0; margin-bottom: 4px; }
+.reports-search, .reports-select { flex-direction: column; }
+.reports-count { color: rgb(51, 71, 75); margin-bottom: 8px; }
+.reports-empty { white-space: normal; padding: 16px; border-radius: 6px; background-color: rgb(243, 247, 247); }
 .login, .training { flex-grow: 1; }
 
 .workspace-text {
