@@ -54,6 +54,30 @@ If the scene or its UI panel settings go missing, rebuild them with
 **Formula 9 → Rebuild client scene** (or headless:
 `Unity.exe -batchmode -quit -projectPath . -executeMethod Formula9.EditorTools.SceneBuilder.Build`).
 
+## Building the executable
+
+A build made from Unity's Build menu only contains the client. To build one that also runs the
+backend, close the project in Unity and double-click **`build.bat`** (after running `run.bat` once):
+
+```powershell
+python Tools/build_executable.py [--output Builds/Formula9] [--zip] [--skip-unity]
+# Windows shortcut: build.bat [--zip]
+```
+
+It builds the Windows player in batch mode into `Builds/Formula9`, then adds a `Backend` folder with
+a portable copy of Python 3.12 (the one `backend/.venv` was made from, with its packages), the backend
+source, fixtures and `backend/.env`, and the contracts. It then starts that copy from outside the
+repository to check it answers `/api/health`. `--zip` also packs `Builds/Formula9.zip`;
+`--skip-unity` keeps the player already there and only bundles the backend again. The Unity log goes to
+`Logs/build-player.log`.
+
+Copy the whole folder. `Formula9.exe` starts the bundled backend hidden on `http://127.0.0.1:8000`
+when it opens (`BundledBackend.cs`) and stops it when it closes; the backend also stops by itself if the
+player crashes. Its log is `Backend/logs/backend.log` and its sessions are kept in `Backend/state`. It
+does not start one when `FORMULA9_BACKEND_URL` is set or when a backend is already listening on port
+8000, such as one from `run.bat`. The build includes the team's MongoDB connection from
+`backend/.env`, so only share it with people who may use that database.
+
 ## Layout
 
 | Folder | Contents |
