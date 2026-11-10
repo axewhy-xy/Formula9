@@ -2,9 +2,9 @@
  * The text and state the Unity client's screens show.
  *
  * Author: Choo Jian Wei
- * Contributors: Rishika (fleet cards, next stop and ETA), Lau Xiang Yang (session list and cleanup)
+ * Contributors: Rishika (fleet cards, next stop and ETA), Lau Xiang Yang (session list and cleanup, exit)
  * Date Created: 30/10/2026
- * Last Modified: 30/10/2026
+ * Last Modified: 10/11/2026
  *
  * Description:
  *     Part of the Unity client's UI. Pure functions that turn login results, snapshots, session
@@ -30,7 +30,7 @@ namespace Formula9.UI
     //     the Qt LoginPage.
     //
     //     Attributes: SignUpHint explains the account rules; Expired is shown when a login runs
-    //     out.
+    //     out. ConfirmExit asks before the application closes.
     public static class LoginMessages
     {
         public const string SignUpHint = "Create an account to get started. Usernames are 3 to 32 letters, numbers, dots, " +
@@ -57,6 +57,21 @@ namespace Formula9.UI
             if (signUp && password != confirmation) return "Passwords do not match.";
             return null;
         }
+
+        // -----------------------------------------------------------------------------------
+        // Function: ConfirmExit
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function asks whether to close the application. The login is held in memory
+        //     only, so a logged-in trainee is told they will have to log in again.
+        //
+        // Args:
+        //     loggedIn (bool): True when a trainee is logged in.
+        //
+        // Returns:
+        //     string: The question to show.
+        public static string ConfirmExit(bool loggedIn) =>
+            loggedIn ? "Exit Formula 9? You will need to log in again next time." : "Exit Formula 9?";
 
         // -----------------------------------------------------------------------------------
         // Function: For

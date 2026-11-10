@@ -647,10 +647,9 @@ namespace Formula9.UI
         // Description:
         //     This function asks before closing the application. Esc is easy to hit by accident
         //     and the client runs full screen, so the answer defaults to Cancel and a second Esc
-        //     dismisses the question. The login is held in memory only, so a logged-in trainee is
-        //     told they will have to log in again.
+        //     dismisses the question. LoginMessages words the question.
         private void ConfirmExit() => Confirm(
-            auth.IsLoggedIn ? "Exit Formula 9? You will need to log in again next time." : "Exit Formula 9?",
+            LoginMessages.ConfirmExit(auth.IsLoggedIn),
             "Exit", () =>
             {
                 Quit();
