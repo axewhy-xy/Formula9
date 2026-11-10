@@ -6,9 +6,9 @@
  * Last Modified: 10/11/2026
  *
  * Description:
- *     Mounts six cameras on the selected shuttle, the way real AV shuttles
- *     are watched remotely: front, rear, left, right, one looking back into
- *     the cabin, and a top-down bird's-eye view. Each camera draws into its
+ *     Mounts five cameras on the selected shuttle, the way real AV shuttles
+ *     are watched remotely: front, rear, left, right, and a top-down
+ *     bird's-eye view. Each camera draws into its
  *     own small render texture for the camera panel. The cameras start
  *     switched off, see only nearby, and follow the shuttle when placed
  *     each frame.
@@ -21,8 +21,8 @@ namespace Formula9.World
     public sealed class ShuttleCameraRig : System.IDisposable
     {
         // Where one camera sits on the shuttle and which way it looks. Offset is in metres from
-        // the shuttle's centre at ground level (x right, y up, z forward); Yaw turns it right and
-        // Pitch tilts it down, in degrees.
+        // the middle of the shuttle, 2.5 m above the road (x right, y up, z forward); Yaw turns
+        // it right and Pitch tilts it down, in degrees.
         private struct Mount
         {
             public string Name;
@@ -30,15 +30,15 @@ namespace Formula9.World
             public float Yaw, Pitch;
         }
 
-        // One camera per blind spot, for a shuttle 5 m wide, 5 m tall and 12 m long. A pitch of
-        // 90 looks straight down and makes the bird's-eye camera orthographic.
+        // One camera per blind spot, just outside a bus 4.6 m wide, 4.7 m tall and 12.6 m long,
+        // about 2 m above the road. A pitch of 90 looks straight down and makes the bird's-eye
+        // camera orthographic.
         private static readonly Mount[] Mounts =
         {
-            new Mount { Name = "Front", Offset = new Vector3(0, 2.5f, 6.2f), Yaw = 0, Pitch = 0 },
-            new Mount {Name = "Rear", Offset = new Vector3(0, 2.5f, -6.2f), Yaw = 180, Pitch = 0},
-            new Mount {Name = "Left", Offset = new Vector3(-2.6f, 2.5f, 0), Yaw = -90, Pitch = 0},
-            new Mount {Name = "Right", Offset = new Vector3(2.6f, 2.5f, 0), Yaw = 90, Pitch = 0},
-            new Mount {Name = "Cabin", Offset = new Vector3(0, 4, 5), Yaw = 180, Pitch = 20},
+            new Mount { Name = "Front", Offset = new Vector3(0, -0.5f, 6.8f), Yaw = 0, Pitch = 0 },
+            new Mount {Name = "Rear", Offset = new Vector3(0, -0.5f, -6.2f), Yaw = 180, Pitch = 0},
+            new Mount {Name = "Left", Offset = new Vector3(-2.4f, -0.5f, 0), Yaw = -90, Pitch = 0},
+            new Mount {Name = "Right", Offset = new Vector3(2.4f, -0.5f, 0), Yaw = 90, Pitch = 0},
             new Mount {Name = "Bird's eye", Offset = new Vector3(0, 25, 0), Yaw = 0, Pitch = 90}
         };
         // One camera and one render texture per mount, in the same order as Mounts.
@@ -90,7 +90,7 @@ namespace Formula9.World
         //     back, whichever way the shuttle is heading. It is called once a frame.
         //
         // Args:
-        //     position (Vector3): The shuttle's centre at ground level.
+        //     position (Vector3): The middle of the shuttle, 2.5 m above the road.
         //     rotation (Quaternion): The way the shuttle faces.
         public void Place(Vector3 position, Quaternion rotation)
         {
@@ -130,8 +130,8 @@ namespace Formula9.World
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function lets the cameras take turns: each frame only one of them draws, so
-        //     the panel costs one extra camera instead of six. At 60 frames a second each view
-        //     still refreshes ten times a second. It does nothing while the cameras are off.
+        //     the panel costs one extra camera instead of five. At 60 frames a second each view
+        //     still refreshes twelve times a second. It does nothing while the cameras are off.
         public void Tick()
         {
             if (!active) return;

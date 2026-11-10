@@ -7,7 +7,7 @@
  *
  * Description:
  *     Builds the real WorldView with the training layout, a one-building city and the shared
- *     planar snapshot, then checks that the camera panel starts hidden with its six cameras off,
+ *     planar snapshot, then checks that the camera panel starts hidden with its five cameras off,
  *     that showing it switches them on and mounts them around the selected shuttle, that they
  *     then take turns drawing one per frame, that they follow the shuttle as it moves and
  *     turns, and that the panel closes itself when there is no shuttle left to watch.
@@ -39,7 +39,7 @@ namespace Formula9.Tests
     public class ShuttleCameraTests
     {
         private const string Shuttle = "shuttle-01";
-        private static readonly string[] Names = { "Front", "Rear", "Left", "Right", "Cabin", "Bird's eye" };
+        private static readonly string[] Names = { "Front", "Rear", "Left", "Right", "Bird's eye" };
 
         // Serves a city of one building away from the shuttles, so the city loads at once.
         private sealed class OneBuilding : IHttpTransport
@@ -120,15 +120,15 @@ namespace Formula9.Tests
             Assert.Less(Vector3.Dot(Cam("Rear").transform.position - s.position, s.forward), -6f, "rear is at the tail");
             Assert.Greater(Vector3.Dot(Cam("Left").transform.forward, -s.right), 0.999f, "left looks left");
             Assert.Greater(Vector3.Dot(Cam("Right").transform.forward, s.right), 0.999f, "right looks right");
-            Assert.Greater(Vector3.Dot(Cam("Cabin").transform.forward, -s.forward), 0.9f, "cabin looks back into the shuttle");
-            Assert.Less(Cam("Cabin").transform.forward.y, 0, "cabin tilts down");
+            foreach (var name in new[] { "Front", "Rear", "Left", "Right" })
+                Assert.AreEqual(s.position.y - 0.5f, Cam(name).transform.position.y, 1e-3f, name + " is about 2 m above the road");
             Assert.Greater(Vector3.Dot(Cam("Bird's eye").transform.forward, Vector3.down), 0.999f, "bird's eye looks straight down");
             Assert.AreEqual(s.position.y + 25, Cam("Bird's eye").transform.position.y, 1e-3f, "bird's eye is 25 m up");
             Assert.IsTrue(Cam("Bird's eye").orthographic, "bird's eye is orthographic");
         }
 
         [Test]
-        public void PanelStartsHiddenWithSixLabelledTilesAndCamerasOff()
+        public void PanelStartsHiddenWithFiveLabelledTilesAndCamerasOff()
         {
             Assert.AreEqual(DisplayStyle.None, Panel().style.display.value, "panel hidden");
             Assert.IsFalse(view.CamerasShown);
@@ -152,7 +152,7 @@ namespace Formula9.Tests
         }
 
         [Test]
-        public void CamerasTakeTurnsSoEachDrawsOnceEverySixFrames()
+        public void CamerasTakeTurnsSoEachDrawsOnceEveryFiveFrames()
         {
             view.ShowCameras(true);
             var turns = new int[Names.Length];
@@ -163,7 +163,7 @@ namespace Formula9.Tests
                 Assert.AreEqual(1, on.Count, $"exactly one camera draws on frame {frame}");
                 turns[on[0]]++;
             }
-            CollectionAssert.AreEqual(Enumerable.Repeat(2, Names.Length), turns, "every camera got two turns in twelve frames");
+            CollectionAssert.AreEqual(Enumerable.Repeat(2, Names.Length), turns, "every camera got two turns in ten frames");
 
             view.ShowCameras(false);
             Frame();
