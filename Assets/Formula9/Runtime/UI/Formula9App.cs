@@ -55,7 +55,7 @@ namespace Formula9.UI
         private Label dialogText;
         private Func<Task> dialogAction;
 
-        private VisualElement loginScreen, trainingScreen, fleet, confirmRow, fleetPanel, sessionPlayback, sessionCard;
+        private VisualElement loginScreen, trainingScreen, fleet, confirmRow, fleetPanel, sessionPlayback;
         private TextField fleetSearch;
         private VisualElement fleetEmpty;
         private Label fleetTitle;
@@ -63,8 +63,7 @@ namespace Formula9.UI
         private Button viewMap, viewWorld;
         private const string RememberedUserKey = "login.rememberedUser";
         private TextField username, password, confirm, sessionId;
-        private Label signUpHint, loginError, title, user, capacity, status, message, worldStatus, sessionBadge, sessionDiagnostics;
-        private Foldout sessionDetails;
+        private Label signUpHint, loginError, title, user, capacity, status, message, worldStatus, sessionBadge;
         private string sessionBadgeClass;
         private readonly SessionStatusPresenter sessionStatusPresenter = new SessionStatusPresenter();
         private Button forgot, submit, modeSwitch, start, pause, resume, archive, refreshSessions;
@@ -273,19 +272,11 @@ namespace Formula9.UI
         private void BindTraining(VisualElement root)
         {
             trainingScreen = root.Q("training-host");
-            sessionCard = root.Q("content-card");
             title = root.Q<Label>("title");
             user = root.Q<Label>("user");
             capacity = root.Q<Label>("capacity");
             status = root.Q<Label>("status");
             sessionBadge = root.Q<Label>("session-badge");
-            sessionDiagnostics = root.Q<Label>("session-diagnostics");
-            sessionDetails = root.Q<Foldout>("session-details");
-            sessionDetails.RegisterValueChangedCallback(change =>
-            {
-                sessionDetails.EnableInClassList("session-details-expanded", change.newValue);
-                if (change.newValue) RenderSessionDiagnostics(session.Store.Snapshot);
-            });
             message = root.Q<Label>("message");
             ShowMessage("");
             worldStatus = root.Q<Label>("world-status");
@@ -741,7 +732,7 @@ namespace Formula9.UI
             RenderFleet(snapshot);
         }
 
-        // Keep the operator's state readable; retain snapshot diagnostics behind an expandable section.
+        // Keep the operator's state readable: badge, tooltip and one-line summary.
         private void RenderSessionStatus(FullSnapshot snapshot)
         {
             var view = sessionStatusPresenter.Present(snapshot, session.Available);
@@ -755,20 +746,6 @@ namespace Formula9.UI
             if (sessionBadge.tooltip != view.Tooltip) sessionBadge.tooltip = view.Tooltip;
             if (status.text != view.Summary) status.text = view.Summary;
             status.EnableInClassList("session-summary-offline", view.Offline);
-            sessionDetails.style.display = snapshot == null ? DisplayStyle.None : DisplayStyle.Flex;
-            if (snapshot == null)
-            {
-                sessionDetails.value = false;
-                sessionDiagnostics.text = sessionStatusPresenter.Diagnostics(null, false);
-            }
-            else if (sessionDetails.value) RenderSessionDiagnostics(snapshot);
-        }
-
-        private void RenderSessionDiagnostics(FullSnapshot snapshot)
-        {
-            if (sessionCard.ClassListContains("session-compact")) return;
-            var text = sessionStatusPresenter.Diagnostics(snapshot, session.Available);
-            if (sessionDiagnostics.text != text) sessionDiagnostics.text = text;
         }
 
         // -----------------------------------------------------------------------------------

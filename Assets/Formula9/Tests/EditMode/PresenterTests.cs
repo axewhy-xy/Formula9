@@ -256,22 +256,6 @@ namespace Formula9.Tests
             Assert.AreEqual(TrainingPresenter.NoSession, presenter.Present(null, false).Summary);
         }
 
-        [Test]
-        public void DiagnosticsAreCachedAndRefreshWhenRequestedForANewerSnapshot()
-        {
-            var presenter = new SessionStatusPresenter();
-            var s = WithStatus("RUNNING");
-            var initial = presenter.Diagnostics(s, true);
-            Assert.AreSame(initial, presenter.Diagnostics(s, true));
-            s.Tick++; s.SnapshotId = "latest-snapshot";
-            presenter.Present(s, true);
-            var current = presenter.Diagnostics(s, true);
-            StringAssert.Contains("latest-snapshot", current);
-            StringAssert.Contains("tick " + s.Tick, current);
-            StringAssert.EndsWith("stale/offline", presenter.Diagnostics(s, false));
-            Assert.AreEqual("", presenter.Diagnostics(null, false));
-        }
-
         // -----------------------------------------------------------------------------------
         // Function: StartWaitsWhileAnAssignedRouteCrossesAnActiveClosure
         // -----------------------------------------------------------------------------------

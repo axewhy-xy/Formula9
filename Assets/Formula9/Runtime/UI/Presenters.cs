@@ -151,8 +151,6 @@ namespace Formula9.UI
     {
         private (bool Joined, string Session, string State, bool Available)? statusKey;
         private SessionStatusView status;
-        private (string Session, long Epoch, string Snapshot, long Tick, string State, bool Available)? diagnosticsKey;
-        private string diagnostics;
 
         public SessionStatusView Present(FullSnapshot snapshot, bool available)
         {
@@ -163,19 +161,6 @@ namespace Formula9.UI
                 statusKey = key;
             }
             return status;
-        }
-
-        // Called only while the diagnostics section is expanded and visible.
-        public string Diagnostics(FullSnapshot snapshot, bool available)
-        {
-            if (snapshot == null) { diagnosticsKey = null; diagnostics = null; return ""; }
-            var key = (snapshot.SessionId, snapshot.Session.SessionEpoch, snapshot.SnapshotId, snapshot.Tick, snapshot.Session.Status, available);
-            if (diagnosticsKey != key)
-            {
-                diagnostics = TrainingPresenter.StatusLine(snapshot, available);
-                diagnosticsKey = key;
-            }
-            return diagnostics;
         }
     }
 
