@@ -6,5 +6,15 @@
     <ui:VisualElement name="app" class="app">
         <ui:Instance template="LoginPage" name="login-host" class="page-host" />
         <ui:Instance template="MainShell" name="training-host" class="page-host" style="display: none;" />
+        <!-- Shared by both pages: confirmations, including Exit (Esc) on the login page -->
+        <ui:VisualElement name="dialog-overlay" class="dialog-overlay" style="display: none;">
+            <ui:VisualElement class="dialog">
+                <ui:Label name="dialog-text" class="dialog-text" />
+                <ui:VisualElement class="dialog-actions">
+                    <ui:Button name="dialog-cancel" text="Cancel" />
+                    <ui:Button name="dialog-confirm" class="danger" />
+                </ui:VisualElement>
+            </ui:VisualElement>
+        </ui:VisualElement>
     </ui:VisualElement>
 </ui:UXML>

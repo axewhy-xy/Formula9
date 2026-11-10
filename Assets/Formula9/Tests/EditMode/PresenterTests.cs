@@ -99,6 +99,8 @@ namespace Formula9.Tests
             Assert.AreEqual("Passwords do not match.", LoginMessages.Validate("a", "secret1", true, "secret2"));
             Assert.AreEqual("Enter your username and password.", LoginMessages.Validate(" ", "x", false, null));
             Assert.IsNull(LoginMessages.Validate("trainee", "secret", false, null));
+            Assert.AreEqual("Exit Formula 9?", LoginMessages.ConfirmExit(false));
+            Assert.AreEqual("Exit Formula 9? You will need to log in again next time.", LoginMessages.ConfirmExit(true));
         }
 
         // -----------------------------------------------------------------------------------

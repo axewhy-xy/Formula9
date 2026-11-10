@@ -24,6 +24,7 @@
             <ui:Label name="login-error" class="error" />
             <ui:Button name="submit" text="LOGIN" class="login-button" />
             <ui:Button name="mode-switch" text="Create account" class="link" />
+            <ui:Button name="exit-login" text="Exit" class="link" tooltip="Exit Formula 9 (Esc)" />
         </ui:VisualElement>
     </ui:VisualElement>
 </ui:UXML>

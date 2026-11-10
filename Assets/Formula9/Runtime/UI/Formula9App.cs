@@ -3,15 +3,16 @@
  *
  * Author: Choo Jian Wei
  * Contributors: Rishika (page layout, fleet cards, map/3D switch),
- *     Lau Xiang Yang (training workspace, session list and cleanup)
+ *     Lau Xiang Yang (training workspace, session list and cleanup, exit)
  * Date Created: 30/10/2026
- * Last Modified: 30/10/2026
+ * Last Modified: 10/11/2026
  *
  * Description:
  *     Part of the Unity client's UI. Wires the UI Toolkit screens to the login and session layers,
  *     the 3D world, the training workspace, the alerts and the interface sounds. Decisions about
  *     what to show live in LoginMessages and TrainingPresenter; this class only moves values on and
- *     off screen. It polls the joined session every second while logged in.
+ *     off screen. It polls the joined session every second while logged in. Esc or an Exit button
+ *     asks before closing the application, so a stray key press does not end the attempt.
  */
 
 using System;
@@ -121,6 +122,7 @@ namespace Formula9.UI
                 Run(RefreshSessionList());
             };
 
+            BindDialog(GetComponent<UIDocument>().rootVisualElement);
             BindLogin(GetComponent<UIDocument>().rootVisualElement);
             BindTraining(GetComponent<UIDocument>().rootVisualElement);
             // A spatial session's Start waits until its mandatory geometry is verified and drawn.
@@ -191,6 +193,20 @@ namespace Formula9.UI
         }
 
         // -----------------------------------------------------------------------------------
+        // Function: Update
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function answers Esc: it cancels an open dialog, otherwise it asks to exit. The
+        //     key is read from the input manager rather than a UI event so it works whatever has
+        //     the focus, including the 3D view or nothing at all.
+        private void Update()
+        {
+            if (!Input.GetKeyDown(KeyCode.Escape) || dialogOverlay == null) return;
+            if (DialogOpen) CloseDialog();
+            else ConfirmExit();
+        }
+
+        // -----------------------------------------------------------------------------------
         // Function: Poll
         // -----------------------------------------------------------------------------------
         // Description:
@@ -206,6 +222,30 @@ namespace Formula9.UI
                 yield return wait;
                 if (auth.IsLoggedIn) Run(session.RefreshAsync());
             }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: BindDialog
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function connects the confirmation dialog, which sits above both the login and
+        //     training screens. Esc cancels it (see Update).
+        //
+        // Args:
+        //     root (VisualElement): The document's root.
+        private void BindDialog(VisualElement root)
+        {
+            dialogOverlay = root.Q("dialog-overlay");
+            dialogText = root.Q<Label>("dialog-text");
+            dialogCancel = root.Q<Button>("dialog-cancel");
+            dialogConfirm = root.Q<Button>("dialog-confirm");
+            dialogCancel.clicked += CloseDialog;
+            dialogConfirm.clicked += () =>
+            {
+                var confirmed = dialogAction;
+                CloseDialog();
+                if (confirmed != null) Run(confirmed());
+            };
         }
 
         // -----------------------------------------------------------------------------------
@@ -230,6 +270,7 @@ namespace Formula9.UI
             modeSwitch = root.Q<Button>("mode-switch");
             submit.clicked += () => Run(SubmitLogin());
             modeSwitch.clicked += () => SetSignUp(!signUp);
+            root.Q<Button>("exit-login").clicked += ConfirmExit;
             // Enter submits from either field, as in the Qt login. The text field consumes Return
             // itself, so listen on the way down (trickle-down) rather than as the event bubbles up.
             EventCallback<KeyDownEvent> submitOnEnter = e =>
@@ -336,18 +377,6 @@ namespace Formula9.UI
             deleteSession.clicked += ConfirmDeleteSession;
             purgeSessions.clicked += ConfirmPurgeSessions;
             reclaimDisk.clicked += () => Run(Cleanup("Reclaiming disk space…", async () => TrainingPresenter.Reclaimed(await api.CompactSessionsAsync())));
-            dialogOverlay = root.Q("dialog-overlay");
-            dialogText = root.Q<Label>("dialog-text");
-            dialogCancel = root.Q<Button>("dialog-cancel");
-            dialogConfirm = root.Q<Button>("dialog-confirm");
-            dialogCancel.clicked += CloseDialog;
-            dialogConfirm.clicked += () =>
-            {
-                var confirmed = dialogAction;
-                CloseDialog();
-                if (confirmed != null) Run(confirmed());
-            };
-            dialogOverlay.RegisterCallback<KeyDownEvent>(e => { if (e.keyCode == KeyCode.Escape) CloseDialog(); }, TrickleDown.TrickleDown);
             RenderCleanup();
 
             root.Q<Button>("logout").clicked += () =>
@@ -355,6 +384,7 @@ namespace Formula9.UI
                 loggingOut = true;
                 Run(authClient.LogOutAsync());
             };
+            root.Q<Button>("exit-app").clicked += ConfirmExit;
             root.Q<Button>("create").clicked += () => Run(Create());
             root.Q<Button>("join").clicked += () => Run(Join(sessionId.value.Trim()));
             root.Q<Button>("refresh").clicked += () => Run(session.RefreshAsync());
@@ -606,6 +636,39 @@ namespace Formula9.UI
             dialogAction = confirmed;
             dialogOverlay.style.display = DisplayStyle.Flex;
             dialogCancel.Focus();
+        }
+
+        // Read from the inline style that Confirm and CloseDialog set, which is current at once
+        private bool DialogOpen => dialogOverlay.style.display.value == DisplayStyle.Flex;
+
+        // -----------------------------------------------------------------------------------
+        // Function: ConfirmExit
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function asks before closing the application. Esc is easy to hit by accident
+        //     and the client runs full screen, so the answer defaults to Cancel and a second Esc
+        //     dismisses the question. LoginMessages words the question.
+        private void ConfirmExit() => Confirm(
+            LoginMessages.ConfirmExit(auth.IsLoggedIn),
+            "Exit", () =>
+            {
+                Quit();
+                return Task.CompletedTask;
+            });
+
+        // -----------------------------------------------------------------------------------
+        // Function: Quit
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function closes the player, or leaves Play mode in the Editor, where
+        //     Application.Quit is ignored. OnDisable then stops the session controller.
+        private static void Quit()
+        {
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.isPlaying = false;
+#else
+            Application.Quit();
+#endif
         }
 
         // -----------------------------------------------------------------------------------
