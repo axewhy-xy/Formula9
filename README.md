@@ -54,6 +54,37 @@ If the scene or its UI panel settings go missing, rebuild them with
 **Formula 9 → Rebuild client scene** (or headless:
 `Unity.exe -batchmode -quit -projectPath . -executeMethod Formula9.EditorTools.SceneBuilder.Build`).
 
+## Building the executable
+
+A build made from Unity's Build menu only contains the client. To build one that also runs the
+backend, close the project in Unity and double-click **`build.bat`** (it sets up `backend/.venv`
+first if `run.bat` has not):
+
+```powershell
+python Tools/build_executable.py [--output Builds/Formula9] [--zip] [--skip-unity] [--include-env]
+# Windows shortcut: build.bat [--zip] [--include-env]
+```
+
+It builds the Windows player in batch mode into `Builds/Formula9`, then adds a `Backend` folder with
+a portable copy of Python 3.12 (the one `backend/.venv` was made from, with its packages), the backend
+source and fixtures, and the contracts, all precompiled so the first launch starts quickly. It then
+starts that copy from outside the repository to check it answers `/api/health`. `--zip` also packs
+`Builds/Formula9.zip`; `--skip-unity` keeps the player already there and only bundles the backend
+again. The Unity log goes to `Logs/build-player.log`. `--output` only replaces a folder that is empty
+or an earlier build.
+
+`backend/.env`, which holds the team's MongoDB connection, is left out by default, so a build passed
+around cannot reach the team's database; without it the account endpoints answer 503 and nobody can
+log in. `--include-env` ships it; share such a build only with people who may use that database.
+
+Copy the whole folder. `Formula9.exe` starts the bundled backend hidden on `http://127.0.0.1:8000`
+when it opens (`BundledBackend.cs`), and requests wait for it to start listening. Every open
+`Formula9.exe` shares that one backend, which shuts down cleanly once the last of them has closed,
+even after a crash (`Tools/bundled_backend.py`). Its log, appended to on every launch, is
+`Backend/logs/backend.log`, and its sessions are kept in `Backend/state`. When a backend is already
+listening on the port, such as one from `run.bat`, the players use it instead. `FORMULA9_BACKEND_URL`
+moves the bundled backend to another local port, or turns it off when it points to another machine.
+
 ## Layout
 
 | Folder | Contents |
