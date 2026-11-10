@@ -51,6 +51,7 @@ namespace Formula9.World
         private Camera viewCamera;
         private readonly List<Camera> trafficCameras = new List<Camera>();
         private ShuttleCameraRig shuttleCameras;
+        private VisualElement cameraPanel;
         private RenderTexture texture;
         private WorldScene world;
         private SpatialReference shownPins;
@@ -150,6 +151,20 @@ namespace Formula9.World
             viewCamera = cameraObject.AddComponent<Camera>();
             shuttleCameras = new ShuttleCameraRig(transform);
             trafficCameras.AddRange(shuttleCameras.Cameras);
+            cameraPanel = new VisualElement();
+            cameraPanel.AddToClassList("camera-panel");
+            for (var i = 0; i < shuttleCameras.Textures.Count; i++)
+            {
+                var tile = new VisualElement();
+                tile.AddToClassList("camera-tile");
+                tile.style.backgroundImage = new StyleBackground(Background.FromRenderTexture(shuttleCameras.Textures[i]));
+                var label = new Label {text = shuttleCameras.NameOf(i)};
+                label.AddToClassList("camera-label");
+                tile.Add(label);
+                cameraPanel.Add(tile);
+            }
+            cameraPanel.style.display = DisplayStyle.None;    // hidden until the button is pressed
+            surface.Add(cameraPanel);
             trafficCameras.Add(viewCamera); 
             viewCamera.clearFlags = CameraClearFlags.SolidColor;
             viewCamera.backgroundColor = new Color(0.10f, 0.10f, 0.12f);
@@ -338,6 +353,9 @@ namespace Formula9.World
         //     moves the shuttles of the city or scene each frame and keeps a followed one in view.
         private void Update()
         {
+            // While the city is still loading its shuttles are not placed yet, so wait for them,
+            // as Driver view does, before deciding there is nothing to watch
+            if (camerasShown && !CanShowCameras && !(CityShown && cityLoad != null && !cityLoad.IsCompleted)) ShowCameras(false);
             if (CityShown && city != null)
             {
                 city.Tick(motion, Time.unscaledTime);
@@ -836,7 +854,17 @@ namespace Formula9.World
             else if (followingBeforeDriving) WatchShuttle(selectedId);
             else FrameDraft();
         }
-
+        private bool camerasShown;
+        // Whether the camera panel is open, and whether there is a shuttle to watch.
+        public bool CamerasShown => camerasShown;
+        public bool CanShowCameras => CityShown && city != null && city.TryGetShuttlePose(selectedId, out _, out _);
+        
+        public void ShowCameras(bool show)
+        {
+            camerasShown = show;
+            cameraPanel.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
+            shuttleCameras.SetActive(show);
+        }
         // -----------------------------------------------------------------------------------
         // Function: LeaveDriverView
         // -----------------------------------------------------------------------------------

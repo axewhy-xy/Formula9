@@ -54,7 +54,8 @@
                 <ui:VisualElement class="draft-actions route-view-actions">
                     <ui:Button name="route-start" text="Start and watch in 3D" class="route-action" />
                     <ui:Button name="route-watch" text="Watch in 3D" />
-                    <ui:Button name="route-driver" text="Driver view" tooltip="See this route from its shuttle's driver seat, in the 3D city. Drag to look around." class="draft-last" />
+                    <ui:Button name="route-driver" text="Driver view" tooltip="See this route from its shuttle's driver seat, in the 3D city. Drag to look around." />
+                    <ui:Button name="route-cameras" text="Cameras" tooltip="Watch this route's shuttle through its blind-spot cameras: front, rear, sides, cabin and bird's-eye." class="draft-last" />
                 </ui:VisualElement>
             </ui:VisualElement>
         </ui:VisualElement>

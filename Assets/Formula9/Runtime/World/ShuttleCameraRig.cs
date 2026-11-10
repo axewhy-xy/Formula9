@@ -102,6 +102,8 @@ namespace Formula9.World
         public IReadOnlyList<Camera> Cameras => cameras;
         // What each camera draws into, for the camera panel; same order as Cameras.
         public IReadOnlyList<RenderTexture> Textures => textures;
+        // The name of camera i, for its label in the panel.
+        public string NameOf(int i) => Mounts[i].Name;
 
         // -----------------------------------------------------------------------------------
         // Function: SetActive

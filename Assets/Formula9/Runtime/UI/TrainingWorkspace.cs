@@ -27,7 +27,7 @@ namespace Formula9.UI
         private readonly DropdownField routes, incidents, candidates;
         private readonly TextField routeReason, incidentReason;
         private readonly Label routeProblem, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes, incidentData, incidentReport, selection;
-        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowClosure, routeDriver, approve, routeStart, routeWatch, previewIncident, approveIncident, rerouteIncident, history, debrief;
+        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowClosure, routeDriver,routeCameras, approve, routeStart, routeWatch, previewIncident, approveIncident, rerouteIncident, history, debrief;
         private readonly FleetMap evidenceMap;
         private readonly VisualElement routeStages, routeWaypoints, routeIssues, routeMetrics, routeDecide, routeFeedback, routeApply, routeOutcomePanel, routeOutcomeRows, fleetTable;
         private readonly List<VisualElement> operationalViews;
@@ -97,6 +97,7 @@ namespace Formula9.UI
             routes.RegisterValueChangedCallback(_ => { ResetDraft(); dependencies = null; RequestContext(); if (world.Driving) DriveRoute(); });
             Bind(root, "refresh", RequestContext);
             routeDriver = Bind(root, "route-driver", ToggleDriverView);
+            routeCameras = Bind(root, "route-cameras", ToggleCameras);
             routeStages = root.Q("route-stages");
             foreach (var stage in RoutePresenter.Stages) { var chip = new Label(stage); chip.AddToClassList("route-stage"); routeStages.Add(chip); }
             routeProblem = root.Q<Label>("route-problem");
@@ -290,6 +291,9 @@ namespace Formula9.UI
             routeDriver.SetEnabled(world.Driving || (world.CanDrive && RouteVehicle() != null));
             routeDriver.text = world.Driving ? "Leave driver view" : "Driver view";
             routeDriver.EnableInClassList("segment-selected", world.Driving);
+            routeCameras.SetEnabled(world.CamerasShown || (world.CanDrive && RouteVehicle() != null));
+            routeCameras.text = world.CamerasShown ? "Hide cameras" : "Cameras";
+            routeCameras.EnableInClassList("segment-selected", world.CamerasShown);
             charging.UpdateActions();
             var candidate = s?.Candidates.FirstOrDefault(c => c.CandidateId == candidates.value && c.IncidentId == incidents.value);
             var decision = Current && !incidentBusy && s?.Session.Status == "RUNNING" && candidate?.Validation == "PASS" && candidate.ExpiresAtTick >= s.Tick &&
@@ -492,6 +496,23 @@ namespace Formula9.UI
                 if (held != null) { SelectVehicle(held.VehicleId); world.ShowMap(true); }
             }
             else DriveRoute();
+            UpdateActions();
+        }
+
+        private void ToggleCameras()
+        {
+            if (world.CamerasShown)
+            {
+                world.ShowCameras(false);
+            }
+            else
+            {
+                var vehicle = RouteVehicle();
+                if (vehicle == null) return;
+                SelectVehicle(vehicle);
+                world.ShowMap(false);
+                world.ShowCameras(true);
+            }
             UpdateActions();
         }
 
