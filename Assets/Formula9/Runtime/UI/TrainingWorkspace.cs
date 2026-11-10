@@ -47,6 +47,8 @@ namespace Formula9.UI
         private long draftRevision, checkedRevision = -1, requestGeneration, incidentGeneration;
         private string dependencies, boundary, incidentBoundary, ledgerSession, heldIncident, heldVehicle;
         private bool routeBusy, incidentBusy, reloadContext, previewQueued, suggesting, outcomeBusy;
+        // Whether the cameras were opened from the 2D map, so closing them goes back there
+        private bool camerasFromMap;
         private float acceptedAt, outcomeAt;
         private long outcomeSequence = -1;
         private RouteEditorContext context;
@@ -484,6 +486,8 @@ namespace Formula9.UI
             var vehicle = RouteVehicle();
             if (vehicle == null) return;
             SelectVehicle(vehicle);
+            if (!world.CamerasShown)
+                camerasFromMap = world.ShowingMap;
             world.ShowMap(false);
             world.ShowCameras(true);
         }
@@ -502,6 +506,8 @@ namespace Formula9.UI
             if (world.CamerasShown) CloseCameras();
             else if (session.Store.Snapshot?.Vehicles.Any(v => v.VehicleId == world.SelectedId) == true)
             {
+                if (!world.CamerasShown)
+                    camerasFromMap = world.ShowingMap;
                 world.ShowMap(false);
                 world.ShowCameras(true);
             }
@@ -514,6 +520,7 @@ namespace Formula9.UI
             // A closure that came up while watching is waiting on the map
             var held = DecisionRules.HeldIncident(session.Store.Snapshot);
             if (held != null) { SelectVehicle(held.VehicleId); world.ShowMap(true); }
+            else if (camerasFromMap){world.ShowMap(true);}
         }
 
         private void WatchRoute()

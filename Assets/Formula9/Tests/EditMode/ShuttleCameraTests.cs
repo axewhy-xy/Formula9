@@ -12,7 +12,10 @@
  *     that the camera shown large draws every frame while the thumbnails take turns, that a
  *     thumbnail can be shown large, that the cameras follow the shuttle as it moves and turns,
  *     and that the 3D view comes back when there is no shuttle left to watch or something
- *     else needs it.
+ *     else needs it. Also checks that the cameras match the city's sky and view distance,
+ *     keep watching their shuttle when another is selected, update the hint at once, leave
+ *     the hidden 3D view still while following, and that traffic is drawn for every camera
+ *     that can see it.
  */
 
 using System;
@@ -125,6 +128,9 @@ namespace Formula9.Tests
             Assert.Less(Vector3.Dot(Cam("Rear").transform.position - s.position, s.forward), -6f, "rear is at the tail");
             Assert.Greater(Vector3.Dot(Cam("Left").transform.forward, -s.right), 0.999f, "left looks left");
             Assert.Greater(Vector3.Dot(Cam("Right").transform.forward, s.right), 0.999f, "right looks right");
+            // Outside the plain 5 m wide box drawn when the bus model is missing, as well as the bus
+            Assert.Greater(Vector3.Dot(Cam("Left").transform.position - s.position, -s.right), 2.5f, "left is outside the side");
+            Assert.Greater(Vector3.Dot(Cam("Right").transform.position - s.position, s.right), 2.5f, "right is outside the side");
             foreach (var name in Names)
                 Assert.AreEqual(s.position.y - 0.5f, Cam(name).transform.position.y, 1e-3f, name + " is about 2 m above the road");
         }
@@ -139,8 +145,7 @@ namespace Formula9.Tests
             Assert.AreEqual("Front", MainLabel().text, "the front camera is shown large first");
             Assert.IsTrue(Tiles()[0].ClassListContains("camera-tile-selected"), "and its thumbnail is marked");
             Assert.IsTrue(Cams().All(c => !c.enabled), "cameras off while nobody watches");
-            Assert.IsTrue(Cams().All(c => c.targetTexture != null && c.targetTexture.width == 960 && c.targetTexture.height == 540),
-                "big enough to fill the 3D view");
+            Assert.IsTrue(Cams().All(c => c.targetTexture == null), "no pictures are made until someone opens the cameras");
             Assert.IsFalse(rig.GetComponentsInChildren<Camera>(true).Any(c => c.name.Contains("Bird")), "no bird's-eye camera");
         }
 
@@ -152,6 +157,16 @@ namespace Formula9.Tests
             view.ShowCameras(true);
             Assert.IsTrue(Cams().All(c => c.enabled), "every camera draws once on opening, so no thumbnail starts blank");
             Assert.IsFalse(WorldCamera().enabled, "the 3D view stops drawing while the cameras cover it");
+            Assert.IsTrue(Cams().All(c => c.targetTexture != null && c.targetTexture.width == 960 && c.targetTexture.height == 540),
+                "each picture is big enough to fill the 3D view, as any can be shown large");
+            var world = WorldCamera();
+            foreach (var c in Cams())
+            {
+                Assert.AreEqual(world.clearFlags, c.clearFlags, c.name + " has the city's sky");
+                Assert.AreEqual(world.backgroundColor, c.backgroundColor, c.name + " has the city's sky colour");
+                Assert.AreEqual(world.farClipPlane, c.farClipPlane, c.name + " sees as far as the 3D view");
+                Assert.AreEqual(world.cullingMask, c.cullingMask, c.name + " draws what the 3D view draws");
+            }
             Frame();
             Assert.IsTrue(view.CamerasShown, "still open after a frame");
             Assert.AreEqual(DisplayStyle.Flex, Panel().style.display.value);
@@ -227,17 +242,116 @@ namespace Formula9.Tests
         {
             view.ShowCameras(true);
             Frame();
-            view.SelectEntity(null);
+            var changed = 0;
+            view.ViewChanged += () => changed++;
+            var gone = Snapshot();
+            gone.Vehicles.RemoveAll(v => v.VehicleId == Shuttle);
+            view.Show(gone);
             Frame();
-            Assert.IsFalse(view.CamerasShown, "nothing selected");
+            Assert.IsFalse(view.CamerasShown, "the watched shuttle left the session");
             Assert.IsTrue(Cams().All(c => !c.enabled));
+            Assert.Greater(changed, 0, "the workspace is told, so its Cameras buttons go back");
 
+            view.Show(Snapshot());
             view.SelectEntity(Shuttle);
             view.ShowCameras(true);
             Frame();
             view.ShowMap(true);
             Frame();
             Assert.IsFalse(view.CamerasShown, "the 2D map has no shuttle cameras");
+        }
+
+        // Selecting another shuttle, or nothing, in the fleet table or on the map does not switch
+        // the feed: the operator keeps watching the shuttle they opened the cameras on.
+        [Test]
+        public void AnotherSelectionDoesNotSwitchTheFeed()
+        {
+            view.ShowCameras(true);
+            Frame();
+            var other = Snapshot().Vehicles.First(v => v.VehicleId != Shuttle).VehicleId;
+            view.SelectEntity(other);
+            Frame();
+            Assert.IsTrue(view.CamerasShown);
+            Assert.AreEqual(Shuttle, view.WatchedId, "still watching the shuttle they chose");
+            AssertMounted();
+
+            view.SelectEntity(null);
+            Frame();
+            Assert.IsTrue(view.CamerasShown, "clearing the selection does not close them either");
+            AssertMounted();
+        }
+
+        [Test]
+        public void TheHintNamesTheShuttleAndCameraAtOnce()
+        {
+            Assume.That(view.Ready, "the one-building city is shown");
+            view.ShowCameras(true);
+            StringAssert.Contains($"Shuttle cameras · {Shuttle} · Front", view.Diagnostic, "on opening");
+            view.SelectCamera(1);
+            StringAssert.Contains($"Shuttle cameras · {Shuttle} · Rear", view.Diagnostic, "on switching, not at the next snapshot");
+            view.ShowCameras(false);
+            StringAssert.StartsWith("3D city", view.Diagnostic, "on closing");
+        }
+
+        // Following a shuttle does not move the hidden 3D view behind the cameras, and carries on
+        // when they close.
+        [Test]
+        public void FollowingWaitsBehindTheCameras()
+        {
+            view.FollowSelected();
+            Frame();
+            view.ShowCameras(true);
+            var before = WorldCamera().transform.position;
+            view.Show(Snapshot(90, 10, 250));
+            Frame();
+            Assert.AreEqual(0, Vector3.Distance(WorldCamera().transform.position, before), 1e-3f, "the hidden 3D view stays put");
+
+            view.ShowCameras(false);
+            Frame();
+            Assert.Greater(Vector3.Distance(WorldCamera().transform.position, before), 100, "following carries on");
+        }
+
+        // The traffic is culled against every camera that draws this frame: a car is drawn if any
+        // of them can see it, and none is drawn when none of them draws.
+        [Test]
+        public void TrafficIsDrawnIfAnyDrawingCameraCanSeeIt()
+        {
+            var setFrustrums = typeof(CityTrafficRenderer).GetMethod("SetFrustrums", BindingFlags.NonPublic | BindingFlags.Instance);
+            var inView = typeof(CityTrafficRenderer).GetMethod("InView", BindingFlags.NonPublic | BindingFlags.Instance);
+            var traffic = new CityTrafficRenderer();
+            var front = new GameObject("Front").AddComponent<Camera>();
+            var rear = new GameObject("Rear").AddComponent<Camera>();
+            try
+            {
+                foreach (var c in new[] { front, rear }) { c.aspect = 16f / 9; c.fieldOfView = 60; c.farClipPlane = 300; }
+                rear.transform.rotation = Quaternion.Euler(0, 180, 0);
+                var ahead = new Vector3(0, 0, 50);
+                var behind = new Vector3(0, 0, -50);
+                var aside = new Vector3(200, 0, 0);
+                var cams = new System.Collections.Generic.List<Camera> { front, rear };
+                bool Seen(Vector3 p)
+                {
+                    setFrustrums.Invoke(traffic, new object[] { cams });
+                    return (bool)inView.Invoke(traffic, new object[] { p });
+                }
+
+                Assert.IsTrue(Seen(ahead), "seen by the front camera");
+                Assert.IsTrue(Seen(behind), "seen by the rear camera");
+                Assert.IsFalse(Seen(aside), "seen by neither");
+
+                rear.enabled = false;
+                Assert.IsTrue(Seen(ahead));
+                Assert.IsFalse(Seen(behind), "a camera that does not draw this frame does not count");
+
+                front.enabled = false;
+                Assert.IsFalse(Seen(ahead), "no camera draws, so no car is drawn");
+            }
+            finally
+            {
+                traffic.Dispose();
+                UnityEngine.Object.DestroyImmediate(front.gameObject);
+                UnityEngine.Object.DestroyImmediate(rear.gameObject);
+            }
         }
 
         [Test]

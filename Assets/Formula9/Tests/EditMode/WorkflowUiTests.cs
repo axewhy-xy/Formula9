@@ -140,6 +140,10 @@ namespace Formula9.Tests
         public async Task RoutePlanningTogglesTheCamerasOfTheRoutesShuttle()
         {
             var raw = Fixture("snapshot"); raw["session"]["status"] = "READY";
+            // A second route, served by shuttle-05
+            var routeB = (JObject)raw["routes"][0].DeepClone(); routeB["route_id"] = "route-b";
+            ((JArray)raw["routes"]).Add(routeB);
+            raw["vehicles"][4]["route_id"] = "route-b";
             var backend = new Backend();
             backend.Reply = request =>
             {
@@ -182,12 +186,27 @@ namespace Formula9.Tests
 
                 press.Invoke(workspace, null);
                 Assert.IsFalse(world.CamerasShown);
-                Assert.IsFalse(world.ShowingMap, "back to the 3D view the cameras covered");
+                Assert.IsTrue(world.ShowingMap, "back to the map the cameras were opened from");
                 Assert.AreEqual("Cameras", toggle.text);
 
                 workspace.SelectVehicle("shuttle-03");
                 press.Invoke(workspace, null);
                 Assert.AreEqual("shuttle-03", world.SelectedId, "the selected shuttle, being on this route");
+
+                // Another route while watching. Outside a panel the dropdown sends no change
+                // event, so do what its callback does when the cameras are open.
+                root.Q<DropdownField>("routes").SetValueWithoutNotify("route-b");
+                typeof(TrainingWorkspace).GetMethod("ShowRouteCameras", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(workspace, null);
+                Assert.IsTrue(world.CamerasShown);
+                Assert.AreEqual("shuttle-05", world.WatchedId, "the new route's shuttle");
+                press.Invoke(workspace, null);
+                Assert.IsTrue(world.ShowingMap, "the route change did not forget the map");
+
+                // Opened from the 3D view, closing stays in the 3D view
+                world.ShowMap(false);
+                press.Invoke(workspace, null);
+                press.Invoke(workspace, null);
+                Assert.IsFalse(world.ShowingMap, "back to the 3D view the cameras covered");
             }
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
         }

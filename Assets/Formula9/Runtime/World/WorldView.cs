@@ -160,11 +160,10 @@ namespace Formula9.World
             cameraPanel.Add(mainCameraView);
             var strip = new VisualElement();
             strip.AddToClassList("camera-strip");
-            for (var i = 0; i < shuttleCameras.Textures.Count; i++)
+            for (var i = 0; i < shuttleCameras.Cameras.Count; i++)
             {
                 var tile = new VisualElement();
                 tile.AddToClassList("camera-tile");
-                tile.style.backgroundImage = new StyleBackground(Background.FromRenderTexture(shuttleCameras.Textures[i]));
                 var label = new Label {text = shuttleCameras.NameOf(i)};
                 label.AddToClassList("camera-label");
                 tile.Add(label);
@@ -296,11 +295,7 @@ namespace Formula9.World
                 city.ShowDraft(draft, servedStops);
                 city.ShowIncidents(incidentRecords.Values, snapshot, roadNetwork, Time.unscaledTime);
                 RefreshHud();
-                SetReady(true, camerasShown
-                    ? $"Shuttle cameras · {selectedId} · {shuttleCameras.NameOf(mainCamera)} · click a thumbnail to switch"
-                    : $"3D city · {city.BuildingCount} buildings · " +
-                      (city.LtaBusStopsLoaded ? $"{city.LtaBusStopCount} {city.BusStopSource} bus-stop shelters" : "loading bus-stop shelters") +
-                      " · right-drag orbit, left-drag pan, wheel zoom");
+                SetReady(true, CityHint());
             }
         }
 
@@ -369,12 +364,19 @@ namespace Formula9.World
         {
             // While the city is still loading its shuttles are not placed yet, so wait for them
             // before deciding there is nothing to watch
-            if (camerasShown && !CanShowCameras && !(CityShown && cityLoad != null && !cityLoad.IsCompleted)) ShowCameras(false);
+            if (camerasShown && !CanShowCameras && !(CityShown && cityLoad != null && !cityLoad.IsCompleted))
+            {
+                ShowCameras(false);
+                // Nobody pressed a button, so tell the workspace to redraw its Cameras buttons
+                ViewChanged?.Invoke();
+            }
             if (CityShown && city != null)
             {
                 city.Tick(motion, Time.unscaledTime);
-                if (city.TryGetShuttlePose(selectedId, out var position, out var rotation))
+                if (city.TryGetShuttlePose(watchedId, out var position, out var rotation))
                     shuttleCameras.Place(position, rotation);
+                // Again each frame, for cameras opened while the city was still loading
+                if (camerasShown) shuttleCameras.Match(viewCamera);
                 // Before the traffic, which is drawn for the cameras whose turn it is
                 shuttleCameras.Tick(mainCamera);
                 // On the same clock as the shuttles, and still when they are
@@ -382,7 +384,8 @@ namespace Formula9.World
             }
             else if (world != null) world.Advance(motion, Time.unscaledTime);
             else return;
-            if (following) FocusSelected(false);
+            // Following waits behind the camera view and carries on when it closes
+            if (following && !camerasShown) FocusSelected(false);
         }
 
         // -----------------------------------------------------------------------------------
@@ -828,10 +831,14 @@ namespace Formula9.World
         public void FollowSelected() { LeaveCameras(); following = true; FocusSelected(); }
 
         private bool camerasShown;
+        private string watchedId;
         // Whether the shuttle's cameras are shown in place of the 3D view, whether there is a
         // selected shuttle in the 3D city to watch, and whether this session has a 3D city at all.
         public bool CamerasShown => camerasShown;
-        public bool CanShowCameras => CityShown && city != null && city.TryGetShuttlePose(selectedId, out _, out _);
+        // The shuttle whose cameras are shown, or null. It stays the same when another shuttle
+        // is selected, so the feed never switches without the operator asking for it.
+        public string WatchedId => camerasShown ? watchedId : null;
+        public bool CanShowCameras => CityShown && city != null && city.TryGetShuttlePose(camerasShown ? watchedId : selectedId, out _, out _);
         public bool HasCity => latest != null && latest.Spatial == null && cityClient != null;
         // The camera shown large.
         public int MainCamera => mainCamera;
@@ -850,12 +857,20 @@ namespace Formula9.World
         public void ShowCameras(bool show)
         {
             camerasShown = show;
+            if (show) watchedId = selectedId;
             cameraPanel.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
-            if (show && city != null && city.TryGetShuttlePose(selectedId, out var position, out var rotation))
+            if (show) shuttleCameras.Match(viewCamera);
+            if (show && city != null && city.TryGetShuttlePose(watchedId, out var position, out var rotation))
                 shuttleCameras.Place(position, rotation);
             shuttleCameras.SetActive(show);
-            if (show) viewCamera.enabled = false;
+            if (show)
+            {
+                // The pictures only exist once the cameras have been opened
+                ShowTextures();
+                viewCamera.enabled = false;
+            }
             else if (CityShown) viewCamera.enabled = true;
+            RefreshHint();
         }
 
         // -----------------------------------------------------------------------------------
@@ -869,10 +884,51 @@ namespace Formula9.World
         public void SelectCamera(int index)
         {
             mainCamera = index;
-            mainCameraView.style.backgroundImage = new StyleBackground(Background.FromRenderTexture(shuttleCameras.Textures[index]));
             mainCameraLabel.text = shuttleCameras.NameOf(index);
             for (var i = 0; i < cameraTiles.Count; i++)
                 cameraTiles[i].EnableInClassList("camera-tile-selected", i == index);
+            ShowTextures();
+            RefreshHint();
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: ShowTextures
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function puts each camera's picture on its thumbnail, and the chosen one's
+        //     on the large view. Before the cameras are first opened there are no pictures yet.
+        private void ShowTextures()
+        {
+            var textures = shuttleCameras.Textures;
+            if (textures[0] == null) return;
+            mainCameraView.style.backgroundImage = new StyleBackground(Background.FromRenderTexture(textures[mainCamera]));
+            for (var i = 0; i < cameraTiles.Count; i++)
+                cameraTiles[i].style.backgroundImage = new StyleBackground(Background.FromRenderTexture(textures[i]));
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: CityHint
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function returns the hint for the 3D view: the shuttle and camera being
+        //     watched, or how to move around the city.
+        private string CityHint() => camerasShown
+            ? $"Shuttle cameras · {watchedId} · {shuttleCameras.NameOf(mainCamera)} · click a thumbnail to switch"
+            : $"3D city · {city.BuildingCount} buildings · " +
+              (city.LtaBusStopsLoaded ? $"{city.LtaBusStopCount} {city.BusStopSource} bus-stop shelters" : "loading bus-stop shelters") +
+              " · right-drag orbit, left-drag pan, wheel zoom";
+
+        // -----------------------------------------------------------------------------------
+        // Function: RefreshHint
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function rewrites the hint as soon as the cameras open, close or switch,
+        //     instead of at the next snapshot. It leaves the hint alone while the city is
+        //     loading or not shown.
+        private void RefreshHint()
+        {
+            if (!Ready || !CityShown || city == null || city.BuildingCount == 0 || (cityLoad != null && !cityLoad.IsCompleted)) return;
+            SetReady(true, CityHint());
         }
 
         // -----------------------------------------------------------------------------------

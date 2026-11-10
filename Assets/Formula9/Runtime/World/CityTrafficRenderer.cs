@@ -309,22 +309,12 @@ namespace Formula9.World
         {
             foreach (var list in modelRenderers.Values)
                 foreach (var render in list) render.Reset();
-            frustrumCount = 0;
-            if (cameras != null)
-            {
-                for (var i = 0; i <cameras.Count; i++)
-                {
-                    var camera = cameras[i];
-                    if (camera == null || !camera.enabled) continue;
-                    // To grow when needed.
-                    if (frustrumCount == frustrums.Count){frustrums.Add(new Plane[6]);}
-                    GeometryUtility.CalculateFrustumPlanes(camera, frustrums[frustrumCount]);
-                    frustrumCount++;
-                }
-            }
+            SetFrustrums(cameras);
             foreach (var vehicle in vehicles)
             {
-                if (!vehicle.Placed || (frustrumCount > 0 && !InView(vehicle.Position))) continue;
+                // Given cameras, a car is drawn only if one that draws this frame can see it; when
+                // none of them draws, no car is. Without cameras every car is drawn.
+                if (!vehicle.Placed || (cameras != null && !InView(vehicle.Position))) continue;
                 vehicle.Render.Add(Matrix4x4.TRS(vehicle.Position, Quaternion.LookRotation(vehicle.Forward, Vector3.up), Vector3.one), vehicle.Paint);
             }
 
@@ -332,6 +322,23 @@ namespace Formula9.World
                 foreach (var render in list) render.Render();
         }
 
+        // Takes the view of every camera that draws this frame, for InView.
+        private void SetFrustrums(IReadOnlyList<Camera> cameras)
+        {
+            frustrumCount = 0;
+            if (cameras == null) return;
+            for (var i = 0; i < cameras.Count; i++)
+            {
+                var camera = cameras[i];
+                if (camera == null || !camera.enabled) continue;
+                // To grow when needed.
+                if (frustrumCount == frustrums.Count) frustrums.Add(new Plane[6]);
+                GeometryUtility.CalculateFrustumPlanes(camera, frustrums[frustrumCount]);
+                frustrumCount++;
+            }
+        }
+
+        // Whether any camera that draws this frame can see the point; false when none draws.
         private bool InView(Vector3 position)
         {
             for (var f = 0; f < frustrumCount; f++)

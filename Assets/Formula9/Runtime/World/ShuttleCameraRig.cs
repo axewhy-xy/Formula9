@@ -10,8 +10,10 @@
  *     are watched remotely: front, rear, left and right, about 2 m above
  *     the road. Each camera draws into its own render texture for the
  *     camera view, which shows one of them large and the rest as
- *     thumbnails. The cameras start switched off, see only nearby, and
- *     follow the shuttle when placed each frame.
+ *     thumbnails. The cameras start switched off, and their render textures
+ *     are only made the first time they are switched on. They draw the same
+ *     sky and distance as the 3D view, and follow the shuttle when placed
+ *     each frame.
  */
 using System.Collections.Generic;
 using UnityEngine;
@@ -30,18 +32,23 @@ namespace Formula9.World
             public float Yaw, Pitch;
         }
 
-        // One camera per blind spot, just outside a bus 4.6 m wide, 4.7 m tall and 12.6 m long,
-        // about 2 m above the road.
+        // One camera per blind spot, about 2 m above the road, just outside both shapes a
+        // shuttle can have. The bus model is 4.6 m wide and 12.6 m long but not centred on the
+        // shuttle's position: it reaches 6.6 m ahead and 6.0 m behind, so the front and rear
+        // mounts are uneven on purpose. The plain box drawn when the model is missing is 5 m
+        // wide and 12 m long, so the side mounts sit 2.6 m out.
         private static readonly Mount[] Mounts =
         {
             new Mount { Name = "Front", Offset = new Vector3(0, -0.5f, 6.8f), Yaw = 0, Pitch = 0 },
-            new Mount {Name = "Rear", Offset = new Vector3(0, -0.5f, -6.2f), Yaw = 180, Pitch = 0},
-            new Mount {Name = "Left", Offset = new Vector3(-2.4f, -0.5f, 0), Yaw = -90, Pitch = 0},
-            new Mount {Name = "Right", Offset = new Vector3(2.4f, -0.5f, 0), Yaw = 90, Pitch = 0}
+            new Mount { Name = "Rear", Offset = new Vector3(0, -0.5f, -6.2f), Yaw = 180, Pitch = 0 },
+            new Mount { Name = "Left", Offset = new Vector3(-2.6f, -0.5f, 0), Yaw = -90, Pitch = 0 },
+            new Mount { Name = "Right", Offset = new Vector3(2.6f, -0.5f, 0), Yaw = 90, Pitch = 0 }
         };
-        // Big enough to fill the 3D view when shown large; the thumbnails scale it down.
+        // Big enough to fill the 3D view when shown large. Any thumbnail can be shown large at
+        // a click, so they all have this size rather than being made again on each click.
         private const int TextureWidth = 960, TextureHeight = 540;
-        // One camera and one render texture per mount, in the same order as Mounts.
+        // One camera and one render texture per mount, in the same order as Mounts. The
+        // textures stay null until the cameras are first switched on.
         private readonly Camera[] cameras;
         private readonly RenderTexture[] textures;
         // Whether the cameras are in use, and which thumbnail draws on the next frame.
@@ -52,9 +59,10 @@ namespace Formula9.World
         // Function: ShuttleCameraRig
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function creates one camera per mount, each drawing into its own 960x540
-        //     render texture. The cameras are wide (90 degrees), see only 300 m, and start
-        //     switched off.
+        //     This function creates one camera per mount. The cameras are wide (90 degrees)
+        //     and start switched off; Match gives them the 3D view's sky and view distance.
+        //     Their render textures are made by SetActive, so a session in which nobody opens
+        //     the cameras never allocates them.
         //
         // Args:
         //     parent (Transform): The object the cameras are created under.
@@ -69,10 +77,27 @@ namespace Formula9.World
                 cameras[i] = obj.AddComponent<Camera>();
                 cameras[i].fieldOfView = 90;
                 cameras[i].nearClipPlane = 0.1f;
-                cameras[i].farClipPlane = 300;
                 cameras[i].enabled = false;
-                textures[i] = new RenderTexture(TextureWidth, TextureHeight, 24);
-                cameras[i].targetTexture = textures[i];
+            }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: Match
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function gives every camera the 3D view's background, what it draws and how
+        //     far it sees, so the camera pictures show the same sky and distant buildings.
+        //
+        // Args:
+        //     view (Camera): The 3D view's camera.
+        public void Match(Camera view)
+        {
+            foreach (var camera in cameras)
+            {
+                camera.clearFlags = view.clearFlags;
+                camera.backgroundColor = view.backgroundColor;
+                camera.cullingMask = view.cullingMask;
+                camera.farClipPlane = view.farClipPlane;
             }
         }
 
@@ -98,7 +123,8 @@ namespace Formula9.World
 
         // The cameras, so the traffic can be drawn for them too.
         public IReadOnlyList<Camera> Cameras => cameras;
-        // What each camera draws into, for the camera view; same order as Cameras.
+        // What each camera draws into, for the camera view; same order as Cameras. Each is
+        // null until the cameras are first switched on.
         public IReadOnlyList<RenderTexture> Textures => textures;
         // The name of camera i, for its label in the panel.
         public string NameOf(int i) => Mounts[i].Name;
@@ -108,15 +134,21 @@ namespace Formula9.World
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function switches every camera on or off. A camera that is off draws
-        //     nothing and costs nothing, so they stay off while no one is watching them.
+        //     nothing and costs nothing, so they stay off while no one is watching them. The
+        //     first time they are switched on, their render textures are made.
         //
         // Args:
         //     active (bool): True to switch the cameras on, false to switch them off.
         public void SetActive(bool active)
         {
-            this.active = active; 
+            this.active = active;
             for (var i = 0; i < cameras.Length; i++)
-            { 
+            {
+                if (active && textures[i] == null)
+                {
+                    textures[i] = new RenderTexture(TextureWidth, TextureHeight, 24);
+                    cameras[i].targetTexture = textures[i];
+                }
                 cameras[i].enabled = active;
             }
         }
@@ -151,14 +183,17 @@ namespace Formula9.World
         {
             for (var i = 0; i < cameras.Length; i++)
             {
-                textures[i].Release();
-                if (Application.isPlaying) Object.Destroy(textures[i]);
-                else Object.DestroyImmediate(textures[i]);
+                if (textures[i] != null)
+                {
+                    textures[i].Release();
+                    if (Application.isPlaying) Object.Destroy(textures[i]);
+                    else Object.DestroyImmediate(textures[i]);
+                }
                 if (cameras[i] == null) continue;
                 if (Application.isPlaying) Object.Destroy(cameras[i].gameObject);
                 else Object.DestroyImmediate(cameras[i].gameObject);
             }
         }
     }
-    
+
 }
