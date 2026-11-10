@@ -92,10 +92,7 @@
                 <ui:VisualElement name="view-bar" class="view-bar">
                     <ui:Button name="view-map" text="2D Map" class="segment" />
                     <ui:Button name="view-world" text="3D View" class="segment" />
-                    <ui:VisualElement name="info-banner" class="info-banner">
-                        <f9:Glyph kind="Info" tint="#334749" size="16" />
-                        <ui:Label name="world-status" text="Join a training session to see its world." class="info-text" />
-                    </ui:VisualElement>
+                    <ui:VisualElement class="view-bar-spacer" />
                     <ui:Button name="toggle-fleet" text="Fleet List" class="segment-round" />
                 </ui:VisualElement>
 

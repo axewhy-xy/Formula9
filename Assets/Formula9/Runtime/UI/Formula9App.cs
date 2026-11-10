@@ -63,7 +63,7 @@ namespace Formula9.UI
         private Button viewMap, viewWorld;
         private const string RememberedUserKey = "login.rememberedUser";
         private TextField username, password, confirm, sessionId;
-        private Label signUpHint, loginError, title, user, capacity, status, message, worldStatus, sessionBadge;
+        private Label signUpHint, loginError, title, user, capacity, status, message, sessionBadge;
         private string sessionBadgeClass;
         private readonly SessionStatusPresenter sessionStatusPresenter = new SessionStatusPresenter();
         private Button forgot, submit, modeSwitch, start, pause, resume, archive, refreshSessions;
@@ -279,7 +279,6 @@ namespace Formula9.UI
             sessionBadge = root.Q<Label>("session-badge");
             message = root.Q<Label>("message");
             ShowMessage("");
-            worldStatus = root.Q<Label>("world-status");
             fleet = root.Q("fleet");
             sessionId = root.Q<TextField>("session-id");
             scenario = root.Q<DropdownField>("scenario");
@@ -693,7 +692,7 @@ namespace Formula9.UI
         // Function: Render
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function shows the current state: world status and view switch, session
+        //     This function shows the current state: view switch, session
         //     controls, the workspace, the status line and the fleet panel.
         private void Render()
         {
@@ -706,7 +705,6 @@ namespace Formula9.UI
             sessionPlayback.style.display = controls.PlaybackVisible ? DisplayStyle.Flex : DisplayStyle.None;
             if (world != null)
             {
-                worldStatus.text = world.Diagnostic;
                 viewMap.EnableInClassList("segment-selected", world.ShowingMap);
                 viewWorld.EnableInClassList("segment-selected", !world.ShowingMap);
             }

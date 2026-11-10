@@ -435,22 +435,8 @@
     border-color: rgb(15, 76, 92);
 }
 
-.info-banner {
-    flex-grow: 1;
-    flex-basis: 0;
-    min-width: 0;
-    flex-direction: row;
-    align-items: center;
-    min-height: 40px;
-    margin-right: 8px;
-    padding: 0 10px;
-    border-width: 1px;
-    border-radius: 8px;
-    border-color: rgb(207, 227, 227);
-    background-color: rgb(232, 243, 243);
-}
-
-.info-text { margin-left: 6px; white-space: normal; color: rgb(51, 71, 75); flex-shrink: 1; }
+/* Pushes the Fleet List toggle to the right end of the view bar. */
+.view-bar-spacer { flex-grow: 1; }
 
 .app Button.segment-round {
     height: 40px;
