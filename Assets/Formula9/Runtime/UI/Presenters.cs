@@ -266,23 +266,6 @@ namespace Formula9.UI
             : "Singapore, real streets · incidents, detours, charging";
 
         // -----------------------------------------------------------------------------------
-        // Function: StatusLine
-        // -----------------------------------------------------------------------------------
-        // Description:
-        //     This function writes the status line: session, epoch, snapshot, tick, status and
-        //     whether the view is current.
-        //
-        // Args:
-        //     snapshot (FullSnapshot): The accepted snapshot.
-        //     available (bool): False while the view is stale or offline.
-        //
-        // Returns:
-        //     string: The line.
-        public static string StatusLine(FullSnapshot snapshot, bool available) =>
-            $"Session {snapshot.Session.SessionId} · epoch {snapshot.Session.SessionEpoch} · snapshot {snapshot.SnapshotId} · " +
-            $"tick {snapshot.Tick} · {snapshot.Session.Status} · {(available ? "current" : "stale/offline")}";
-
-        // -----------------------------------------------------------------------------------
         // Function: Controls
         // -----------------------------------------------------------------------------------
         // Description:

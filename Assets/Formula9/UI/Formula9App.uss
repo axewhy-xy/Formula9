@@ -435,8 +435,8 @@
     border-color: rgb(15, 76, 92);
 }
 
-/* Pushes the Fleet List toggle to the right end of the view bar. */
-.view-bar-spacer { flex-grow: 1; }
+/* 3D loading/failure notice; empty otherwise, it still pushes the Fleet List toggle to the right. */
+.world-notice { flex-grow: 1; flex-shrink: 1; min-width: 0; margin: 0 8px; white-space: normal; font-size: 12px; color: rgb(74, 93, 97); }
 
 .app Button.segment-round {
     height: 40px;

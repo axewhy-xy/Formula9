@@ -33,7 +33,8 @@ namespace Formula9.World
     // Description:
     //     This component shows the 3D world and the 2D map of the selected session.
     //
-    //     Attributes: Ready and Diagnostic say whether the world is shown and why not, and
+    //     Attributes: Ready and Diagnostic say whether the world is shown and why not, Notice
+    //     marks a Diagnostic worth surfacing (loading or a failure), and
     //     ReadinessChanged reports changes; SelectedId and EntitySelected track the selected
     //     entity; RouteEditing enables picking route nodes, reported through RouteNodeSelected;
     //     ShowingMap and Offline describe the view.
@@ -99,6 +100,8 @@ namespace Formula9.World
 
         public bool Ready { get; private set; }
         public string Diagnostic { get; private set; } = "Join a training session to see its world.";
+        // True while Diagnostic reports loading or a failure, not just the routine state of the view
+        public bool Notice { get; private set; }
         public event Action<bool, string> ReadinessChanged;
 
         // -----------------------------------------------------------------------------------
@@ -225,7 +228,7 @@ namespace Formula9.World
             }
             if (world == null) return; // still loading; the latest snapshot is applied when it finishes
             var mismatch = world.ApplyPoses(snapshot, motion, Time.unscaledTime);
-            if (mismatch != null) SetReady(false, $"3D unavailable · scene/vehicle binding mismatch: {mismatch}");
+            if (mismatch != null) SetReady(false, $"3D unavailable · scene/vehicle binding mismatch: {mismatch}", notice: true);
         }
 
         // -----------------------------------------------------------------------------------
@@ -249,7 +252,7 @@ namespace Formula9.World
             {
                 city = new CityView(transform, tiles, transit);
                 cityCancellation = new CancellationTokenSource();
-                SetReady(false, "Loading 3D buildings…");
+                SetReady(false, "Loading 3D buildings…", notice: true);
                 cityLoad = LoadCityAsync(city, cityCancellation.Token);
                 return;
             }
@@ -320,7 +323,7 @@ namespace Formula9.World
                 preferMap = true;
                 viewCamera.enabled = false;
                 if (latest != null) { map.style.display = DisplayStyle.Flex; map.Show(latest); }
-                SetReady(latest != null, $"3D buildings unavailable · {error.Message}");
+                SetReady(latest != null, $"3D buildings unavailable · {error.Message}", notice: true);
             }
         }
 
@@ -372,7 +375,7 @@ namespace Formula9.World
             Clear();
             motion.Clear();
             shownPins = pins;
-            SetReady(false, "Loading mandatory 3D geometry…");
+            SetReady(false, "Loading mandatory 3D geometry…", notice: true);
             try
             {
                 var package = await loader.LoadAsync(pins, cancellation.Token);
@@ -401,11 +404,11 @@ namespace Formula9.World
             catch (SceneException error)
             {
                 if (cancellation.IsCancellationRequested) return;
-                SetReady(false, $"3D unavailable · {error.Message}");
+                SetReady(false, $"3D unavailable · {error.Message}", notice: true);
             }
             catch (Exception error)
             {
-                if (!cancellation.IsCancellationRequested) SetReady(false, $"3D unavailable · {error.Message}");
+                if (!cancellation.IsCancellationRequested) SetReady(false, $"3D unavailable · {error.Message}", notice: true);
             }
         }
 
@@ -433,11 +436,13 @@ namespace Formula9.World
         // Args:
         //     ready (bool): True when the world is shown.
         //     diagnostic (string): What the trainee sees about it.
-        private void SetReady(bool ready, string diagnostic)
+        //     notice (bool): True when the diagnostic is loading or a failure the trainee should see.
+        private void SetReady(bool ready, string diagnostic, bool notice = false)
         {
-            if (Ready == ready && Diagnostic == diagnostic) return;
+            if (Ready == ready && Diagnostic == diagnostic && Notice == notice) return;
             Ready = ready;
             Diagnostic = diagnostic;
+            Notice = notice;
             ReadinessChanged?.Invoke(ready, diagnostic);
         }
 

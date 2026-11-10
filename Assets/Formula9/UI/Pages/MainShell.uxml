@@ -92,7 +92,7 @@
                 <ui:VisualElement name="view-bar" class="view-bar">
                     <ui:Button name="view-map" text="2D Map" class="segment" />
                     <ui:Button name="view-world" text="3D View" class="segment" />
-                    <ui:VisualElement class="view-bar-spacer" />
+                    <ui:Label name="world-notice" class="world-notice" />
                     <ui:Button name="toggle-fleet" text="Fleet List" class="segment-round" />
                 </ui:VisualElement>
 

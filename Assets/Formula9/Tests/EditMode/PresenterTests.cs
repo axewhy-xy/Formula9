@@ -102,18 +102,14 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: StatusLineAndTitleDescribeTheSnapshot
+        // Function: TitleDescribesTheSnapshot
         // -----------------------------------------------------------------------------------
         // Description:
-        //     The status line and title describe the joined session.
+        //     The title describes the joined session.
         [Test]
-        public void StatusLineAndTitleDescribeTheSnapshot()
+        public void TitleDescribesTheSnapshot()
         {
-            var snapshot = Snapshot();
-            Assert.AreEqual("Session session-001 · epoch 1 · snapshot snapshot-200 · tick 200 · RUNNING · current",
-                TrainingPresenter.StatusLine(snapshot, true));
-            StringAssert.EndsWith("stale/offline", TrainingPresenter.StatusLine(snapshot, false));
-            StringAssert.StartsWith("Singapore, real streets", TrainingPresenter.Title(snapshot));
+            StringAssert.StartsWith("Singapore, real streets", TrainingPresenter.Title(Snapshot()));
         }
 
         // -----------------------------------------------------------------------------------
