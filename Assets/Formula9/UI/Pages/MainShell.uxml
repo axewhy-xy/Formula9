@@ -37,6 +37,7 @@
                 <ui:Label name="user" class="user" />
                 <ui:Label name="clock" class="user" />
                 <ui:Button name="logout" text="Log out" />
+                <ui:Button name="exit-app" text="Exit" tooltip="Exit Formula 9 (Esc)" />
             </ui:VisualElement>
 
             <ui:VisualElement name="content-card" class="content-card">
@@ -112,16 +113,6 @@
                         <ui:Instance template="Reports" name="page-reports" class="page-host" style="display: none;" />
                         <ui:Instance template="Scenarios" name="page-scenarios" class="page-host" style="display: none;" />
                     </ui:VisualElement>
-                </ui:VisualElement>
-            </ui:VisualElement>
-        </ui:VisualElement>
-
-        <ui:VisualElement name="dialog-overlay" class="dialog-overlay" style="display: none;">
-            <ui:VisualElement class="dialog">
-                <ui:Label name="dialog-text" class="dialog-text" />
-                <ui:VisualElement class="dialog-actions">
-                    <ui:Button name="dialog-cancel" text="Cancel" />
-                    <ui:Button name="dialog-confirm" class="danger" />
                 </ui:VisualElement>
             </ui:VisualElement>
         </ui:VisualElement>
