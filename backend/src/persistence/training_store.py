@@ -411,6 +411,15 @@ class TrainingStore:
     def runtimes(self) -> list[tuple[FullSnapshot, dict]]:
         return [self.runtime(session_id) for session_id in self.runtime_ids()]
 
+    def next_session_number(self) -> int:
+        """Issue the next running number for a readable session id; never reused, gaps allowed."""
+        def write(connection: sqlite3.Connection) -> int:
+            connection.execute("BEGIN IMMEDIATE")
+            number = connection.execute("INSERT INTO session_numbers (issued_at_utc) VALUES (?)", (_now(),)).lastrowid
+            connection.commit()
+            return number
+        return self._submit(write)
+
     def create_session(self, snapshot: FullSnapshot, *, runtime_state: dict | None = None,
                        creation: tuple[str, str, str] | None = None) -> FullSnapshot:
         snapshot = FullSnapshot.model_validate(snapshot.model_dump(mode="json"))
