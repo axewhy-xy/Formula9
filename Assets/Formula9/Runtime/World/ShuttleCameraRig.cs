@@ -44,6 +44,9 @@ namespace Formula9.World
         // One camera and one render texture per mount, in the same order as Mounts.
         private readonly Camera[] cameras;
         private readonly RenderTexture[] textures;
+        // Whether the cameras are in use, and which one draws on the next frame.
+        private bool active;
+        private int next;
 
         // -----------------------------------------------------------------------------------
         // Function: ShuttleCameraRig
@@ -116,8 +119,25 @@ namespace Formula9.World
         //     active (bool): True to switch the cameras on, false to switch them off.
         public void SetActive(bool active)
         {
+            this.active = active; 
             for (var i = 0; i < cameras.Length; i++)
-            { cameras[i].enabled = active; }
+            { 
+                cameras[i].enabled = active;
+            }
+        }
+        // -----------------------------------------------------------------------------------
+        // Function: Tick
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function lets the cameras take turns: each frame only one of them draws, so
+        //     the panel costs one extra camera instead of six. At 60 frames a second each view
+        //     still refreshes ten times a second. It does nothing while the cameras are off.
+        public void Tick()
+        {
+            if (!active) return;
+            for (var i = 0; i < cameras.Length; i++)
+                cameras[i].enabled = i == next;
+            next = (next + 1) % cameras.Length;
         }
 
         // -----------------------------------------------------------------------------------

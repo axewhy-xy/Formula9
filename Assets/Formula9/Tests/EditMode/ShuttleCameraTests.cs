@@ -9,8 +9,8 @@
  *     Builds the real WorldView with the training layout, a one-building city and the shared
  *     planar snapshot, then checks that the camera panel starts hidden with its six cameras off,
  *     that showing it switches them on and mounts them around the selected shuttle, that they
- *     follow the shuttle as it moves and turns, and that the panel closes itself when there is
- *     no shuttle left to watch.
+ *     then take turns drawing one per frame, that they follow the shuttle as it moves and
+ *     turns, and that the panel closes itself when there is no shuttle left to watch.
  */
 
 using System;
@@ -143,11 +143,31 @@ namespace Formula9.Tests
         {
             Assert.IsTrue(view.CanShowCameras, "a selected shuttle in the 3D city can be watched");
             view.ShowCameras(true);
+            Assert.IsTrue(Cams().All(c => c.enabled), "every camera draws once on opening, so no tile starts blank");
             Frame();
             Assert.IsTrue(view.CamerasShown, "still open after a frame");
             Assert.AreEqual(DisplayStyle.Flex, Panel().style.display.value);
-            Assert.IsTrue(Cams().All(c => c.enabled), "cameras on");
+            Assert.AreEqual(1, Cams().Count(c => c.enabled), "one camera draws each frame, taking turns");
             AssertMounted();
+        }
+
+        [Test]
+        public void CamerasTakeTurnsSoEachDrawsOnceEverySixFrames()
+        {
+            view.ShowCameras(true);
+            var turns = new int[Names.Length];
+            for (var frame = 0; frame < Names.Length * 2; frame++)
+            {
+                Frame();
+                var on = Cams().Select((c, i) => (c, i)).Where(p => p.c.enabled).Select(p => p.i).ToList();
+                Assert.AreEqual(1, on.Count, $"exactly one camera draws on frame {frame}");
+                turns[on[0]]++;
+            }
+            CollectionAssert.AreEqual(Enumerable.Repeat(2, Names.Length), turns, "every camera got two turns in twelve frames");
+
+            view.ShowCameras(false);
+            Frame();
+            Assert.IsTrue(Cams().All(c => !c.enabled), "no turns while the panel is closed");
         }
 
         [Test]

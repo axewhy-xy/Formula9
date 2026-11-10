@@ -363,6 +363,8 @@ namespace Formula9.World
                 city.Tick(motion, Time.unscaledTime);
                 if (city.TryGetShuttlePose(selectedId, out var position, out var rotation))
                     shuttleCameras.Place(position, rotation);
+                // Before the traffic, which is drawn for the camera whose turn it is
+                shuttleCameras.Tick();
                 // On the same clock as the shuttles, and still when they are
                 city.TickTraffic(latest.Session?.Status == "RUNNING" ? Time.unscaledDeltaTime : 0, trafficCameras);
             }
