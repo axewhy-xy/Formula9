@@ -27,7 +27,7 @@ namespace Formula9.UI
         private readonly DropdownField routes, incidents, candidates;
         private readonly TextField routeReason, incidentReason;
         private readonly Label routeProblem, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes, incidentData, incidentReport, selection;
-        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowClosure, routeDriver,routeCameras, approve, routeStart, routeWatch, previewIncident, approveIncident, rerouteIncident, history, debrief;
+        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowClosure, routeDriver, routeCameras, approve, routeStart, routeWatch, previewIncident, approveIncident, rerouteIncident, history, debrief;
         private readonly FleetMap evidenceMap;
         private readonly VisualElement routeStages, routeWaypoints, routeIssues, routeMetrics, routeDecide, routeFeedback, routeApply, routeOutcomePanel, routeOutcomeRows, fleetTable;
         private readonly List<VisualElement> operationalViews;

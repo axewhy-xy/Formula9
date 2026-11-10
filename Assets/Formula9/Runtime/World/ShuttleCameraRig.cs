@@ -124,13 +124,15 @@ namespace Formula9.World
         // Function: Dispose
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function releases the render textures' GPU memory and removes the cameras'
+        //     This function releases and destroys the render textures and removes the cameras'
         //     objects. Outside Play mode, as in EditMode tests, they are destroyed at once.
         public void Dispose()
         {
             for (var i = 0; i < cameras.Length; i++)
             {
                 textures[i].Release();
+                if (Application.isPlaying) Object.Destroy(textures[i]);
+                else Object.DestroyImmediate(textures[i]);
                 if (cameras[i] == null) continue;
                 if (Application.isPlaying) Object.Destroy(cameras[i].gameObject);
                 else Object.DestroyImmediate(cameras[i].gameObject);

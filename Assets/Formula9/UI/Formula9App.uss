@@ -855,6 +855,11 @@
     background-color: rgb(26, 26, 30);
     -unity-background-scale-mode: stretch-to-fill;
 }
+/* A clicked tile: one camera at three times the size, across the top of the panel. */
+.camera-tile-large {
+    width: 488px;
+    height: 274px;
+}
 .camera-label {
     position: absolute;
     left: 4px;

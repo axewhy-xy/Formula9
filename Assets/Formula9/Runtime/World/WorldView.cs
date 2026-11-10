@@ -161,6 +161,8 @@ namespace Formula9.World
                 var label = new Label {text = shuttleCameras.NameOf(i)};
                 label.AddToClassList("camera-label");
                 tile.Add(label);
+                // A click enlarges this camera's view; another click shrinks it back
+                tile.RegisterCallback<ClickEvent>(_ => tile.ToggleInClassList("camera-tile-large"));
                 cameraPanel.Add(tile);
             }
             cameraPanel.style.display = DisplayStyle.None;    // hidden until the button is pressed
@@ -863,6 +865,8 @@ namespace Formula9.World
         {
             camerasShown = show;
             cameraPanel.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
+            if (show && city != null && city.TryGetShuttlePose(selectedId, out var position, out var rotation))
+                shuttleCameras.Place(position, rotation);
             shuttleCameras.SetActive(show);
         }
         // -----------------------------------------------------------------------------------
