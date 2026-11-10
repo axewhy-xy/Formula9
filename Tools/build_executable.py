@@ -3,22 +3,24 @@ Build Formula9.exe with the backend bundled beside it.
 
 Author: Lau Xiang Yang
 Date Created: 06/11/2026
-Last Modified: 06/11/2026
+Last Modified: 10/11/2026
 
 Description:
     A plain Unity build only contains the client. This script builds the Windows player in batch
     mode, then adds a Backend folder holding a portable copy of Python 3.12 with the backend's
-    packages, the backend source, its fixtures and backend/.env, and the shared contracts. The
-    player starts that backend when it opens and stops it when it closes (BundledBackend.cs), so
-    the build folder runs on a machine with no Python, Unity or repository.
+    packages, the backend source and fixtures, and the shared contracts, all precompiled. The
+    player starts that backend when it opens, and it stops once every open player has closed
+    (BundledBackend.cs, bundled_backend.py), so the build folder runs on a machine with no Python,
+    Unity or repository.
 
-        python Tools/build_executable.py [--output Builds/Formula9] [--zip] [--skip-unity]
+        python Tools/build_executable.py [--output Builds/Formula9] [--zip] [--skip-unity] [--include-env]
         Windows shortcut: build.bat
 
     Run run.bat once first: it installs the pinned Unity editor and creates backend/.venv. Close the
     project in Unity before building, since batch mode cannot open a project that is already open.
-    The build includes backend/.env, which holds the team's MongoDB connection, so share the build
-    only with people who may use that database.
+    backend/.env holds the team's MongoDB connection, so it is left out unless --include-env is
+    given; without it the build's account endpoints answer 503 and nobody can log in. Share a build
+    made with --include-env only with people who may use that database.
 """
 
 from __future__ import annotations
@@ -40,6 +42,8 @@ ROOT = run_backend.ROOT
 DEFAULT_OUTPUT = ROOT / "Builds" / "Formula9"
 EXECUTABLE = "Formula9.exe"
 BACKEND_FOLDER = "Backend"  # BundledBackend.FolderName
+# Written into every build folder, so a later build knows the folder is safe to delete.
+MARKER = ".formula9-build"
 UNITY_LOG = ROOT / "Logs" / "build-player.log"
 # Standard library parts the server never imports.
 UNUSED_STDLIB = {"site-packages", "test", "idlelib", "tkinter", "turtledemo", "ensurepip", "lib2to3"}
@@ -79,13 +83,14 @@ def base_python() -> Path:
 # -----------------------------------------------------------------------------------
 Description:
     This function checks that a folder about to be deleted is empty or an earlier build, so a
-    mistyped --output never wipes anything else.
+    mistyped --output never wipes anything else. A build folder holds the marker file this script
+    writes, or at least Formula9.exe.
 
 Args:
     folder (Path): The folder to check.
 
 Returns:
-    bool: True if the folder is missing, empty, or looks like an earlier build.
+    bool: True if the folder is missing, empty, or an earlier build.
 """
 def safe_to_replace(folder: Path) -> bool:
     if not folder.exists():
@@ -93,7 +98,7 @@ def safe_to_replace(folder: Path) -> bool:
     if not folder.is_dir():
         return False
     names = {entry.name for entry in folder.iterdir()}
-    return not names or EXECUTABLE in names or BACKEND_FOLDER in names
+    return not names or MARKER in names or EXECUTABLE in names
 
 
 """
@@ -136,13 +141,15 @@ def build_player(output: Path) -> None:
 # -----------------------------------------------------------------------------------
 Description:
     This function writes the Backend folder: a portable Python (the venv's base installation with
-    the venv's packages), the backend source, fixtures and .env, the contracts, and serve.py. The
-    folders keep the repository's layout, because the backend finds its files relative to itself.
+    the venv's packages), the backend source and fixtures, .env when asked, the contracts, and
+    serve.py, then precompiles it all. The folders keep the repository's layout, because the
+    backend finds its files relative to itself.
 
 Args:
     backend (Path): The Backend folder to create.
+    include_env (bool): Whether to copy backend/.env, which holds the MongoDB connection.
 """
-def bundle_backend(backend: Path) -> None:
+def bundle_backend(backend: Path, include_env: bool) -> None:
     base = base_python()
     print(f"Bundling the backend with Python from {base}", flush=True)
     python = backend / "python"
@@ -159,13 +166,45 @@ def bundle_backend(backend: Path) -> None:
     source_cache = shutil.ignore_patterns("__pycache__", "*.pyc")
     shutil.copytree(ROOT / "backend" / "src", backend / "backend" / "src", ignore=source_cache)
     shutil.copytree(ROOT / "backend" / "fixtures", backend / "backend" / "fixtures", ignore=source_cache)
-    if (ROOT / "backend" / ".env").is_file():
+    if not include_env:
+        print("Left out backend/.env (the team's MongoDB connection), so the build's account endpoints "
+              "answer 503 and nobody can log in. Build with --include-env to ship it.", file=sys.stderr)
+    elif (ROOT / "backend" / ".env").is_file():
         shutil.copy2(ROOT / "backend" / ".env", backend / "backend" / ".env")
+        print("Included backend/.env: share this build only with people who may use that database.", flush=True)
     else:
         print("backend/.env is missing, so the build's account endpoints will answer 503.", file=sys.stderr)
     shutil.copytree(ROOT / "contracts", backend / "contracts", ignore=source_cache)
     shutil.copy2(Path(__file__).with_name("bundled_backend.py"), backend / "serve.py")
     (backend / "state").mkdir()
+    precompile(backend)
+
+
+"""
+# -----------------------------------------------------------------------------------
+# Function: precompile
+# -----------------------------------------------------------------------------------
+Description:
+    This function compiles every .py file in the Backend folder with the bundled Python, so the
+    first launch does not spend its time compiling. Python never compares these .pyc files with
+    their source's timestamp, because unzipping a build changes timestamps and would make it
+    throw them away.
+
+Args:
+    backend (Path): The Backend folder.
+
+Raises:
+    SystemExit: If the backend's own code does not compile.
+"""
+def precompile(backend: Path) -> None:
+    print("Precompiling the bundled Python and backend...", flush=True)
+    command = [str(backend / "python" / "python.exe"), "-I", "-m", "compileall", "-f", "-j", "0",
+               "--invalidation-mode", "unchecked-hash"]
+    # Some packages ship files that are not meant to compile (templates, other Python versions).
+    subprocess.call(command + ["-qq", str(backend / "python" / "Lib")], cwd=backend)
+    if subprocess.call(command + ["-q", str(backend / "backend"), str(backend / "contracts"), str(backend / "serve.py")],
+                       cwd=backend):
+        raise SystemExit("The bundled backend's code did not compile; the errors are above.")
 
 
 """
@@ -199,7 +238,8 @@ def smoke_test(backend: Path) -> None:
         environment["TRAINING_DATABASE_PATH"] = str(Path(scratch) / "sessions.sqlite")
         log = Path(scratch) / "backend.log"
         server = subprocess.Popen([str(backend / "python" / "python.exe"), str(backend / "serve.py"),
-                                   "--port", str(port), "--parent-pid", str(os.getpid()), "--log", str(log)],
+                                   "--port", str(port), "--parent-pid", str(os.getpid()), "--log", str(log),
+                                   "--state", scratch],
                                   cwd=scratch, env=environment)
         try:
             deadline = time.monotonic() + 120
@@ -212,7 +252,8 @@ def smoke_test(backend: Path) -> None:
                             print("The bundled backend answered /api/health.", flush=True)
                             return
                 except OSError:
-                    time.sleep(0.5)
+                    pass
+                time.sleep(0.5)
             print(log.read_text(encoding="utf-8", errors="replace") if log.is_file() else "", file=sys.stderr)
             raise SystemExit("The bundled backend did not start; its output is above.")
         finally:
@@ -243,6 +284,9 @@ def main() -> int:
     parser.add_argument("--zip", action="store_true", help="Also pack the build folder into a .zip beside it")
     parser.add_argument("--skip-unity", action="store_true",
                         help="Keep the player already in the build folder and only bundle the backend again")
+    parser.add_argument("--include-env", action="store_true",
+                        help="Ship backend/.env (the team's MongoDB connection) so logging in works; "
+                             "share such a build only with people who may use that database")
     args = parser.parse_args()
     if os.name != "nt":
         parser.error("The executable is a Windows build; run this on Windows.")
@@ -259,17 +303,22 @@ def main() -> int:
     if args.skip_unity:
         if not (output / EXECUTABLE).is_file():
             parser.error(f"--skip-unity needs an existing build, but {output / EXECUTABLE} is missing.")
+        (output / MARKER).write_text("Made by Tools/build_executable.py; a new build replaces this folder.\n",
+                                     encoding="utf-8")
     else:
         if not safe_to_replace(output):
             parser.error(f"{output} is not empty and is not an earlier build; choose another --output.")
         if output.exists():
             shutil.rmtree(output)
+        output.mkdir(parents=True)
+        (output / MARKER).write_text("Made by Tools/build_executable.py; a new build replaces this folder.\n",
+                                     encoding="utf-8")
         build_player(output)
 
     backend = output / BACKEND_FOLDER
     if backend.exists():
         shutil.rmtree(backend)
-    bundle_backend(backend)
+    bundle_backend(backend, args.include_env)
     smoke_test(backend)
 
     print(f"\nBuilt {output / EXECUTABLE} ({folder_size(output) / 2**20:.0f} MB). "

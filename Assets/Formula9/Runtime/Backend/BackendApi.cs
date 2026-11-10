@@ -2,9 +2,9 @@
  * The backend's login and training APIs.
  *
  * Author: Choo Jian Wei
- * Contributors: Lau Xiang Yang (session retention and cleanup)
+ * Contributors: Lau Xiang Yang (session retention and cleanup, waiting for the bundled backend)
  * Date Created: 30/10/2026
- * Last Modified: 30/10/2026
+ * Last Modified: 10/11/2026
  *
  * Description:
  *     Part of the Unity client's backend layer. AuthClient logs in against the team's shared
@@ -208,6 +208,8 @@ namespace Formula9.Backend
         protected async Task<HttpResponse> SendForReplyAsync(HttpRequest request, CancellationToken cancellation,
             Action<ApiError> onUnauthorized = null)
         {
+            // A build's own backend can take a few seconds to start after the player opens.
+            await BundledBackend.WhenReadyAsync(cancellation);
             var response = await Transport.SendAsync(request, cancellation);
             if (response.Failure == HttpFailure.Cancelled) throw new OperationCanceledException(cancellation);
             if (!response.Complete) throw new NoReplyException($"No complete reply from {request.Method} {request.Url.AbsolutePath}");
