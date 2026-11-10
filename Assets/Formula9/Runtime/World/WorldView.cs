@@ -50,6 +50,7 @@ namespace Formula9.World
         private SceneLoader loader;
         private Camera viewCamera;
         private readonly List<Camera> trafficCameras = new List<Camera>();
+        private ShuttleCameraRig shuttleCameras;
         private RenderTexture texture;
         private WorldScene world;
         private SpatialReference shownPins;
@@ -147,6 +148,8 @@ namespace Formula9.World
             var cameraObject = new GameObject("World Camera");
             cameraObject.transform.SetParent(transform, false);
             viewCamera = cameraObject.AddComponent<Camera>();
+            shuttleCameras = new ShuttleCameraRig(transform);
+            trafficCameras.AddRange(shuttleCameras.Cameras);
             trafficCameras.Add(viewCamera); 
             viewCamera.clearFlags = CameraClearFlags.SolidColor;
             viewCamera.backgroundColor = new Color(0.10f, 0.10f, 0.12f);
@@ -182,6 +185,7 @@ namespace Formula9.World
                 else DestroyImmediate(lineMaterial);
             }
             if (texture != null) texture.Release();
+            shuttleCameras?.Dispose();
         }
 
         // -----------------------------------------------------------------------------------
@@ -337,6 +341,8 @@ namespace Formula9.World
             if (CityShown && city != null)
             {
                 city.Tick(motion, Time.unscaledTime);
+                if (city.TryGetShuttlePose(selectedId, out var position, out var rotation))
+                    shuttleCameras.Place(position, rotation);
                 // On the same clock as the shuttles, and still when they are
                 city.TickTraffic(latest.Session?.Status == "RUNNING" ? Time.unscaledDeltaTime : 0, trafficCameras);
             }
