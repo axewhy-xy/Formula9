@@ -35,6 +35,13 @@ every launch logs in again. If login expires during session creation, signing
 back in as the same user confirms the original attempt with its original key.
 Another account cannot retry an unresolved creation belonging to that user.
 
+Session IDs are readable: the place, a running number, then the server's local
+date and time of creation, such as `toa-payoh-007-10nov-1340` for the 7th session,
+a Toa Payoh exercise created on 10 November at 13:40 (`fleet-3d` and `fleet-loop`
+name the other two scenarios). The running number is stored in the database and
+is never reused, even after a session is deleted. Sessions created before this
+change keep their older random IDs.
+
 To observe the same run, copy its session ID into the other app and click
 **Open session** (web) or **Join** (native). Joining, refreshing, reconnecting and
 closing a client do not create or stop an actor.
