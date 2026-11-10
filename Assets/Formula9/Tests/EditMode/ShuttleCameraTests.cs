@@ -1,5 +1,5 @@
 /*
- * Unit tests for the shuttle camera panel (ShuttleCameraRig.cs, WorldView.cs).
+ * Unit tests for the shuttle cameras (ShuttleCameraRig.cs, WorldView.cs).
  *
  * Author: Choo Jian Wei
  * Date Created: 10/11/2026
@@ -7,10 +7,12 @@
  *
  * Description:
  *     Builds the real WorldView with the training layout, a one-building city and the shared
- *     planar snapshot, then checks that the camera panel starts hidden with its five cameras off,
- *     that showing it switches them on and mounts them around the selected shuttle, that they
- *     then take turns drawing one per frame, that they follow the shuttle as it moves and
- *     turns, and that the panel closes itself when there is no shuttle left to watch.
+ *     planar snapshot, then checks that the camera view starts hidden with its four cameras off,
+ *     that showing it replaces the 3D view and mounts the cameras around the selected shuttle,
+ *     that the camera shown large draws every frame while the thumbnails take turns, that a
+ *     thumbnail can be shown large, that the cameras follow the shuttle as it moves and turns,
+ *     and that the 3D view comes back when there is no shuttle left to watch or something
+ *     else needs it.
  */
 
 using System;
@@ -35,11 +37,11 @@ namespace Formula9.Tests
     // Class: ShuttleCameraTests
     // -----------------------------------------------------------------------------------
     // Description:
-    //     This class tests the shuttle camera panel against a real WorldView.
+    //     This class tests the shuttle camera view against a real WorldView.
     public class ShuttleCameraTests
     {
         private const string Shuttle = "shuttle-01";
-        private static readonly string[] Names = { "Front", "Rear", "Left", "Right", "Bird's eye" };
+        private static readonly string[] Names = { "Front", "Rear", "Left", "Right" };
 
         // Serves a city of one building away from the shuttles, so the city loads at once.
         private sealed class OneBuilding : IHttpTransport
@@ -105,8 +107,11 @@ namespace Formula9.Tests
             typeof(WorldView).GetMethod("Update", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(view, null);
 
         private VisualElement Panel() => root.Q(className: "camera-panel");
+        private VisualElement[] Tiles() => Panel().Query(className: "camera-tile").ToList().ToArray();
+        private Label MainLabel() => Panel().Q(className: "camera-main").Q<Label>();
         private Camera Cam(string name) => rig.GetComponentsInChildren<Camera>(true).Single(c => c.name == "Shuttle camera " + name);
         private Camera[] Cams() => Names.Select(Cam).ToArray();
+        private Camera WorldCamera() => rig.GetComponentsInChildren<Camera>(true).Single(c => c.name == "World Camera");
         private Transform ShuttleTransform() =>
             rig.GetComponentsInChildren<Transform>(true).First(t => t.name == "Shuttle " + Shuttle);
 
@@ -120,54 +125,76 @@ namespace Formula9.Tests
             Assert.Less(Vector3.Dot(Cam("Rear").transform.position - s.position, s.forward), -6f, "rear is at the tail");
             Assert.Greater(Vector3.Dot(Cam("Left").transform.forward, -s.right), 0.999f, "left looks left");
             Assert.Greater(Vector3.Dot(Cam("Right").transform.forward, s.right), 0.999f, "right looks right");
-            foreach (var name in new[] { "Front", "Rear", "Left", "Right" })
+            foreach (var name in Names)
                 Assert.AreEqual(s.position.y - 0.5f, Cam(name).transform.position.y, 1e-3f, name + " is about 2 m above the road");
-            Assert.Greater(Vector3.Dot(Cam("Bird's eye").transform.forward, Vector3.down), 0.999f, "bird's eye looks straight down");
-            Assert.AreEqual(s.position.y + 25, Cam("Bird's eye").transform.position.y, 1e-3f, "bird's eye is 25 m up");
-            Assert.IsTrue(Cam("Bird's eye").orthographic, "bird's eye is orthographic");
         }
 
         [Test]
-        public void PanelStartsHiddenWithFiveLabelledTilesAndCamerasOff()
+        public void ViewStartsHiddenWithFourLabelledThumbnailsAndCamerasOff()
         {
-            Assert.AreEqual(DisplayStyle.None, Panel().style.display.value, "panel hidden");
+            Assert.AreEqual(DisplayStyle.None, Panel().style.display.value, "camera view hidden");
             Assert.IsFalse(view.CamerasShown);
-            var labels = Panel().Query<Label>(className: "camera-label").ToList().Select(l => l.text).ToArray();
-            CollectionAssert.AreEqual(Names, labels, "one labelled tile per camera, in order");
+            var labels = Tiles().Select(t => t.Q<Label>().text).ToArray();
+            CollectionAssert.AreEqual(Names, labels, "one labelled thumbnail per camera, in order");
+            Assert.AreEqual("Front", MainLabel().text, "the front camera is shown large first");
+            Assert.IsTrue(Tiles()[0].ClassListContains("camera-tile-selected"), "and its thumbnail is marked");
             Assert.IsTrue(Cams().All(c => !c.enabled), "cameras off while nobody watches");
-            Assert.IsTrue(Cams().All(c => c.targetTexture != null && c.targetTexture.width == 320 && c.targetTexture.height == 180));
+            Assert.IsTrue(Cams().All(c => c.targetTexture != null && c.targetTexture.width == 960 && c.targetTexture.height == 540),
+                "big enough to fill the 3D view");
+            Assert.IsFalse(rig.GetComponentsInChildren<Camera>(true).Any(c => c.name.Contains("Bird")), "no bird's-eye camera");
         }
 
         [Test]
-        public void ShowingCamerasSwitchesThemOnAndMountsThemOnTheShuttle()
+        public void ShowingCamerasReplacesThe3DViewAndMountsThemOnTheShuttle()
         {
             Assert.IsTrue(view.CanShowCameras, "a selected shuttle in the 3D city can be watched");
+            Assert.IsTrue(WorldCamera().enabled, "the 3D view draws before the cameras open");
             view.ShowCameras(true);
-            Assert.IsTrue(Cams().All(c => c.enabled), "every camera draws once on opening, so no tile starts blank");
+            Assert.IsTrue(Cams().All(c => c.enabled), "every camera draws once on opening, so no thumbnail starts blank");
+            Assert.IsFalse(WorldCamera().enabled, "the 3D view stops drawing while the cameras cover it");
             Frame();
             Assert.IsTrue(view.CamerasShown, "still open after a frame");
             Assert.AreEqual(DisplayStyle.Flex, Panel().style.display.value);
-            Assert.AreEqual(1, Cams().Count(c => c.enabled), "one camera draws each frame, taking turns");
             AssertMounted();
+
+            view.Show(Snapshot());
+            Assert.IsFalse(WorldCamera().enabled, "a new snapshot does not bring the 3D view back");
         }
 
         [Test]
-        public void CamerasTakeTurnsSoEachDrawsOnceEveryFiveFrames()
+        public void TheLargeCameraDrawsEveryFrameAndTheThumbnailsTakeTurns()
         {
             view.ShowCameras(true);
             var turns = new int[Names.Length];
-            for (var frame = 0; frame < Names.Length * 2; frame++)
+            for (var frame = 0; frame < 6; frame++)
             {
                 Frame();
+                Assert.IsTrue(Cam("Front").enabled, $"the large camera draws on frame {frame}");
                 var on = Cams().Select((c, i) => (c, i)).Where(p => p.c.enabled).Select(p => p.i).ToList();
-                Assert.AreEqual(1, on.Count, $"exactly one camera draws on frame {frame}");
-                turns[on[0]]++;
+                Assert.AreEqual(2, on.Count, $"the large camera and one thumbnail draw on frame {frame}");
+                turns[on.Single(i => i != 0)]++;
             }
-            CollectionAssert.AreEqual(Enumerable.Repeat(2, Names.Length), turns, "every camera got two turns in ten frames");
+            CollectionAssert.AreEqual(new[] { 0, 2, 2, 2 }, turns, "the other three take turns, twice each in six frames");
+
+            view.SelectCamera(2);
+            Frame();
+            Assert.IsTrue(Cam("Left").enabled, "the newly chosen camera draws every frame");
+            Assert.AreEqual(2, Cams().Count(c => c.enabled));
 
             view.ShowCameras(false);
             Frame();
-            Assert.IsTrue(Cams().All(c => !c.enabled), "no turns while the panel is closed");
+            Assert.IsTrue(Cams().All(c => !c.enabled), "no turns while the view is closed");
+        }
+
+        [Test]
+        public void AThumbnailCanBeShownLarge()
+        {
+            view.ShowCameras(true);
+            view.SelectCamera(1);
+            Assert.AreEqual(1, view.MainCamera);
+            Assert.AreEqual("Rear", MainLabel().text);
+            Assert.IsTrue(Tiles()[1].ClassListContains("camera-tile-selected"));
+            Assert.IsFalse(Tiles()[0].ClassListContains("camera-tile-selected"), "only one thumbnail is marked");
         }
 
         [Test]
@@ -184,7 +211,7 @@ namespace Formula9.Tests
         }
 
         [Test]
-        public void HidingCamerasSwitchesThemOff()
+        public void HidingCamerasBringsThe3DViewBack()
         {
             view.ShowCameras(true);
             Frame();
@@ -192,10 +219,11 @@ namespace Formula9.Tests
             Assert.IsFalse(view.CamerasShown);
             Assert.AreEqual(DisplayStyle.None, Panel().style.display.value);
             Assert.IsTrue(Cams().All(c => !c.enabled));
+            Assert.IsTrue(WorldCamera().enabled, "the 3D view draws again");
         }
 
         [Test]
-        public void PanelClosesItselfWithoutAShuttleToWatch()
+        public void CamerasCloseWithoutAShuttleToWatch()
         {
             view.ShowCameras(true);
             Frame();
@@ -213,6 +241,20 @@ namespace Formula9.Tests
         }
 
         [Test]
+        public void OverviewAndFollowSelectedPutThe3DViewBack()
+        {
+            view.ShowCameras(true);
+            view.Overview();
+            Assert.IsFalse(view.CamerasShown, "Overview needs the 3D view");
+            Assert.IsTrue(WorldCamera().enabled);
+
+            view.ShowCameras(true);
+            view.FollowSelected();
+            Assert.IsFalse(view.CamerasShown, "so does Follow selected");
+            Assert.IsTrue(WorldCamera().enabled);
+        }
+
+        [Test]
         public void CamerasAreDrawnWithTheTraffic()
         {
             var traffic = (System.Collections.Generic.List<Camera>)typeof(WorldView)
@@ -221,7 +263,7 @@ namespace Formula9.Tests
         }
 
         // Pressing Cameras from the 2D map in a session whose city is still downloading: the
-        // button opens the panel straight away, so it should stay open once the city arrives.
+        // button opens the camera view straight away, so it should stay open once the city arrives.
         [UnityTest]
         public IEnumerator CamerasPressedWhileTheCityLoadsStayOpen()
         {
@@ -240,7 +282,8 @@ namespace Formula9.Tests
             while (!arrived() && Time.realtimeSinceStartup < deadline) yield return null;
             Assert.IsTrue(arrived(), "the city loaded");
             Frame();
-            Assert.IsTrue(view.CamerasShown, "the panel survived the city load");
+            Assert.IsTrue(view.CamerasShown, "the camera view survived the city load");
+            Assert.IsFalse(WorldCamera().enabled, "and still covers the 3D view");
         }
 
         [Test]

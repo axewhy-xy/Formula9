@@ -838,27 +838,46 @@
     color: rgb(255, 255, 255);
     background-color: rgba(15, 30, 38, 0.85);
 }
-/* Shuttle cameras: a 3x2 grid of blind-spot views, top right of the 3D view. */
+/* Shuttle cameras: they cover the whole 3D view, one camera large with the rest as thumbnails below. */
 .camera-panel {
     position: absolute;
-    right: 10px;
-    top: 10px;
-    width: 492px;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgb(26, 26, 30);
+}
+/* The large camera fills the space above the thumbnails; cropped, not stretched, to keep its shape. */
+.camera-main {
+    flex-grow: 1;
+    -unity-background-scale-mode: scale-and-crop;
+}
+.camera-strip {
     flex-direction: row;
-    flex-wrap: wrap;
+    flex-shrink: 0;
+    justify-content: center;
+    padding: 6px;
+    background-color: rgba(15, 30, 38, 0.9);
 }
 .camera-tile {
     width: 160px;
     height: 90px;
-    margin: 2px;
+    margin: 0 4px;
     border-radius: 4px;
+    border-width: 2px;
+    border-color: rgba(0, 0, 0, 0);
     background-color: rgb(26, 26, 30);
     -unity-background-scale-mode: stretch-to-fill;
 }
-/* A clicked tile: one camera at three times the size, across the top of the panel. */
-.camera-tile-large {
-    width: 488px;
-    height: 274px;
+/* The thumbnail of the camera shown large. */
+.camera-tile-selected {
+    border-color: rgb(13, 148, 136);
+}
+.camera-main .camera-label {
+    left: 10px;
+    top: 10px;
+    bottom: auto;
+    font-size: 14px;
 }
 .camera-label {
     position: absolute;

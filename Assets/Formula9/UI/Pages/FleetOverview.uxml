@@ -12,7 +12,7 @@
         <ui:Label name="fleet-selection" text="Select a shuttle in the fleet or map." class="workspace-text" />
         <ui:VisualElement class="row">
             <ui:Button name="follow-selected" text="Follow selected" />
-            <ui:Button name="drive-selected" text="Driver view" />
+            <ui:Button name="fleet-cameras" text="Cameras" tooltip="Watch the selected shuttle through its blind-spot cameras: front, rear and sides." />
             <ui:Button name="camera-overview" text="Overview" />
         </ui:VisualElement>
     </ui:VisualElement>

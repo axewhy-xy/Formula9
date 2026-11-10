@@ -27,7 +27,7 @@ namespace Formula9.UI
         private readonly DropdownField routes, incidents, candidates;
         private readonly TextField routeReason, incidentReason;
         private readonly Label routeProblem, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes, incidentData, incidentReport, selection;
-        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowClosure, routeDriver, routeCameras, approve, routeStart, routeWatch, previewIncident, approveIncident, rerouteIncident, history, debrief;
+        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowClosure, routeCameras, fleetCameras, approve, routeStart, routeWatch, previewIncident, approveIncident, rerouteIncident, history, debrief;
         private readonly FleetMap evidenceMap;
         private readonly VisualElement routeStages, routeWaypoints, routeIssues, routeMetrics, routeDecide, routeFeedback, routeApply, routeOutcomePanel, routeOutcomeRows, fleetTable;
         private readonly List<VisualElement> operationalViews;
@@ -90,13 +90,12 @@ namespace Formula9.UI
             }
             selection = root.Q<Label>("fleet-selection");
             Bind(root, "follow-selected", () => world.FollowSelected());
-            Bind(root, "drive-selected", () => world.DriveSelected());
+            fleetCameras = Bind(root, "fleet-cameras", ToggleSelectedCameras);
             Bind(root, "camera-overview", () => world.Overview());
 
             routes = root.Q<DropdownField>("routes");
-            routes.RegisterValueChangedCallback(_ => { ResetDraft(); dependencies = null; RequestContext(); if (world.Driving) DriveRoute(); });
+            routes.RegisterValueChangedCallback(_ => { ResetDraft(); dependencies = null; RequestContext(); if (world.CamerasShown) ShowRouteCameras(); });
             Bind(root, "refresh", RequestContext);
-            routeDriver = Bind(root, "route-driver", ToggleDriverView);
             routeCameras = Bind(root, "route-cameras", ToggleCameras);
             routeStages = root.Q("route-stages");
             foreach (var stage in RoutePresenter.Stages) { var chip = new Label(stage); chip.AddToClassList("route-stage"); routeStages.Add(chip); }
@@ -170,7 +169,8 @@ namespace Formula9.UI
                 if (outcome.Status != "QUEUED" && outcome.Status != "PENDING_CONFIRMATION") { InvalidateRoute(); ClearIncidentPreview(); }
                 RenderReports(); UpdateActions();
             };
-            world.EntitySelected += id => { selection.text = "Selected: " + id; };
+            // The Cameras buttons depend on which shuttle is selected
+            world.EntitySelected += id => { selection.text = "Selected: " + id; UpdateActions(); };
             world.RouteNodeSelected += AppendNode;
             world.RoadClicked += AddRoad;
             world.WaypointClicked += RemoveWaypoint;
@@ -288,12 +288,12 @@ namespace Formula9.UI
             routeStart.style.display = s?.Session.Status == "READY" && !routeClosed ? DisplayStyle.Flex : DisplayStyle.None;
             routeStart.SetEnabled(Current && s?.Session.Status == "READY" && !routeClosed);
             routeWatch.style.display = s != null && s.Session.Status != "READY" && outcome?.VehicleId != null ? DisplayStyle.Flex : DisplayStyle.None;
-            routeDriver.SetEnabled(world.Driving || (world.CanDrive && RouteVehicle() != null));
-            routeDriver.text = world.Driving ? "Leave driver view" : "Driver view";
-            routeDriver.EnableInClassList("segment-selected", world.Driving);
-            routeCameras.SetEnabled(world.CamerasShown || (world.CanDrive && RouteVehicle() != null));
+            routeCameras.SetEnabled(world.CamerasShown || (world.HasCity && RouteVehicle() != null));
             routeCameras.text = world.CamerasShown ? "Hide cameras" : "Cameras";
             routeCameras.EnableInClassList("segment-selected", world.CamerasShown);
+            fleetCameras.SetEnabled(world.CamerasShown || (world.HasCity && s?.Vehicles.Any(v => v.VehicleId == world.SelectedId) == true));
+            fleetCameras.text = world.CamerasShown ? "Hide cameras" : "Cameras";
+            fleetCameras.EnableInClassList("segment-selected", world.CamerasShown);
             charging.UpdateActions();
             var candidate = s?.Candidates.FirstOrDefault(c => c.CandidateId == candidates.value && c.IncidentId == incidents.value);
             var decision = Current && !incidentBusy && s?.Session.Status == "RUNNING" && candidate?.Validation == "PASS" && candidate.ExpiresAtTick >= s.Tick &&
@@ -314,7 +314,7 @@ namespace Formula9.UI
 
         // A closure holding a shuttle brings the route editor to that shuttle's route, whatever the
         // operator was looking at. A decision, or the road reopening, ends it and leaves the editor there.
-        // Someone in a driver's seat stays in it, in the shuttle they chose, until they leave it.
+        // Someone watching a shuttle's cameras keeps watching it, until they close them.
         private void FollowHeldIncident(FullSnapshot s)
         {
             var held = DecisionRules.HeldIncident(s);
@@ -328,16 +328,16 @@ namespace Formula9.UI
             dependencies = null;
             if (held == null)
             {
-                // A route is edited on the map; running, it is watched in 3D, or from the driver's seat
-                if (shownPage == RoutePage && heldVehicle != null && !world.Driving) world.WatchShuttle(heldVehicle);
+                // A route is edited on the map; running, it is watched in 3D, or through its cameras
+                if (shownPage == RoutePage && heldVehicle != null && !world.CamerasShown) world.WatchShuttle(heldVehicle);
                 return;
             }
             Choices(incidents, s.Incidents.Select(i => i.IncidentId));
             incidents.SetValueWithoutNotify(held.IncidentId);
-            if (!world.Driving) SelectVehicle(held.VehicleId);
+            if (!world.CamerasShown) SelectVehicle(held.VehicleId);
             notify($"{held.VehicleId} is held at a road closure. Route it round the closure, or choose another option in the Incident Monitor.");
             ShowPage(RoutePage);
-            if (!world.Driving) world.ShowMap(true);
+            if (!world.CamerasShown) world.ShowMap(true);
         }
 
         private void InvalidateRoute()
@@ -467,10 +467,10 @@ namespace Formula9.UI
         {
             var s = session.Store.Snapshot;
             if (!Current || s?.Session.Status != "READY") return;
-            if (await session.SendControlAsync("START")) { if (!world.Driving) WatchRoute(); await session.RefreshAsync(); }
+            if (await session.SendControlAsync("START")) { if (!world.CamerasShown) WatchRoute(); await session.RefreshAsync(); }
         }
 
-        // The shuttle this route's driver view rides in: the selected one if it is on this route.
+        // The shuttle whose cameras this route shows: the selected one if it is on this route.
         private string RouteVehicle()
         {
             var onRoute = session.Store.Snapshot?.Vehicles.Where(v => v.RouteId == routes.value).OrderBy(v => v.VehicleId, StringComparer.Ordinal).Select(v => v.VehicleId).ToList();
@@ -478,42 +478,42 @@ namespace Formula9.UI
             return onRoute.Contains(world.SelectedId) ? world.SelectedId : outcome?.VehicleId ?? onRoute.FirstOrDefault();
         }
 
-        private void DriveRoute()
+        // Shows the cameras of this route's shuttle in place of the 3D view.
+        private void ShowRouteCameras()
         {
             var vehicle = RouteVehicle();
             if (vehicle == null) return;
             SelectVehicle(vehicle);
-            world.DriveSelected();
+            world.ShowMap(false);
+            world.ShowCameras(true);
         }
 
-        private void ToggleDriverView()
+        // The Cameras button on Route Planning: this route's shuttle's cameras, or back to 3D.
+        private void ToggleCameras()
         {
-            if (world.Driving)
-            {
-                world.StopDriving();
-                // A closure that came up during the drive is waiting on the map
-                var held = DecisionRules.HeldIncident(session.Store.Snapshot);
-                if (held != null) { SelectVehicle(held.VehicleId); world.ShowMap(true); }
-            }
-            else DriveRoute();
+            if (world.CamerasShown) CloseCameras();
+            else ShowRouteCameras();
             UpdateActions();
         }
 
-        private void ToggleCameras()
+        // The Cameras button on Fleet Overview: the selected shuttle's cameras, or back to 3D.
+        private void ToggleSelectedCameras()
         {
-            if (world.CamerasShown)
+            if (world.CamerasShown) CloseCameras();
+            else if (session.Store.Snapshot?.Vehicles.Any(v => v.VehicleId == world.SelectedId) == true)
             {
-                world.ShowCameras(false);
-            }
-            else
-            {
-                var vehicle = RouteVehicle();
-                if (vehicle == null) return;
-                SelectVehicle(vehicle);
                 world.ShowMap(false);
                 world.ShowCameras(true);
             }
             UpdateActions();
+        }
+
+        private void CloseCameras()
+        {
+            world.ShowCameras(false);
+            // A closure that came up while watching is waiting on the map
+            var held = DecisionRules.HeldIncident(session.Store.Snapshot);
+            if (held != null) { SelectVehicle(held.VehicleId); world.ShowMap(true); }
         }
 
         private void WatchRoute()
@@ -827,8 +827,8 @@ namespace Formula9.UI
             var entering = index == RoutePage && shownPage != RoutePage;
             shownPage = index;
             FitSessionControls();
-            // A route is edited on the map; running, it is watched in 3D. Leaving a driver's seat is the driver's call.
-            if (entering && Drafting(session.Store.Snapshot) && !world.Driving) world.ShowMap(true);
+            // A route is edited on the map; running, it is watched in 3D. Closing the cameras is the operator's call.
+            if (entering && Drafting(session.Store.Snapshot) && !world.CamerasShown) world.ShowMap(true);
             ShowDraftInViews();
             RenderWaypoints();
             RenderFeedback();

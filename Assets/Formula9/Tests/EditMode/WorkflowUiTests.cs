@@ -134,10 +134,10 @@ namespace Formula9.Tests
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
         }
 
-        // The route page's toggle rides in a shuttle of the chosen route, keeps to the selected one
-        // when that is on the route, and goes back to the map the route is drafted on.
+        // The route page's toggle shows the cameras of a shuttle of the chosen route, in place of
+        // the 3D view, and keeps to the selected one when that is on the route.
         [Test]
-        public async Task RoutePlanningTogglesTheDriverViewOfTheRoutesShuttle()
+        public async Task RoutePlanningTogglesTheCamerasOfTheRoutesShuttle()
         {
             var raw = Fixture("snapshot"); raw["session"]["status"] = "READY";
             var backend = new Backend();
@@ -159,13 +159,14 @@ namespace Formula9.Tests
             var api = new TrainingApi(backend, auth, url);
             var session = new SessionController(api, auth);
             var root = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/Formula9/UI/Formula9App.uxml").CloneTree();
-            var rig = new GameObject("Route driver view test"); var world = rig.AddComponent<WorldView>();
+            var rig = new GameObject("Route cameras test"); var world = rig.AddComponent<WorldView>();
             try
             {
                 world.Attach(root.Q("world"), new SceneLoader(backend, url), null, null, new CityClient(backend, url));
                 var workspace = new TrainingWorkspace(root, api, session, world, _ => { }, _ => { });
-                var toggle = root.Q<Button>("route-driver");
-                var press = typeof(TrainingWorkspace).GetMethod("ToggleDriverView", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                Assert.IsNull(root.Q<Button>("route-driver"), "no driver view any more");
+                var toggle = root.Q<Button>("route-cameras");
+                var press = typeof(TrainingWorkspace).GetMethod("ToggleCameras", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 await session.JoinAsync((string)raw["session_id"]);
                 world.Show(session.Store.Snapshot);
                 workspace.ShowRoutePlanning();
@@ -173,16 +174,16 @@ namespace Formula9.Tests
                 Assert.IsTrue(toggle.enabledSelf);
 
                 press.Invoke(workspace, null);
-                Assert.IsTrue(world.Driving);
-                Assert.IsFalse(world.ShowingMap);
+                Assert.IsTrue(world.CamerasShown);
+                Assert.IsFalse(world.ShowingMap, "the cameras are watched in the 3D city");
                 Assert.AreEqual("shuttle-01", world.SelectedId, "the route's first shuttle");
-                Assert.AreEqual("Leave driver view", toggle.text);
+                Assert.AreEqual("Hide cameras", toggle.text);
                 Assert.IsTrue(toggle.ClassListContains("segment-selected"));
 
                 press.Invoke(workspace, null);
-                Assert.IsFalse(world.Driving);
-                Assert.IsTrue(world.ShowingMap, "back on the map");
-                Assert.AreEqual("Driver view", toggle.text);
+                Assert.IsFalse(world.CamerasShown);
+                Assert.IsFalse(world.ShowingMap, "back to the 3D view the cameras covered");
+                Assert.AreEqual("Cameras", toggle.text);
 
                 workspace.SelectVehicle("shuttle-03");
                 press.Invoke(workspace, null);
@@ -191,10 +192,11 @@ namespace Formula9.Tests
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
         }
 
-        // A closure holding a shuttle opens the map on it, except for someone driving: they keep their
-        // seat in the shuttle they chose, and leaving it takes them to the map and the held shuttle.
+        // A closure holding a shuttle opens the map on it, except for someone watching a shuttle's
+        // cameras: they keep watching the shuttle they chose, and closing the cameras takes them to
+        // the map and the held shuttle.
         [Test]
-        public async Task AClosureLeavesADriverInTheirSeat()
+        public async Task AClosureLeavesSomeoneWatchingTheCameras()
         {
             var raw = Fixture("snapshot");
             var backend = new Backend();
@@ -216,7 +218,7 @@ namespace Formula9.Tests
             var api = new TrainingApi(backend, auth, url);
             var session = new SessionController(api, auth);
             var root = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/Formula9/UI/Formula9App.uxml").CloneTree();
-            var rig = new GameObject("Held closure driver test"); var world = rig.AddComponent<WorldView>();
+            var rig = new GameObject("Held closure cameras test"); var world = rig.AddComponent<WorldView>();
             var wait = (JObject)raw["candidates"][0];
             var detour = (JObject)wait.DeepClone(); detour["candidate_id"] = "candidate-detour-1"; detour["action"] = "ROAD_DETOUR";
             async Task Hold(bool held)
@@ -230,24 +232,24 @@ namespace Formula9.Tests
             {
                 world.Attach(root.Q("world"), new SceneLoader(backend, url), null, null, new CityClient(backend, url));
                 var workspace = new TrainingWorkspace(root, api, session, world, _ => { }, _ => { });
-                var toggle = root.Q<Button>("route-driver");
-                var press = typeof(TrainingWorkspace).GetMethod("ToggleDriverView", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var toggle = root.Q<Button>("fleet-cameras");
+                var press = typeof(TrainingWorkspace).GetMethod("ToggleSelectedCameras", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 await session.JoinAsync((string)raw["session_id"]);
                 world.Show(session.Store.Snapshot);
                 workspace.ShowSection("operations");
                 workspace.SelectVehicle("shuttle-03");
                 press.Invoke(workspace, null);
-                Assert.IsTrue(world.Driving);
+                Assert.IsTrue(world.CamerasShown);
 
                 await Hold(true);
                 workspace.Render();
-                Assert.IsTrue(world.Driving, "still driving");
+                Assert.IsTrue(world.CamerasShown, "still watching");
                 Assert.IsFalse(world.ShowingMap, "still in the city");
-                Assert.AreEqual("shuttle-03", world.SelectedId, "still in the shuttle they chose");
-                Assert.AreEqual("Leave driver view", toggle.text);
+                Assert.AreEqual("shuttle-03", world.SelectedId, "still watching the shuttle they chose");
+                Assert.AreEqual("Hide cameras", toggle.text);
 
                 press.Invoke(workspace, null);
-                Assert.IsFalse(world.Driving);
+                Assert.IsFalse(world.CamerasShown);
                 Assert.IsTrue(world.ShowingMap, "leaving goes to the closure, on the map");
                 Assert.AreEqual("shuttle-01", world.SelectedId, "the held shuttle");
 
@@ -257,7 +259,7 @@ namespace Formula9.Tests
                 workspace.SelectVehicle("shuttle-03");
                 await Hold(true);
                 workspace.Render();
-                Assert.IsTrue(world.ShowingMap, "not driving: the closure opens the map");
+                Assert.IsTrue(world.ShowingMap, "not watching the cameras: the closure opens the map");
                 Assert.AreEqual("shuttle-01", world.SelectedId, "on the held shuttle");
             }
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }

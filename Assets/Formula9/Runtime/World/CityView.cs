@@ -53,7 +53,7 @@ namespace Formula9.World
         private RouteDraftView shownDraft;
         private RouteEditPreview shownPreview;
         private string shownHighlights, shownWaypoints, shownClosures;
-        private string routesKey, hiddenShuttle;
+        private string routesKey;
         private Material buildingMaterial, lineMaterial;
         private readonly CityIncidents incidents;
         private readonly TransitClient transit;
@@ -918,7 +918,7 @@ namespace Formula9.World
                 {
                     var line = new GameObject("Route " + route.RouteId).AddComponent<LineRenderer>();
                     line.transform.SetParent(root, false);
-                    // Flat on the road: by default a line turns to face the camera, like a wall in the driver view
+                    // Flat on the road: by default a line turns to face the camera, like a wall in the shuttle's cameras
                     line.transform.localRotation = Quaternion.Euler(90, 0, 0);
                     line.alignment = LineAlignment.TransformZ;
                     line.numCornerVertices = 4;
@@ -1004,16 +1004,6 @@ namespace Formula9.World
             position = shuttle.position;
             rotation = shuttle.rotation;
             return true;
-        }
-
-        // Hides the shuttle the driver camera sits in, or none: from inside, the back of its own
-        // windscreen would fill the view. A hidden shuttle still moves, so the camera can follow it.
-        public void HideShuttle(string id)
-        {
-            if (id == hiddenShuttle) return;
-            if (hiddenShuttle != null && shuttles.TryGetValue(hiddenShuttle, out var shown)) shown.gameObject.SetActive(true);
-            hiddenShuttle = id;
-            if (id != null && shuttles.TryGetValue(id, out var hidden)) hidden.gameObject.SetActive(false);
         }
 
         public void Dispose()

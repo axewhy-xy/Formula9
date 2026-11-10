@@ -6,12 +6,12 @@
  * Last Modified: 10/11/2026
  *
  * Description:
- *     Mounts five cameras on the selected shuttle, the way real AV shuttles
- *     are watched remotely: front, rear, left, right, and a top-down
- *     bird's-eye view. Each camera draws into its
- *     own small render texture for the camera panel. The cameras start
- *     switched off, see only nearby, and follow the shuttle when placed
- *     each frame.
+ *     Mounts four cameras on the selected shuttle, the way real AV shuttles
+ *     are watched remotely: front, rear, left and right, about 2 m above
+ *     the road. Each camera draws into its own render texture for the
+ *     camera view, which shows one of them large and the rest as
+ *     thumbnails. The cameras start switched off, see only nearby, and
+ *     follow the shuttle when placed each frame.
  */
 using System.Collections.Generic;
 using UnityEngine;
@@ -31,20 +31,20 @@ namespace Formula9.World
         }
 
         // One camera per blind spot, just outside a bus 4.6 m wide, 4.7 m tall and 12.6 m long,
-        // about 2 m above the road. A pitch of 90 looks straight down and makes the bird's-eye
-        // camera orthographic.
+        // about 2 m above the road.
         private static readonly Mount[] Mounts =
         {
             new Mount { Name = "Front", Offset = new Vector3(0, -0.5f, 6.8f), Yaw = 0, Pitch = 0 },
             new Mount {Name = "Rear", Offset = new Vector3(0, -0.5f, -6.2f), Yaw = 180, Pitch = 0},
             new Mount {Name = "Left", Offset = new Vector3(-2.4f, -0.5f, 0), Yaw = -90, Pitch = 0},
-            new Mount {Name = "Right", Offset = new Vector3(2.4f, -0.5f, 0), Yaw = 90, Pitch = 0},
-            new Mount {Name = "Bird's eye", Offset = new Vector3(0, 25, 0), Yaw = 0, Pitch = 90}
+            new Mount {Name = "Right", Offset = new Vector3(2.4f, -0.5f, 0), Yaw = 90, Pitch = 0}
         };
+        // Big enough to fill the 3D view when shown large; the thumbnails scale it down.
+        private const int TextureWidth = 960, TextureHeight = 540;
         // One camera and one render texture per mount, in the same order as Mounts.
         private readonly Camera[] cameras;
         private readonly RenderTexture[] textures;
-        // Whether the cameras are in use, and which one draws on the next frame.
+        // Whether the cameras are in use, and which thumbnail draws on the next frame.
         private bool active;
         private int next;
 
@@ -52,9 +52,9 @@ namespace Formula9.World
         // Function: ShuttleCameraRig
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function creates one camera per mount, each drawing into its own 320x180
+        //     This function creates one camera per mount, each drawing into its own 960x540
         //     render texture. The cameras are wide (90 degrees), see only 300 m, and start
-        //     switched off. The bird's-eye camera is orthographic, showing 30 m top to bottom.
+        //     switched off.
         //
         // Args:
         //     parent (Transform): The object the cameras are created under.
@@ -71,13 +71,8 @@ namespace Formula9.World
                 cameras[i].nearClipPlane = 0.1f;
                 cameras[i].farClipPlane = 300;
                 cameras[i].enabled = false;
-                textures[i] = new RenderTexture(320, 180, 24);
+                textures[i] = new RenderTexture(TextureWidth, TextureHeight, 24);
                 cameras[i].targetTexture = textures[i];
-                if (Mounts[i].Pitch == 90)
-                {
-                    cameras[i].orthographic = true;
-                    cameras[i].orthographicSize = 15;
-                }
             }
         }
 
@@ -103,7 +98,7 @@ namespace Formula9.World
 
         // The cameras, so the traffic can be drawn for them too.
         public IReadOnlyList<Camera> Cameras => cameras;
-        // What each camera draws into, for the camera panel; same order as Cameras.
+        // What each camera draws into, for the camera view; same order as Cameras.
         public IReadOnlyList<RenderTexture> Textures => textures;
         // The name of camera i, for its label in the panel.
         public string NameOf(int i) => Mounts[i].Name;
@@ -129,14 +124,20 @@ namespace Formula9.World
         // Function: Tick
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function lets the cameras take turns: each frame only one of them draws, so
-        //     the panel costs one extra camera instead of five. At 60 frames a second each view
-        //     still refreshes twelve times a second. It does nothing while the cameras are off.
-        public void Tick()
+        //     This function picks which cameras draw this frame. The one shown large draws every
+        //     frame, so it moves smoothly; the thumbnails take turns, one a frame, so the view
+        //     costs two cameras instead of four. At 60 frames a second each thumbnail still
+        //     refreshes twenty times a second. It does nothing while the cameras are off.
+        //
+        // Args:
+        //     main (int): The camera shown large.
+        public void Tick(int main)
         {
             if (!active) return;
+            // The large camera draws anyway, so its turn as a thumbnail goes to the next one
+            if (next == main) next = (next + 1) % cameras.Length;
             for (var i = 0; i < cameras.Length; i++)
-                cameras[i].enabled = i == next;
+                cameras[i].enabled = i == main || i == next;
             next = (next + 1) % cameras.Length;
         }
 
