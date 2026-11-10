@@ -7,6 +7,7 @@ from collections.abc import Coroutine
 from contextvars import Context
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 import hashlib
 import logging
 import sqlite3
@@ -30,6 +31,22 @@ SCENARIO_REVISION = "scenario-m2-r1"
 SPATIAL_SCENARIO_REVISION = "scenario-m2-road-3d-r1"
 LIFECYCLE = {"START": "RUNNING", "PAUSE": "PAUSED", "RESUME": "RUNNING", "ARCHIVE": "ARCHIVED"}
 T = TypeVar("T")
+
+# The first part of a readable session id: where the exercise takes place.
+SESSION_PLACES = {SCENARIO_SELECTOR: "toa-payoh", SPATIAL_SCENARIO_REVISION: "fleet-3d", SCENARIO_REVISION: "fleet-loop"}
+# Fixed English month names, so the id does not depend on the server's locale.
+_MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
+
+
+def readable_session_id(scenario_revision_id: str, number: int, when: datetime | None = None) -> str:
+    """Name a session so people can tell it apart: place, running number, then local date and time.
+
+    For example toa-payoh-007-10nov-1340 is the 7th session, a Toa Payoh exercise
+    created on 10 November at 13:40. The running number alone keeps it unique.
+    """
+    when = when or datetime.now().astimezone()
+    place = SESSION_PLACES.get(scenario_revision_id, "session")
+    return f"{place}-{number:03d}-{when.day}{_MONTHS[when.month - 1]}-{when:%H%M}"
 
 
 async def wait_for_deadline(trace, deadline_ns, **tags):
@@ -224,12 +241,13 @@ class TrainingSessionService:
 
     def _create_initial(self, request: CreateSessionRequest, actor_id: str, key: str,
                         digest: str) -> tuple[FullSnapshot, SessionActor]:
+        session_id = readable_session_id(request.scenario_revision_id, self.store.next_session_number())
         if request.scenario_revision_id == SCENARIO_SELECTOR:
-            actor = IntegratedSessionActor(seed=request.seed, session_id=str(uuid4()))
+            actor = IntegratedSessionActor(seed=request.seed, session_id=session_id)
         elif request.scenario_revision_id == SPATIAL_SCENARIO_REVISION:
-            actor = SpatialSessionActor(seed=request.seed, session_id=str(uuid4()))
+            actor = SpatialSessionActor(seed=request.seed, session_id=session_id)
         else:
-            actor = SessionActor(seed=request.seed, route=load_routes_from_json(), session_id=str(uuid4()))
+            actor = SessionActor(seed=request.seed, route=load_routes_from_json(), session_id=session_id)
         actor.is_paused = True
         snapshot = actor.generate_snapshot()
         snapshot.session.status = "READY"

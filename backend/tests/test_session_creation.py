@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 import hashlib
 import json
+import re
 import sqlite3
 from threading import Event as ThreadEvent
 from uuid import uuid4
@@ -21,7 +22,7 @@ from src.auth.service import AuthService
 from src.auth.store import MemoryAccountStore
 from src.core.config import get_settings
 from src.persistence.training_store import TrainingStore, TrainingStoreError
-from src.services.training_sessions import TrainingSessionService
+from src.services.training_sessions import TrainingSessionService, readable_session_id
 
 TOKEN = "session-creation-test-credential"
 ACTOR = "training-operator"
@@ -851,3 +852,21 @@ def test_command_outcome_during_staged_tick_does_not_stop_runtime(api, monkeypat
     assert [e.event_type for e in store.replay(session_id, 0).events] == [
         "SESSION_RUNNING", "COMMAND_APPLIED", "COMMAND_REJECTED",
     ]
+
+
+def test_session_ids_are_readable_and_never_reused_after_delete(api, monkeypatch):
+    monkeypatch.setattr(TrainingSessionService, "_run", manual_clock)
+    client, store = api
+    first = create(client).json()["session_id"]
+    assert re.fullmatch(r"fleet-loop-001-\d{1,2}[a-z]{3}-\d{4}", first)
+    control(client, store.snapshot(first).model_dump(mode="json"), "ARCHIVE")
+    assert client.delete(f"/api/v2/sessions/{first}", headers=HEADERS).status_code == 204
+    second = client.post("/api/v2/sessions", headers={**HEADERS, "Idempotency-Key": "next"},
+                         json={**BODY, "scenario_revision_id": "scenario-m2-road-3d-r1"}).json()["session_id"]
+    assert second.startswith("fleet-3d-002-")
+
+
+def test_readable_session_id_names_place_number_date_and_time():
+    when = datetime(2026, 11, 10, 13, 40)
+    assert readable_session_id("scenario-m2-integrated-r1", 7, when) == "toa-payoh-007-10nov-1340"
+    assert readable_session_id("unknown", 1234, datetime(2026, 1, 5, 9, 5)) == "session-1234-5jan-0905"
