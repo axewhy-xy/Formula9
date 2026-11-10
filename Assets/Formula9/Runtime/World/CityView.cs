@@ -962,7 +962,7 @@ namespace Formula9.World
         }
 
         // Called once a frame, unlike Tick, which a new snapshot also calls. A delta of zero holds traffic still.
-        public void TickTraffic(float deltaTime, Camera camera)
+        public void TickTraffic(float deltaTime, IReadOnlyList<Camera> cameras)
         {
             if (traffic == null) return;
             hazardsDueS -= deltaTime;
@@ -975,7 +975,7 @@ namespace Formula9.World
             foreach (var pair in shuttles)
                 trafficObstacles.Add(new TrafficObstacle { Id = pair.Key, Position = pair.Value.position, Forward = pair.Value.forward, HalfLength = ShuttleSize.z / 2, HalfWidth = ShuttleSize.x / 2 });
             traffic.SetShuttles(trafficObstacles);
-            traffic.Tick(deltaTime, camera);
+            traffic.Tick(deltaTime, cameras);
         }
 
         // Called each frame: shuttles glide between the backend's poses.
