@@ -20,6 +20,11 @@ namespace Formula9.World
         private const int TileZoom = 17, FarTileZoom = 14;
         private const float GroundMarginM = 250, FarGroundMarginM = 6000, FarGroundDrop = 2;
         private static readonly Vector3 ShuttleSize = new Vector3(5, 5, 12);
+        // The bus model's body, for the traffic: it reaches 6.6 m ahead of the shuttle's position (6.0 m
+        // behind) and is 4.6 m wide. The plain box drawn when the model is missing is ShuttleSize.
+        private const float BusReachM = 6.6f, BusHalfWidthM = 2.3f;
+        private float BodyHalfLength => shuttlePrefab != null ? BusReachM : ShuttleSize.z / 2;
+        private float BodyHalfWidth => shuttlePrefab != null ? BusHalfWidthM : ShuttleSize.x / 2;
         // A route is a thin line lying on the road. It is cut through buildings wider than that, so a shuttle fits.
         private const float RouteWidthM = 1.35f, RouteHeightM = 0.3f, RouteCutHalfWidthM = 4;
         private static readonly Color KerbColor = new Color(0.66f, 0.66f, 0.64f), AsphaltColor = new Color(0.17f, 0.17f, 0.19f), MarkingColor = new Color(0.95f, 0.95f, 0.92f);
@@ -731,12 +736,15 @@ namespace Formula9.World
         public void Show(FullSnapshot snapshot, ShuttleMotion motion, float now)
         {
             var ordered = snapshot.Vehicles.OrderBy(v => v.VehicleId, StringComparer.Ordinal).ToList();
+            // The lights change on the session's clock, as the backend's shuttles stop by them
+            traffic?.FollowSignalClock(snapshot.SimulationTimeS);
             var routes = ShuttleMotion.Routes(snapshot);
             foreach (var gone in shuttles.Keys.Where(id => ordered.All(v => v.VehicleId != id)).ToList())
             {
                 WorldBuilder.Remove(shuttles[gone].gameObject);
                 shuttles.Remove(gone);
                 motion.Forget(gone);
+                traffic?.ForgetShuttle(gone);
             }
             for (var i = 0; i < ordered.Count; i++)
             {
@@ -754,6 +762,9 @@ namespace Formula9.World
 
                 routes.TryGetValue(vehicle.RouteId ?? "", out var route);
                 motion.SetTarget(vehicle.VehicleId, at, facing, now, route);
+                // On its route the traffic drives it, keeping to its lane, the lights and the cars around
+                // it; anywhere else, as in a depot yard, it glides to the backend's pose as before
+                traffic?.DriveShuttle(vehicle.VehicleId, vehicle.RouteId, route, at, facing, (float)vehicle.SpeedMps, BodyHalfLength, BodyHalfWidth);
             }
             Tick(motion, now);
             var key = string.Join(";", snapshot.Routes.Select(r => $"{r.RouteId}:{r.Revision}")) + snapshot.Disruptions.Count;
@@ -975,21 +986,32 @@ namespace Formula9.World
                 hazardsDueS = HazardRefreshS;
                 traffic.SetHazards(incidents.TrafficHazards());
             }
+            // The shuttles the traffic does not drive, where they are drawn
             trafficObstacles.Clear();
             foreach (var pair in shuttles)
-                trafficObstacles.Add(new TrafficObstacle { Id = pair.Key, Position = pair.Value.position, Forward = pair.Value.forward, HalfLength = ShuttleSize.z / 2, HalfWidth = ShuttleSize.x / 2 });
+                if (!traffic.DrivesShuttle(pair.Key))
+                    trafficObstacles.Add(new TrafficObstacle { Id = pair.Key, Position = pair.Value.position, Forward = pair.Value.forward, HalfLength = BodyHalfLength, HalfWidth = BodyHalfWidth });
             traffic.SetShuttles(trafficObstacles);
             traffic.Tick(deltaTime, cameras);
         }
 
-        // Called each frame: shuttles glide between the backend's poses.
+        // Called each frame: a shuttle on its route is where the traffic drove it; any other glides
+        // between the backend's poses.
         public void Tick(ShuttleMotion motion, float now)
         {
             foreach (var pair in shuttles)
-                if (motion.Sample(pair.Key, now, out var position, out var rotation))
+            {
+                if (traffic != null && traffic.TryGetShuttlePose(pair.Key, out var driven, out var facing))
+                    pair.Value.SetPositionAndRotation(driven, facing);
+                else if (motion.Sample(pair.Key, now, out var position, out var rotation))
                     pair.Value.SetPositionAndRotation(position, rotation);
+            }
             incidents.Tick(now, id => shuttles.TryGetValue(id, out var shuttle) ? shuttle : null);
         }
+
+        // The shuttles are put straight at their next poses, for a new session or a view that was not
+        // being drawn, as ShuttleMotion.Clear is for the glide.
+        public void ResetShuttles() => traffic?.ResetShuttles();
 
         public bool TryGetShuttle(string id, out Vector3 position)
         {

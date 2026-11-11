@@ -233,7 +233,7 @@ namespace Formula9.World
         public void Show(FullSnapshot snapshot)
         {
             var boundary = snapshot == null ? null : $"{snapshot.SessionId}/{snapshot.SessionEpoch}";
-            if (boundary != sessionBoundary) { sessionBoundary = boundary; preferMap = snapshot?.Spatial == null; following = false; LeaveCameras(); selectedId = null; routeContext = null; roadNetwork = null; incidentRecords.Clear(); motion.Clear(); DrawDraft(); }
+            if (boundary != sessionBoundary) { sessionBoundary = boundary; preferMap = snapshot?.Spatial == null; following = false; LeaveCameras(); selectedId = null; routeContext = null; roadNetwork = null; incidentRecords.Clear(); motion.Clear(); city?.ResetShuttles(); DrawDraft(); }
             latest = snapshot;
             if (snapshot != null) motion.BeginSnapshot(snapshot.Tick, Time.unscaledTime);
             if (snapshot?.Spatial == null)
@@ -701,6 +701,7 @@ namespace Formula9.World
             if (preferMap == value) { ViewChanged?.Invoke(); return; }
             preferMap = value;
             motion.Clear();
+            city?.ResetShuttles();
             if (latest != null) Show(latest);
             if (!value) FrameDraft();
             RefreshHud();

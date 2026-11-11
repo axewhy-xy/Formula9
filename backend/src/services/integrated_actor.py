@@ -41,6 +41,7 @@ from src.services.incidents import FIXTURE_PATH as INCIDENT_FIXTURE, IncidentSer
 from src.services.incident_scenarios.simulated_catalog import SimulatedIncidentCatalog
 from src.services.route_edit import RouteEditService
 from src.services.session_actor import SessionActor
+from src.traffic import route_signals, signal_cycle
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,12 @@ SCENARIO_ID = "m2-integrated"
 EPSILON = 1e-8
 FULL_TOLERANCE_KWH = 0.01  # auxiliary use keeps a plugged-in battery just under capacity
 YARD_WAIT_M = 15.0  # a shuttle waits this far short of the yard, clear of one driving out
+# The bus model the 3D view draws reaches this far ahead of a shuttle's position, so it stops this far
+# short of a red light's stop line
+SHUTTLE_FRONT_M = 6.6
+SIGNAL_AREA = "toa-payoh"
+# The longest a light can hold a shuttle: a whole yellow and red, arriving just as its green ends
+SIGNAL_WAIT_S = signal_cycle.PHASE_S * (signal_cycle.PHASES - 1) + signal_cycle.YELLOW_S + signal_cycle.ALL_RED_S
 
 
 def geometry(identifier: str, points: list) -> dict:
@@ -923,7 +930,65 @@ class IntegratedSessionActor(SessionActor):
             wait_at = self._yard_entry_m(shuttle)
             if wait_at is not None and shuttle.progress <= wait_at+EPSILON and end > wait_at and not self._may_enter_yard(shuttle):
                 ahead.append(wait_at)
+        hold = self._signal_hold(shuttle)
+        if hold is not None:
+            ahead.append(hold)
         return min([end, *ahead])
+
+    def _signal_hold(self, shuttle):
+        """How far the shuttle may go before a red light (or a yellow it can stop for) holds it.
+
+        The lights are the simulated ones the 3D view draws, on the session's clock, simulation time,
+        so this is deterministic and a restored session holds where the original did.
+        """
+        lines = self._route_stop_lines(shuttle.route_ID)
+        if not lines:
+            return None
+        return route_signals.hold_point(lines, self.timestamp_second, shuttle.progress, SHUTTLE_FRONT_M, shuttle.curr_vel)
+
+    def _route_stop_lines(self, route_id):
+        """The stop lines along a route, worked out again only when the route's path changes."""
+        waypoints = self._routes[route_id]["waypoints"]
+        cache = self.__dict__.setdefault("_stop_lines_cache", {})
+        known = cache.get(route_id)
+        if known is None or known[0] is not waypoints:
+            cache[route_id] = known = (waypoints, self._stop_lines_on([(p.x, p.y) for p in waypoints]))
+        return known[1]
+
+    @staticmethod
+    def _stop_lines_on(points):
+        junctions = route_signals.junctions(SIGNAL_AREA)
+        return route_signals.stop_lines(points, junctions) if junctions else []
+
+    def _lines_on(self, points):
+        return len(self._stop_lines_on(points))
+
+    def _signal_wait_s(self, shuttle, depot):
+        """The longest the lights could hold a shuttle on its way in to a depot.
+
+        Every stop line it has still to cross could be red: those left on its route, then those on
+        the depot's road in from the route's end (the longest way to any bay, as _route_tail).
+        The safety return does not allow for it: standing that long uses a fraction of a kWh, which
+        the reserve takes, so a shuttle may arrive that much under its reserve.
+        """
+        if shuttle.route_ID.startswith("depot-path-"):
+            return max(self._lines_on(self._depot_points(shuttle, charger_id)) for charger_id in depot["bays"])*SIGNAL_WAIT_S
+        ahead = sum(1 for line in self._route_stop_lines(shuttle.route_ID)
+                    if line.progress_m - SHUTTLE_FRONT_M - route_signals.STOP_MARGIN_M >= shuttle.progress - EPSILON)
+        end = self._routes[shuttle.route_ID]["waypoints"][-1]
+        route_id = self.domain.vehicles[shuttle.ID].route_id
+        root = route_id if route_id in depot["connectors"] else self.definition.data["route_edit"]["route_id"]
+        key = (end.x, end.y, root, depot["depot_id"])
+        tails = self.__dict__.setdefault("_tail_lines", {})
+        if key not in tails:
+            counts = []
+            for charger_id in depot["bays"]:
+                points = [(end.x, end.y), *(tuple(p) for p in depot["connectors"][root])]
+                bay = self.definition.bay_positions[charger_id]
+                points.extend([(bay[0], points[-1][1]), tuple(bay)])
+                counts.append(self._lines_on(points))
+            tails[key] = max(counts)
+        return (ahead + tails[key])*SIGNAL_WAIT_S
 
     def _schedule_first_incident(self):
         """Only the first shuttle, on its already approved live detour."""
@@ -1079,7 +1144,7 @@ class IntegratedSessionActor(SessionActor):
                 f"Type: {template.kind}; incident edge: {edge}; affected route edges: {impacted}.",
                 f"Operational impact: {'route directly blocked' if requires_guidance else 'traffic delay possible' if impacted else 'none; no action required'}.",
                 "Traffic impact estimated from shared endpoints (one graph hop).",
-                "No traffic volume, lanes or signal timings are modelled.",
+                "No traffic volume or lanes are modelled; shuttles stop at simulated traffic lights with made-up timings.",
                 "Nearby incidents may reduce speed on connected route edges; direct closures require guidance.",
                 "Scoring is provisional and not calibrated for real-world safety.",
             ],

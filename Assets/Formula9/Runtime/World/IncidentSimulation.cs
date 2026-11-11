@@ -85,7 +85,7 @@ namespace Formula9.World
 
     // Turns the backend's incident into what the 3D city draws: the scene on the road, and the traffic
     // backing up along the roads leading to it. The backend models no other traffic ("No traffic
-    // volume, lanes or signal timings are modelled"), so the queue is illustration: it follows the real
+    // volume or lanes are modelled"), so the queue is illustration: it follows the real
     // road graph and the incident's own clock, and never affects the shuttle. Only the backend moves
     // the shuttle, and only on the incident's impact edges. The background traffic keeps off the scene
     // and stops behind the queue, by way of Hazards.

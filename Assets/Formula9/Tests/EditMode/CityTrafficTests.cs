@@ -448,29 +448,298 @@ namespace Formula9.Tests
             Assert.IsTrue(went, "it went on when the shuttle had gone");
         }
 
+        // A shuttle the traffic drives: the bus model's body, on a route north along x = 0.
+        private const float BusReach = 6.6f, BusHalfWidth = 2.3f;
+        private static readonly List<Vector2> North = new List<Vector2> { new Vector2(0, 0), new Vector2(0, 1000) };
+
+        // A snapshot of the shuttle: where the backend says it is, and how fast it is driving.
+        private static bool Snapshot(CityTrafficRenderer traffic, float z, float mps, List<Vector2> route = null) =>
+            traffic.DriveShuttle("s", "route", route ?? North, new Vector3(0, 2.5f, z), Quaternion.identity, mps, BusReach, BusHalfWidth);
+
+        private static Vector3 Bus(CityTrafficRenderer traffic)
+        {
+            Assert.IsTrue(traffic.TryGetShuttlePose("s", out var position, out _));
+            return position;
+        }
+
+        [Test]
+        public void TwoShuttlesQueueAtARedLightWithoutOverlapping()
+        {
+            // Both backend poses drive on through the light, as the backend did before it knew of the lights,
+            // 15 m apart, the backend's headway on one route
+            var road = Road("r", 1, 2, true, "primary", (0, 0), (0, 1000));
+            var traffic = Cars(Light("r", 0, 200, 90, offset: 35), new[] { road });
+            var z = 120f;
+            for (var i = 0; i < 400; i++) // 20 s, all red
+            {
+                z += 10 * Frame;
+                traffic.DriveShuttle("a", "route", North, new Vector3(0, 2.5f, z), Quaternion.identity, 10, BusReach, BusHalfWidth);
+                traffic.DriveShuttle("b", "route", North, new Vector3(0, 2.5f, z - 15), Quaternion.identity, 10, BusReach, BusHalfWidth);
+                traffic.Tick(Frame);
+                Assert.AreEqual(0, traffic.Report().ShuttleOverlaps, "the shuttles never touched");
+            }
+            Assert.IsTrue(traffic.TryGetShuttlePose("a", out var first, out _));
+            Assert.IsTrue(traffic.TryGetShuttlePose("b", out var second, out _));
+            Assert.AreEqual(200 - BusReach, first.z, 1.5f, "the first at the line");
+            Assert.Greater(first.z - second.z, 2 * BusReach, "the second behind its back");
+            Assert.Less(first.z - second.z, 2 * BusReach + 4, "and close behind it");
+        }
+
+        [Test]
+        public void ShuttlesCrossingEachOthersWayDoNotMeet()
+        {
+            var east = new List<Vector2> { new Vector2(-100, 0), new Vector2(300, 0) };
+            var north = new List<Vector2> { new Vector2(0, -100), new Vector2(0, 300) };
+            var traffic = Cars(null, Crossroads());
+            for (var i = 0; i < 600; i++)
+            {
+                var travelled = Mathf.Min(-60 + i * 10 * Frame, 250);
+                traffic.DriveShuttle("a", "east", east, new Vector3(travelled, 2.5f, 0), Quaternion.LookRotation(Vector3.right), 10, BusReach, BusHalfWidth);
+                traffic.DriveShuttle("b", "north", north, new Vector3(0, 2.5f, travelled), Quaternion.identity, 10, BusReach, BusHalfWidth);
+                traffic.Tick(Frame);
+                Assert.AreEqual(0, traffic.Report().ShuttleOverlaps, "they never met");
+            }
+            Assert.IsTrue(traffic.TryGetShuttlePose("a", out var a, out _));
+            Assert.IsTrue(traffic.TryGetShuttlePose("b", out var b, out _));
+            Assert.Greater(a.x, 100, "one went first");
+            Assert.Greater(b.z, 100, "and the other after it");
+        }
+
+        [Test]
+        public void TheLightsKeepToTheSessionsClock()
+        {
+            var traffic = Cars(null, new[] { Road("r", 1, 2, true, "primary", (0, 0), (0, 1000)) });
+            traffic.FollowSignalClock(120);
+            Assert.AreEqual(120, traffic.SignalClockS, 1e-9, "set to it when far off");
+            traffic.FollowSignalClock(120.3);
+            Assert.AreEqual(120, traffic.SignalClockS, 1e-9, "a snapshot a little late or early leaves it running smoothly");
+        }
+
+        [Test]
+        public void AShuttleWaitsAtTheSameRedLightAsTheBackendAndStaysCloseBehindIt()
+        {
+            // The backend holds its shuttle with its front 0.5 m short of the line, as the traffic does
+            var road = Road("r", 1, 2, true, "primary", (0, 0), (0, 1000));
+            var traffic = Cars(Light("r", 0, 200, 90, offset: 25), new[] { road }); // Yellow in 5 s, then red for 37
+            var timing = new CitySignalTiming();
+            var z = 100f;
+            var furthest = 0f;
+            for (var i = 0; i < 1600; i++)
+            {
+                var next = z + 10 * Frame;
+                var frontToLine = 200 - z - BusReach;
+                var color = timing.ColorAt(traffic.SignalClockS, 25, 0);
+                if (frontToLine >= 0 && (color == SignalColor.Red || (color == SignalColor.Yellow && 100f / 12 <= frontToLine)))
+                    next = Mathf.Min(next, Mathf.Max(z, 200 - BusReach - 0.5f));
+                var moving = next > z;
+                z = next;
+                Snapshot(traffic, z, moving ? 10 : 0);
+                traffic.Tick(Frame);
+                furthest = Mathf.Max(furthest, z - Bus(traffic).z);
+            }
+            Assert.Greater(z, 400, "both went on at green");
+            // The backend is at 10 m/s at once; the bus takes 10² / (2 × 1.5) m to get there, on a road no faster
+            Assert.Less(furthest, 10 * 10 / (2 * 1.5f) + 1, "it was only ever behind by pulling away more gently than the backend");
+            Assert.AreEqual(0, traffic.Report().ShuttleRedLightRuns);
+        }
+
+        [Test]
+        public void AShuttleNeverGetsAheadOfTheBackend()
+        {
+            var traffic = Cars(null, new[] { Road("r", 1, 2, true, "primary", (0, 0), (0, 1000)) });
+            var z = 100f;
+            Assert.IsTrue(Snapshot(traffic, z, 10));
+            for (var i = 0; i < 600; i++)
+            {
+                var moving = i < 300;
+                if (moving) z += 10 * Frame;
+                Snapshot(traffic, z, moving ? 10 : 0);
+                traffic.Tick(Frame);
+                Assert.LessOrEqual(Bus(traffic).z, z + 1e-3f, "never past the backend");
+            }
+            Assert.AreEqual(z, Bus(traffic).z, 0.5f, "and there once the backend stopped");
+            Assert.AreEqual(2.5f, Bus(traffic).y, 1e-3f, "at the backend's height");
+        }
+
+        [Test]
+        public void AShuttleOffItsRouteIsLeftToTheCaller()
+        {
+            var traffic = Cars(null, new[] { Road("r", 1, 2, true, "primary", (0, 0), (0, 1000)) });
+            Assert.IsTrue(Snapshot(traffic, 100, 10));
+            Assert.IsFalse(traffic.DriveShuttle("s", "route", North, new Vector3(50, 2.5f, 100), Quaternion.identity, 10, BusReach, BusHalfWidth), "50 m off the route");
+            Assert.IsFalse(traffic.TryGetShuttlePose("s", out _, out _));
+            Assert.IsFalse(traffic.DrivesShuttle("s"));
+            // Reversing out of a depot bay, it faces against the way the route runs
+            Assert.IsFalse(traffic.DriveShuttle("s", "route", North, new Vector3(0, 2.5f, 100), Quaternion.LookRotation(Vector3.back), 10, BusReach, BusHalfWidth));
+        }
+
+        [Test]
+        public void AShuttleStopsAtARedLightAndGoesOnGreen()
+        {
+            var road = Road("r", 1, 2, true, "primary", (0, 0), (0, 1000));
+            var traffic = Cars(Light("r", 0, 200, 90, offset: 33), new[] { road }); // Red for 37 s
+            var z = 100f;
+            for (var i = 0; i < 680; i++)
+            {
+                z = Mathf.Min(z + 10 * Frame, 600);
+                Snapshot(traffic, z, 10);
+                traffic.Tick(Frame);
+                Assert.Less(Bus(traffic).z + BusReach, 200.01f, "front behind the line");
+            }
+            Assert.Greater(Bus(traffic).z + BusReach, 195, "it reached the line");
+            for (var i = 0; i < 1200; i++)
+            {
+                z = Mathf.Min(z + 10 * Frame, 600);
+                Snapshot(traffic, z, z < 600 ? 10 : 0);
+                traffic.Tick(Frame);
+            }
+            Assert.AreEqual(600, Bus(traffic).z, 0.5f, "it went on green and caught up with the backend");
+            Assert.AreEqual(0, traffic.Report().ShuttleRedLightRuns);
+        }
+
+        [Test]
+        public void AShuttleIgnoresALightFacingTheOtherWay()
+        {
+            var road = Road("r", 1, 2, false, "primary", (0, 0), (0, 1000));
+            var traffic = Cars(Light("r", 0, 200, 270, offset: 33), new[] { road });
+            var z = 100f;
+            for (var i = 0; i < 400; i++)
+            {
+                z += 10 * Frame;
+                Snapshot(traffic, z, 10);
+                traffic.Tick(Frame);
+            }
+            Assert.Greater(Bus(traffic).z, 250);
+        }
+
+        [TestCase(false, 1, -1.6f)]
+        [TestCase(false, 2, -4.8f)]
+        [TestCase(true, 2, -1.6f)]
+        public void AShuttleKeepsToTheKerbLane(bool oneway, int lanes, float expectedX)
+        {
+            var road = Road("r", 1, 2, oneway, "primary", (0, 0), (0, 1000));
+            road.Lanes = lanes;
+            var traffic = Cars(null, new[] { road });
+            var z = 100f;
+            for (var i = 0; i < 100; i++)
+            {
+                z += 10 * Frame;
+                Snapshot(traffic, z, 10);
+                traffic.Tick(Frame);
+                Assert.AreEqual(expectedX, Bus(traffic).x, 0.05f, "on the left, as Singapore drives");
+            }
+        }
+
+        [Test]
+        public void AShuttleQueuesBehindACarInsteadOfDrivingThroughIt()
+        {
+            // The car waits at a red light, and the backend, knowing nothing of either, drives on
+            var road = Road("r", 1, 2, true, "primary", (0, 0), (0, 1000));
+            var traffic = Cars(Light("r", 0, 200, 90, offset: 35), new[] { road }, ("a", "r", 150f));
+            var z = 100f;
+            for (var i = 0; i < 400; i++) // 20 s, all red
+            {
+                z += 10 * Frame;
+                Snapshot(traffic, z, 10);
+                traffic.Tick(Frame);
+                Assert.Less(Bus(traffic).z + BusReach, Position(traffic, "a").z - 2, "behind the car's back");
+                Assert.AreEqual(0, traffic.Report().ShuttleOverlaps);
+            }
+            Assert.Greater(Bus(traffic).z + BusReach, Position(traffic, "a").z - 2 - 4, "queued close behind it");
+            for (var i = 0; i < 1000; i++)
+            {
+                z += 10 * Frame;
+                Snapshot(traffic, z, 10);
+                traffic.Tick(Frame);
+                Assert.AreEqual(0, traffic.Report().ShuttleOverlaps);
+            }
+            Assert.Greater(Bus(traffic).z, 300, "it followed the car on through the junction");
+        }
+
+        [Test]
+        public void ACarQueuesBehindAShuttleHeldAtARedLight()
+        {
+            var road = Road("r", 1, 2, true, "primary", (0, 0), (0, 1000));
+            var traffic = Cars(Light("r", 0, 200, 90, offset: 35), new[] { road }, ("v", "r", 60f));
+            var z = 150f;
+            for (var i = 0; i < 400; i++)
+            {
+                z += 10 * Frame;
+                Snapshot(traffic, z, 10);
+                traffic.Tick(Frame);
+                Assert.AreEqual(0, Position(traffic, "v").x, 0.05f, "it stayed in its lane instead of going round");
+                Assert.AreEqual(0, traffic.Report().ShuttleOverlaps);
+            }
+            Assert.Less(Position(traffic, "v").z + 2, Bus(traffic).z - 6, "behind the shuttle");
+        }
+
+        [Test]
+        public void AShuttleStopsForACarStandingAcrossItsWayAndDoesNotWaitForEver()
+        {
+            // The car stands across the shuttle's road at z = 50, held up by a queue on its own road
+            var road = Road("r", 1, 2, true, "primary", (0, 0), (0, 1000));
+            var across = Road("across", 3, 4, true, "primary", (-100, 50), (100, 50));
+            var traffic = Cars(null, new[] { road, across }, ("v", "across", 100f));
+            traffic.SetHazards(new[] { Hazard(false, 5, 50, 60, 50) });
+            var z = 0f;
+            for (var i = 0; i < 400; i++) // 20 s
+            {
+                z += 10 * Frame;
+                Snapshot(traffic, z, 10);
+                traffic.Tick(Frame);
+                Assert.AreEqual(0, traffic.Report().ShuttleOverlaps, "it did not run the car over");
+            }
+            Assert.Less(Bus(traffic).z + BusReach, 49);
+            for (var i = 0; i < 600; i++) // Past the 30 s it waits for a vehicle that never moves
+            {
+                z += 10 * Frame;
+                Snapshot(traffic, z, 10);
+                traffic.Tick(Frame);
+            }
+            Assert.Greater(Bus(traffic).z, 60, "the stuck car left and the shuttle went on past where it stood");
+        }
+
+        [Test]
+        public void ACarCrossesOnItsGreenWhileAShuttleWaitsAtItsRed()
+        {
+            // The shuttle comes up main-in from the south; the car comes along side-in from the west
+            var route = new List<Vector2> { new Vector2(0, -100), new Vector2(0, 300) };
+            var signals = new CitySignalData
+            {
+                Junctions = new List<CitySignalJunction>
+                {
+                    new CitySignalJunction
+                    {
+                        Id = "j", OffsetS = 35, // Phase 0, the main road, red; phase 1, the side road, green
+                        Approaches = new List<CitySignalApproach>
+                        {
+                            new CitySignalApproach { Road = "main-in", StopX = 0, StopY = -8, HeadingDeg = 90, Phase = 0 },
+                            new CitySignalApproach { Road = "side-in", StopX = -8, StopY = 0, HeadingDeg = 0, Phase = 1 },
+                        },
+                    },
+                },
+            };
+            var traffic = Cars(signals, Crossroads(), ("v", "side-in", 40f));
+            var z = -60f;
+            var carWent = false;
+            for (var i = 0; i < 400; i++) // 20 s of the shuttle's red and the car's green
+            {
+                z += 10 * Frame;
+                Snapshot(traffic, z, 10, route);
+                traffic.Tick(Frame);
+                Assert.Less(Bus(traffic).z + BusReach, -8 + 0.01f, "the shuttle waited at its light");
+                Assert.AreEqual(0, traffic.Report().ShuttleOverlaps);
+                carWent |= Position(traffic, "v").x + Position(traffic, "v").z > 5;
+            }
+            Assert.IsTrue(carWent, "the car crossed on its green");
+            Assert.AreEqual(0, traffic.Report().ShuttleRedLightRuns);
+        }
+
         // The real roads, vehicles and lights, as the backend serves them, for four minutes of traffic.
         [Test]
         public void TheRealCityKeepsMovingWithNoOverlapsOrRedLightRuns()
         {
-            var folder = Path.Combine(Application.dataPath, "..", "backend", "fixtures", "traffic");
-            var root = JObject.Parse(File.ReadAllText(Path.Combine(folder, "toa-payoh.json")));
-            var roads = root["roads"].Select(r => new CityRoad
-            {
-                Id = (string)r["id"], Class = (string)r["class"], FromNode = (long)r["from_node"], ToNode = (long)r["to_node"], Oneway = (bool)r["oneway"],
-                Lanes = (int)r["lanes"], SpeedKph = (int?)r["speed_kph"] ?? 40, Points = r["points_m"].Select(p => ((double)p[0], (double)p[1])).ToList(),
-            }).ToList();
-            var data = new CityTrafficData();
-            foreach (var model in ((JObject)root["models"]).Properties())
-                data.Models[model.Name] = new CityTrafficModel { Id = model.Name, LengthM = (float)model.Value["length_m"], WidthM = (float)model.Value["width_m"], HeightM = (float)model.Value["height_m"] };
-            data.Vehicles = root["vehicles"].Select(v => new CityTrafficVehicle
-            {
-                Id = (string)v["id"], Model = (string)v["model"], Color = (string)v["color"], Road = (string)v["road"], Direction = (int)v["direction"], Lane = (int)v["lane"], DistanceM = (float)v["distance_m"], SpeedKph = (int)v["speed_kph"],
-            }).ToList();
-            var signals = CityClient.ParseSignals(File.ReadAllText(Path.Combine(folder, "toa-payoh-signals.json")));
-
-            var traffic = new CityTrafficRenderer();
-            Made.Add(traffic);
-            traffic.Rebuild(roads, data, signals);
+            var traffic = RealCity(out _);
             traffic.SignalClockS = 1000;
             traffic.Tick(0);
             var seeded = traffic.Report();
@@ -493,6 +762,221 @@ namespace Formula9.Tests
             Assert.AreEqual(0, mostOverlaps, "nobody drove through the vehicle in front");
             Assert.Greater(slowest, 2f, "traffic never seized up");
             Assert.Less(end.Outside, end.Driving / 10, "the roads in have room");
+        }
+
+        [Test]
+        public void AShuttleDrivesThroughTheRealCityWithoutTouchingTheTrafficOrRunningARedLight()
+        {
+            var traffic = RealCity(out var roads);
+            traffic.SignalClockS = 1000;
+            traffic.Tick(0);
+            var route = StraightOn(roads, 2500);
+            var length = 0f;
+            for (var i = 1; i < route.Count; i++) length += Vector2.Distance(route[i - 1], route[i]);
+            Assert.Greater(length, 1000, "a long enough drive");
+
+            var along = 0f;
+            var mostOverlaps = 0;
+            var held = 0f;
+            var arrived = -1;
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            for (var i = 0; arrived < 0 || i < arrived + 1200; i++) // Until 60 s after the backend arrives
+            {
+                along = Mathf.Min(along + 10 * Frame, length);
+                if (along >= length && arrived < 0) arrived = i;
+                var at = PointAlong(route, along, out var heading);
+                Assert.IsTrue(traffic.DriveShuttle("s", "route", route, new Vector3(at.x, 2.5f, at.y), Quaternion.LookRotation(new Vector3(heading.x, 0, heading.y)), along < length ? 10 : 0, BusReach, BusHalfWidth), "on its route");
+                traffic.Tick(Frame);
+                var shown = Bus(traffic);
+                if (Vector2.Distance(new Vector2(shown.x, shown.z), at) > 20) held += Frame;
+                mostOverlaps = Mathf.Max(mostOverlaps, traffic.Report().ShuttleOverlaps);
+            }
+            watch.Stop();
+            var end = traffic.Report();
+            var last = Bus(traffic);
+            Debug.Log($"Shuttle drive: {length:0} m, {route.Count} points, {held:0.0} s held back by the traffic, most overlaps {mostOverlaps}, {end.ShuttleRedLightRuns} red runs, {watch.ElapsedMilliseconds:0} ms");
+            Assert.AreEqual(0, end.ShuttleRedLightRuns, "it never ran a red light");
+            Assert.AreEqual(0, mostOverlaps, "it never touched a vehicle");
+            Assert.Less(Vector2.Distance(new Vector2(last.x, last.z), route[route.Count - 1]), 10, "it got to the end of its route");
+        }
+
+        [Test]
+        public void AShuttleDrivesThroughTheRealCityWithABackendThatStopsAtTheLightsToo()
+        {
+            // The backend now holds its shuttle at a red light, on the session's clock, as the traffic does
+            var traffic = RealCity(out var roads);
+            traffic.SignalClockS = 1000;
+            traffic.Tick(0);
+            var route = StraightOn(roads, 2500);
+            var length = Length(route);
+            var lines = BackendStopLines(route);
+            Assert.Greater(lines.Count, 0, "lights on the way");
+            var timing = new CitySignalTiming();
+
+            var along = 0f;
+            var behind = 0f;
+            var furthest = 0f;
+            var mostOverlaps = 0;
+            for (var i = 0; along < length && i < 12000; i++)
+            {
+                var next = along + 10 * Frame;
+                foreach (var (at, offset, phase) in lines)
+                {
+                    var frontToLine = at - along - BusReach;
+                    if (frontToLine < 0) continue;
+                    var color = timing.ColorAt(traffic.SignalClockS, offset, phase);
+                    if (color == SignalColor.Red || (color == SignalColor.Yellow && 100f / 12 <= frontToLine))
+                        next = Mathf.Min(next, Mathf.Max(along, at - BusReach - 0.5f));
+                }
+                var moving = next > along;
+                along = Mathf.Min(next, length);
+                var point = PointAlong(route, along, out var heading);
+                traffic.DriveShuttle("s", "route", route, new Vector3(point.x, 2.5f, point.y), Quaternion.LookRotation(new Vector3(heading.x, 0, heading.y)), moving ? 10 : 0, BusReach, BusHalfWidth);
+                traffic.Tick(Frame);
+                var shown = Bus(traffic);
+                var gap = Vector2.Distance(new Vector2(shown.x, shown.z), point);
+                furthest = Mathf.Max(furthest, gap);
+                if (gap > 20) behind += Frame;
+                if (i % 10 == 0) mostOverlaps = Mathf.Max(mostOverlaps, traffic.Report().ShuttleOverlaps);
+            }
+            Debug.Log($"Shuttle with the backend at the lights: {length:0} m, {lines.Count} lights, {behind:0.0} s more than 20 m behind, furthest {furthest:0} m behind, most overlaps {mostOverlaps}, {traffic.Report().ShuttleRedLightRuns} red runs");
+            Assert.AreEqual(0, traffic.Report().ShuttleRedLightRuns);
+            Assert.AreEqual(0, mostOverlaps);
+            // The backend cannot see the cars, so a queue at a light still holds the shuttle further back
+            Assert.Less(furthest, 400, "never so far behind that it was put on the backend's pose");
+        }
+
+        // Where the backend's shuttle stops on a route: the lights' stop lines, matched as route_signals.py does.
+        private static List<(float At, int Offset, int Phase)> BackendStopLines(List<Vector2> route)
+        {
+            var signals = CityClient.ParseSignals(File.ReadAllText(Path.Combine(Application.dataPath, "..", "backend", "fixtures", "traffic", "toa-payoh-signals.json")));
+            var lines = new List<(float, int, int)>();
+            foreach (var junction in signals.Junctions)
+                foreach (var approach in junction.Approaches)
+                {
+                    var heading = approach.HeadingDeg * Mathf.Deg2Rad;
+                    var travel = new Vector2(Mathf.Cos(heading), Mathf.Sin(heading));
+                    var stop = new Vector2(approach.StopX, approach.StopY);
+                    var travelled = 0f;
+                    for (var i = 1; i < route.Count; i++)
+                    {
+                        var run = route[i] - route[i - 1];
+                        var step = run.magnitude;
+                        if (step <= 0) continue;
+                        var share = Mathf.Clamp(Vector2.Dot(stop - route[i - 1], run / step), 0, step);
+                        var at = travelled + share;
+                        if (Vector2.Distance(stop, route[i - 1] + run / step * share) <= 8 && Vector2.Dot(run / step, travel) >= 0.7f
+                            && lines.TrueForAll(l => Mathf.Abs(l.Item1 - at) >= 10)) lines.Add((at, junction.OffsetS, approach.Phase));
+                        travelled += step;
+                    }
+                }
+            return lines;
+        }
+
+        // The longest route from a main road a light controls, straight on at every junction, up to a distance.
+        private static List<Vector2> StraightOn(List<CityRoad> roads, float farM)
+        {
+            var signals = CityClient.ParseSignals(File.ReadAllText(Path.Combine(Application.dataPath, "..", "backend", "fixtures", "traffic", "toa-payoh-signals.json")));
+            var byId = roads.GroupBy(r => r.Id).ToDictionary(g => g.Key, g => g.First());
+            var leaving = new Dictionary<long, List<(CityRoad Road, bool Forward)>>();
+            foreach (var road in roads)
+            {
+                if (road.Class == "service") continue;
+                if (!leaving.TryGetValue(road.FromNode, out var from)) leaving[road.FromNode] = from = new List<(CityRoad, bool)>();
+                from.Add((road, true));
+                if (road.Oneway) continue;
+                if (!leaving.TryGetValue(road.ToNode, out var to)) leaving[road.ToNode] = to = new List<(CityRoad, bool)>();
+                to.Add((road, false));
+            }
+            List<Vector2> longest = null;
+            var longestM = 0f;
+            foreach (var start in signals.Junctions.SelectMany(j => j.Approaches))
+            {
+                if (!byId.TryGetValue(start.Road, out var road) || (road.Class != "primary" && road.Class != "secondary")) continue;
+                var heading = start.HeadingDeg * Mathf.Deg2Rad;
+                var forward = Vector2.Dot(Point(road.Points[road.Points.Count - 1]) - Point(road.Points[0]), new Vector2(Mathf.Cos(heading), Mathf.Sin(heading))) >= 0;
+                if (!forward && road.Oneway) continue;
+                var points = RoadPath(road, forward);
+                var node = forward ? road.ToNode : road.FromNode;
+                var length = Length(points);
+                var used = new HashSet<string> { road.Id };
+                while (length < farM && leaving.TryGetValue(node, out var exits))
+                {
+                    var into = points[points.Count - 1] - points[points.Count - 2];
+                    (CityRoad Road, bool Forward) best = default;
+                    var bestAngle = 50f;
+                    foreach (var exit in exits)
+                    {
+                        if (used.Contains(exit.Road.Id)) continue;
+                        var path = RoadPath(exit.Road, exit.Forward);
+                        var angle = Vector2.Angle(into, path[1] - path[0]);
+                        if (angle < bestAngle) { bestAngle = angle; best = exit; }
+                    }
+                    if (best.Road == null) break;
+                    used.Add(best.Road.Id);
+                    node = best.Forward ? best.Road.ToNode : best.Road.FromNode;
+                    var next = RoadPath(best.Road, best.Forward);
+                    for (var i = 1; i < next.Count; i++) { length += Vector2.Distance(points[points.Count - 1], next[i]); points.Add(next[i]); }
+                }
+                if (length > longestM) { longestM = length; longest = points; }
+                if (longestM >= farM) break;
+            }
+            return longest;
+        }
+
+        private static Vector2 Point((double X, double Y) point) => new Vector2((float)point.X, (float)point.Y);
+
+        private static List<Vector2> RoadPath(CityRoad road, bool forward)
+        {
+            var path = road.Points.Select(Point).ToList();
+            if (!forward) path.Reverse();
+            return path;
+        }
+
+        private static float Length(List<Vector2> line)
+        {
+            var length = 0f;
+            for (var i = 1; i < line.Count; i++) length += Vector2.Distance(line[i - 1], line[i]);
+            return length;
+        }
+
+        private static Vector2 PointAlong(List<Vector2> line, float along, out Vector2 heading)
+        {
+            heading = Vector2.up;
+            for (var i = 1; i < line.Count; i++)
+            {
+                var step = Vector2.Distance(line[i - 1], line[i]);
+                if (step <= 0) continue;
+                heading = (line[i] - line[i - 1]) / step;
+                if (along <= step || i == line.Count - 1) return Vector2.Lerp(line[i - 1], line[i], Mathf.Clamp01(along / step));
+                along -= step;
+            }
+            return line[line.Count - 1];
+        }
+
+        // The real roads, vehicles and lights of Toa Payoh, as the backend serves them.
+        private static CityTrafficRenderer RealCity(out List<CityRoad> roads)
+        {
+            var folder = Path.Combine(Application.dataPath, "..", "backend", "fixtures", "traffic");
+            var root = JObject.Parse(File.ReadAllText(Path.Combine(folder, "toa-payoh.json")));
+            roads = root["roads"].Select(r => new CityRoad
+            {
+                Id = (string)r["id"], Class = (string)r["class"], FromNode = (long)r["from_node"], ToNode = (long)r["to_node"], Oneway = (bool)r["oneway"],
+                Lanes = (int)r["lanes"], SpeedKph = (int?)r["speed_kph"] ?? 40, Points = r["points_m"].Select(p => ((double)p[0], (double)p[1])).ToList(),
+            }).ToList();
+            var data = new CityTrafficData();
+            foreach (var model in ((JObject)root["models"]).Properties())
+                data.Models[model.Name] = new CityTrafficModel { Id = model.Name, LengthM = (float)model.Value["length_m"], WidthM = (float)model.Value["width_m"], HeightM = (float)model.Value["height_m"] };
+            data.Vehicles = root["vehicles"].Select(v => new CityTrafficVehicle
+            {
+                Id = (string)v["id"], Model = (string)v["model"], Color = (string)v["color"], Road = (string)v["road"], Direction = (int)v["direction"], Lane = (int)v["lane"], DistanceM = (float)v["distance_m"], SpeedKph = (int)v["speed_kph"],
+            }).ToList();
+            var signals = CityClient.ParseSignals(File.ReadAllText(Path.Combine(folder, "toa-payoh-signals.json")));
+
+            var traffic = new CityTrafficRenderer();
+            Made.Add(traffic);
+            traffic.Rebuild(roads, data, signals);
+            return traffic;
         }
 
         private static Vector3 Position(CityTrafficRenderer traffic)

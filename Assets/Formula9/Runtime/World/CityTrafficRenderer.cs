@@ -61,6 +61,10 @@ namespace Formula9.World
             hazardRoads.Clear();
             claimsByNode.Clear();
             redLightRuns = 0;
+            // A shuttle's stop lines and lane come from these roads and lights, so it starts over on them
+            shuttles.Clear();
+            shuttleRoutes.Clear();
+            shuttleRedLightRuns = 0;
             exitsByNode.Clear();
             entryRoads.Clear();
             largeEntryRoads.Clear();
@@ -83,9 +87,10 @@ namespace Formula9.World
         }
 
         // A delta of zero holds the traffic still, and still draws it. A camera culls what it cannot see.
+        // The shuttles it drives move with it, even with no other traffic.
         public void Tick(float deltaTime, IReadOnlyList<Camera> cameras = null)
         {
-            if (vehicles.Count == 0) return;
+            if (vehicles.Count == 0 && shuttles.Count == 0) return;
 
             var step = Mathf.Min(deltaTime, MaxStepSeconds);
             if (step > 0) Drive(step);
