@@ -15,6 +15,7 @@ Description:
 
 from __future__ import annotations
 
+import base64
 from copy import deepcopy
 from dataclasses import asdict
 from functools import lru_cache
@@ -1034,12 +1035,23 @@ class IntegratedSessionActor(SessionActor):
 
     def traffic_frame(self):
         """Where the background traffic and the shuttles' bodies are now, for the 3D view to draw, or None
-        when this session has no traffic. Presentation only: it is not part of the public snapshot."""
+        when this session has no traffic. Presentation only: it is not part of the public snapshot.
+
+        The vehicles are packed (city_traffic.FRAME_RECORD) and base64-encoded: a frame of the whole
+        sample is read by the 3D view ten times a second, and thousands of JSON numbers made it hitch.
+        """
         if self.traffic is None:
             return None
-        vehicles, shuttles = self.traffic.frame()
+        vehicles, count, shuttles = self.traffic.frame()
         return {"tick": self.current_tick, "simulation_time_s": round(self.timestamp_second, 3),
-                "vehicles": vehicles, "shuttles": shuttles}
+                "vehicle_count": count, "vehicles": base64.b64encode(vehicles).decode("ascii"), "shuttles": shuttles}
+
+    def traffic_frame_due(self) -> bool:
+        """True on a tick the background traffic stepped. Its frame then shows the vehicles and the shuttles
+        at the same moment, the moment it is stamped with, so the 3D view can draw them between frames
+        without one running ahead of the other. Frames come every TRAFFIC_STEP_TICKS ticks, whichever
+        ticks publish a snapshot."""
+        return self.traffic is not None and self.current_tick % TRAFFIC_STEP_TICKS == 0
 
     def _signal_hold(self, shuttle):
         """How far the shuttle may go before a red light (or a yellow it can stop for) holds it.

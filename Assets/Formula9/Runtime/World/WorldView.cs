@@ -393,13 +393,15 @@ namespace Formula9.World
         {
             if (CityShown && city != null)
             {
+                // The traffic first: the backend's traffic frames carry the shuttles' bodies too, so the
+                // shuttles, the cameras on them and the vehicles around them are all drawn at one moment
+                city.AdvanceTraffic(Time.unscaledDeltaTime, latest?.Session?.Status == "RUNNING");
                 city.Tick(motion, Time.unscaledTime);
                 if (city.TryGetShuttlePose(watchedId, out var position, out var rotation))
                     shuttleCameras.Place(position, rotation);
-                // Before the traffic, which is drawn for the cameras whose turn it is
+                // Before the traffic is drawn, for the cameras whose turn it is
                 shuttleCameras.Tick();
-                // On the same clock as the shuttles, and still when they are
-                city.TickTraffic(latest.Session?.Status == "RUNNING" ? Time.unscaledDeltaTime : 0, trafficCameras);
+                city.DrawTraffic(trafficCameras);
             }
             else if (world != null) world.Advance(motion, Time.unscaledTime);
             else return;

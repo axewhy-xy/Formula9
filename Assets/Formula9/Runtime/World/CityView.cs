@@ -980,10 +980,21 @@ namespace Formula9.World
             return item.transform;
         }
 
-        // Called once a frame, unlike Tick, which a new snapshot also calls. A delta of zero holds traffic still.
-        public void TickTraffic(float deltaTime, IReadOnlyList<Camera> cameras)
+        // Called once a frame, before Tick places the shuttles, so the shuttles' bodies the backend's
+        // traffic frames carry are drawn at the same moment as the vehicles around them. While those
+        // frames come they move the traffic on their own clock, which runs down to a stop by itself when
+        // they stop (a paused session), so running does not matter; otherwise the traffic here drives,
+        // only while running says the session runs.
+        public void AdvanceTraffic(float deltaTime, bool running)
         {
             if (traffic == null) return;
+            if (traffic.FollowsBackend)
+            {
+                // The backend keeps the traffic off its hazards and away from the shuttles
+                traffic.Advance(deltaTime);
+                return;
+            }
+            deltaTime = running ? deltaTime : 0;
             hazardsDueS -= deltaTime;
             if (hazardsDueS <= 0)
             {
@@ -996,8 +1007,12 @@ namespace Formula9.World
                 if (!traffic.DrivesShuttle(pair.Key))
                     trafficObstacles.Add(new TrafficObstacle { Id = pair.Key, Position = pair.Value.position, Forward = pair.Value.forward, HalfLength = BodyHalfLength, HalfWidth = BodyHalfWidth });
             traffic.SetShuttles(trafficObstacles);
-            traffic.Tick(deltaTime, cameras);
+            traffic.Advance(deltaTime);
         }
+
+        // Called once a frame, after the cameras are placed: draws the traffic where AdvanceTraffic left
+        // it, for the cameras whose turn it is.
+        public void DrawTraffic(IReadOnlyList<Camera> cameras) => traffic?.Draw(cameras);
 
         // Called each frame: a shuttle is where the backend's traffic frames put its body; without them,
         // one on its route is where the traffic here drove it, and any other glides between the

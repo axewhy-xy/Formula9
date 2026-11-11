@@ -36,9 +36,17 @@ T = TypeVar("T")
 
 # The first part of a readable session id: where the exercise takes place.
 SESSION_PLACES = {SCENARIO_SELECTOR: "toa-payoh", SPATIAL_SCENARIO_REVISION: "fleet-3d", SCENARIO_REVISION: "fleet-loop"}
-# A live session keeps this many of its latest traffic frames, one a published tick (ten a second), for
-# a 3D view that polls a few times a second to draw without gaps
+# A live session keeps this many of its latest traffic frames, one a traffic step (ten a second), for a
+# 3D view that asks again as soon as each reply arrives (wait_for_traffic) and draws a little behind them
 TRAFFIC_FRAMES = 30
+# A reply carries at most this many of the newest frames: a second's worth, more than a 3D view that has
+# fallen behind needs to pick up where the traffic is
+TRAFFIC_REPLY_FRAMES = 10
+# How far a session's clock may fall behind the wall clock and still catch up. A tick that runs late (a
+# checkpoint written on a slow disk, a burst of work) does not push back the ticks after it, so the
+# session's time keeps pace with the wall clock and the 3D view, drawing at the wall clock's pace, never
+# runs out of frames. Further behind than this, as after the process was stalled, the rest is let go.
+MAX_TICK_BACKLOG_S = 0.25
 # Fixed English month names, so the id does not depend on the server's locale.
 _MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
 
@@ -78,6 +86,17 @@ async def wait_for_deadline(trace, deadline_ns, **tags):
             "early_wakeups": early, "wait_enter_lateness_ms": max(0, started-deadline_ns)/1e6}
 
 
+def next_deadline(deadline_ns: int, now_ns: int, step_ns: int,
+                  max_backlog_ns: int = round(MAX_TICK_BACKLOG_S * 1e9)) -> int:
+    """The next tick's deadline after the one at deadline_ns, at now_ns.
+
+    One step on, even when that has already passed: a late tick is caught up on rather than pushing back
+    every tick after it, so the session's clock keeps the wall clock's pace on average. Only a backlog
+    longer than max_backlog_ns is let go, so a stalled process does not then rush through minutes of ticks.
+    """
+    return max(deadline_ns + step_ns, now_ns - max_backlog_ns)
+
+
 def checkpoint(actor: SessionActor) -> dict:
     state = {
         "version": 1, "seed": actor.seed, "scenario_revision": actor.scenario_revision,
@@ -110,6 +129,16 @@ class LiveSession:
     progress: SessionProgress = field(default_factory=SessionProgress)
     # (tick, JSON) of the latest traffic frames: presentation only, never checkpointed
     frames: deque = field(default_factory=lambda: deque(maxlen=TRAFFIC_FRAMES))
+    # Set, and replaced by a fresh one, whenever a frame is added: wakes the 3D views waiting for one
+    frame_signal: asyncio.Event = field(default_factory=asyncio.Event)
+
+    def add_frame(self, tick: int, frame: str) -> None:
+        self.frames.append((tick, frame))
+        self.wake_frame_waiters()
+
+    def wake_frame_waiters(self) -> None:
+        signal, self.frame_signal = self.frame_signal, asyncio.Event()
+        signal.set()
 
 
 class TrainingSessionService:
@@ -447,7 +476,7 @@ class TrainingSessionService:
             if staged is not None:
                 session.actor = staged
                 if frame is not None:
-                    session.frames.append((staged.current_tick, frame))
+                    session.add_frame(staged.current_tick, frame)
             session.baseline = baseline
             session.progress.observe(self.store.trace, session.actor, committed=baseline,
                                      sample_ns=sample_ns if staged is not None else None)
@@ -455,8 +484,8 @@ class TrainingSessionService:
     def _step_staged(self, actor: SessionActor, baseline: FullSnapshot | None, enqueued_ns: int | None = None
                      ) -> tuple[SessionActor | None, FullSnapshot | None, str | None]:
         """One tick of a staged copy of the actor, committed when it publishes. Returns the copy to
-        install (None to keep the actor), the latest committed snapshot, and the traffic frame of a
-        published tick as JSON, if the session has traffic."""
+        install (None to keep the actor), the latest committed snapshot, and, on a tick the session's
+        traffic stepped, the traffic's frame as JSON."""
         tags = {"session_id": actor.session_id, "session_epoch": actor.session_epoch, "tick": actor.current_tick + 1}
         if enqueued_ns is not None:
             self.store.trace.record("tick.worker_wait", enqueued_ns, self.store.trace.clock(), **tags)
@@ -465,7 +494,10 @@ class TrainingSessionService:
                 staged = deepcopy(actor)
             with self.store.trace.span("tick.actor", **tags):
                 staged.tick()
-        frame = None
+        # The traffic's frame comes with every step it takes, ten a second, whether or not this tick
+        # publishes; it is taken once the tick is done, so it shows what the tick installs
+        frame_due = (isinstance(staged, IntegratedSessionActor) and staged.current_tick != actor.current_tick
+                     and staged.traffic_frame_due())
         if staged.should_emit_snapshot():
             if baseline is None:
                 baseline = self.store.snapshot(actor.session_id)
@@ -486,30 +518,56 @@ class TrainingSessionService:
                 # Another command may have appended an outcome while this tick
                 # was staged. Retry from the installed actor and latest cursor.
                 return None, self.store.snapshot(actor.session_id), None
-            frame = self._frame_json(staged)
-        return staged, baseline, frame
+        if frame_due:
+            with self.store.trace.span("traffic.frame", **tags):
+                return staged, baseline, self._frame_json(staged)
+        return staged, baseline, None
 
     @staticmethod
     def _frame_json(actor: SessionActor) -> str | None:
         frame = actor.traffic_frame() if isinstance(actor, IntegratedSessionActor) else None
         return json.dumps(frame, separators=(",", ":")) if frame is not None else None
 
-    def traffic(self, session_id: str, after_tick: int) -> list[str]:
-        """The latest traffic frames of a live session after a tick, oldest first, as JSON.
-
-        A session that has published none since this process started (one paused, or just recovered)
-        gives its current frame, so a 3D view can draw where the traffic stands. Presentation only:
-        the frames are not durable, and a session without traffic, or not live here, has none.
-        """
+    def _traffic_session(self, session_id: str) -> LiveSession:
         session = self.sessions.get(session_id)
         if session is None or session.failed or not isinstance(session.actor, IntegratedSessionActor):
             raise TrainingStoreError("INVALID_REFERENCE", "No live traffic for this training session")
         if session.actor.traffic is None:
             raise TrainingStoreError("INVALID_REFERENCE", "This training session has no traffic")
-        frames = [frame for tick, frame in session.frames if tick > after_tick]
+        return session
+
+    def traffic(self, session_id: str, after_tick: int) -> list[str]:
+        """The latest traffic frames of a live session after a tick, oldest first, as JSON: at most
+        TRAFFIC_REPLY_FRAMES, the newest.
+
+        A session that has published none since this process started (one paused, or just recovered)
+        gives its current frame, so a 3D view can draw where the traffic stands. Presentation only:
+        the frames are not durable, and a session without traffic, or not live here, has none.
+        """
+        session = self._traffic_session(session_id)
+        frames = [frame for tick, frame in session.frames if tick > after_tick][-TRAFFIC_REPLY_FRAMES:]
         if not session.frames and session.actor.current_tick > after_tick:
             frames.append(self._frame_json(session.actor))
         return frames
+
+    async def wait_for_traffic(self, session_id: str, after_tick: int, wait_s: float) -> list[str]:
+        """As traffic, but with no frame after after_tick yet, waits up to wait_s for the next one.
+
+        A 3D view asks again as soon as each reply comes, so it hears of every frame as it is made,
+        rather than up to a polling interval late: what it draws then needs less of a lead over the
+        newest frame to never run out. A reply after wait_s with no frames means none came, as while
+        the session is paused.
+        """
+        frames = self.traffic(session_id, after_tick)
+        if frames or wait_s <= 0:
+            return frames
+        # Taken in the same turn of the event loop as the check above, so no frame can come between
+        signal = self.sessions[session_id].frame_signal
+        try:
+            await asyncio.wait_for(signal.wait(), wait_s)
+        except (TimeoutError, asyncio.TimeoutError):
+            pass
+        return self.traffic(session_id, after_tick)
 
     async def _run(self, session: LiveSession) -> None:
         step_ns = round(SessionActor.STEP_S * 1e9)
@@ -537,7 +595,7 @@ class TrainingSessionService:
                                             tick=session.actor.current_tick, running=running, lateness_ms=lateness / 1e6,
                                             boundary_ms=(end-start)/1e6,
                                             missed_deadlines=max(0, (end-deadline) // step_ns), **waiting)
-                deadline = max(deadline + step_ns, self.store.trace.clock())
+                deadline = next_deadline(deadline, self.store.trace.clock(), step_ns)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -587,4 +645,6 @@ class TrainingSessionService:
             await asyncio.gather(*tuple(self._operations), return_exceptions=True)
         for session in self.sessions.values():
             session.progress.observe(self.store.trace, session.actor, running=False)
+            # No more frames will come: a 3D view waiting for one hears so now
+            session.wake_frame_waiters()
 

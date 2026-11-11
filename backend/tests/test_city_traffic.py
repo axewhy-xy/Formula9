@@ -13,18 +13,21 @@ Description:
 
 from copy import deepcopy
 import asyncio
+import base64
 import json
 import math
+import time
 
 import pytest
 
 from contracts.v2.models import DispatcherCommand
 from contracts.v2.route_edit import RouteApprovalRequest, RouteEditRequest
 from src.services.integrated_actor import SHUTTLE_FRONT_M, IntegratedSessionActor
-from src.services.training_sessions import TrainingSessionService, checkpoint
+from src.services import training_sessions
+from src.services.training_sessions import TrainingSessionService, checkpoint, next_deadline
 from src.persistence.training_store import TrainingStore
 from src.traffic import city_traffic, incident_hazards, route_signals, signal_cycle
-from src.traffic.city_traffic import CityTraffic, ShuttleRoute, overlap
+from src.traffic.city_traffic import FRAME_RECORD, CityTraffic, ShuttleRoute, overlap, unpack_frame
 from src.traffic.road_network import RoadNetwork
 
 MODELS = {"car": {"length_m": 4.5, "width_m": 1.8, "height_m": 1.5}}
@@ -311,12 +314,26 @@ def test_a_shuttle_brakes_evenly_and_pulls_away_no_faster_than_the_bus_can():
             speeds[shuttle.ID] = speed
 
 
+def vehicles_of(frame):
+    """A frame's vehicles, unpacked: (seed index, x cm, y cm, heading in tenths of a degree, speed cm/s)."""
+    vehicles = unpack_frame(base64.b64decode(frame["vehicles"]))
+    assert len(vehicles) == frame["vehicle_count"]
+    return vehicles
+
+
 @pytest.mark.traffic
 def test_frames_carry_the_traffic_and_the_shuttles_bodies():
     actor = IntegratedSessionActor(0, session_id="traffic-test")
     frame = actor.traffic_frame()
-    assert frame["tick"] == 0 and len(frame["vehicles"]) % 5 == 0
-    assert len(frame["vehicles"]) // 5 <= len(actor.traffic.network.seeds)
+    vehicles = vehicles_of(frame)
+    assert frame["tick"] == 0 and 0 < len(vehicles) <= len(actor.traffic.network.seeds)
+    # Each record is where the traffic has the vehicle, to the centimetre and tenth of a degree
+    for seed, x, y, heading, speed in vehicles[:50]:
+        vehicle = next(v for v in actor.traffic.vehicles if v.seed == seed)
+        assert not vehicle.outside
+        assert abs(x / 100 - vehicle.x) <= 0.005 and abs(y / 100 - vehicle.y) <= 0.005
+        assert abs(heading / 10 - math.degrees(math.atan2(vehicle.fy, vehicle.fx))) <= 0.05
+        assert abs(speed / 100 - vehicle.speed) <= 0.005
     assert [s["vehicle_id"] for s in frame["shuttles"]] == [v.vehicle_id for v in actor.domain.vehicles]
     # A shuttle's body is in its lane, beside its route's line
     first = frame["shuttles"][0]
@@ -424,9 +441,118 @@ def test_the_traffic_endpoint_serves_the_frames(tmp_path, monkeypatch):
                 body = reply.json()
                 # Not yet started: the traffic where it stands, so the 3D view can draw it
                 assert body["session_id"] == session_id and [f["tick"] for f in body["frames"]] == [0]
-                assert len(body["frames"][0]["shuttles"]) == 5 and len(body["frames"][0]["vehicles"]) > 4000
+                assert len(body["frames"][0]["shuttles"]) == 5 and len(vehicles_of(body["frames"][0])) > 800
                 assert client.get(f"/api/v2/sessions/{session_id}/traffic?after_tick=0").json()["frames"] == []
+                # Asked to wait, a reply with no frame yet waits that long for one, then says none came
+                started = time.monotonic()
+                waited = client.get(f"/api/v2/sessions/{session_id}/traffic?after_tick=0&wait_ms=150")
+                assert waited.status_code == 200 and waited.json()["frames"] == []
+                assert time.monotonic() - started >= 0.1
+                assert client.get(f"/api/v2/sessions/{session_id}/traffic?wait_ms=6000").status_code == 422
                 assert client.get("/api/v2/sessions/no-such-session/traffic").status_code == 404
     finally:
         app.dependency_overrides.clear()
         app.dependency_overrides.update(previous)
+
+
+def test_packed_vehicles_read_back_exactly():
+    records = [(0, 0, 0, 0, 0), (1009, -123456, 98765, -1800, 1550), (65535, 2**31 - 1, -(2**31 - 1), 1800, 65535)]
+    packed = b"".join(FRAME_RECORD.pack(*record) for record in records)
+    assert len(packed) == 14 * len(records)
+    assert unpack_frame(packed) == records
+    with pytest.raises(ValueError):
+        unpack_frame(packed[:-1])
+
+
+def test_a_late_tick_is_caught_up_on_and_only_a_long_stall_is_let_go():
+    step = 50_000_000
+    # On time: one step on
+    assert next_deadline(1_000_000_000, 1_000_000_000, step) == 1_050_000_000
+    # A tick that ran 30 ms over does not push back the next: it comes at once, then the pace resumes
+    assert next_deadline(1_000_000_000, 1_080_000_000, step) == 1_050_000_000
+    # A stall longer than the backlog keeps only the backlog to catch up on
+    backlog = round(training_sessions.MAX_TICK_BACKLOG_S * 1e9)
+    assert next_deadline(1_000_000_000, 5_000_000_000, step) == 5_000_000_000 - backlog
+    # A session whose ticks alternate 80 ms and 10 ms keeps the wall clock's pace
+    deadline = now = 0
+    for tick in range(200):
+        now = max(now, deadline) + (80_000_000 if tick % 2 == 0 else 10_000_000)
+        deadline = next_deadline(deadline, now, step)
+    assert abs(deadline - 200 * step) <= step
+
+
+async def _started(store, actor):
+    service = TrainingSessionService(store)
+    await service.initialize()
+    draft = actor.definition.routes.preview(store.snapshot(actor.session_id), RouteEditRequest(
+        route_id="route-m2-detour", expected_route_revision=1, draft_revision=1))
+    approved = await service.approve_route("operator", actor.session_id, RouteApprovalRequest(
+        preview_id=draft.preview_id, preview_revision=draft.preview_revision, command_id="route",
+        idempotency_key="route", target_vehicle_ids=["shuttle-01"], reason="Pre-trip bypass"))
+    assert approved.status == "APPLIED"
+    snapshot = store.snapshot(actor.session_id)
+    start = await service.submit("operator", DispatcherCommand(contract_version="2.0", command_id="start",
+        idempotency_key="start", session_id=actor.session_id, command_type="START", expected_epoch=1,
+        expected_revision=snapshot.session.aggregate_revision, target_type="SESSION", target_id=actor.session_id,
+        payload={}))
+    assert start.status == "APPLIED"
+    return service
+
+
+@pytest.mark.traffic
+def test_a_frame_comes_with_every_traffic_step_whichever_ticks_publish(tmp_path, monkeypatch):
+    monkeypatch.setattr(TrainingSessionService, "_run", _manual_clock)
+
+    async def exercise():
+        actor = IntegratedSessionActor(1000, session_id="traffic-steps")
+        with TrainingStore(tmp_path / "steps.sqlite") as store:
+            store.create_session(actor.generate_snapshot(), runtime_state=checkpoint(actor))
+            service = await _started(store, actor)
+            try:
+                session = service.sessions[actor.session_id]
+                # Snapshots now publish on the ticks the traffic does not step
+                session.actor.command_tick += 1
+                first = session.actor.current_tick
+                for _ in range(20):
+                    await service.step(session)
+                frames = [json.loads(frame) for frame in service.traffic(actor.session_id, first)]
+                return first, session.actor, frames
+            finally:
+                await service.close()
+
+    first, live, frames = asyncio.run(exercise())
+    assert live.current_tick == first + 20
+    assert [f["tick"] for f in frames] == [t for t in range(first + 1, first + 21) if t % 2 == 0][-10:]
+    # Each frame is stamped with the moment it shows, and the traffic stood there then
+    assert all(f["simulation_time_s"] == round(f["tick"] * live.STEP_S, 3) for f in frames)
+    assert frames[-1]["vehicles"] == live.traffic_frame()["vehicles"]
+
+
+@pytest.mark.traffic
+def test_a_view_waiting_for_traffic_hears_of_the_next_frame_at_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(TrainingSessionService, "_run", _manual_clock)
+
+    async def exercise():
+        actor = IntegratedSessionActor(1000, session_id="traffic-waits")
+        with TrainingStore(tmp_path / "waits.sqlite") as store:
+            store.create_session(actor.generate_snapshot(), runtime_state=checkpoint(actor))
+            service = await _started(store, actor)
+            try:
+                session = service.sessions[actor.session_id]
+                while not session.actor.traffic_frame_due() or not session.frames:
+                    await service.step(session)
+                newest = session.actor.current_tick
+                waiting = asyncio.create_task(service.wait_for_traffic(actor.session_id, newest, 30))
+                await asyncio.sleep(0.05)
+                assert not waiting.done(), "nothing new yet"
+                started = time.monotonic()
+                await service.step(session)
+                await service.step(session)
+                frames = await asyncio.wait_for(waiting, 5)
+                return newest, frames, time.monotonic() - started
+            finally:
+                await service.close()
+
+    newest, frames, waited = asyncio.run(exercise())
+    assert [json.loads(frame)["tick"] for frame in frames] == [newest + 2]
+    assert waited < 5

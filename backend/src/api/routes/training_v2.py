@@ -121,16 +121,20 @@ async def snapshot(session_id: str, actor_id: str = Depends(get_actor_id),
 
 @router.get("/{session_id}/traffic")
 async def traffic(session_id: str, after_tick: Annotated[int, Query(ge=-1)] = -1,
+                  wait_ms: Annotated[int, Query(ge=0, le=5000)] = 0,
                   actor_id: str = Depends(get_actor_id),
                   service: TrainingSessionService = Depends(get_training_service)) -> Response:
     """The background traffic and the shuttles' bodies as the backend drives them, for a 3D view to draw.
 
-    Frames after after_tick, oldest first, ten a second while the session runs. Each lists the vehicles
-    on the roads as flat (index in /api/traffic/{area}'s vehicles, x cm, y cm, heading in tenths of a
-    degree anticlockwise from east, speed cm/s) and each shuttle's body: its middle, heading and speed.
+    Frames after after_tick, oldest first, one a traffic step (ten a second) while the session runs, at
+    most the newest second's worth. With wait_ms and none yet, the reply waits up to that long for the
+    next, so a view that asks again at once hears of each frame as it is made. Each frame has its tick and
+    simulation time; vehicle_count vehicles on the roads, base64 of 14 bytes each, little-endian (uint16
+    index in /api/traffic/{area}'s vehicles, int32 x cm, int32 y cm, int16 heading in tenths of a degree
+    anticlockwise from east, uint16 speed cm/s); and each shuttle's body: its middle, heading and speed.
     Presentation only; the snapshot stays the authority on where a shuttle is along its route.
     """
-    frames = service.traffic(session_id, after_tick)
+    frames = await service.wait_for_traffic(session_id, after_tick, wait_ms / 1000)
     return Response(content='{"session_id":%s,"frames":[%s]}' % (json.dumps(session_id), ",".join(frames)),
                     media_type="application/json")
 

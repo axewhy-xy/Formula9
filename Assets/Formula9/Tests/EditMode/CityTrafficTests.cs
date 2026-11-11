@@ -1180,14 +1180,20 @@ namespace Formula9.Tests
         [Test]
         public void TheTrafficIsDrawnBetweenTheFramesEitherSideOfItsClock()
         {
-            var traffic = FollowingTheBackend();
+            var traffic = Traffic("car", "r", 1, 10, Road("r", 1, 2, true, "primary", (0, 0), (2000, 0)));
+            // 10 m/s east, from x = 98 at 9.8 s to x = 101 at 10.1 s
+            traffic.FollowBackend(Enumerable.Range(0, 4).Select(k => BackendFrame(196 + 2 * k, 98 + k)).ToList());
             traffic.Tick(0);
-            traffic.Tick(Frame);
-            var share = (float)((traffic.FollowedS - 10.0) / 0.1);
-            Assert.Greater(share, 0f);
-            Assert.Less(share, 1f);
-            Assert.AreEqual(100 + share, Position(traffic, "v").x, 0.01f);
-            Assert.AreEqual(traffic.FollowedS, traffic.SignalClockS, 1e-9, "the lights show the colours the backend stopped for");
+            Assert.AreEqual(10.1 - 0.1 - TrafficPlaybackClock.StartMarginS, traffic.FollowedS, 1e-9, "a frame and the margin behind the newest");
+            for (var i = 0; i < 3; i++)
+            {
+                var before = traffic.FollowedS;
+                traffic.Tick(Frame);
+                Assert.Greater(traffic.FollowedS, before);
+                Assert.Less(traffic.FollowedS, 10.1);
+                Assert.AreEqual(98 + (traffic.FollowedS - 9.8) * 10, Position(traffic, "v").x, 0.01f);
+                Assert.AreEqual(traffic.FollowedS, traffic.SignalClockS, 1e-9, "the lights show the colours the backend stopped for");
+            }
         }
 
         [Test]
@@ -1203,14 +1209,14 @@ namespace Formula9.Tests
         public void TheBackendsShuttleIsDrawnWhereItsFramesPutIt()
         {
             var traffic = Traffic("car", "r", 1, 10, Road("r", 1, 2, true, "primary", (0, 0), (2000, 0)));
-            traffic.FollowBackend(new[] { BackendFrame(200, 100, shuttleY: 0), BackendFrame(202, 101, shuttleY: 1) });
+            // 5 m/s north, from y = 0 at 9.8 s
+            traffic.FollowBackend(Enumerable.Range(0, 4).Select(k => BackendFrame(196 + 2 * k, 98 + k, shuttleY: 0.5f * k)).ToList());
             Assert.IsFalse(traffic.TryGetBackendShuttlePose("shuttle-01", 1.6f, out _, out _), "nothing drawn yet");
             traffic.Tick(0);
             traffic.Tick(Frame);
             Assert.IsTrue(traffic.TryGetBackendShuttlePose("shuttle-01", 1.6f, out var at, out var facing));
-            var share = (float)((traffic.FollowedS - 10.0) / 0.1);
             Assert.AreEqual(50, at.x, 0.01f);
-            Assert.AreEqual(share, at.z, 0.01f);
+            Assert.AreEqual((traffic.FollowedS - 9.8) * 5, at.z, 0.01f);
             Assert.AreEqual(1.6f, at.y, 0.001f);
             Assert.Greater(Vector3.Dot(facing * Vector3.forward, Vector3.forward), 0.999f, "north, along +Z");
             Assert.IsFalse(traffic.TryGetBackendShuttlePose("shuttle-02", 1.6f, out _, out _));
@@ -1232,18 +1238,101 @@ namespace Formula9.Tests
         [Test]
         public void TheTrafficReplyIsRead()
         {
-            const string reply = "{\"session_id\":\"s1\",\"frames\":[{\"tick\":4,\"simulation_time_s\":0.2,\"vehicles\":[7,12345,-678,900,1000],"
+            // Packed by the backend (struct "<HiihH"): two vehicles, the second at the edges of what the fields hold
+            const string packed = "BwA5MAAAWv3//4QD6APxA3Av/P8ACT0A+Pj//w==";
+            const string reply = "{\"session_id\":\"s1\",\"frames\":[{\"tick\":4,\"simulation_time_s\":0.2,\"vehicle_count\":2,\"vehicles\":\"" + packed + "\","
                 + "\"shuttles\":[{\"vehicle_id\":\"shuttle-01\",\"x_m\":1.5,\"y_m\":-2.5,\"heading_deg\":45.0,\"speed_mps\":3.0}]}]}";
             var frames = TrainingApi.ParseTrafficFrames(reply, "s1");
             Assert.AreEqual(1, frames.Count);
             Assert.AreEqual(4, frames[0].Tick);
             Assert.AreEqual(0.2, frames[0].SimulationTimeS, 1e-9);
-            CollectionAssert.AreEqual(new[] { 7, 12345, -678, 900, 1000 }, frames[0].Vehicles);
+            CollectionAssert.AreEqual(new[] { 7, 12345, -678, 900, 1000, 1009, -250000, 4000000, -1800, 65535 }, frames[0].Vehicles);
+            Assert.AreEqual(packed, TrafficFrame.PackVehicles(frames[0].Vehicles), "packed as the backend packs them");
             Assert.AreEqual("shuttle-01", frames[0].Shuttles[0].VehicleId);
             Assert.AreEqual(-2.5, frames[0].Shuttles[0].YM, 1e-9);
             Assert.Throws<Formula9.Contracts.ContractException>(() => TrainingApi.ParseTrafficFrames(reply, "s2"), "another session's");
+            Assert.Throws<Formula9.Contracts.ContractException>(() => TrainingApi.ParseTrafficFrames(reply.Replace("\"vehicle_count\":2", "\"vehicle_count\":3"), "s1"), "a miscounted frame");
+            Assert.Throws<Formula9.Contracts.ContractException>(() => TrainingApi.ParseTrafficFrames(reply.Replace(packed, "BwA5MAAA"), "s1"), "a vehicle cut short");
             Assert.Throws<Formula9.Contracts.ContractException>(() => TrainingApi.ParseTrafficFrames(
-                "{\"session_id\":\"s1\",\"frames\":[{\"tick\":4,\"simulation_time_s\":0.2,\"vehicles\":[7,1,2]}]}", "s1"), "a vehicle cut short");
+                "{\"session_id\":\"s1\",\"frames\":[{\"tick\":4,\"simulation_time_s\":0.2,\"vehicle_count\":1,\"vehicles\":[7,1,2,3,4]}]}", "s1"), "unpacked vehicles");
+        }
+
+        // Feeds frames to the traffic as a backend would send them, one each interval of real time, and
+        // draws it every frame; returns the vehicle's drawn place each frame.
+        private static List<Vector3> Play(CityTrafficRenderer traffic, IReadOnlyList<TrafficFrame> frames, double interval = 0.1, float frame = 1 / 60f, double extraS = 1)
+        {
+            var drawn = new List<Vector3>();
+            var next = 0;
+            for (var now = 0.0; now < frames.Count * interval + extraS; now += frame)
+            {
+                while (next < frames.Count && next * interval <= now) traffic.FollowBackend(new[] { frames[next++] }, now);
+                traffic.Tick(frame);
+                if (traffic.TryGetPose("v", out var position, out _)) drawn.Add(position);
+            }
+            return drawn;
+        }
+
+        [Test]
+        public void DrawnBetweenFramesTheTrafficRoundsABendWithoutCorners()
+        {
+            // Round a bend of 20 m radius at 10 m/s: one metre a frame, the heading turning 2.9 degrees a frame
+            const float radius = 20, step = 1f / radius;
+            Vector2 At(int k) => new Vector2(radius * Mathf.Sin(k * step), radius - radius * Mathf.Cos(k * step));
+            Vector2 Facing(int k) => new Vector2(Mathf.Cos(k * step), Mathf.Sin(k * step));
+            for (var k = 1; k < 4; k++)
+            {
+                // Leaving a frame along its heading, and arriving at the next along that one's
+                CityTrafficRenderer.Between(At(k), Facing(k), At(k + 1), Facing(k + 1), 0.001f, out var leaving);
+                CityTrafficRenderer.Between(At(k - 1), Facing(k - 1), At(k), Facing(k), 0.999f, out var arriving);
+                Assert.Less(Vector2.Angle(leaving - At(k), Facing(k)), 0.5f, "leaves along its heading");
+                Assert.Less(Vector2.Angle(At(k) - arriving, Facing(k)), 0.5f, "so no corner where two frames meet");
+                // Halfway, on the bend rather than cutting across it
+                CityTrafficRenderer.Between(At(k), Facing(k), At(k + 1), Facing(k + 1), 0.5f, out var halfway);
+                Assert.AreEqual(radius, Vector2.Distance(halfway, new Vector2(0, radius)), 0.0005f);
+            }
+            // Moved sideways, or turned about, it goes straight across
+            CityTrafficRenderer.Between(Vector2.zero, Vector2.right, new Vector2(0, 3), Vector2.right, 0.5f, out var across);
+            Assert.AreEqual(new Vector2(0, 1.5f), across);
+        }
+
+        [Test]
+        public void AHeadingTurnsSmoothlyThroughTheFrames()
+        {
+            // A steady turn is drawn turning steadily, across north's 0/360
+            Assert.AreEqual(0, Mathf.DeltaAngle(0, CityTrafficRenderer.HeadingBetween(350, 10, 330, 30, 0.5f)), 1e-3f);
+            Assert.AreEqual(5, CityTrafficRenderer.HeadingBetween(0, 10, -10, 20, 0.5f), 1e-3f);
+            // Without the frames before and after, it turns at a steady rate between the two
+            Assert.AreEqual(2.5f, CityTrafficRenderer.HeadingBetween(0, 10, null, null, 0.25f), 1e-3f);
+            // Coming out of a turn onto a straight, the rate of turn eases off across the frame instead of stopping at it
+            float Rate(float b, float c, float? a, float? d, float s) =>
+                (CityTrafficRenderer.HeadingBetween(b, c, a, d, s + 0.001f) - CityTrafficRenderer.HeadingBetween(b, c, a, d, s - 0.001f)) / 0.002f;
+            Assert.AreEqual(Rate(10, 20, 0, 20, 0.999f), Rate(20, 20, 10, 20, 0.001f), 0.5f);
+        }
+
+        [Test]
+        public void AVehicleTheBackendPutsInAnotherLaneIsSteeredAcrossNotJumped()
+        {
+            var traffic = Traffic("car", "r", 1, 10, Road("r", 1, 2, true, "primary", (0, 0), (2000, 0)));
+            // At 10 m/s along y = 0, then the backend has it in a lane 3 m over, as onto another road at a junction
+            var frames = Enumerable.Range(0, 40).Select(k => BackendFrame(200 + 2 * k, 100 + k, k < 15 ? 0 : 3)).ToList();
+            var drawn = Play(traffic, frames);
+            for (var i = 1; i < drawn.Count; i++)
+                Assert.Less(Vector3.Distance(drawn[i], drawn[i - 1]), 0.6f, $"no jump at frame {i}");
+            Assert.AreEqual(3, drawn[drawn.Count - 1].z, 0.02f, "in the new lane in the end");
+            Assert.AreEqual(139, drawn[drawn.Count - 1].x, 0.01f, "where the newest frame is once they stop coming");
+        }
+
+        [Test]
+        public void TrafficFramesThatComeAtTheWallClocksPaceAreDrawnAtAnEvenSpeed()
+        {
+            var traffic = Traffic("car", "r", 1, 10, Road("r", 1, 2, true, "primary", (0, 0), (2000, 0)));
+            var frames = Enumerable.Range(0, 100).Select(k => BackendFrame(200 + 2 * k, 100 + k)).ToList();
+            var drawn = Play(traffic, frames, extraS: 0);
+            // Once settled, a frame of 1/60 s moves the car the 10 m/s's worth, give or take what the clock corrects
+            var settled = drawn.Skip(drawn.Count / 3).ToList();
+            for (var i = 1; i < settled.Count; i++)
+                Assert.AreEqual(10f / 60, settled[i].x - settled[i - 1].x, 10f / 60 * 0.15f, $"frame {i}");
+            Assert.AreEqual(0, traffic.Playback.NearStalls);
         }
     }
 }

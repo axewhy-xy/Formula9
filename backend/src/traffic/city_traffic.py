@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import bisect
 import math
+import struct
 from copy import deepcopy
 
 from src.traffic import signal_cycle
@@ -83,6 +84,12 @@ SHUTTLE_FOLLOW_EXTRA_M, SHUTTLE_SWING_M = 4.0, 2.0
 TOUCH_M = 0.1
 # What stands in for "no limit" in a checkpoint, which JSON cannot hold as infinity
 NO_LIMIT = 1e9
+# One vehicle of a frame, little-endian: its index in the area's sample (uint16), x and y in centimetres
+# (int32), its heading in tenths of a degree anticlockwise from east (int16) and its speed in cm/s
+# (uint16). Packed, a frame of the whole sample is 14 bytes a vehicle, which the 3D view reads without
+# parsing thousands of JSON numbers ten times a second.
+FRAME_RECORD = struct.Struct("<HiihH")
+_INT32 = 2**31 - 1
 
 _PHASE_S, _CYCLE_S, _GREEN_S, _AMBER_S = signal_cycle.PHASE_S, signal_cycle.CYCLE_S, signal_cycle.GREEN_S, \
     signal_cycle.GREEN_S + signal_cycle.YELLOW_S
@@ -1317,19 +1324,22 @@ class CityTraffic:
 
     # ---------------------------------------------------------------- what is reported
 
-    def frame(self) -> tuple[list[int], list[dict]]:
-        """The vehicles on the roads, as a flat list of (seed index, x cm, y cm, heading in tenths of a
-        degree anticlockwise from east, speed cm/s) for the 3D view, and the shuttles' bodies."""
-        flat: list[int] = []
-        for vehicle in self.vehicles:
-            if vehicle.outside:
-                continue
-            flat.extend((vehicle.seed, round(vehicle.x * 100), round(vehicle.y * 100),
-                         round(math.degrees(math.atan2(vehicle.fy, vehicle.fx)) * 10), round(vehicle.speed * 100)))
+    def frame(self) -> tuple[bytes, int, list[dict]]:
+        """The vehicles on the roads for the 3D view, packed as FRAME_RECORD after FRAME_RECORD, and how
+        many there are; and the shuttles' bodies."""
+        driving = [vehicle for vehicle in self.vehicles if not vehicle.outside]
+        packed = bytearray(FRAME_RECORD.size * len(driving))
+        pack, size, at = FRAME_RECORD.pack_into, FRAME_RECORD.size, 0
+        for vehicle in driving:
+            pack(packed, at, vehicle.seed,
+                 min(max(round(vehicle.x * 100), -_INT32), _INT32), min(max(round(vehicle.y * 100), -_INT32), _INT32),
+                 round(math.degrees(math.atan2(vehicle.fy, vehicle.fx)) * 10), min(round(vehicle.speed * 100), 65535))
+            at += size
         shuttles = [{"vehicle_id": s.id, "x_m": round(s.x, 3), "y_m": round(s.y, 3),
                      "heading_deg": round(math.degrees(math.atan2(s.fy, s.fx)), 2), "speed_mps": round(s.speed, 3)}
                     for s in self.shuttles.values() if s.placed]
-        return flat, shuttles
+        return bytes(packed), len(driving), shuttles
+
 
     def report(self) -> dict:
         """Counts for tests and diagnostics: vehicles driving and waiting outside, vehicles overlapping the
@@ -1365,3 +1375,10 @@ class CityTraffic:
                         *body, vehicle.x, vehicle.y, vehicle.fx, vehicle.fy, vehicle.half, vehicle.half_width):
                     found.append((shuttle.id, vehicle.id))
         return found
+
+
+def unpack_frame(packed: bytes) -> list[tuple[int, int, int, int, int]]:
+    """A frame's packed vehicles as (seed index, x cm, y cm, heading in tenths of a degree, speed cm/s)."""
+    if len(packed) % FRAME_RECORD.size:
+        raise ValueError("A frame's vehicles are cut short")
+    return list(FRAME_RECORD.iter_unpack(packed))

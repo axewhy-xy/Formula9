@@ -81,8 +81,12 @@ namespace Formula9.Session
     {
         public const string IntegratedScenario = "scenario-m2-integrated-r1";
         public static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
-        // The backend's traffic moves every tenth of a second, so the 3D city asks for it this often
-        public static readonly TimeSpan TrafficPollInterval = TimeSpan.FromSeconds(0.2);
+        // The backend's traffic moves every tenth of a second. The 3D city asks for it again as soon as
+        // each reply comes, and the backend holds a request this long for the next frame, so each frame
+        // arrives as it is made instead of up to a polling interval late.
+        public static readonly TimeSpan TrafficWait = TimeSpan.FromSeconds(1);
+        // After a traffic request fails, or while there is nothing to ask, the next waits this long
+        public static readonly TimeSpan TrafficRetryInterval = TimeSpan.FromSeconds(0.25);
         private static readonly Regex IdPattern = new Regex("^[A-Za-z0-9][A-Za-z0-9_.:-]*$");
         private static readonly HashSet<string> SessionControls = new HashSet<string> { "START", "PAUSE", "RESUME", "ARCHIVE" };
 
@@ -316,40 +320,50 @@ namespace Formula9.Session
         // Function: RefreshTrafficAsync
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function is one poll of the joined session's traffic: the backend's frames since
-        //     the newest taken, which TrafficFramesAccepted reports. A new session or epoch starts
-        //     over. A session whose backend drives no traffic is not asked again; any other failure
-        //     is left to the snapshot poll to report, and the next poll tries again.
-        public async Task RefreshTrafficAsync()
+        //     This function is one request for the joined session's traffic: the backend's frames
+        //     since the newest taken, which TrafficFramesAccepted reports. Given a wait, the backend
+        //     holds the request that long for a frame newer than those taken. A new session or epoch
+        //     starts over. A session whose backend drives no traffic is not asked again; any other
+        //     failure is left to the snapshot poll to report, and the next request tries again.
+        //
+        // Args:
+        //     wait (TimeSpan): How long the backend may hold the request for the next frame; none by default.
+        //
+        // Returns:
+        //     Task<int>: How many frames the backend sent, which may be none, when it answered: asking
+        //         again at once is then right. -1 when nothing was asked, or the request failed.
+        public async Task<int> RefreshTrafficAsync(TimeSpan wait = default)
         {
             var sessionId = SessionId;
-            if (!auth.IsLoggedIn || sessionId == null || !Available || trafficRequest != null) return;
+            if (!auth.IsLoggedIn || sessionId == null || !Available || trafficRequest != null) return -1;
             var key = $"{sessionId}/{epoch}";
-            if (key == noTrafficKey) return;
+            if (key == noTrafficKey) return -1;
             if (key != trafficKey) { trafficKey = key; trafficCursor = -1; }
             var token = trafficRequest = new object();
             var started = generation;
             List<TrafficFrame> frames;
             try
             {
-                frames = await api.GetTrafficFramesAsync(sessionId, trafficCursor, lifetime.Token);
+                frames = await api.GetTrafficFramesAsync(sessionId, trafficCursor, (int)Math.Max(0, wait.TotalMilliseconds), lifetime.Token);
             }
             catch (BackendErrorException error) when (error.Error.Code == "INVALID_REFERENCE")
             {
                 if (trafficRequest == token) trafficRequest = null;
                 if (started == generation) noTrafficKey = key;
-                return;
+                return -1;
             }
             catch (Exception error) when (!(error is OperationCanceledException))
             {
                 if (trafficRequest == token) trafficRequest = null;
-                return;
+                return -1;
             }
-            catch (OperationCanceledException) { return; }
+            catch (OperationCanceledException) { return -1; }
             if (trafficRequest == token) trafficRequest = null;
-            if (started != generation || key != trafficKey || frames.Count == 0) return;
+            if (started != generation || key != trafficKey) return -1;
+            if (frames.Count == 0) return 0;
             trafficCursor = frames[frames.Count - 1].Tick;
             TrafficFramesAccepted?.Invoke(frames);
+            return frames.Count;
         }
 
         // -----------------------------------------------------------------------------------

@@ -60,10 +60,19 @@ An integrated session drives its shuttles through the area's background traffic
 checkpoints it, so a recovered session drives on exactly as the original would. In the traffic a
 shuttle keeps to the kerb lane, accelerates and brakes, follows the vehicle in front, gives way, and
 queues behind vehicles waiting at a red light; incidents close their road and back the traffic up
-(`src/traffic/incident_hazards.py`). `GET /api/v2/sessions/{id}/traffic?after_tick=N` returns the
-traffic's latest frames, ten a second, for the 3D city to draw: presentation only, not part of the
-durable snapshot. The tests run integrated sessions without traffic unless marked `traffic`
-(`tests/conftest.py`); `tests/test_city_traffic.py` covers it.
+(`src/traffic/incident_hazards.py`). `GET /api/v2/sessions/{id}/traffic?after_tick=N&wait_ms=M`
+returns the traffic's latest frames for the 3D city to draw: presentation only, not part of the
+durable snapshot. A frame comes with every traffic step, ten a session second, stamped with the
+moment it shows the vehicles and shuttles at; its vehicles are packed (`city_traffic.FRAME_RECORD`,
+14 bytes each, base64) so the client reads a thousand of them without parsing JSON numbers. With
+`wait_ms`, a request with no newer frame yet is held until the next one (or the wait runs out), so
+the client, asking again as each reply arrives, hears of every frame as it is made. A tick that runs
+late does not push back the ticks after it: `TrainingSessionService` catches up on up to
+`MAX_TICK_BACKLOG_S` of missed ticks, so a session's clock, and its frames, keep the wall clock's
+pace. The client draws the frames a little behind the newest on a clock that matches their pace and
+lateness (`Assets/Formula9/Runtime/World/TrafficPlaybackClock.cs`). The tests run integrated
+sessions without traffic unless marked `traffic` (`tests/conftest.py`); `tests/test_city_traffic.py`
+covers it.
 
 A session pins the fixture it started on. After the network or scenario changes, sessions from
 the old revision can't be recovered: they are marked `FAILED` with `CORRUPT_CHECKPOINT`, stay

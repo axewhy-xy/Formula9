@@ -71,8 +71,8 @@ namespace Formula9.World
             ClearModels();
             vehicles.Clear();
             // The backend's frames name these vehicles, so they start over with them
-            vehiclesBySeed.Clear();
             ForgetBackend();
+            vehiclesBySeed = Array.Empty<VehicleState>();
 
             BuildDirectedRoads(roadsData);
             PlaceSignals(signals);
@@ -85,22 +85,26 @@ namespace Formula9.World
             foreach (var pair in trafficData.Models)
                 modelRenderers[pair.Key] = ModelsFor(catalog, pair.Key, pair.Value);
 
+            vehiclesBySeed = new VehicleState[trafficData.Vehicles.Count];
             for (var i = 0; i < trafficData.Vehicles.Count; i++)
-            {
-                var added = AddVehicle(trafficData.Vehicles[i], trafficData);
-                if (added != null) vehiclesBySeed[i] = added;
-            }
+                vehiclesBySeed[i] = AddVehicle(trafficData.Vehicles[i], trafficData);
         }
 
-        // A delta of zero holds the traffic still, and still draws it. A camera culls what it cannot see.
-        // The shuttles it drives move with it, even with no other traffic. While the backend's frames
-        // come, they move the traffic instead (CityTrafficFollow).
+        // Advance, then Draw. A delta of zero holds the traffic still, and still draws it.
         public void Tick(float deltaTime, IReadOnlyList<Camera> cameras = null)
+        {
+            Advance(deltaTime);
+            Draw(cameras);
+        }
+
+        // Moves the traffic on by a frame. While the backend's frames come, they move it, on their own
+        // clock (CityTrafficFollow); otherwise it drives itself, and the shuttles it drives with it, even
+        // with no other traffic. A delta of zero holds it still.
+        public void Advance(float deltaTime)
         {
             if (FollowsBackend)
             {
                 Follow(Mathf.Max(0, deltaTime));
-                RenderVehicles(cameras);
                 return;
             }
             if (vehicles.Count == 0 && shuttles.Count == 0) return;
@@ -109,9 +113,10 @@ namespace Formula9.World
             if (step > 0) Drive(step);
             for (var i = 0; i < vehicles.Count; i++)
                 UpdatePose(vehicles[i], step);
-
-            RenderVehicles(cameras);
         }
+
+        // Draws the traffic where Advance left it. Given cameras, each culls what it cannot see.
+        public void Draw(IReadOnlyList<Camera> cameras = null) => RenderVehicles(cameras);
 
         public bool TryGetPose(string vehicleId, out Vector3 position, out Vector3 forward)
         {
@@ -658,6 +663,10 @@ namespace Formula9.World
             // What is drawn: it follows the vehicle's place on the road, and is unset until first placed.
             public bool Placed;
             public Vector3 Position, Forward;
+            // Following the backend: where the frames put it last frame drawn, and how far what is drawn
+            // still is from there after they moved it somewhere near in one step; that shrinks to nothing
+            // (CityTrafficFollow)
+            public Vector3 FollowTarget, FollowOffset;
 
             public bool HasClaim(DirectedRoad to)
             {

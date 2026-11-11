@@ -133,13 +133,13 @@ namespace Formula9.World
         public void ForgetShuttle(string id) => shuttles.RemoveAll(s => s.Pose.Id == id);
 
         // Every shuttle is put straight at its next pose, as for a new session or a view that was not being
-        // drawn; following the backend, so is every vehicle, at the time the frames are drawn from.
+        // drawn; following the backend, so is every vehicle, with the frames drawn from just behind the newest.
         public void ResetShuttles()
         {
             shuttles.Clear();
             shuttleRoutes.Clear();
             if (!FollowsBackend) return;
-            followS = double.NaN;
+            playback.Restart();
             foreach (var vehicle in vehicles) vehicle.Placed = false;
         }
 

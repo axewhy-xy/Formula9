@@ -208,7 +208,8 @@ namespace Formula9.Tests
                 {
                     ["tick"] = tick,
                     ["simulation_time_s"] = tick * 0.05,
-                    ["vehicles"] = new JArray(3, 1200, -450, 900, 1000),
+                    ["vehicle_count"] = 1,
+                    ["vehicles"] = TrafficFrame.PackVehicles(3, 1200, -450, 900, 1000),
                     ["shuttles"] = new JArray(new JObject
                     {
                         ["vehicle_id"] = "shuttle-01", ["x_m"] = 1.5, ["y_m"] = -2.0, ["heading_deg"] = 90.0, ["speed_mps"] = 4.2,
@@ -774,8 +775,9 @@ namespace Formula9.Tests
         // -----------------------------------------------------------------------------------
         // Description:
         //     The first traffic poll of a session asks for every frame the backend keeps, and each
-        //     later one only for frames after the newest taken, which are reported in order. A
-        //     session the backend drives no traffic for is not asked again.
+        //     later one only for frames after the newest taken, which are reported in order, with
+        //     how long the backend may wait for one. A session the backend drives no traffic for is
+        //     not asked again.
         [Test]
         public async Task TrafficIsPolledFromTheNewestFrameUntilTheSessionHasNone()
         {
@@ -783,10 +785,16 @@ namespace Formula9.Tests
             controller.TrafficFramesAccepted += accepted.Add;
             await controller.JoinAsync(SessionId);
             backend.OnTraffic = _ => Json(backend.Traffic(10, 12));
-            await controller.RefreshTrafficAsync();
+            Assert.AreEqual(2, await controller.RefreshTrafficAsync());
             backend.OnTraffic = _ => Json(backend.Traffic(14));
-            await controller.RefreshTrafficAsync();
+            Assert.AreEqual(1, await controller.RefreshTrafficAsync(SessionController.TrafficWait));
             CollectionAssert.AreEqual(new long[] { -1, 12 }, backend.To("/traffic").Select(FakeBackend.AfterTick).ToList());
+            var waiting = backend.To("/traffic").Last();
+            StringAssert.Contains("wait_ms=1000", waiting.Url.Query);
+            Assert.Greater(waiting.TimeoutSeconds, 10, "the request outlasts the backend's wait");
+            backend.OnTraffic = _ => Json(backend.Traffic());
+            Assert.AreEqual(0, await controller.RefreshTrafficAsync(SessionController.TrafficWait), "the wait ran out with nothing new");
+            Assert.AreEqual(14L, FakeBackend.AfterTick(backend.To("/traffic").Last()));
             Assert.AreEqual(2, accepted.Count);
             CollectionAssert.AreEqual(new long[] { 10, 12 }, accepted[0].Select(f => f.Tick).ToList());
             CollectionAssert.AreEqual(new long[] { 14 }, accepted[1].Select(f => f.Tick).ToList());
@@ -796,10 +804,10 @@ namespace Formula9.Tests
             CollectionAssert.AreEqual(new[] { 3, 1200, -450, 900, 1000 }, accepted[1][0].Vehicles);
 
             backend.OnTraffic = _ => Error(404, "INVALID_REFERENCE");
-            await controller.RefreshTrafficAsync();
+            Assert.AreEqual(-1, await controller.RefreshTrafficAsync());
             Assert.AreEqual(14L, FakeBackend.AfterTick(backend.To("/traffic").Last()));
             var asked = backend.To("/traffic").Count();
-            await controller.RefreshTrafficAsync();
+            Assert.AreEqual(-1, await controller.RefreshTrafficAsync(), "nothing asked");
             await controller.RefreshTrafficAsync();
             Assert.AreEqual(asked, backend.To("/traffic").Count(), "a session without traffic is not asked again");
             Assert.AreEqual(2, accepted.Count);
