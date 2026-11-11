@@ -18,6 +18,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Formula9.Backend;
@@ -49,6 +50,12 @@ namespace Formula9.World
         private VisualElement surface;
         private SceneLoader loader;
         private Camera viewCamera;
+        private readonly List<Camera> trafficCameras = new List<Camera>();
+        private ShuttleCameraRig shuttleCameras;
+        private VisualElement cameraPanel, mainCameraView;
+        private Label mainCameraLabel;
+        private readonly List<VisualElement> cameraTiles = new List<VisualElement>();
+        private int mainCamera;
         private RenderTexture texture;
         private WorldScene world;
         private SpatialReference shownPins;
@@ -76,14 +83,9 @@ namespace Formula9.World
         private Transform draftRoot;
         private Material lineMaterial;
         private bool following;
-        private bool driving;
-        private bool mapBeforeDriving, followingBeforeDriving;
         private RouteDraftView draft;
         private IReadOnlyCollection<string> servedStops = Array.Empty<string>();
         private Label hud;
-        private float lookYaw, lookPitch;
-        private const float LookDegreesPerPixel = 0.2f, MaxLookPitchDeg = 30f;
-        private const float EyeHeightM = 1.5f, EyeForwardM = 5.5f;
         private string selectedId, sessionBoundary;
         private readonly Dictionary<string, IncidentRecord> incidentRecords = new Dictionary<string, IncidentRecord>();
         // The road network, kept while the route editor reloads its own copy: closures make it do so
@@ -146,6 +148,37 @@ namespace Formula9.World
             var cameraObject = new GameObject("World Camera");
             cameraObject.transform.SetParent(transform, false);
             viewCamera = cameraObject.AddComponent<Camera>();
+            shuttleCameras = new ShuttleCameraRig(transform);
+            trafficCameras.AddRange(shuttleCameras.Cameras);
+            // The camera view covers the whole 3D view: one camera large, the rest as thumbnails
+            cameraPanel = new VisualElement();
+            cameraPanel.AddToClassList("camera-panel");
+            mainCameraView = new VisualElement();
+            mainCameraView.AddToClassList("camera-main");
+            mainCameraLabel = new Label();
+            mainCameraLabel.AddToClassList("camera-label");
+            mainCameraView.Add(mainCameraLabel);
+            cameraPanel.Add(mainCameraView);
+            var strip = new VisualElement();
+            strip.AddToClassList("camera-strip");
+            for (var i = 0; i < shuttleCameras.Cameras.Count; i++)
+            {
+                var tile = new VisualElement();
+                tile.AddToClassList("camera-tile");
+                var label = new Label {text = shuttleCameras.NameOf(i)};
+                label.AddToClassList("camera-label");
+                tile.Add(label);
+                // A click shows this camera large
+                var index = i;
+                tile.RegisterCallback<ClickEvent>(_ => SelectCamera(index));
+                strip.Add(tile);
+                cameraTiles.Add(tile);
+            }
+            cameraPanel.Add(strip);
+            cameraPanel.style.display = DisplayStyle.None;    // hidden until the button is pressed
+            surface.Add(cameraPanel);
+            SelectCamera(0);
+            trafficCameras.Add(viewCamera); 
             viewCamera.clearFlags = CameraClearFlags.SolidColor;
             viewCamera.backgroundColor = new Color(0.10f, 0.10f, 0.12f);
             viewCamera.nearClipPlane = 0.1f;
@@ -180,6 +213,7 @@ namespace Formula9.World
                 else DestroyImmediate(lineMaterial);
             }
             if (texture != null) texture.Release();
+            shuttleCameras?.Dispose();
         }
 
         // -----------------------------------------------------------------------------------
@@ -196,7 +230,7 @@ namespace Formula9.World
         public void Show(FullSnapshot snapshot)
         {
             var boundary = snapshot == null ? null : $"{snapshot.SessionId}/{snapshot.SessionEpoch}";
-            if (boundary != sessionBoundary) { sessionBoundary = boundary; preferMap = snapshot?.Spatial == null; following = false; LeaveDriverView(); selectedId = null; routeContext = null; roadNetwork = null; incidentRecords.Clear(); motion.Clear(); DrawDraft(); }
+            if (boundary != sessionBoundary) { sessionBoundary = boundary; preferMap = snapshot?.Spatial == null; following = false; LeaveCameras(); selectedId = null; routeContext = null; roadNetwork = null; incidentRecords.Clear(); motion.Clear(); DrawDraft(); }
             latest = snapshot;
             if (snapshot != null) motion.BeginSnapshot(snapshot.Tick, Time.unscaledTime);
             if (snapshot?.Spatial == null)
@@ -242,8 +276,11 @@ namespace Formula9.World
             map.style.display = DisplayStyle.None;
             viewCamera.farClipPlane = CityFarClip;
             viewCamera.backgroundColor = CitySky;
+            // Cameras opened while the city was loading take its sky now
+            if (camerasShown) shuttleCameras.Match(viewCamera);
             maxDistance = CityMaxDistance;
-            viewCamera.enabled = true;
+            // The shuttle's cameras take the place of the 3D view while they are shown
+            viewCamera.enabled = !camerasShown;
             Resize();
             if (city == null)
             {
@@ -261,11 +298,7 @@ namespace Formula9.World
                 city.ShowDraft(draft, servedStops);
                 city.ShowIncidents(incidentRecords.Values, snapshot, roadNetwork, Time.unscaledTime);
                 RefreshHud();
-                SetReady(true, driving
-                    ? $"Driver view · {selectedId} · drag to look around"
-                    : $"3D city · {city.BuildingCount} buildings · " +
-                      (city.LtaBusStopsLoaded ? $"{city.LtaBusStopCount} {city.BusStopSource} bus-stop shelters" : "loading bus-stop shelters") +
-                      " · right-drag orbit, left-drag pan, wheel zoom");
+                SetReady(true, CityHint());
             }
         }
 
@@ -306,7 +339,7 @@ namespace Formula9.World
                 await view.LoadAsync(cityClient, CityArea, cancellation);
                 if (cancellation.IsCancellationRequested) return;
                 // Someone asked to watch a shuttle while this loaded: keep them on it
-                if (!following && !driving) FrameCity(view);
+                if (!following) FrameCity(view);
                 // The load has finished by the time this runs, so the next Show draws it
                 cityLoad = null;
                 if (latest != null && CityShown) Show(latest);
@@ -316,7 +349,7 @@ namespace Formula9.World
             {
                 // Forget it, so going back to 3D View tries again
                 city?.Dispose(); city = null; cityLoad = null;
-                LeaveDriverView();
+                LeaveCameras();
                 preferMap = true;
                 viewCamera.enabled = false;
                 if (latest != null) { map.style.display = DisplayStyle.Flex; map.Show(latest); }
@@ -335,13 +368,36 @@ namespace Formula9.World
             if (CityShown && city != null)
             {
                 city.Tick(motion, Time.unscaledTime);
+                if (city.TryGetShuttlePose(watchedId, out var position, out var rotation))
+                    shuttleCameras.Place(position, rotation);
+                // Before the traffic, which is drawn for the cameras whose turn it is
+                shuttleCameras.Tick();
                 // On the same clock as the shuttles, and still when they are
-                city.TickTraffic(latest.Session?.Status == "RUNNING" ? Time.unscaledDeltaTime : 0, viewCamera);
+                city.TickTraffic(latest.Session?.Status == "RUNNING" ? Time.unscaledDeltaTime : 0, trafficCameras);
             }
             else if (world != null) world.Advance(motion, Time.unscaledTime);
             else return;
-            if (driving) PlaceDriverCamera();
-            else if (following) FocusSelected(false);
+            // Following waits behind the camera view and carries on when it closes
+            if (following && !camerasShown) FocusSelected(false);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: LateUpdate
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function closes the cameras once the frame's work is done, when there is no
+        //     shuttle left to watch, and tells the workspace so its buttons can update. Unity
+        //     calls it after every Update, so the workspace never redraws partway through one.
+        private void LateUpdate()
+        {
+            // While the city is still loading its shuttles are not placed yet, so wait for them
+            // before deciding there is nothing to watch
+            if (camerasShown && !CanShowCameras && !(CityShown && cityLoad != null && !cityLoad.IsCompleted))
+            {
+                CloseCameras();
+                // Nobody pressed a button, so tell the workspace to redraw its Cameras buttons
+                ViewChanged?.Invoke();
+            }
         }
 
         // -----------------------------------------------------------------------------------
@@ -553,12 +609,6 @@ namespace Formula9.World
         {
             if (dragButton < 0 || !surface.HasPointerCapture(e.pointerId)) return;
             var delta = e.deltaPosition;
-            if (driving)
-            {
-                lookYaw += delta.x * LookDegreesPerPixel;
-                lookPitch = Mathf.Clamp(lookPitch + delta.y * LookDegreesPerPixel, -MaxLookPitchDeg, MaxLookPitchDeg);
-                return;
-            }
             if (dragButton == 1)
             {
                 yaw += delta.x * 0.006f;
@@ -600,7 +650,8 @@ namespace Formula9.World
         private void OnWheel(WheelEvent e)
         {
             if (e.target != surface) return;
-            if (driving) { e.StopPropagation(); return; }
+            // The camera view covers the 3D view; zooming it would move a camera nobody sees
+            if (camerasShown) { e.StopPropagation(); return; }
             distance = Mathf.Clamp(distance * Mathf.Exp(e.delta.y * 0.03f), MinDistance, maxDistance);
             PlaceCamera();
             e.StopPropagation();
@@ -640,8 +691,8 @@ namespace Formula9.World
         //     value (bool): True for the 2D map.
         public void ShowMap(bool value)
         {
-            // The map has no driver's seat, so coming back to 3D starts over the city
-            if (value) LeaveDriverView();
+            // The map has no shuttle cameras, so coming back to 3D starts over the city
+            if (value) LeaveCameras();
             if (preferMap == value) { ViewChanged?.Invoke(); return; }
             preferMap = value;
             motion.Clear();
@@ -664,7 +715,7 @@ namespace Formula9.World
         {
             ShowMap(false);
             SelectEntity(id);
-            LeaveDriverView();
+            LeaveCameras();
             following = true;
             // Steep enough that the blocks along the road don't hide the shuttle
             distance = 170; pitch = 1.2f; yaw = Mathf.PI - 0.35f;
@@ -714,7 +765,7 @@ namespace Formula9.World
         public bool FocusIncident(string id)
         {
             if (!CityShown || city == null || !city.TryGetIncidentSite(id, out var site)) return false;
-            following = false; LeaveDriverView();
+            following = false; LeaveCameras();
             target = new Vector3(site.x, 0, site.y);
             distance = IncidentFocusDistance; pitch = IncidentFocusPitch; yaw = Mathf.PI - 0.35f;
             PlaceCamera();
@@ -736,7 +787,7 @@ namespace Formula9.World
             if (!CityShown || city == null || draft == null) return;
             var points = ids.SelectMany(id => draft.TryRoad(id, out var road) ? road.Points : Array.Empty<Vector2>()).ToList();
             if (points.Count == 0) return;
-            following = false; LeaveDriverView();
+            following = false; LeaveCameras();
             target = new Vector3(points.Average(p => p.x), 0, points.Average(p => p.y));
             distance = Mathf.Clamp(Mathf.Max(points.Max(p => p.x) - points.Min(p => p.x), points.Max(p => p.y) - points.Min(p => p.y)) * 1.6f, 120, CityMaxDistance);
             PlaceCamera();
@@ -749,7 +800,7 @@ namespace Formula9.World
         //     This function points the 3D camera at the proposal and the closure it avoids.
         private void FrameDraft()
         {
-            if (draft == null || !CityShown || following || driving) return;
+            if (draft == null || !CityShown || following || camerasShown) return;
             var points = draft.FocusPoints();
             foreach (var path in draft.ProposalPaths()) points.AddRange(path.Points);
             if (points.Count == 0) return;
@@ -789,79 +840,155 @@ namespace Formula9.World
         // Description:
         //     This function focuses the camera on the selected entity and keeps it there as it
         //     moves.
-        public void FollowSelected() { LeaveDriverView(); following = true; FocusSelected(); }
+        public void FollowSelected() { LeaveCameras(); following = true; FocusSelected(); }
+
+        private bool camerasShown;
+        private string watchedId;
+        // Remembers whether the cameras were opened from the 2D map.
+        private bool camerasFromMap;
 
         // -----------------------------------------------------------------------------------
-        // Function: DriveSelected
+        // Function: OpenCameras
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function goes to the 3D city and puts the camera in the selected shuttle's
-        //     driver seat, looking where it is heading, until something else takes the camera. It
-        //     does nothing without a selected shuttle or in a session that has no 3D city.
-        public void DriveSelected()
+        //     This function shows the selected shuttle's cameras in the 3D city, the way both
+        //     Cameras buttons open them. It remembers whether they were opened from the 2D map,
+        //     keeping the first answer when they are opened again for another route's shuttle.
+        public void OpenCameras()
         {
-            if (!CanDrive || latest.Vehicles.All(v => v.VehicleId != selectedId)) return;
-            if (!driving) { mapBeforeDriving = preferMap; followingBeforeDriving = following; }
-            driving = true;
-            lookYaw = lookPitch = 0;
-            following = false;
+            if (!CamerasShown)
+                camerasFromMap = ShowingMap;
             ShowMap(false);
-        }
-
-        // Whether the camera is in a shuttle's driver seat, and whether this session has a 3D city
-        // for it to be in.
-        public bool Driving => driving;
-        public bool CanDrive => latest != null && latest.Spatial == null && cityClient != null;
-
-        // -----------------------------------------------------------------------------------
-        // Function: StopDriving
-        // -----------------------------------------------------------------------------------
-        // Description:
-        //     This function is the other half of the driver view toggle: it leaves the shuttle and
-        //     goes back to what Driver view was entered from, the 2D map, the followed shuttle or
-        //     the 3D city around the proposal.
-        public void StopDriving()
-        {
-            if (!driving) return;
-            LeaveDriverView();
-            if (mapBeforeDriving) ShowMap(true);
-            else if (followingBeforeDriving) WatchShuttle(selectedId);
-            else FrameDraft();
+            ShowCameras(true);
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: LeaveDriverView
+        // Function: CloseCameras
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function takes the camera out of the shuttle and back over the city, and shows
-        //     the shuttle again.
-        private void LeaveDriverView()
+        //     This function closes the cameras and goes back to where they were opened from,
+        //     the 2D map or the 3D view. It is used by Hide cameras and when the watched
+        //     shuttle leaves; Overview and the like use LeaveCameras, as they need the 3D view.
+        public void CloseCameras()
         {
-            if (!driving) return;
-            driving = false;
-            city?.HideShuttle(null);
-            if (city != null && city.BuildingCount > 0) FrameCity(city);
+            ShowCameras(false);
+            if (camerasFromMap)
+                ShowMap(true);
         }
 
+        // Whether the shuttle's cameras are shown in place of the 3D view, whether there is a
+        // selected shuttle in the 3D city to watch, and whether this session has a 3D city at all.
+        public bool CamerasShown => camerasShown;
+        // The shuttle whose cameras are shown, or null. It stays the same when another shuttle
+        // is selected, so the feed never switches without the operator asking for it.
+        public string WatchedId => camerasShown ? watchedId : null;
+        public bool CanShowCameras => CityShown && city != null && city.TryGetShuttlePose(camerasShown ? watchedId : selectedId, out _, out _);
+        public bool HasCity => latest != null && latest.Spatial == null && cityClient != null;
+        // The camera shown large.
+        public int MainCamera => mainCamera;
+
         // -----------------------------------------------------------------------------------
-        // Function: PlaceDriverCamera
+        // Function: ShowCameras
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function puts the camera at the selected shuttle's eye point, facing the way
-        //     the shuttle faces, and hides that shuttle from it. While the city loads there is no
-        //     shuttle yet, so it waits. If the shuttle is gone, it leaves driver view.
-        private void PlaceDriverCamera()
+        //     This function shows the selected shuttle's cameras in place of the 3D view, or puts
+        //     the 3D view back. The 3D view's own camera stops drawing while it is covered. The
+        //     shuttle's cameras are placed before they switch on, so their first frame is not
+        //     drawn from where they were last.
+        //
+        // Args:
+        //     show (bool): True to show the cameras, false to go back to the 3D view.
+        public void ShowCameras(bool show)
         {
-            if (cityLoad != null && !cityLoad.IsCompleted) return;
-            if (!CityShown || city == null || !city.TryGetShuttlePose(selectedId, out var position, out var rotation))
+            camerasShown = show;
+            if (show) watchedId = selectedId;
+            cameraPanel.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
+            if (show) shuttleCameras.Match(viewCamera);
+            if (show && city != null && city.TryGetShuttlePose(watchedId, out var position, out var rotation))
+                shuttleCameras.Place(position, rotation);
+            shuttleCameras.SetActive(show);
+            if (show)
             {
-                LeaveDriverView();
-                return;
+                // The pictures only exist once the cameras have been opened
+                ShowTextures();
+                viewCamera.enabled = false;
             }
-            city.HideShuttle(selectedId);
-            var eye = position + rotation * new Vector3(0, EyeHeightM, EyeForwardM);
-            viewCamera.transform.position = eye;
-            viewCamera.transform.rotation = rotation * Quaternion.Euler(lookPitch, lookYaw, 0);
+            else if (CityShown) viewCamera.enabled = true;
+            if (show) SelectCamera(mainCamera);
+            RefreshHint();
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: SelectCamera
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function shows one of the shuttle's cameras large and marks its thumbnail.
+        //
+        // Args:
+        //     index (int): The camera, in the rig's order.
+        public void SelectCamera(int index)
+        {
+            mainCamera = index;
+            shuttleCameras.SetMain(index);
+            // Names the watched shuttle too, as the selection elsewhere can be another one
+            mainCameraLabel.text = watchedId == null
+                ? shuttleCameras.NameOf(index)
+                : $"{watchedId} · {shuttleCameras.NameOf(index)}";
+            for (var i = 0; i < cameraTiles.Count; i++)
+                cameraTiles[i].EnableInClassList("camera-tile-selected", i == index);
+            ShowTextures();
+            RefreshHint();
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: ShowTextures
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function puts the large image on the large view and each camera's thumbnail
+        //     image on its tile. While the cameras are closed there are no images, so it does
+        //     nothing.
+        private void ShowTextures()
+        {
+            if (shuttleCameras.Large == null) return;
+            mainCameraView.style.backgroundImage = new StyleBackground(Background.FromRenderTexture(shuttleCameras.Large));
+            for (var i = 0; i < cameraTiles.Count; i++)
+                cameraTiles[i].style.backgroundImage = new StyleBackground(Background.FromRenderTexture(shuttleCameras.Thumbnail(i)));
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: CityHint
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function returns the hint for the 3D view: the shuttle and camera being
+        //     watched, or how to move around the city.
+        private string CityHint() => camerasShown
+            ? $"Shuttle cameras · {watchedId} · {shuttleCameras.NameOf(mainCamera)} · click a thumbnail to switch"
+            : $"3D city · {city.BuildingCount} buildings · " +
+              (city.LtaBusStopsLoaded ? $"{city.LtaBusStopCount} {city.BusStopSource} bus-stop shelters" : "loading bus-stop shelters") +
+              " · right-drag orbit, left-drag pan, wheel zoom";
+
+        // -----------------------------------------------------------------------------------
+        // Function: RefreshHint
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function rewrites the hint as soon as the cameras open, close or switch,
+        //     instead of at the next snapshot. It leaves the hint alone while the city is
+        //     loading or not shown.
+        private void RefreshHint()
+        {
+            if (!Ready || !CityShown || city == null || city.BuildingCount == 0 || (cityLoad != null && !cityLoad.IsCompleted)) return;
+            SetReady(true, CityHint());
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: LeaveCameras
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function puts the 3D view back when something else needs it, such as Overview,
+        //     Follow selected, the 2D map or a new session.
+        private void LeaveCameras()
+        {
+            if (camerasShown) ShowCameras(false);
         }
         // -----------------------------------------------------------------------------------
         // Function: FocusSelected
@@ -900,7 +1027,7 @@ namespace Formula9.World
         public void Overview()
         {
             following = false;
-            LeaveDriverView();
+            LeaveCameras();
             if (world != null) Frame(world.Package.Manifest);
             else if (CityShown && city != null && city.BuildingCount > 0) FrameCity(city);
         }

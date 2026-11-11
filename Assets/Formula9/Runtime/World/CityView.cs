@@ -25,6 +25,9 @@ namespace Formula9.World
         private static readonly Color KerbColor = new Color(0.66f, 0.66f, 0.64f), AsphaltColor = new Color(0.17f, 0.17f, 0.19f), MarkingColor = new Color(0.95f, 0.95f, 0.92f);
         private const int GrainSize = 128, GrainSeed = 9;
         private const float ProposedWidthM = 6, ProposedHeightM = 2, ClosureWidthM = 9, ClosureHeightM = 1.6f;
+        // The layer ("Planning Overlay") for planning aids drawn over the city, such as closed
+        // roads and proposed routes, so the shuttle cameras can leave them out.
+        public const int PlanningLayer = 8;
         private const float BarrierWidthM = 12, BarrierHeightM = 2.4f, PinHeightM = 26, StopReachM = 14;
         private static readonly Color ProposedColor = new Color(0.086f, 0.396f, 0.753f, 0.95f);
         private static readonly Color ClosureColor = new Color(0.839f, 0.188f, 0.192f, 0.85f);
@@ -53,7 +56,7 @@ namespace Formula9.World
         private RouteDraftView shownDraft;
         private RouteEditPreview shownPreview;
         private string shownHighlights, shownWaypoints, shownClosures;
-        private string routesKey, hiddenShuttle;
+        private string routesKey;
         private Material buildingMaterial, lineMaterial;
         private readonly CityIncidents incidents;
         private readonly TransitClient transit;
@@ -861,6 +864,7 @@ namespace Formula9.World
         {
             if (points.Length < 2) return;
             var line = new GameObject(name).AddComponent<LineRenderer>();
+            line.gameObject.layer = PlanningLayer;
             line.transform.SetParent(root, false);
             line.useWorldSpace = true; line.sharedMaterial = lineMaterial; line.positionCount = points.Length;
             line.SetPositions(points.Select(p => new Vector3(p.x, height, p.y)).ToArray());
@@ -918,7 +922,7 @@ namespace Formula9.World
                 {
                     var line = new GameObject("Route " + route.RouteId).AddComponent<LineRenderer>();
                     line.transform.SetParent(root, false);
-                    // Flat on the road: by default a line turns to face the camera, like a wall in the driver view
+                    // Flat on the road: by default a line turns to face the camera, like a wall in the shuttle's cameras
                     line.transform.localRotation = Quaternion.Euler(90, 0, 0);
                     line.alignment = LineAlignment.TransformZ;
                     line.numCornerVertices = 4;
@@ -962,7 +966,7 @@ namespace Formula9.World
         }
 
         // Called once a frame, unlike Tick, which a new snapshot also calls. A delta of zero holds traffic still.
-        public void TickTraffic(float deltaTime, Camera camera)
+        public void TickTraffic(float deltaTime, IReadOnlyList<Camera> cameras)
         {
             if (traffic == null) return;
             hazardsDueS -= deltaTime;
@@ -975,7 +979,7 @@ namespace Formula9.World
             foreach (var pair in shuttles)
                 trafficObstacles.Add(new TrafficObstacle { Id = pair.Key, Position = pair.Value.position, Forward = pair.Value.forward, HalfLength = ShuttleSize.z / 2, HalfWidth = ShuttleSize.x / 2 });
             traffic.SetShuttles(trafficObstacles);
-            traffic.Tick(deltaTime, camera);
+            traffic.Tick(deltaTime, cameras);
         }
 
         // Called each frame: shuttles glide between the backend's poses.
@@ -1004,16 +1008,6 @@ namespace Formula9.World
             position = shuttle.position;
             rotation = shuttle.rotation;
             return true;
-        }
-
-        // Hides the shuttle the driver camera sits in, or none: from inside, the back of its own
-        // windscreen would fill the view. A hidden shuttle still moves, so the camera can follow it.
-        public void HideShuttle(string id)
-        {
-            if (id == hiddenShuttle) return;
-            if (hiddenShuttle != null && shuttles.TryGetValue(hiddenShuttle, out var shown)) shown.gameObject.SetActive(true);
-            hiddenShuttle = id;
-            if (id != null && shuttles.TryGetValue(id, out var hidden)) hidden.gameObject.SetActive(false);
         }
 
         public void Dispose()

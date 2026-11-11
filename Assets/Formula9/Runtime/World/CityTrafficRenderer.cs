@@ -34,7 +34,8 @@ namespace Formula9.World
         private readonly Dictionary<string, List<ModelRenderData>> modelRenderers = new Dictionary<string, List<ModelRenderData>>();
         private readonly Dictionary<Material, Material> materialCopies = new Dictionary<Material, Material>();
         private readonly List<VehicleState> vehicles = new List<VehicleState>();
-        private readonly Plane[] frustum = new Plane[6];
+        private readonly List<Plane[]> frustums = new List<Plane[]>();
+        private int frustumCount;
 
         public int VehicleCount => vehicles.Count;
 
@@ -82,7 +83,7 @@ namespace Formula9.World
         }
 
         // A delta of zero holds the traffic still, and still draws it. A camera culls what it cannot see.
-        public void Tick(float deltaTime, Camera camera = null)
+        public void Tick(float deltaTime, IReadOnlyList<Camera> cameras = null)
         {
             if (vehicles.Count == 0) return;
 
@@ -91,7 +92,7 @@ namespace Formula9.World
             for (var i = 0; i < vehicles.Count; i++)
                 UpdatePose(vehicles[i], step);
 
-            RenderVehicles(camera);
+            RenderVehicles(cameras);
         }
 
         public bool TryGetPose(string vehicleId, out Vector3 position, out Vector3 forward)
@@ -304,14 +305,16 @@ namespace Formula9.World
             return weighted[weighted.Count - 1].Road;
         }
 
-        private void RenderVehicles(Camera camera)
+        private void RenderVehicles(IReadOnlyList<Camera> cameras)
         {
             foreach (var list in modelRenderers.Values)
                 foreach (var render in list) render.Reset();
-            if (camera != null) GeometryUtility.CalculateFrustumPlanes(camera, frustum);
+            SetFrustums(cameras);
             foreach (var vehicle in vehicles)
             {
-                if (!vehicle.Placed || (camera != null && !InView(vehicle.Position))) continue;
+                // Given cameras, a car is drawn only if one that draws this frame can see it; when
+                // none of them draws, no car is. Without cameras every car is drawn.
+                if (!vehicle.Placed || (cameras != null && !InView(vehicle.Position))) continue;
                 vehicle.Render.Add(Matrix4x4.TRS(vehicle.Position, Quaternion.LookRotation(vehicle.Forward, Vector3.up), Vector3.one), vehicle.Paint);
             }
 
@@ -319,11 +322,40 @@ namespace Formula9.World
                 foreach (var render in list) render.Render();
         }
 
-        private bool InView(Vector3 position)
+        // Takes the view of every camera that draws this frame, for InView.
+        internal void SetFrustums(IReadOnlyList<Camera> cameras)
         {
-            foreach (var plane in frustum)
-                if (plane.GetDistanceToPoint(position) < -CullMarginM) return false;
-            return true;
+            frustumCount = 0;
+            if (cameras == null) return;
+            for (var i = 0; i < cameras.Count; i++)
+            {
+                var camera = cameras[i];
+                if (camera == null || !camera.enabled) continue;
+                // To grow when needed.
+                if (frustumCount == frustums.Count) frustums.Add(new Plane[6]);
+                GeometryUtility.CalculateFrustumPlanes(camera, frustums[frustumCount]);
+                frustumCount++;
+            }
+        }
+
+        // Whether any camera that draws this frame can see the point; false when none draws.
+        internal bool InView(Vector3 position)
+        {
+            for (var f = 0; f < frustumCount; f++)
+            {
+                Plane[] planes = frustums[f];
+                var inside = true;
+                foreach (var plane in planes)
+                {
+                    if (plane.GetDistanceToPoint(position)< -CullMarginM)
+                    {
+                        inside = false;
+                        break;
+                    }
+                }
+                if (inside) return true;
+            }
+            return false;
         }
 
         private static float ClassWeight(string roadClass) =>
