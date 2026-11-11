@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from contracts.v2.models import DispatcherCommand, Event, FullSnapshot
 from src.api.routes.training_v2 import get_actor_id, get_training_store
 from src.app import app
-from src.persistence.training_store import TrainingStore, TrainingStoreError
+from src.persistence.training_store import _MIGRATIONS, TrainingStore, TrainingStoreError
 
 FIXTURES = Path(__file__).resolve().parents[2] / "contracts" / "v2" / "fixtures"
 
@@ -110,6 +110,20 @@ def test_acknowledgement_retry_and_payload_conflict(tmp_path: Path) -> None:
             assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
             assert connection.execute("SELECT version FROM schema_migrations").fetchone()[0] == 1
             assert connection.execute("SELECT reason FROM commands").fetchone()[0] == "Wait for the scripted obstruction to clear"
+
+
+def test_database_migrated_by_a_newer_backend_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "training.sqlite"
+    with TrainingStore(path):
+        pass
+    latest = max(int(migration.name[:4]) for migration in _MIGRATIONS.glob("[0-9][0-9][0-9][0-9]_*.sql"))
+    with sqlite3.connect(path) as connection:
+        connection.execute("INSERT INTO schema_migrations VALUES (?, '2026-01-01T00:00:00+00:00')", (latest + 1,))
+    with pytest.raises(TrainingStoreError) as error:
+        TrainingStore(path)
+    assert error.value.code == "SCHEMA_TOO_NEW"
+    assert f"schema v{latest + 1}" in str(error.value) and f"up to v{latest}" in str(error.value)
+    assert "TRAINING_DATABASE_PATH" in str(error.value)
 
 
 def test_application_commits_status_event_and_checkpoint_once(tmp_path: Path) -> None:

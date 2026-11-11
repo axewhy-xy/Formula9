@@ -56,7 +56,7 @@ namespace Formula9.UI
         private Label dialogText;
         private Func<Task> dialogAction;
 
-        private VisualElement loginScreen, trainingScreen, fleet, confirmRow, fleetPanel, sessionPlayback, sessionCard;
+        private VisualElement loginScreen, trainingScreen, fleet, confirmRow, fleetPanel, sessionPlayback;
         private TextField fleetSearch;
         private VisualElement fleetEmpty;
         private Label fleetTitle;
@@ -64,8 +64,7 @@ namespace Formula9.UI
         private Button viewMap, viewWorld;
         private const string RememberedUserKey = "login.rememberedUser";
         private TextField username, password, confirm, sessionId;
-        private Label signUpHint, loginError, title, user, capacity, status, message, worldStatus, sessionBadge, sessionDiagnostics;
-        private Foldout sessionDetails;
+        private Label signUpHint, loginError, title, user, capacity, status, message, sessionBadge, worldNotice;
         private string sessionBadgeClass;
         private readonly SessionStatusPresenter sessionStatusPresenter = new SessionStatusPresenter();
         private Button forgot, submit, modeSwitch, start, pause, resume, archive, refreshSessions;
@@ -314,22 +313,14 @@ namespace Formula9.UI
         private void BindTraining(VisualElement root)
         {
             trainingScreen = root.Q("training-host");
-            sessionCard = root.Q("content-card");
             title = root.Q<Label>("title");
             user = root.Q<Label>("user");
             capacity = root.Q<Label>("capacity");
             status = root.Q<Label>("status");
             sessionBadge = root.Q<Label>("session-badge");
-            sessionDiagnostics = root.Q<Label>("session-diagnostics");
-            sessionDetails = root.Q<Foldout>("session-details");
-            sessionDetails.RegisterValueChangedCallback(change =>
-            {
-                sessionDetails.EnableInClassList("session-details-expanded", change.newValue);
-                if (change.newValue) RenderSessionDiagnostics(session.Store.Snapshot);
-            });
             message = root.Q<Label>("message");
             ShowMessage("");
-            worldStatus = root.Q<Label>("world-status");
+            worldNotice = root.Q<Label>("world-notice");
             fleet = root.Q("fleet");
             sessionId = root.Q<TextField>("session-id");
             scenario = root.Q<DropdownField>("scenario");
@@ -351,7 +342,13 @@ namespace Formula9.UI
             viewMap = root.Q<Button>("view-map");
             viewWorld = root.Q<Button>("view-world");
             viewMap.clicked += () => { world.ShowMap(true); Render(); };
-            viewWorld.clicked += () => { world.ShowMap(false); Render(); };
+            viewWorld.clicked += () =>
+            {
+                world.ShowMap(false);
+                // Still on the map: this session has no 3D view, so say why instead of doing nothing
+                if (world.ShowingMap) ShowMessage(world.Diagnostic);
+                Render();
+            };
             root.Q<Button>("toggle-fleet").clicked += () =>
                 fleetPanel.style.display = fleetPanel.resolvedStyle.display == DisplayStyle.None ? DisplayStyle.Flex : DisplayStyle.None;
 
@@ -765,7 +762,7 @@ namespace Formula9.UI
         // Function: Render
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function shows the current state: world status and view switch, session
+        //     This function shows the current state: view switch and 3D notice, session
         //     controls, the workspace, the status line and the fleet panel.
         private void Render()
         {
@@ -778,9 +775,12 @@ namespace Formula9.UI
             sessionPlayback.style.display = controls.PlaybackVisible ? DisplayStyle.Flex : DisplayStyle.None;
             if (world != null)
             {
-                worldStatus.text = world.Diagnostic;
                 viewMap.EnableInClassList("segment-selected", world.ShowingMap);
                 viewWorld.EnableInClassList("segment-selected", !world.ShowingMap);
+                viewWorld.tooltip = world.Diagnostic;
+                // Only loading and failures are shown; the routine 3D summary stays in the tooltip
+                var notice = world.Notice ? world.Diagnostic : "";
+                if (worldNotice.text != notice) worldNotice.text = notice;
             }
             start.SetEnabled(controls.Start);
             start.tooltip = controls.StartHint ?? "";
@@ -804,7 +804,7 @@ namespace Formula9.UI
             RenderFleet(snapshot);
         }
 
-        // Keep the operator's state readable; retain snapshot diagnostics behind an expandable section.
+        // Keep the operator's state readable: badge, tooltip and one-line summary.
         private void RenderSessionStatus(FullSnapshot snapshot)
         {
             var view = sessionStatusPresenter.Present(snapshot, session.Available);
@@ -818,20 +818,6 @@ namespace Formula9.UI
             if (sessionBadge.tooltip != view.Tooltip) sessionBadge.tooltip = view.Tooltip;
             if (status.text != view.Summary) status.text = view.Summary;
             status.EnableInClassList("session-summary-offline", view.Offline);
-            sessionDetails.style.display = snapshot == null ? DisplayStyle.None : DisplayStyle.Flex;
-            if (snapshot == null)
-            {
-                sessionDetails.value = false;
-                sessionDiagnostics.text = sessionStatusPresenter.Diagnostics(null, false);
-            }
-            else if (sessionDetails.value) RenderSessionDiagnostics(snapshot);
-        }
-
-        private void RenderSessionDiagnostics(FullSnapshot snapshot)
-        {
-            if (sessionCard.ClassListContains("session-compact")) return;
-            var text = sessionStatusPresenter.Diagnostics(snapshot, session.Available);
-            if (sessionDiagnostics.text != text) sessionDiagnostics.text = text;
         }
 
         // -----------------------------------------------------------------------------------

@@ -197,8 +197,15 @@ class TrainingStore:
         connection.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at_utc TEXT NOT NULL)")
         current = connection.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").fetchone()[0]
         migrations = sorted(_MIGRATIONS.glob("[0-9][0-9][0-9][0-9]_*.sql"))
-        if current > len(migrations):
-            raise TrainingStoreError("SCHEMA_TOO_NEW", "Training database schema is newer than this backend")
+        latest = int(migrations[-1].name[:4]) if migrations else 0
+        if current > latest:
+            # Usually a branch with a newer migration opened this shared file first.
+            raise TrainingStoreError(
+                "SCHEMA_TOO_NEW",
+                f"Training database {self.path} is at schema v{current}, but this backend only has "
+                f"migrations up to v{latest}. A newer branch probably migrated it: switch back to that "
+                "branch, or set TRAINING_DATABASE_PATH to a separate file for this one.",
+            )
         for migration in migrations:
             version = int(migration.name[:4])
             if version <= current:

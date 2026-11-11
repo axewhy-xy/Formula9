@@ -410,9 +410,6 @@
 .session-status-bar { flex-direction: row; flex-wrap: wrap; align-items: center; flex-shrink: 0; margin-bottom: 8px; }
 .session-summary { flex-grow: 1; flex-shrink: 1; flex-basis: 240px; margin: 0 12px 0 0; color: rgb(74, 93, 97); }
 .session-summary-offline { color: rgb(151, 57, 57); -unity-font-style: bold; }
-.session-details { flex-shrink: 0; color: rgb(74, 93, 97); }
-.session-details-expanded { flex-grow: 1; flex-basis: 100%; margin-top: 6px; }
-.session-diagnostics { white-space: normal; padding: 8px 10px; margin-top: 4px; border-radius: 6px; background-color: rgb(244, 247, 247); font-size: 12px; }
 .session-compact .session-header { padding-bottom: 0; margin-bottom: 8px; border-bottom-width: 0; }
 .session-compact .session-heading, .session-compact .session-utilities, .session-compact .session-playback,
 .session-compact .session-title, .session-compact .session-badge { margin-top: 0; margin-bottom: 0; }
@@ -438,22 +435,8 @@
     border-color: rgb(15, 76, 92);
 }
 
-.info-banner {
-    flex-grow: 1;
-    flex-basis: 0;
-    min-width: 0;
-    flex-direction: row;
-    align-items: center;
-    min-height: 40px;
-    margin-right: 8px;
-    padding: 0 10px;
-    border-width: 1px;
-    border-radius: 8px;
-    border-color: rgb(207, 227, 227);
-    background-color: rgb(232, 243, 243);
-}
-
-.info-text { margin-left: 6px; white-space: normal; color: rgb(51, 71, 75); flex-shrink: 1; }
+/* 3D loading/failure notice; empty otherwise, it still pushes the Fleet List toggle to the right. */
+.world-notice { flex-grow: 1; flex-shrink: 1; min-width: 0; margin: 0 8px; white-space: normal; font-size: 12px; color: rgb(74, 93, 97); }
 
 .app Button.segment-round {
     height: 40px;

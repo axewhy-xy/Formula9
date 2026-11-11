@@ -166,8 +166,6 @@ namespace Formula9.UI
     {
         private (bool Joined, string Session, string State, bool Available)? statusKey;
         private SessionStatusView status;
-        private (string Session, long Epoch, string Snapshot, long Tick, string State, bool Available)? diagnosticsKey;
-        private string diagnostics;
 
         public SessionStatusView Present(FullSnapshot snapshot, bool available)
         {
@@ -178,19 +176,6 @@ namespace Formula9.UI
                 statusKey = key;
             }
             return status;
-        }
-
-        // Called only while the diagnostics section is expanded and visible.
-        public string Diagnostics(FullSnapshot snapshot, bool available)
-        {
-            if (snapshot == null) { diagnosticsKey = null; diagnostics = null; return ""; }
-            var key = (snapshot.SessionId, snapshot.Session.SessionEpoch, snapshot.SnapshotId, snapshot.Tick, snapshot.Session.Status, available);
-            if (diagnosticsKey != key)
-            {
-                diagnostics = TrainingPresenter.StatusLine(snapshot, available);
-                diagnosticsKey = key;
-            }
-            return diagnostics;
         }
     }
 
@@ -294,23 +279,6 @@ namespace Formula9.UI
         public static string Title(FullSnapshot snapshot) => snapshot.Spatial != null
             ? "3D fleet exercise · road, ramp and obstruction"
             : "Singapore, real streets · incidents, detours, charging";
-
-        // -----------------------------------------------------------------------------------
-        // Function: StatusLine
-        // -----------------------------------------------------------------------------------
-        // Description:
-        //     This function writes the status line: session, epoch, snapshot, tick, status and
-        //     whether the view is current.
-        //
-        // Args:
-        //     snapshot (FullSnapshot): The accepted snapshot.
-        //     available (bool): False while the view is stale or offline.
-        //
-        // Returns:
-        //     string: The line.
-        public static string StatusLine(FullSnapshot snapshot, bool available) =>
-            $"Session {snapshot.Session.SessionId} · epoch {snapshot.Session.SessionEpoch} · snapshot {snapshot.SnapshotId} · " +
-            $"tick {snapshot.Tick} · {snapshot.Session.Status} · {(available ? "current" : "stale/offline")}";
 
         // -----------------------------------------------------------------------------------
         // Function: Controls
