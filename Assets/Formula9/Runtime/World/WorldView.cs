@@ -233,7 +233,7 @@ namespace Formula9.World
         public void Show(FullSnapshot snapshot)
         {
             var boundary = snapshot == null ? null : $"{snapshot.SessionId}/{snapshot.SessionEpoch}";
-            if (boundary != sessionBoundary) { sessionBoundary = boundary; preferMap = snapshot?.Spatial == null; following = false; LeaveCameras(); selectedId = null; routeContext = null; roadNetwork = null; incidentRecords.Clear(); motion.Clear(); city?.ResetShuttles(); DrawDraft(); }
+            if (boundary != sessionBoundary) { sessionBoundary = boundary; preferMap = snapshot?.Spatial == null; following = false; LeaveCameras(); selectedId = null; routeContext = null; roadNetwork = null; incidentRecords.Clear(); motion.Clear(); city?.ResetShuttles(); city?.ForgetTraffic(); DrawDraft(); }
             latest = snapshot;
             if (snapshot != null) motion.BeginSnapshot(snapshot.Tick, Time.unscaledTime);
             if (snapshot?.Spatial == null)
@@ -263,6 +263,29 @@ namespace Formula9.World
             if (world == null) return; // still loading; the latest snapshot is applied when it finishes
             var mismatch = world.ApplyPoses(snapshot, motion, Time.unscaledTime);
             if (mismatch != null) SetReady(false, $"3D unavailable · scene/vehicle binding mismatch: {mismatch}", notice: true);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: WantsTraffic
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     True while the 3D city is drawn, so the backend's traffic frames are worth fetching:
+        //     they come far more often than snapshots, and only the city draws them.
+        public bool WantsTraffic => CityShown && city != null && city.BuildingCount > 0 && (cityLoad == null || cityLoad.IsCompleted);
+
+        // -----------------------------------------------------------------------------------
+        // Function: ShowTraffic
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function hands the backend's latest traffic frames to the 3D city, which then
+        //     draws the traffic and the shuttles' bodies where the backend drives them.
+        //
+        // Args:
+        //     frames (IReadOnlyList<TrafficFrame>): The frames, oldest first.
+        public void ShowTraffic(IReadOnlyList<TrafficFrame> frames)
+        {
+            if (latest == null || frames == null || frames.Count == 0 || !CityShown || city == null) return;
+            city.ShowTraffic(frames);
         }
 
         // -----------------------------------------------------------------------------------

@@ -10,7 +10,9 @@ namespace Formula9.World
     // of the traffic does: in the kerb lane, slowing for a bend, stopping at a red light, and following
     // or giving way to any vehicle in its way. So it can fall behind the backend, and it catches up, no
     // faster than the road allows, once the way is clear. Off its route, or too far behind to catch up,
-    // it is put where the backend says.
+    // it is put where the backend says. This is for a session whose backend sends no traffic frames: one
+    // that drives the traffic itself sends its shuttles' bodies with it, and they are drawn there
+    // (CityTrafficFollow), so they never fall behind.
     public sealed partial class CityTrafficRenderer
     {
         // A backend pose this close to a leg of the route, facing along it, is on the route
@@ -130,11 +132,15 @@ namespace Formula9.World
 
         public void ForgetShuttle(string id) => shuttles.RemoveAll(s => s.Pose.Id == id);
 
-        // Every shuttle is put straight at its next pose, as for a new session or a view that was not being drawn.
+        // Every shuttle is put straight at its next pose, as for a new session or a view that was not being
+        // drawn; following the backend, so is every vehicle, at the time the frames are drawn from.
         public void ResetShuttles()
         {
             shuttles.Clear();
             shuttleRoutes.Clear();
+            if (!FollowsBackend) return;
+            followS = double.NaN;
+            foreach (var vehicle in vehicles) vehicle.Placed = false;
         }
 
         private ShuttleRoute RouteFor(string id, IReadOnlyList<Vector2> points)

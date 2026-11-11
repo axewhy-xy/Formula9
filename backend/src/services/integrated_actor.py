@@ -41,7 +41,8 @@ from src.services.incidents import FIXTURE_PATH as INCIDENT_FIXTURE, IncidentSer
 from src.services.incident_scenarios.simulated_catalog import SimulatedIncidentCatalog
 from src.services.route_edit import RouteEditService
 from src.services.session_actor import SessionActor
-from src.traffic import route_signals, signal_cycle
+from src.traffic import incident_hazards, route_signals, signal_cycle
+from src.traffic.city_traffic import COMFORT_BRAKE, HARD_BRAKE, PLAN_AHEAD_M, SHUTTLE_ACCEL, CityTraffic, move_towards
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +53,19 @@ EPSILON = 1e-8
 FULL_TOLERANCE_KWH = 0.01  # auxiliary use keeps a plugged-in battery just under capacity
 YARD_WAIT_M = 15.0  # a shuttle waits this far short of the yard, clear of one driving out
 # The bus model the 3D view draws reaches this far ahead of a shuttle's position, so it stops this far
-# short of a red light's stop line
+# short of a red light's stop line; the traffic keeps clear of a body this long either way and this wide
 SHUTTLE_FRONT_M = 6.6
+SHUTTLE_HALF_WIDTH_M = 2.3
 SIGNAL_AREA = "toa-payoh"
+# The incidents' hazards are worked out again this often, as the 3D view did, so a queue grows smoothly
+HAZARD_REFRESH_TICKS = 10
+# The background traffic steps every this many ticks: a tenth of a second, the longest step the 3D view
+# ever took, and on the ticks a snapshot is published, so each traffic frame shows a fresh step
+TRAFFIC_STEP_TICKS = 2
+# What every incident says the session models of the roads
+TRAFFIC_ASSUMPTION = ("Background traffic is a 0.1% sample of Singapore's registered vehicles driving a simple "
+                      "car-following model on OpenStreetMap roads; shuttles keep to the kerb lane, queue behind it and "
+                      "stop at simulated traffic lights with made-up timings.")
 # The longest a light can hold a shuttle: a whole yellow and red, arriving just as its green ends
 SIGNAL_WAIT_S = signal_cycle.PHASE_S * (signal_cycle.PHASES - 1) + signal_cycle.YELLOW_S + signal_cycle.ALL_RED_S
 
@@ -73,8 +84,9 @@ class WorkflowDefinition:
         incident = json.loads(INCIDENT_FIXTURE.read_bytes())
         incident.update(self.data["incident_overrides"])
         incident["assumptions"] = [*incident["assumptions"], *self.data["assumptions"]]
+        # The controller's revision changes with how it drives: r2 drives the shuttles through the traffic
         self.signature = hashlib.sha256(json.dumps({"fixture": self.data, "network": self.network, "incident": incident,
-            "energy": asdict(ENERGY_R1), "controller": "integrated-planar-r1"}, sort_keys=True).encode()).hexdigest()
+            "energy": asdict(ENERGY_R1), "controller": "integrated-planar-r2"}, sort_keys=True).encode()).hexdigest()
         graph = nx.MultiDiGraph()
         for identifier, point in self.network["nodes"].items():
             graph.add_node(int(identifier), x=float(point[0]), y=float(point[1]), z=0.0)
@@ -169,10 +181,21 @@ def services_for(snapshot: FullSnapshot, routes=None, incidents=None):
 
 
 class IntegratedSessionActor(SessionActor):
-    """One BE-M2-02 controller with recoverable route/incident/charging effects."""
+    """One BE-M2-02 controller with recoverable route/incident/charging effects.
+
+    A new session drives its shuttles through the area's background traffic (src.traffic.city_traffic),
+    which it owns and checkpoints with the rest of its state. In the traffic a shuttle drives as a road
+    vehicle: it keeps to its lane, accelerates and brakes, slows for bends, follows the vehicle in front,
+    gives way, and brakes evenly to stand at its stops and at red lights. Without the traffic it keeps the
+    planar controller's idealised motion: full speed or standing still. TRAFFIC chooses for new sessions;
+    a restored session keeps whichever it was checkpointed with.
+    """
+
+    TRAFFIC = True
 
     def __init__(self, seed: int, *, session_id: str):
         self.definition = get_workflow_definition()
+        self.traffic = None
         super().__init__(seed, self.definition.actor_routes, session_id=session_id)
         # Session-local, deterministic incident instance. Do not mutate the shared
         # WorkflowDefinition/IncidentService (used by all concurrent sessions).
@@ -252,6 +275,13 @@ class IntegratedSessionActor(SessionActor):
             charger_ids=list(depot["bays"])) for depot in self.definition.depots]
         self._adopt_route(primary.route_id, primary.directed_edge_ids)
         self.domain = self.generate_snapshot()
+        # How each shuttle was held this step, for the traffic around it; never outlives the step
+        self.traffic_holds = {}
+        if self.TRAFFIC:
+            self.traffic = CityTraffic.start(SIGNAL_AREA)
+            if self.traffic is not None:
+                self._place_in_traffic({})
+                self.traffic.clear_shuttles()
 
     def _validated_routes(self, route):
         return validate_routes(route, MAX_ROUTE_WAYPOINTS)
@@ -931,9 +961,85 @@ class IntegratedSessionActor(SessionActor):
             if wait_at is not None and shuttle.progress <= wait_at+EPSILON and end > wait_at and not self._may_enter_yard(shuttle):
                 ahead.append(wait_at)
         hold = self._signal_hold(shuttle)
+        if self.traffic is not None:
+            return self._drive_in_traffic(shuttle, shuttle.cruise_vel*speed_factor, ahead, hold)
         if hold is not None:
             ahead.append(hold)
         return min([end, *ahead])
+
+    def _drive_in_traffic(self, shuttle, cruise, stops, light):
+        """Where a shuttle gets to this step as a road vehicle in the traffic.
+
+        It brakes evenly to stand exactly at the next of its stops (stops, as progress along its route,
+        and the route's end) and at a light that holds it (light), slows for bends, follows or gives way
+        to what is in its way, and pulls away no faster than the bus can. It never goes further than
+        would touch a vehicle or another shuttle where they stand now.
+        """
+        route = self._routes[shuttle.route_ID]
+        record = self._traffic_shuttle(shuttle)
+        path = self.traffic.shuttle_route(shuttle.route_ID, route["waypoints"])
+        plan = self.traffic.plan_shuttle(record, path, shuttle.progress, cruise)
+        progress = shuttle.progress
+        stop_at = min([route["total_length"], *stops])
+        limit = min(cruise, plan.bend_mps, math.sqrt(2*COMFORT_BRAKE*max(0.0, stop_at-progress)))
+        # What the traffic and the lights allow, as against its own stops and the road
+        rules = plan.limit_mps
+        if light is not None:
+            rules = min(rules, math.sqrt(2*COMFORT_BRAKE*max(0.0, light-progress)))
+            stop_at = min(stop_at, light)
+        target = min(limit, rules)
+        speed = move_towards(record.speed, target, (SHUTTLE_ACCEL if target > record.speed else HARD_BRAKE)*self.STEP_S)
+        end = max(progress, min(stop_at, progress+speed*self.STEP_S, progress+plan.cap_m))
+        # Whatever the rules allow, a step that would put its body into another is cut short
+        held = plan.held
+        if end > progress+EPSILON and self.traffic.body_blocker(record, path, end) is not None:
+            held = True
+            end = next((progress+(end-progress)*share for share in (0.5, 0.2)
+                        if self.traffic.body_blocker(record, path, progress+(end-progress)*share) is None), progress)
+        # A light far up the road is not what holds it up now
+        near_light = light is not None and light-progress <= PLAN_AHEAD_M
+        self.traffic_holds[shuttle.ID] = (held, near_light, rules <= limit and rules < cruise)
+        return end
+
+    def _traffic_shuttle(self, shuttle):
+        """The traffic's record of a shuttle, by the shuttle's public id."""
+        return self.traffic.shuttle(self.domain.vehicles[shuttle.ID].vehicle_id, SHUTTLE_FRONT_M, SHUTTLE_HALF_WIDTH_M)
+
+    def _drive_traffic(self):
+        """A step of the background traffic every TRAFFIC_STEP_TICKS ticks, before the shuttles move, so
+        they see where it has got to. The traffic stands still between its steps, so a shuttle's own
+        check that it never drives into a vehicle is exact on every tick."""
+        if self.current_tick % TRAFFIC_STEP_TICKS:
+            return
+        if self.current_tick % HAZARD_REFRESH_TICKS == 0:
+            self.traffic.set_hazards(incident_hazards.live_hazards(
+                self.random_incidents, self.domain, self.definition.network["edges"], self.STEP_S, self.current_tick))
+        self.traffic.step(self.STEP_S*TRAFFIC_STEP_TICKS, self.timestamp_second)
+
+    def _place_in_traffic(self, moved, blocked=()):
+        """Tells the traffic where every shuttle is now and how fast it went (moved, metres this step).
+
+        A shuttle held by the traffic, a light or another shuttle is in the traffic, so vehicles queue
+        behind it; one standing at its stop or in a bay is passed.
+        """
+        for shuttle in self.shuttles:
+            held_by_traffic, held_by_light, in_traffic = self.traffic_holds.get(shuttle.ID, (False, False, False))
+            route = self._routes[shuttle.route_ID]
+            self.traffic.place_shuttle(self._traffic_shuttle(shuttle),
+                                       self.traffic.shuttle_route(shuttle.route_ID, route["waypoints"]),
+                                       shuttle.progress, moved.get(shuttle.ID, 0.0)/self.STEP_S, self.STEP_S,
+                                       held_by_traffic=held_by_traffic, held_by_light=held_by_light,
+                                       in_traffic=in_traffic or shuttle.ID in blocked)
+        self.traffic_holds = {}
+
+    def traffic_frame(self):
+        """Where the background traffic and the shuttles' bodies are now, for the 3D view to draw, or None
+        when this session has no traffic. Presentation only: it is not part of the public snapshot."""
+        if self.traffic is None:
+            return None
+        vehicles, shuttles = self.traffic.frame()
+        return {"tick": self.current_tick, "simulation_time_s": round(self.timestamp_second, 3),
+                "vehicles": vehicles, "shuttles": shuttles}
 
     def _signal_hold(self, shuttle):
         """How far the shuttle may go before a red light (or a yellow it can stop for) holds it.
@@ -1144,6 +1250,7 @@ class IntegratedSessionActor(SessionActor):
                 f"Type: {template.kind}; incident edge: {edge}; affected route edges: {impacted}.",
                 f"Operational impact: {'route directly blocked' if requires_guidance else 'traffic delay possible' if impacted else 'none; no action required'}.",
                 "Traffic impact estimated from shared endpoints (one graph hop).",
+                TRAFFIC_ASSUMPTION if self.traffic is not None else
                 "No traffic volume or lanes are modelled; shuttles stop at simulated traffic lights with made-up timings.",
                 "Nearby incidents may reduce speed on connected route edges; direct closures require guidance.",
                 "Scoring is provisional and not calibrated for real-world safety.",
@@ -1176,12 +1283,15 @@ class IntegratedSessionActor(SessionActor):
                         self._begin_parking(shuttle, charger_id, release_port=False)
                         self._event(shuttle, "DEPOT_BAY_CLEARANCE_STARTED", charger_id=charger_id)
                         break
+        if self.traffic is not None:
+            self._drive_traffic()
         charging = {s.ID for s in self.shuttles if self.modes[s.ID] == "CHARGING"}
         proposed = {s.ID: self._prepare_motion(s) for s in self.shuttles}
         proposed, blocked = self._resolve_motion(proposed)
+        moved = {}
         for shuttle in self.shuttles:
             mode = self.modes[shuttle.ID]
-            distance = abs(proposed[shuttle.ID]-shuttle.progress)
+            distance = moved[shuttle.ID] = abs(proposed[shuttle.ID]-shuttle.progress)
             shuttle.progress = proposed[shuttle.ID]
             if shuttle.ID in blocked and mode in {"IN_SERVICE", "DETOURING", "RETURNING_TO_DEPOT"}:
                 shuttle.state, shuttle.curr_vel = ShuttleState.BLOCKED, 0.0
@@ -1246,6 +1356,8 @@ class IntegratedSessionActor(SessionActor):
                 self._event(shuttle, "BATTERY_EXHAUSTED", released_charger_id=held.charger_id if held else None)
         self._run_bookings()
         self._safety_returns()
+        if self.traffic is not None:
+            self._place_in_traffic(moved, blocked)
 
     def workflow_state(self):
         return {"domain": self.domain.model_dump(mode="json"), "modes": {str(k): v for k, v in self.modes.items()},
@@ -1259,7 +1371,8 @@ class IntegratedSessionActor(SessionActor):
             "random_incident": self.random_incident, "random_incidents": self.random_incidents,
             "stop_names": self.stop_names,
             "loop_started": {str(k): list(v) for k, v in self.loop_started.items()},
-            "pending_events": [e.model_dump(mode="json") for e in self.pending_events]}
+            "pending_events": [e.model_dump(mode="json") for e in self.pending_events],
+            "traffic": self.traffic.state() if self.traffic is not None else None}
 
     def restore_workflow(self, state, snapshot):
         """Restore checkpointed execution; reject disagreement with durable public state."""
@@ -1288,6 +1401,14 @@ class IntegratedSessionActor(SessionActor):
         self.incident_due_tick = state.get("incident_due_tick", self.incident_due_tick)
         self.random_incident = state.get("random_incident")
         self.random_incidents = state.get("random_incidents", [self.random_incident] if self.random_incident else [])
+        # A checkpoint from before the backend drove the traffic has none: its traffic starts from the
+        # area's sample now, as a new session's does
+        if "traffic" in state:
+            try:
+                self.traffic = CityTraffic.from_state(state["traffic"]) if state["traffic"] is not None else None
+            except (ValueError, KeyError, TypeError, IndexError) as error:
+                raise TrainingStoreError("CORRUPT_CHECKPOINT", "Traffic checkpoint is invalid") from error
+        self.traffic_holds = {}
         self.domain = snapshot.model_copy(deep=True)
         if set(self.modes) != set(range(5)) or [s.ID for s in self.shuttles] != list(range(5)):
             raise TrainingStoreError("CORRUPT_CHECKPOINT", "Workflow roster is invalid")
@@ -1303,3 +1424,13 @@ class IntegratedSessionActor(SessionActor):
                 raise TrainingStoreError("CORRUPT_CHECKPOINT", "Workflow position disagrees with its path")
         if any(not math.isfinite(value) or value < 0 for value in self.charge_elapsed.values()):
             raise TrainingStoreError("CORRUPT_CHECKPOINT", "Charging clock is invalid")
+        if self.traffic is not None and "traffic" not in state:
+            self._place_in_traffic({})
+            self.traffic.clear_shuttles()
+        elif self.traffic is not None:
+            # A checkpoint keeps which geometry each shuttle was on, not the geometry itself
+            for shuttle in self.shuttles:
+                record = self.traffic.shuttles.get(self.domain.vehicles[shuttle.ID].vehicle_id)
+                path = self.traffic.shuttle_route(shuttle.route_ID, self._routes[shuttle.route_ID]["waypoints"])
+                if record is not None and record.route_sig == path.sig:
+                    record.route = path

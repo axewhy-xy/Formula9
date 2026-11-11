@@ -81,6 +81,8 @@ namespace Formula9.Session
     {
         public const string IntegratedScenario = "scenario-m2-integrated-r1";
         public static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
+        // The backend's traffic moves every tenth of a second, so the 3D city asks for it this often
+        public static readonly TimeSpan TrafficPollInterval = TimeSpan.FromSeconds(0.2);
         private static readonly Regex IdPattern = new Regex("^[A-Za-z0-9][A-Za-z0-9_.:-]*$");
         private static readonly HashSet<string> SessionControls = new HashSet<string> { "START", "PAUSE", "RESUME", "ARCHIVE" };
 
@@ -113,7 +115,11 @@ namespace Formula9.Session
         // True after a poll of the joined session failed, until one succeeds again.
         private bool connectionLost;
         private string joiningSessionId;
-        private object snapshotRequest, eventsRequest, commandRequest, createRequest;
+        private object snapshotRequest, eventsRequest, commandRequest, createRequest, trafficRequest;
+        // The newest traffic frame taken, for the session and epoch named by trafficKey; and a session
+        // and epoch whose backend drives no traffic, which is not asked again
+        private long trafficCursor = -1;
+        private string trafficKey, noTrafficKey;
         private string creationKey, creationOwner, creationScenario;
         private PendingCommand pending;
 
@@ -127,6 +133,8 @@ namespace Formula9.Session
         public string Scenario { get; set; } = IntegratedScenario;
 
         public event Action<FullSnapshot, bool> SnapshotAccepted;
+        // The backend's newest traffic frames for the joined session, oldest first: presentation only.
+        public event Action<IReadOnlyList<TrafficFrame>> TrafficFramesAccepted;
         public event Action<IReadOnlyList<Event>> EventsAccepted;
         // Durable events a recovery appended before the new epoch's snapshot.
         public event Action<IReadOnlyList<Event>> RecoveryEventsReceived;
@@ -261,7 +269,7 @@ namespace Formula9.Session
             if (sessionId != SessionId) connectionLost = false;
             SetAvailable(false);
             // Requests for the previous join are abandoned; their replies are ignored by generation.
-            snapshotRequest = eventsRequest = commandRequest = null;
+            snapshotRequest = eventsRequest = commandRequest = trafficRequest = null;
             // A same-ID join keeps the store and cursor, replaying from where it left off.
             Store.Select(sessionId);
             return RequestSnapshotAsync(sessionId);
@@ -278,7 +286,8 @@ namespace Formula9.Session
             generation++;
             if (pending != null) FinishPending(Unconfirmed("INVALID_REFERENCE"));
             joiningSessionId = null;
-            snapshotRequest = eventsRequest = commandRequest = null;
+            snapshotRequest = eventsRequest = commandRequest = trafficRequest = null;
+            trafficKey = null;
             SessionId = null;
             Session = null;
             epoch = eventCursor = -1;
@@ -301,6 +310,46 @@ namespace Formula9.Session
             if (creationKey != null && creationOwner == auth.Username) await CreateAsync();
             if (SessionId != null) await RequestSnapshotAsync(SessionId);
             if (pending != null && pending.Command.SessionId == SessionId) await RunPendingAsync(0);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: RefreshTrafficAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function is one poll of the joined session's traffic: the backend's frames since
+        //     the newest taken, which TrafficFramesAccepted reports. A new session or epoch starts
+        //     over. A session whose backend drives no traffic is not asked again; any other failure
+        //     is left to the snapshot poll to report, and the next poll tries again.
+        public async Task RefreshTrafficAsync()
+        {
+            var sessionId = SessionId;
+            if (!auth.IsLoggedIn || sessionId == null || !Available || trafficRequest != null) return;
+            var key = $"{sessionId}/{epoch}";
+            if (key == noTrafficKey) return;
+            if (key != trafficKey) { trafficKey = key; trafficCursor = -1; }
+            var token = trafficRequest = new object();
+            var started = generation;
+            List<TrafficFrame> frames;
+            try
+            {
+                frames = await api.GetTrafficFramesAsync(sessionId, trafficCursor, lifetime.Token);
+            }
+            catch (BackendErrorException error) when (error.Error.Code == "INVALID_REFERENCE")
+            {
+                if (trafficRequest == token) trafficRequest = null;
+                if (started == generation) noTrafficKey = key;
+                return;
+            }
+            catch (Exception error) when (!(error is OperationCanceledException))
+            {
+                if (trafficRequest == token) trafficRequest = null;
+                return;
+            }
+            catch (OperationCanceledException) { return; }
+            if (trafficRequest == token) trafficRequest = null;
+            if (started != generation || key != trafficKey || frames.Count == 0) return;
+            trafficCursor = frames[frames.Count - 1].Tick;
+            TrafficFramesAccepted?.Invoke(frames);
         }
 
         // -----------------------------------------------------------------------------------

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from collections.abc import Coroutine
 from contextvars import Context
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 import hashlib
+import json
 import logging
 import sqlite3
 from typing import Any, TypeVar
@@ -34,6 +36,9 @@ T = TypeVar("T")
 
 # The first part of a readable session id: where the exercise takes place.
 SESSION_PLACES = {SCENARIO_SELECTOR: "toa-payoh", SPATIAL_SCENARIO_REVISION: "fleet-3d", SCENARIO_REVISION: "fleet-loop"}
+# A live session keeps this many of its latest traffic frames, one a published tick (ten a second), for
+# a 3D view that polls a few times a second to draw without gaps
+TRAFFIC_FRAMES = 30
 # Fixed English month names, so the id does not depend on the server's locale.
 _MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
 
@@ -103,6 +108,8 @@ class LiveSession:
     failed: bool = False
     failure_committed: bool = False
     progress: SessionProgress = field(default_factory=SessionProgress)
+    # (tick, JSON) of the latest traffic frames: presentation only, never checkpointed
+    frames: deque = field(default_factory=lambda: deque(maxlen=TRAFFIC_FRAMES))
 
 
 class TrainingSessionService:
@@ -432,19 +439,24 @@ class TrainingSessionService:
                 return
             sample_ns = self.store.trace.clock()
             try:
-                staged, baseline = await asyncio.to_thread(self._step_staged, session.actor, session.baseline, sample_ns)
+                staged, baseline, frame = await asyncio.to_thread(self._step_staged, session.actor, session.baseline, sample_ns)
             except Exception:
                 session.failed = True
                 session.progress.observe(self.store.trace, session.actor, running=False)
                 raise
             if staged is not None:
                 session.actor = staged
+                if frame is not None:
+                    session.frames.append((staged.current_tick, frame))
             session.baseline = baseline
             session.progress.observe(self.store.trace, session.actor, committed=baseline,
                                      sample_ns=sample_ns if staged is not None else None)
 
     def _step_staged(self, actor: SessionActor, baseline: FullSnapshot | None, enqueued_ns: int | None = None
-                     ) -> tuple[SessionActor | None, FullSnapshot | None]:
+                     ) -> tuple[SessionActor | None, FullSnapshot | None, str | None]:
+        """One tick of a staged copy of the actor, committed when it publishes. Returns the copy to
+        install (None to keep the actor), the latest committed snapshot, and the traffic frame of a
+        published tick as JSON, if the session has traffic."""
         tags = {"session_id": actor.session_id, "session_epoch": actor.session_epoch, "tick": actor.current_tick + 1}
         if enqueued_ns is not None:
             self.store.trace.record("tick.worker_wait", enqueued_ns, self.store.trace.clock(), **tags)
@@ -453,11 +465,12 @@ class TrainingSessionService:
                 staged = deepcopy(actor)
             with self.store.trace.span("tick.actor", **tags):
                 staged.tick()
+        frame = None
         if staged.should_emit_snapshot():
             if baseline is None:
                 baseline = self.store.snapshot(actor.session_id)
             if baseline.session.status != "RUNNING":
-                return None, baseline
+                return None, baseline, None
             with self.store.trace.span("snapshot.build", session_id=actor.session_id,
                                        session_epoch=actor.session_epoch, tick=staged.current_tick):
                 snapshot = self._snapshot(staged, baseline, "RUNNING")
@@ -472,8 +485,31 @@ class TrainingSessionService:
                     raise
                 # Another command may have appended an outcome while this tick
                 # was staged. Retry from the installed actor and latest cursor.
-                return None, self.store.snapshot(actor.session_id)
-        return staged, baseline
+                return None, self.store.snapshot(actor.session_id), None
+            frame = self._frame_json(staged)
+        return staged, baseline, frame
+
+    @staticmethod
+    def _frame_json(actor: SessionActor) -> str | None:
+        frame = actor.traffic_frame() if isinstance(actor, IntegratedSessionActor) else None
+        return json.dumps(frame, separators=(",", ":")) if frame is not None else None
+
+    def traffic(self, session_id: str, after_tick: int) -> list[str]:
+        """The latest traffic frames of a live session after a tick, oldest first, as JSON.
+
+        A session that has published none since this process started (one paused, or just recovered)
+        gives its current frame, so a 3D view can draw where the traffic stands. Presentation only:
+        the frames are not durable, and a session without traffic, or not live here, has none.
+        """
+        session = self.sessions.get(session_id)
+        if session is None or session.failed or not isinstance(session.actor, IntegratedSessionActor):
+            raise TrainingStoreError("INVALID_REFERENCE", "No live traffic for this training session")
+        if session.actor.traffic is None:
+            raise TrainingStoreError("INVALID_REFERENCE", "This training session has no traffic")
+        frames = [frame for tick, frame in session.frames if tick > after_tick]
+        if not session.frames and session.actor.current_tick > after_tick:
+            frames.append(self._frame_json(session.actor))
+        return frames
 
     async def _run(self, session: LiveSession) -> None:
         step_ns = round(SessionActor.STEP_S * 1e9)

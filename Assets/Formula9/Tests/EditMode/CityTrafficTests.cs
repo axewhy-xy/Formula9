@@ -1140,5 +1140,110 @@ namespace Formula9.Tests
             Assert.AreEqual("Formula9/TrafficVehicle", material.shader.name);
             Assert.IsTrue(material.enableInstancing);
         }
+
+        // ---------------------------------------------------------------- following the backend
+
+        // A frame of the backend's traffic: the sample's first vehicle at (x, y) heading east, or none,
+        // and the shuttle "shuttle-01" heading north at (shuttleX, shuttleY).
+        private static TrafficFrame BackendFrame(long tick, float? x, float y = 0, float speed = 10, float shuttleX = 50, float shuttleY = 0) => new TrafficFrame
+        {
+            Tick = tick,
+            SimulationTimeS = tick * 0.05,
+            Vehicles = x.HasValue ? new[] { 0, Mathf.RoundToInt(x.Value * 100), Mathf.RoundToInt(y * 100), 0, Mathf.RoundToInt(speed * 100) } : new int[0],
+            Shuttles = new List<TrafficShuttlePose> { new TrafficShuttlePose { VehicleId = "shuttle-01", XM = shuttleX, YM = shuttleY, HeadingDeg = 90, SpeedMps = 10 } },
+        };
+
+        private static CityTrafficRenderer FollowingTheBackend()
+        {
+            var traffic = Traffic("car", "r", 1, 10, Road("r", 1, 2, true, "primary", (0, 0), (2000, 0)));
+            traffic.FollowBackend(new[] { BackendFrame(200, 100), BackendFrame(202, 101) });
+            Assert.IsTrue(traffic.FollowsBackend);
+            return traffic;
+        }
+
+        [Test]
+        public void TheBackendsFramesPlaceTheTrafficAndNothingElseMovesIt()
+        {
+            var traffic = FollowingTheBackend();
+            traffic.Tick(0);
+            Assert.AreEqual(100, Position(traffic, "v").x, 0.01f, "drawn from the frames, not where the sample put it");
+            Assert.AreEqual(0, Position(traffic, "v").z, 0.01f);
+            for (var i = 0; i < 100; i++)
+            {
+                traffic.Tick(Frame);
+                var x = Position(traffic, "v").x;
+                Assert.GreaterOrEqual(x, 100 - 0.01f);
+                Assert.LessOrEqual(x, 101 + 0.01f, "never past the newest frame, whatever the time");
+            }
+        }
+
+        [Test]
+        public void TheTrafficIsDrawnBetweenTheFramesEitherSideOfItsClock()
+        {
+            var traffic = FollowingTheBackend();
+            traffic.Tick(0);
+            traffic.Tick(Frame);
+            var share = (float)((traffic.FollowedS - 10.0) / 0.1);
+            Assert.Greater(share, 0f);
+            Assert.Less(share, 1f);
+            Assert.AreEqual(100 + share, Position(traffic, "v").x, 0.01f);
+            Assert.AreEqual(traffic.FollowedS, traffic.SignalClockS, 1e-9, "the lights show the colours the backend stopped for");
+        }
+
+        [Test]
+        public void AVehicleTheBackendHasOffTheMapIsNotDrawn()
+        {
+            var traffic = Traffic("car", "r", 1, 10, Road("r", 1, 2, true, "primary", (0, 0), (2000, 0)));
+            traffic.FollowBackend(new[] { BackendFrame(200, null), BackendFrame(202, null) });
+            traffic.Tick(Frame);
+            Assert.IsFalse(traffic.TryGetPose("v", out _, out _));
+        }
+
+        [Test]
+        public void TheBackendsShuttleIsDrawnWhereItsFramesPutIt()
+        {
+            var traffic = Traffic("car", "r", 1, 10, Road("r", 1, 2, true, "primary", (0, 0), (2000, 0)));
+            traffic.FollowBackend(new[] { BackendFrame(200, 100, shuttleY: 0), BackendFrame(202, 101, shuttleY: 1) });
+            Assert.IsFalse(traffic.TryGetBackendShuttlePose("shuttle-01", 1.6f, out _, out _), "nothing drawn yet");
+            traffic.Tick(0);
+            traffic.Tick(Frame);
+            Assert.IsTrue(traffic.TryGetBackendShuttlePose("shuttle-01", 1.6f, out var at, out var facing));
+            var share = (float)((traffic.FollowedS - 10.0) / 0.1);
+            Assert.AreEqual(50, at.x, 0.01f);
+            Assert.AreEqual(share, at.z, 0.01f);
+            Assert.AreEqual(1.6f, at.y, 0.001f);
+            Assert.Greater(Vector3.Dot(facing * Vector3.forward, Vector3.forward), 0.999f, "north, along +Z");
+            Assert.IsFalse(traffic.TryGetBackendShuttlePose("shuttle-02", 1.6f, out _, out _));
+        }
+
+        [Test]
+        public void ForgettingTheBackendLetsTheTrafficDriveItselfAgain()
+        {
+            var traffic = FollowingTheBackend();
+            traffic.Tick(Frame);
+            traffic.ForgetBackend();
+            Assert.IsFalse(traffic.FollowsBackend);
+            traffic.Tick(Frame);
+            var start = Position(traffic, "v").x;
+            for (var i = 0; i < 40; i++) traffic.Tick(Frame);
+            Assert.Greater(Position(traffic, "v").x, start + 1, "driving along its road again");
+        }
+
+        [Test]
+        public void TheTrafficReplyIsRead()
+        {
+            const string reply = "{\"session_id\":\"s1\",\"frames\":[{\"tick\":4,\"simulation_time_s\":0.2,\"vehicles\":[7,12345,-678,900,1000],"
+                + "\"shuttles\":[{\"vehicle_id\":\"shuttle-01\",\"x_m\":1.5,\"y_m\":-2.5,\"heading_deg\":45.0,\"speed_mps\":3.0}]}]}";
+            var frames = TrainingApi.ParseTrafficFrames(reply, "s1");
+            Assert.AreEqual(1, frames.Count);
+            Assert.AreEqual(4, frames[0].Tick);
+            Assert.AreEqual(0.2, frames[0].SimulationTimeS, 1e-9);
+            CollectionAssert.AreEqual(new[] { 7, 12345, -678, 900, 1000 }, frames[0].Vehicles);
+            Assert.AreEqual("shuttle-01", frames[0].Shuttles[0].VehicleId);
+            Assert.AreEqual(-2.5, frames[0].Shuttles[0].YM, 1e-9);
+            Assert.Throws<Formula9.Contracts.ContractException>(() => TrainingApi.ParseTrafficFrames(reply, "s2"), "another session's");
+            Assert.Throws<Formula9.Contracts.ContractException>(() => TrainingApi.ParseTrafficFrames(
+                "{\"session_id\":\"s1\",\"frames\":[{\"tick\":4,\"simulation_time_s\":0.2,\"vehicles\":[7,1,2]}]}", "s1"), "a vehicle cut short");
+        }
     }
 }

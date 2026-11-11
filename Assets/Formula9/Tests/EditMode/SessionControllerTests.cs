@@ -2,15 +2,16 @@
  * Unit tests for the session layer (SessionController.cs, SessionStore.cs).
  *
  * Author: Choo Jian Wei
- * Contributors: Lau Xiang Yang (leaving a deleted session)
+ * Contributors: Lau Xiang Yang (leaving a deleted session, polling traffic)
  * Date Created: 30/10/2026
- * Last Modified: 30/10/2026
+ * Last Modified: 11/11/2026
  *
  * Description:
  *     Uses a scripted fake backend serving the shared fixtures and an instant retry delay, so the
  *     whole join, poll, event, command and creation flow runs without a backend. Covers event
  *     cursors, gaps and recovery, the one open command and its confirmation with the same key,
- *     retries and final refusals, logins expiring mid-command, and leaving or switching sessions.
+ *     retries and final refusals, logins expiring mid-command, leaving or switching sessions, and
+ *     polling the traffic.
  */
 
 using System;
@@ -89,7 +90,7 @@ namespace Formula9.Tests
         //
         //     Attributes: Sent lists the requests; Snapshot is served for snapshot requests unless
         //     SnapshotReply is set; LastCommand is the last command submitted; OnEvents, OnCommand,
-        //     OnStatus and OnCreate answer those requests.
+        //     OnStatus, OnCreate and OnTraffic answer those requests.
         private sealed class FakeBackend : IHttpTransport
         {
             public readonly List<HttpRequest> Sent = new List<HttpRequest>();
@@ -100,17 +101,20 @@ namespace Formula9.Tests
             public Func<HttpRequest, HttpResponse> OnCommand;
             public Func<HttpRequest, HttpResponse> OnStatus;
             public Func<HttpRequest, HttpResponse> OnCreate;
+            public Func<HttpRequest, HttpResponse> OnTraffic;
 
             // -----------------------------------------------------------------------------------
             // Function: FakeBackend (constructor)
             // -----------------------------------------------------------------------------------
             // Description:
-            //     This function sets default handlers: no new events, and commands applied at once.
+            //     This function sets default handlers: no new events, commands applied at once, and
+            //     no traffic, as a backend that drives none answers.
             public FakeBackend()
             {
                 OnEvents = request => Json(Replay(After(request)));
                 OnCommand = _ => Json(Status("APPLIED"), 202);
                 OnStatus = _ => Json(Status("APPLIED"));
+                OnTraffic = _ => Error(404, "INVALID_REFERENCE");
             }
 
             // -----------------------------------------------------------------------------------
@@ -147,6 +151,7 @@ namespace Formula9.Tests
                 if (request.Method == "POST" && path == "/api/v2/sessions") return Task.FromResult(OnCreate(request));
                 if (path.EndsWith("/snapshot")) return Task.FromResult(SnapshotReply ?? Json(Snapshot));
                 if (path.EndsWith("/events")) return Task.FromResult(OnEvents(request));
+                if (path.EndsWith("/traffic")) return Task.FromResult(OnTraffic(request));
                 if (request.Method == "POST" && path.EndsWith("/commands"))
                 {
                     LastCommand = JObject.Parse(request.Body);
@@ -169,6 +174,47 @@ namespace Formula9.Tests
             //     long: The cursor.
             public static long After(HttpRequest request) =>
                 long.Parse(request.Url.Query.TrimStart('?').Split('&').First(p => p.StartsWith("after=")).Substring(6));
+
+            // -----------------------------------------------------------------------------------
+            // Function: AfterTick
+            // -----------------------------------------------------------------------------------
+            // Description:
+            //     This function reads the after_tick cursor of a traffic request.
+            //
+            // Args:
+            //     request (HttpRequest): The traffic request.
+            //
+            // Returns:
+            //     long: The cursor.
+            public static long AfterTick(HttpRequest request) =>
+                long.Parse(request.Url.Query.TrimStart('?').Split('&').First(p => p.StartsWith("after_tick=")).Substring(11));
+
+            // -----------------------------------------------------------------------------------
+            // Function: Traffic
+            // -----------------------------------------------------------------------------------
+            // Description:
+            //     This function makes a traffic reply for the snapshot's session with one frame a
+            //     tick, each with one vehicle and one shuttle.
+            //
+            // Args:
+            //     ticks (long[]): The frames' ticks, oldest first.
+            //
+            // Returns:
+            //     JObject: The reply.
+            public JObject Traffic(params long[] ticks) => new JObject
+            {
+                ["session_id"] = Snapshot["session_id"],
+                ["frames"] = new JArray(ticks.Select(tick => new JObject
+                {
+                    ["tick"] = tick,
+                    ["simulation_time_s"] = tick * 0.05,
+                    ["vehicles"] = new JArray(3, 1200, -450, 900, 1000),
+                    ["shuttles"] = new JArray(new JObject
+                    {
+                        ["vehicle_id"] = "shuttle-01", ["x_m"] = 1.5, ["y_m"] = -2.0, ["heading_deg"] = 90.0, ["speed_mps"] = 4.2,
+                    }),
+                })),
+            };
 
             // -----------------------------------------------------------------------------------
             // Function: Replay
@@ -721,6 +767,43 @@ namespace Formula9.Tests
             await controller.CreateAsync();
             StringAssert.Contains("Log in as trainee", errors.Last());
             Assert.AreEqual(1, backend.To("/api/v2/sessions", "POST").Count());
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: TrafficIsPolledFromTheNewestFrameUntilTheSessionHasNone
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The first traffic poll of a session asks for every frame the backend keeps, and each
+        //     later one only for frames after the newest taken, which are reported in order. A
+        //     session the backend drives no traffic for is not asked again.
+        [Test]
+        public async Task TrafficIsPolledFromTheNewestFrameUntilTheSessionHasNone()
+        {
+            var accepted = new List<IReadOnlyList<TrafficFrame>>();
+            controller.TrafficFramesAccepted += accepted.Add;
+            await controller.JoinAsync(SessionId);
+            backend.OnTraffic = _ => Json(backend.Traffic(10, 12));
+            await controller.RefreshTrafficAsync();
+            backend.OnTraffic = _ => Json(backend.Traffic(14));
+            await controller.RefreshTrafficAsync();
+            CollectionAssert.AreEqual(new long[] { -1, 12 }, backend.To("/traffic").Select(FakeBackend.AfterTick).ToList());
+            Assert.AreEqual(2, accepted.Count);
+            CollectionAssert.AreEqual(new long[] { 10, 12 }, accepted[0].Select(f => f.Tick).ToList());
+            CollectionAssert.AreEqual(new long[] { 14 }, accepted[1].Select(f => f.Tick).ToList());
+            var shuttle = accepted[1][0].Shuttles.Single();
+            Assert.AreEqual("shuttle-01", shuttle.VehicleId);
+            Assert.AreEqual(4.2, shuttle.SpeedMps, 1e-9);
+            CollectionAssert.AreEqual(new[] { 3, 1200, -450, 900, 1000 }, accepted[1][0].Vehicles);
+
+            backend.OnTraffic = _ => Error(404, "INVALID_REFERENCE");
+            await controller.RefreshTrafficAsync();
+            Assert.AreEqual(14L, FakeBackend.AfterTick(backend.To("/traffic").Last()));
+            var asked = backend.To("/traffic").Count();
+            await controller.RefreshTrafficAsync();
+            await controller.RefreshTrafficAsync();
+            Assert.AreEqual(asked, backend.To("/traffic").Count(), "a session without traffic is not asked again");
+            Assert.AreEqual(2, accepted.Count);
+            Assert.IsEmpty(errors, "no traffic is not an error");
         }
 
         // -----------------------------------------------------------------------------------

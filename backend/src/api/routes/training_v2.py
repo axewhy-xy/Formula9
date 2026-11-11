@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from threading import Lock
 
 from typing import Annotated
@@ -116,6 +117,22 @@ async def delete_session(session_id: str, actor_id: str = Depends(get_actor_id),
 async def snapshot(session_id: str, actor_id: str = Depends(get_actor_id),
                    service: TrainingSessionService = Depends(get_training_service)) -> dict:
     return (await service.snapshot(session_id)).model_dump(mode="json")
+
+
+@router.get("/{session_id}/traffic")
+async def traffic(session_id: str, after_tick: Annotated[int, Query(ge=-1)] = -1,
+                  actor_id: str = Depends(get_actor_id),
+                  service: TrainingSessionService = Depends(get_training_service)) -> Response:
+    """The background traffic and the shuttles' bodies as the backend drives them, for a 3D view to draw.
+
+    Frames after after_tick, oldest first, ten a second while the session runs. Each lists the vehicles
+    on the roads as flat (index in /api/traffic/{area}'s vehicles, x cm, y cm, heading in tenths of a
+    degree anticlockwise from east, speed cm/s) and each shuttle's body: its middle, heading and speed.
+    Presentation only; the snapshot stays the authority on where a shuttle is along its route.
+    """
+    frames = service.traffic(session_id, after_tick)
+    return Response(content='{"session_id":%s,"frames":[%s]}' % (json.dumps(session_id), ",".join(frames)),
+                    media_type="application/json")
 
 
 @router.get("/{session_id}/routes/{route_id}/editor", response_model=RouteEditorContext)

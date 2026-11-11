@@ -53,6 +53,18 @@ mandatory metadata blocks approval, and the extract has no turn restriction rela
 U-turns are refused. `GET /api/v2/sessions/{id}/routes/{route}/outcome` reads back the durable
 `STOP_SERVED` and `LOOP_COMPLETED` events against what was approved.
 
+An integrated session drives its shuttles through the area's background traffic
+(`src/traffic/city_traffic.py`): the 0.1% sample of Singapore's vehicles from
+`fixtures/traffic/toa-payoh.json` on its OpenStreetMap roads, under the simulated lights of
+`fixtures/traffic/toa-payoh-signals.json`, ported from the 3D client's traffic. The session owns and
+checkpoints it, so a recovered session drives on exactly as the original would. In the traffic a
+shuttle keeps to the kerb lane, accelerates and brakes, follows the vehicle in front, gives way, and
+queues behind vehicles waiting at a red light; incidents close their road and back the traffic up
+(`src/traffic/incident_hazards.py`). `GET /api/v2/sessions/{id}/traffic?after_tick=N` returns the
+traffic's latest frames, ten a second, for the 3D city to draw: presentation only, not part of the
+durable snapshot. The tests run integrated sessions without traffic unless marked `traffic`
+(`tests/conftest.py`); `tests/test_city_traffic.py` covers it.
+
 A session pins the fixture it started on. After the network or scenario changes, sessions from
 the old revision can't be recovered: they are marked `FAILED` with `CORRUPT_CHECKPOINT`, stay
 readable, and a new session has to be created.

@@ -70,6 +70,9 @@ namespace Formula9.World
             largeEntryRoads.Clear();
             ClearModels();
             vehicles.Clear();
+            // The backend's frames name these vehicles, so they start over with them
+            vehiclesBySeed.Clear();
+            ForgetBackend();
 
             BuildDirectedRoads(roadsData);
             PlaceSignals(signals);
@@ -82,14 +85,24 @@ namespace Formula9.World
             foreach (var pair in trafficData.Models)
                 modelRenderers[pair.Key] = ModelsFor(catalog, pair.Key, pair.Value);
 
-            foreach (var seed in trafficData.Vehicles)
-                AddVehicle(seed, trafficData);
+            for (var i = 0; i < trafficData.Vehicles.Count; i++)
+            {
+                var added = AddVehicle(trafficData.Vehicles[i], trafficData);
+                if (added != null) vehiclesBySeed[i] = added;
+            }
         }
 
         // A delta of zero holds the traffic still, and still draws it. A camera culls what it cannot see.
-        // The shuttles it drives move with it, even with no other traffic.
+        // The shuttles it drives move with it, even with no other traffic. While the backend's frames
+        // come, they move the traffic instead (CityTrafficFollow).
         public void Tick(float deltaTime, IReadOnlyList<Camera> cameras = null)
         {
+            if (FollowsBackend)
+            {
+                Follow(Mathf.Max(0, deltaTime));
+                RenderVehicles(cameras);
+                return;
+            }
             if (vehicles.Count == 0 && shuttles.Count == 0) return;
 
             var step = Mathf.Min(deltaTime, MaxStepSeconds);
@@ -222,15 +235,15 @@ namespace Formula9.World
             }
         }
 
-        private void AddVehicle(CityTrafficVehicle seed, CityTrafficData trafficData)
+        private VehicleState AddVehicle(CityTrafficVehicle seed, CityTrafficData trafficData)
         {
-            if (seed == null || string.IsNullOrEmpty(seed.Model)) return;
-            if (!modelRenderers.TryGetValue(seed.Model, out var options) || options.Count == 0) return;
+            if (seed == null || string.IsNullOrEmpty(seed.Model)) return null;
+            if (!modelRenderers.TryGetValue(seed.Model, out var options) || options.Count == 0) return null;
             var render = options[(int)(Hash(seed.Id ?? seed.Model) % (uint)options.Count)];
 
             if (!roads.TryGetValue($"{seed.Road}|{seed.Direction}", out var road))
                 road = roads.Values.FirstOrDefault(r => r.RoadId == seed.Road);
-            if (road == null) return;
+            if (road == null) return null;
 
             var lane = Mathf.Clamp(seed.Lane, 0, Mathf.Max(0, road.Lanes - 1));
             var paint = ParseColor(seed.Color);
@@ -251,6 +264,7 @@ namespace Formula9.World
                 Render = render
             };
             vehicles.Add(state);
+            return state;
         }
 
         // The vehicle's place on the road jumps at a bend or a junction. What is drawn closes on it, so

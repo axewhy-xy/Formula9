@@ -102,6 +102,7 @@ namespace Formula9.UI
                 Render();
                 Run(RefreshSessionListIfChanged());
             };
+            session.TrafficFramesAccepted += frames => world.ShowTraffic(frames);
             session.AvailabilityChanged += available => Render();
             session.CommandFinished += outcome =>
             {
@@ -178,6 +179,7 @@ namespace Formula9.UI
 
             ShowLogin(null);
             StartCoroutine(Poll());
+            StartCoroutine(PollTraffic());
         }
 
         // -----------------------------------------------------------------------------------
@@ -220,6 +222,26 @@ namespace Formula9.UI
             {
                 yield return wait;
                 if (auth.IsLoggedIn) Run(session.RefreshAsync());
+            }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: PollTraffic
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function fetches the backend's traffic for the 3D city several times a second,
+        //     while it is shown: the backend drives the traffic and the shuttles through it, and the
+        //     city draws them where it says.
+        //
+        // Returns:
+        //     IEnumerator: The coroutine.
+        private IEnumerator PollTraffic()
+        {
+            var wait = new WaitForSecondsRealtime((float)SessionController.TrafficPollInterval.TotalSeconds);
+            while (true)
+            {
+                yield return wait;
+                if (auth.IsLoggedIn && world != null && world.WantsTraffic) Run(session.RefreshTrafficAsync());
             }
         }
 
