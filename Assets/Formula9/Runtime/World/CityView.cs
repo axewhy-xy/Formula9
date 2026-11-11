@@ -25,6 +25,9 @@ namespace Formula9.World
         private static readonly Color KerbColor = new Color(0.66f, 0.66f, 0.64f), AsphaltColor = new Color(0.17f, 0.17f, 0.19f), MarkingColor = new Color(0.95f, 0.95f, 0.92f);
         private const int GrainSize = 128, GrainSeed = 9;
         private const float ProposedWidthM = 6, ProposedHeightM = 2, ClosureWidthM = 9, ClosureHeightM = 1.6f;
+        // The layer ("Planning Overlay") for planning aids drawn over the city, such as closed
+        // roads and proposed routes, so the shuttle cameras can leave them out.
+        public const int PlanningLayer = 8;
         private const float BarrierWidthM = 12, BarrierHeightM = 2.4f, PinHeightM = 26, StopReachM = 14;
         private static readonly Color ProposedColor = new Color(0.086f, 0.396f, 0.753f, 0.95f);
         private static readonly Color ClosureColor = new Color(0.839f, 0.188f, 0.192f, 0.85f);
@@ -861,6 +864,7 @@ namespace Formula9.World
         {
             if (points.Length < 2) return;
             var line = new GameObject(name).AddComponent<LineRenderer>();
+            line.gameObject.layer = PlanningLayer;
             line.transform.SetParent(root, false);
             line.useWorldSpace = true; line.sharedMaterial = lineMaterial; line.positionCount = points.Length;
             line.SetPositions(points.Select(p => new Vector3(p.x, height, p.y)).ToArray());

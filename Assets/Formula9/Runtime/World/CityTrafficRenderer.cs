@@ -34,8 +34,8 @@ namespace Formula9.World
         private readonly Dictionary<string, List<ModelRenderData>> modelRenderers = new Dictionary<string, List<ModelRenderData>>();
         private readonly Dictionary<Material, Material> materialCopies = new Dictionary<Material, Material>();
         private readonly List<VehicleState> vehicles = new List<VehicleState>();
-        private readonly List<Plane[]> frustrums = new List<Plane[]>();
-        private int frustrumCount;
+        private readonly List<Plane[]> frustums = new List<Plane[]>();
+        private int frustumCount;
 
         public int VehicleCount => vehicles.Count;
 
@@ -309,7 +309,7 @@ namespace Formula9.World
         {
             foreach (var list in modelRenderers.Values)
                 foreach (var render in list) render.Reset();
-            SetFrustrums(cameras);
+            SetFrustums(cameras);
             foreach (var vehicle in vehicles)
             {
                 // Given cameras, a car is drawn only if one that draws this frame can see it; when
@@ -323,27 +323,27 @@ namespace Formula9.World
         }
 
         // Takes the view of every camera that draws this frame, for InView.
-        private void SetFrustrums(IReadOnlyList<Camera> cameras)
+        internal void SetFrustums(IReadOnlyList<Camera> cameras)
         {
-            frustrumCount = 0;
+            frustumCount = 0;
             if (cameras == null) return;
             for (var i = 0; i < cameras.Count; i++)
             {
                 var camera = cameras[i];
                 if (camera == null || !camera.enabled) continue;
                 // To grow when needed.
-                if (frustrumCount == frustrums.Count) frustrums.Add(new Plane[6]);
-                GeometryUtility.CalculateFrustumPlanes(camera, frustrums[frustrumCount]);
-                frustrumCount++;
+                if (frustumCount == frustums.Count) frustums.Add(new Plane[6]);
+                GeometryUtility.CalculateFrustumPlanes(camera, frustums[frustumCount]);
+                frustumCount++;
             }
         }
 
         // Whether any camera that draws this frame can see the point; false when none draws.
-        private bool InView(Vector3 position)
+        internal bool InView(Vector3 position)
         {
-            for (var f = 0; f < frustrumCount; f++)
+            for (var f = 0; f < frustumCount; f++)
             {
-                Plane[] planes = frustrums[f];
+                Plane[] planes = frustums[f];
                 var inside = true;
                 foreach (var plane in planes)
                 {

@@ -15,7 +15,10 @@
  *     else needs it. Also checks that the cameras match the city's sky and view distance,
  *     keep watching their shuttle when another is selected, update the hint at once, leave
  *     the hidden 3D view still while following, and that traffic is drawn for every camera
- *     that can see it.
+ *     that can see it. And that the thumbnails draw into small images and the camera shown
+ *     large into one large image, all freed on closing; that the large view names the
+ *     watched shuttle; that the planning overlays are left out; and that closing, by the
+ *     button or on its own, goes back to the 2D map the cameras were opened from.
  */
 
 using System;
@@ -105,9 +108,13 @@ namespace Formula9.Tests
         [TearDown]
         public void TearDown() { if (rig != null) UnityEngine.Object.DestroyImmediate(rig); }
 
-        // Runs one frame of the view, which Unity does not do in edit mode.
-        private void Frame() =>
+        // Runs one frame of the view, Update then LateUpdate as Unity does, which it does not do
+        // in edit mode.
+        private void Frame()
+        {
             typeof(WorldView).GetMethod("Update", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(view, null);
+            typeof(WorldView).GetMethod("LateUpdate", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(view, null);
+        }
 
         private VisualElement Panel() => root.Q(className: "camera-panel");
         private VisualElement[] Tiles() => Panel().Query(className: "camera-tile").ToList().ToArray();
@@ -157,15 +164,16 @@ namespace Formula9.Tests
             view.ShowCameras(true);
             Assert.IsTrue(Cams().All(c => c.enabled), "every camera draws once on opening, so no thumbnail starts blank");
             Assert.IsFalse(WorldCamera().enabled, "the 3D view stops drawing while the cameras cover it");
-            Assert.IsTrue(Cams().All(c => c.targetTexture != null && c.targetTexture.width == 960 && c.targetTexture.height == 540),
-                "each picture is big enough to fill the 3D view, as any can be shown large");
+            AssertImages(0);
             var world = WorldCamera();
+            var planning = 1 << CityView.PlanningLayer;
+            Assert.AreNotEqual(0, world.cullingMask & planning, "the 3D view shows the planning overlays");
             foreach (var c in Cams())
             {
                 Assert.AreEqual(world.clearFlags, c.clearFlags, c.name + " has the city's sky");
                 Assert.AreEqual(world.backgroundColor, c.backgroundColor, c.name + " has the city's sky colour");
                 Assert.AreEqual(world.farClipPlane, c.farClipPlane, c.name + " sees as far as the 3D view");
-                Assert.AreEqual(world.cullingMask, c.cullingMask, c.name + " draws what the 3D view draws");
+                Assert.AreEqual(world.cullingMask & ~planning, c.cullingMask, c.name + " draws what the 3D view draws but the planning overlays");
             }
             Frame();
             Assert.IsTrue(view.CamerasShown, "still open after a frame");
@@ -207,9 +215,35 @@ namespace Formula9.Tests
             view.ShowCameras(true);
             view.SelectCamera(1);
             Assert.AreEqual(1, view.MainCamera);
-            Assert.AreEqual("Rear", MainLabel().text);
+            Assert.AreEqual($"{Shuttle} · Rear", MainLabel().text, "the large view names the shuttle and the camera");
+            AssertImages(1);
             Assert.IsTrue(Tiles()[1].ClassListContains("camera-tile-selected"));
             Assert.IsFalse(Tiles()[0].ClassListContains("camera-tile-selected"), "only one thumbnail is marked");
+        }
+
+        // The camera shown large draws into the one large image and the rest into small ones.
+        private void AssertImages(int main)
+        {
+            for (var i = 0; i < Names.Length; i++)
+            {
+                var image = Cams()[i].targetTexture;
+                Assert.IsNotNull(image, Names[i] + " has an image while the cameras are open");
+                if (i == main) Assert.AreEqual((960, 540), (image.width, image.height), Names[i] + ", shown large, fills the 3D view");
+                else Assert.AreEqual((320, 180), (image.width, image.height), Names[i] + ", a thumbnail, draws small");
+            }
+        }
+
+        [Test]
+        public void ClosingFreesTheImages()
+        {
+            view.ShowCameras(true);
+            var images = Cams().Select(c => c.targetTexture).ToArray();
+            view.ShowCameras(false);
+            Assert.IsTrue(Cams().All(c => c.targetTexture == null), "no camera keeps an image");
+            Assert.IsTrue(images.All(t => t == null), "and the images themselves are destroyed");
+
+            view.ShowCameras(true);
+            AssertImages(0);
         }
 
         [Test]
@@ -251,6 +285,18 @@ namespace Formula9.Tests
             Assert.IsFalse(view.CamerasShown, "the watched shuttle left the session");
             Assert.IsTrue(Cams().All(c => !c.enabled));
             Assert.Greater(changed, 0, "the workspace is told, so its Cameras buttons go back");
+
+            view.Show(Snapshot());
+            view.ShowMap(true);
+            view.OpenCameras();
+            Assert.IsTrue(view.CamerasShown, "opened from the map");
+            Assert.IsFalse(view.ShowingMap);
+            Frame();
+            view.Show(gone);
+            Frame();
+            Assert.IsFalse(view.CamerasShown);
+            Assert.IsTrue(view.ShowingMap, "closing on its own goes back to the map they were opened from");
+            view.ShowMap(false);
 
             view.Show(Snapshot());
             view.SelectEntity(Shuttle);
@@ -316,8 +362,6 @@ namespace Formula9.Tests
         [Test]
         public void TrafficIsDrawnIfAnyDrawingCameraCanSeeIt()
         {
-            var setFrustrums = typeof(CityTrafficRenderer).GetMethod("SetFrustrums", BindingFlags.NonPublic | BindingFlags.Instance);
-            var inView = typeof(CityTrafficRenderer).GetMethod("InView", BindingFlags.NonPublic | BindingFlags.Instance);
             var traffic = new CityTrafficRenderer();
             var front = new GameObject("Front").AddComponent<Camera>();
             var rear = new GameObject("Rear").AddComponent<Camera>();
@@ -331,8 +375,8 @@ namespace Formula9.Tests
                 var cams = new System.Collections.Generic.List<Camera> { front, rear };
                 bool Seen(Vector3 p)
                 {
-                    setFrustrums.Invoke(traffic, new object[] { cams });
-                    return (bool)inView.Invoke(traffic, new object[] { p });
+                    traffic.SetFrustums(cams);
+                    return traffic.InView(p);
                 }
 
                 Assert.IsTrue(Seen(ahead), "seen by the front camera");

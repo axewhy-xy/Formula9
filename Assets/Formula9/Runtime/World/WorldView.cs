@@ -18,6 +18,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Formula9.Backend;
@@ -275,6 +276,8 @@ namespace Formula9.World
             map.style.display = DisplayStyle.None;
             viewCamera.farClipPlane = CityFarClip;
             viewCamera.backgroundColor = CitySky;
+            // Cameras opened while the city was loading take its sky now
+            if (camerasShown) shuttleCameras.Match(viewCamera);
             maxDistance = CityMaxDistance;
             // The shuttle's cameras take the place of the 3D view while they are shown
             viewCamera.enabled = !camerasShown;
@@ -362,23 +365,13 @@ namespace Formula9.World
         //     moves the shuttles of the city or scene each frame and keeps a followed one in view.
         private void Update()
         {
-            // While the city is still loading its shuttles are not placed yet, so wait for them
-            // before deciding there is nothing to watch
-            if (camerasShown && !CanShowCameras && !(CityShown && cityLoad != null && !cityLoad.IsCompleted))
-            {
-                ShowCameras(false);
-                // Nobody pressed a button, so tell the workspace to redraw its Cameras buttons
-                ViewChanged?.Invoke();
-            }
             if (CityShown && city != null)
             {
                 city.Tick(motion, Time.unscaledTime);
                 if (city.TryGetShuttlePose(watchedId, out var position, out var rotation))
                     shuttleCameras.Place(position, rotation);
-                // Again each frame, for cameras opened while the city was still loading
-                if (camerasShown) shuttleCameras.Match(viewCamera);
                 // Before the traffic, which is drawn for the cameras whose turn it is
-                shuttleCameras.Tick(mainCamera);
+                shuttleCameras.Tick();
                 // On the same clock as the shuttles, and still when they are
                 city.TickTraffic(latest.Session?.Status == "RUNNING" ? Time.unscaledDeltaTime : 0, trafficCameras);
             }
@@ -386,6 +379,25 @@ namespace Formula9.World
             else return;
             // Following waits behind the camera view and carries on when it closes
             if (following && !camerasShown) FocusSelected(false);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: LateUpdate
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function closes the cameras once the frame's work is done, when there is no
+        //     shuttle left to watch, and tells the workspace so its buttons can update. Unity
+        //     calls it after every Update, so the workspace never redraws partway through one.
+        private void LateUpdate()
+        {
+            // While the city is still loading its shuttles are not placed yet, so wait for them
+            // before deciding there is nothing to watch
+            if (camerasShown && !CanShowCameras && !(CityShown && cityLoad != null && !cityLoad.IsCompleted))
+            {
+                CloseCameras();
+                // Nobody pressed a button, so tell the workspace to redraw its Cameras buttons
+                ViewChanged?.Invoke();
+            }
         }
 
         // -----------------------------------------------------------------------------------
@@ -832,6 +844,38 @@ namespace Formula9.World
 
         private bool camerasShown;
         private string watchedId;
+        // Remembers whether the cameras were opened from the 2D map.
+        private bool camerasFromMap;
+
+        // -----------------------------------------------------------------------------------
+        // Function: OpenCameras
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function shows the selected shuttle's cameras in the 3D city, the way both
+        //     Cameras buttons open them. It remembers whether they were opened from the 2D map,
+        //     keeping the first answer when they are opened again for another route's shuttle.
+        public void OpenCameras()
+        {
+            if (!CamerasShown)
+                camerasFromMap = ShowingMap;
+            ShowMap(false);
+            ShowCameras(true);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: CloseCameras
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function closes the cameras and goes back to where they were opened from,
+        //     the 2D map or the 3D view. It is used by Hide cameras and when the watched
+        //     shuttle leaves; Overview and the like use LeaveCameras, as they need the 3D view.
+        public void CloseCameras()
+        {
+            ShowCameras(false);
+            if (camerasFromMap)
+                ShowMap(true);
+        }
+
         // Whether the shuttle's cameras are shown in place of the 3D view, whether there is a
         // selected shuttle in the 3D city to watch, and whether this session has a 3D city at all.
         public bool CamerasShown => camerasShown;
@@ -870,6 +914,7 @@ namespace Formula9.World
                 viewCamera.enabled = false;
             }
             else if (CityShown) viewCamera.enabled = true;
+            if (show) SelectCamera(mainCamera);
             RefreshHint();
         }
 
@@ -884,7 +929,11 @@ namespace Formula9.World
         public void SelectCamera(int index)
         {
             mainCamera = index;
-            mainCameraLabel.text = shuttleCameras.NameOf(index);
+            shuttleCameras.SetMain(index);
+            // Names the watched shuttle too, as the selection elsewhere can be another one
+            mainCameraLabel.text = watchedId == null
+                ? shuttleCameras.NameOf(index)
+                : $"{watchedId} · {shuttleCameras.NameOf(index)}";
             for (var i = 0; i < cameraTiles.Count; i++)
                 cameraTiles[i].EnableInClassList("camera-tile-selected", i == index);
             ShowTextures();
@@ -895,15 +944,15 @@ namespace Formula9.World
         // Function: ShowTextures
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function puts each camera's picture on its thumbnail, and the chosen one's
-        //     on the large view. Before the cameras are first opened there are no pictures yet.
+        //     This function puts the large image on the large view and each camera's thumbnail
+        //     image on its tile. While the cameras are closed there are no images, so it does
+        //     nothing.
         private void ShowTextures()
         {
-            var textures = shuttleCameras.Textures;
-            if (textures[0] == null) return;
-            mainCameraView.style.backgroundImage = new StyleBackground(Background.FromRenderTexture(textures[mainCamera]));
+            if (shuttleCameras.Large == null) return;
+            mainCameraView.style.backgroundImage = new StyleBackground(Background.FromRenderTexture(shuttleCameras.Large));
             for (var i = 0; i < cameraTiles.Count; i++)
-                cameraTiles[i].style.backgroundImage = new StyleBackground(Background.FromRenderTexture(textures[i]));
+                cameraTiles[i].style.backgroundImage = new StyleBackground(Background.FromRenderTexture(shuttleCameras.Thumbnail(i)));
         }
 
         // -----------------------------------------------------------------------------------

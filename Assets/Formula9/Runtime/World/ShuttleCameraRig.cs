@@ -44,14 +44,17 @@ namespace Formula9.World
             new Mount { Name = "Left", Offset = new Vector3(-2.6f, -0.5f, 0), Yaw = -90, Pitch = 0 },
             new Mount { Name = "Right", Offset = new Vector3(2.6f, -0.5f, 0), Yaw = 90, Pitch = 0 }
         };
-        // Big enough to fill the 3D view when shown large. Any thumbnail can be shown large at
-        // a click, so they all have this size rather than being made again on each click.
-        private const int TextureWidth = 960, TextureHeight = 540;
-        // One camera and one render texture per mount, in the same order as Mounts. The
-        // textures stay null until the cameras are first switched on.
+        // The camera shown large draws into one image big enough to fill the 3D view; the
+        // thumbnails, shown at 160x90, draw into small ones.
+        private const int SmallWidth = 320, SmallHeight = 180, LargeWidth = 960, LargeHeight = 540;
+        // One camera and one small image per mount, in the same order as Mounts, and the large
+        // image. The images exist only while the cameras are on.
         private readonly Camera[] cameras;
         private readonly RenderTexture[] textures;
-        // Whether the cameras are in use, and which thumbnail draws on the next frame.
+        private RenderTexture large;
+        // The camera shown large, whether the cameras are in use, and which thumbnail draws on
+        // the next frame.
+        private int main;
         private bool active;
         private int next;
 
@@ -86,7 +89,8 @@ namespace Formula9.World
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function gives every camera the 3D view's background, what it draws and how
-        //     far it sees, so the camera pictures show the same sky and distant buildings.
+        //     far it sees, so the camera pictures show the same sky and distant buildings. The
+        //     planning overlays are left out, as a real camera on the shuttle would not see them.
         //
         // Args:
         //     view (Camera): The 3D view's camera.
@@ -96,7 +100,8 @@ namespace Formula9.World
             {
                 camera.clearFlags = view.clearFlags;
                 camera.backgroundColor = view.backgroundColor;
-                camera.cullingMask = view.cullingMask;
+                // Everything the 3D view draws except the planning aids
+                camera.cullingMask = view.cullingMask & ~(1 << CityView.PlanningLayer);
                 camera.farClipPlane = view.farClipPlane;
             }
         }
@@ -123,11 +128,30 @@ namespace Formula9.World
 
         // The cameras, so the traffic can be drawn for them too.
         public IReadOnlyList<Camera> Cameras => cameras;
-        // What each camera draws into, for the camera view; same order as Cameras. Each is
-        // null until the cameras are first switched on.
-        public IReadOnlyList<RenderTexture> Textures => textures;
+        // The image the camera view shows large; null while the cameras are closed.
+        public RenderTexture Large => large;
+        // The image for camera i's thumbnail: the large one for the camera shown large, as it
+        // stops drawing into its own small one.
+        public RenderTexture Thumbnail(int i) => i == main ? large : textures[i];
         // The name of camera i, for its label in the panel.
         public string NameOf(int i) => Mounts[i].Name;
+
+        // -----------------------------------------------------------------------------------
+        // Function: SetMain
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function picks the camera shown large. It draws into the large image and
+        //     the others into their small ones. Before the images are made, every camera
+        //     just gets null.
+        //
+        // Args:
+        //     index (int): The camera to show large, in the rig's order.
+        public void SetMain(int index)
+        {
+            main = index;
+            for (var i = 0; i < cameras.Length; i++)
+                cameras[i].targetTexture = i == main ? large : textures[i];
+        }
 
         // -----------------------------------------------------------------------------------
         // Function: SetActive
@@ -135,23 +159,52 @@ namespace Formula9.World
         // Description:
         //     This function switches every camera on or off. A camera that is off draws
         //     nothing and costs nothing, so they stay off while no one is watching them. The
-        //     first time they are switched on, their render textures are made.
+        //     images are made when the cameras switch on and freed when they switch off.
         //
         // Args:
         //     active (bool): True to switch the cameras on, false to switch them off.
         public void SetActive(bool active)
         {
             this.active = active;
-            for (var i = 0; i < cameras.Length; i++)
+            if (active && large == null)
             {
-                if (active && textures[i] == null)
-                {
-                    textures[i] = new RenderTexture(TextureWidth, TextureHeight, 24);
-                    cameras[i].targetTexture = textures[i];
-                }
-                cameras[i].enabled = active;
+                large = new RenderTexture(LargeWidth, LargeHeight, 24);
+                for (var i = 0; i < textures.Length; i++)
+                    textures[i] = new RenderTexture(SmallWidth, SmallHeight, 24);
+                // Points every camera at its image
+                SetMain(main);
             }
+            if (!active) FreeTextures();
+            for (var i = 0; i < cameras.Length; i++)
+                cameras[i].enabled = active;
         }
+
+        // -----------------------------------------------------------------------------------
+        // Function: FreeTextures
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function releases and destroys the large image and every small one, and
+        //     forgets them, so the cameras use no image memory while they are closed. Outside
+        //     Play mode, as in EditMode tests, they are destroyed at once.
+        private void FreeTextures()
+        {
+            // Free one image: Release it, then Destroy (playing) or DestroyImmediate (EditMode)
+            void Free(RenderTexture t)
+            {
+                if (t == null) return;
+                t.Release();
+                if (Application.isPlaying) Object.Destroy(t);
+                else Object.DestroyImmediate(t);
+            }
+            // The cameras let go of their images first: Unity will not release one a camera
+            // still draws into
+            foreach (var camera in cameras)
+                if (camera != null) camera.targetTexture = null;
+            Free(large);
+            large = null;
+            for (var i = 0; i < textures.Length; i++) { Free(textures[i]); textures[i] = null; }
+        }
+
         // -----------------------------------------------------------------------------------
         // Function: Tick
         // -----------------------------------------------------------------------------------
@@ -160,10 +213,7 @@ namespace Formula9.World
         //     frame, so it moves smoothly; the thumbnails take turns, one a frame, so the view
         //     costs two cameras instead of four. At 60 frames a second each thumbnail still
         //     refreshes twenty times a second. It does nothing while the cameras are off.
-        //
-        // Args:
-        //     main (int): The camera shown large.
-        public void Tick(int main)
+        public void Tick()
         {
             if (!active) return;
             // The large camera draws anyway, so its turn as a thumbnail goes to the next one
@@ -177,18 +227,13 @@ namespace Formula9.World
         // Function: Dispose
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function releases and destroys the render textures and removes the cameras'
+        //     This function frees the images through FreeTextures and removes the cameras'
         //     objects. Outside Play mode, as in EditMode tests, they are destroyed at once.
         public void Dispose()
         {
+            FreeTextures();
             for (var i = 0; i < cameras.Length; i++)
             {
-                if (textures[i] != null)
-                {
-                    textures[i].Release();
-                    if (Application.isPlaying) Object.Destroy(textures[i]);
-                    else Object.DestroyImmediate(textures[i]);
-                }
                 if (cameras[i] == null) continue;
                 if (Application.isPlaying) Object.Destroy(cameras[i].gameObject);
                 else Object.DestroyImmediate(cameras[i].gameObject);
