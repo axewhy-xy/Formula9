@@ -401,35 +401,6 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: ArchivingASessionReadsItsRevisionThenSendsArchive
-        // -----------------------------------------------------------------------------------
-        // Description:
-        //     Archive all archives a session it has not joined: it reads the session's snapshot,
-        //     then sends ARCHIVE with that snapshot's epoch and revision, so the backend accepts it.
-        [Test]
-        public async Task ArchivingASessionReadsItsRevisionThenSendsArchive()
-        {
-            LogIn();
-            var snapshot = JObject.Parse(Fixture("snapshot"));
-            var id = (string)snapshot["session_id"];
-            transport.Reply = request => request.Method == "GET" ? Ok(snapshot.ToString()) : Ok(Fixture("command_status"), 202);
-            var status = await training.ArchiveSessionAsync(id);
-
-            Assert.AreEqual("COMMAND_STATUS", status.MessageType);
-            Assert.AreEqual(2, transport.Sent.Count, "the snapshot, then the command");
-            Assert.AreEqual($"/api/v2/sessions/{id}/snapshot", transport.Sent[0].Url.AbsolutePath);
-            Assert.AreEqual("POST", transport.Sent[1].Method);
-            Assert.AreEqual($"/api/v2/sessions/{id}/commands", transport.Sent[1].Url.AbsolutePath);
-            var sent = JObject.Parse(transport.Sent[1].Body);
-            Assert.AreEqual("ARCHIVE", (string)sent["command_type"]);
-            Assert.AreEqual(id, (string)sent["session_id"]);
-            Assert.AreEqual(id, (string)sent["target_id"]);
-            Assert.AreEqual("SESSION", (string)sent["target_type"]);
-            Assert.AreEqual((long)snapshot["session_epoch"], (long)sent["expected_epoch"], "the session's current epoch");
-            Assert.AreEqual((long)snapshot["session"]["aggregate_revision"], (long)sent["expected_revision"], "the session's current revision");
-        }
-
-        // -----------------------------------------------------------------------------------
         // Function: EventReplayMustAnswerTheCursorThatWasAskedFor
         // -----------------------------------------------------------------------------------
         // Description:

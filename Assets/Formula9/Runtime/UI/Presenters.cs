@@ -591,6 +591,83 @@ namespace Formula9.UI
         //
         // Returns:
         //     string: For example 12.5 MB.
+        // -----------------------------------------------------------------------------------
+        // Function: ArchivedAll
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function reports what Archive all did: how many of the live sessions it found
+        //     are no longer live.
+        //
+        // Args:
+        //     live (int): How many sessions were live.
+        //     archived (int): How many of those are no longer live.
+        //
+        // Returns:
+        //     string: The message.
+        public static string ArchivedAll(int live, int archived)
+        {
+            if (live == 0) return "No live sessions to archive.";
+            if (archived == live) return $"Archived {Count(live, "live session")}.";
+            return $"Archived {archived} of {Count(live, "live session")}; {Count(live - archived, "session")} " +
+                   $"{(live - archived == 1 ? "is" : "are")} still live. Refresh the list and try again.";
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: PurgeCount
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function works out how many finished sessions a purge keeping the keep newest
+        //     would delete: every session that is not live, less those kept.
+        //
+        // Args:
+        //     list (SessionListResponse): The session list, for its counts.
+        //     keep (int): How many of the newest finished sessions are kept.
+        //
+        // Returns:
+        //     long: How many would be deleted.
+        public static long PurgeCount(SessionListResponse list, int keep) => Math.Max(0, list.Total - list.LiveCount - keep);
+
+        // -----------------------------------------------------------------------------------
+        // Function: PurgeQuestion
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function asks before a purge, saying exactly how many sessions go and what is
+        //     kept, or says there is nothing to delete.
+        //
+        // Args:
+        //     list (SessionListResponse): The session list, for its counts.
+        //     keep (int): How many of the newest finished sessions are kept.
+        //
+        // Returns:
+        //     string: The question, or why there is nothing to delete.
+        public static string PurgeQuestion(SessionListResponse list, int keep)
+        {
+            var deleted = PurgeCount(list, keep);
+            var finished = list.Total - list.LiveCount;
+            if (deleted == 0)
+                return $"Nothing to delete: there {(finished == 1 ? "is" : "are")} {Count(finished, "finished session")}, " +
+                       $"and the {keep} newest are always kept.";
+            return $"Permanently delete the {Count(deleted, "oldest finished session")}? The {keep} newest finished sessions " +
+                   "and every live session are kept. Their history is removed for everyone. This cannot be undone.";
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: Purged
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function reports a purge.
+        //
+        // Args:
+        //     deleted (long): How many sessions it deleted.
+        //
+        // Returns:
+        //     string: The message.
+        public static string Purged(long deleted) =>
+            deleted == 0 ? "No old sessions to delete." : $"Deleted {Count(deleted, "old training session")}.";
+
+        // A count with its noun, singular for one: "1 live session", "3 live sessions".
+        private static string Count(long count, string noun) => $"{count} {noun}{(count == 1 ? "" : "s")}";
+
         private static string Megabytes(long bytes) => (bytes / 1048576.0).ToString("0.0", CultureInfo.InvariantCulture) + " MB";
 
         // -----------------------------------------------------------------------------------

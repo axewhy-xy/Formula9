@@ -358,6 +358,44 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
+        // Function: ArchiveAllSaysHowManyAreNoLongerLive
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Archive all's message counts what is no longer live, singular for one.
+        [Test]
+        public void ArchiveAllSaysHowManyAreNoLongerLive()
+        {
+            Assert.AreEqual("No live sessions to archive.", TrainingPresenter.ArchivedAll(0, 0));
+            Assert.AreEqual("Archived 1 live session.", TrainingPresenter.ArchivedAll(1, 1));
+            Assert.AreEqual("Archived 3 live sessions.", TrainingPresenter.ArchivedAll(3, 3));
+            Assert.AreEqual("Archived 2 of 3 live sessions; 1 session is still live. Refresh the list and try again.",
+                TrainingPresenter.ArchivedAll(3, 2));
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: PurgeKeepsTheNewestAndSaysHowManyGo
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A purge keeps the newest finished sessions and every live one, and the question
+        //     says exactly how many go; with none to go it says so instead.
+        [Test]
+        public void PurgeKeepsTheNewestAndSaysHowManyGo()
+        {
+            var list = new SessionListResponse { LiveCount = 16, Capacity = 16, Total = 37, Sessions = new System.Collections.Generic.List<SessionListEntry>() };
+            Assert.AreEqual(1, TrainingPresenter.PurgeCount(list, 20), "21 finished, 20 kept");
+            Assert.AreEqual("Permanently delete the 1 oldest finished session? The 20 newest finished sessions and every live session are kept. " +
+                            "Their history is removed for everyone. This cannot be undone.", TrainingPresenter.PurgeQuestion(list, 20));
+            list.Total = 50;
+            StringAssert.StartsWith("Permanently delete the 14 oldest finished sessions?", TrainingPresenter.PurgeQuestion(list, 20));
+            list.Total = 30;
+            Assert.AreEqual(0, TrainingPresenter.PurgeCount(list, 20));
+            Assert.AreEqual("Nothing to delete: there are 14 finished sessions, and the 20 newest are always kept.",
+                TrainingPresenter.PurgeQuestion(list, 20));
+            Assert.AreEqual("Deleted 1 old training session.", TrainingPresenter.Purged(1));
+            Assert.AreEqual("No old sessions to delete.", TrainingPresenter.Purged(0));
+        }
+
+        // -----------------------------------------------------------------------------------
         // Function: ReclaimedSpaceIsShownInMegabytesAndMentionsAHeldWal
         // -----------------------------------------------------------------------------------
         // Description:

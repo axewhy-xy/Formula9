@@ -11,6 +11,8 @@
  *     whole join, poll, event, command and creation flow runs without a backend. Covers event
  *     cursors, gaps and recovery, the one open command and its confirmation with the same key,
  *     retries and final refusals, logins expiring mid-command, and leaving or switching sessions.
+ *     And Archive all: it carries on past a session that fails, counts a queued archive only once
+ *     the session is no longer live, and archives the joined session through its own command.
  */
 
 using System;
@@ -100,6 +102,9 @@ namespace Formula9.Tests
             public Func<HttpRequest, HttpResponse> OnCommand;
             public Func<HttpRequest, HttpResponse> OnStatus;
             public Func<HttpRequest, HttpResponse> OnCreate;
+            // The session list and, when set, each session's own snapshot (Archive all asks for several)
+            public Func<HttpRequest, HttpResponse> OnList = _ => Error(404, "INVALID_REFERENCE");
+            public Func<HttpRequest, HttpResponse> OnSnapshot;
 
             // -----------------------------------------------------------------------------------
             // Function: FakeBackend (constructor)
@@ -145,6 +150,8 @@ namespace Formula9.Tests
                 Sent.Add(request);
                 var path = request.Url.AbsolutePath;
                 if (request.Method == "POST" && path == "/api/v2/sessions") return Task.FromResult(OnCreate(request));
+                if (request.Method == "GET" && path == "/api/v2/sessions") return Task.FromResult(OnList(request));
+                if (path.EndsWith("/snapshot") && OnSnapshot != null) return Task.FromResult(OnSnapshot(request));
                 if (path.EndsWith("/snapshot")) return Task.FromResult(SnapshotReply ?? Json(Snapshot));
                 if (path.EndsWith("/events")) return Task.FromResult(OnEvents(request));
                 if (request.Method == "POST" && path.EndsWith("/commands"))
@@ -736,6 +743,115 @@ namespace Formula9.Tests
             auth.End();
             await controller.RefreshAsync();
             Assert.AreEqual(before, backend.Sent.Count);
+        }
+
+        // A session list in which the given sessions are live.
+        private static JObject LiveList(params string[] live)
+        {
+            var list = Fixture("session_list");
+            list["sessions"] = new JArray(live.Select(id => new JObject
+            {
+                ["occupies_capacity"] = true, ["scenario_revision_id"] = "scenario-r1", ["session_id"] = id, ["status"] = "RUNNING",
+            }));
+            list["live_count"] = live.Length;
+            list["total"] = live.Length;
+            return list;
+        }
+
+        // The session named in a request's path, as in /api/v2/sessions/{id}/snapshot.
+        private static string PathSession(HttpRequest request) => Uri.UnescapeDataString(request.Url.AbsolutePath.Split('/')[4]);
+
+        // A snapshot of a session that is not joined, at revision 7.
+        private static JObject SnapshotOf(string id)
+        {
+            var snapshot = Fixture("snapshot");
+            snapshot["session_id"] = id;
+            snapshot["session"]["session_id"] = id;
+            snapshot["session"]["aggregate_revision"] = 7;
+            return snapshot;
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: ArchiveAllCarriesOnPastAFailureAndCountsWhatIsArchived
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     One session timing out does not stop the rest; each is archived at its own revision;
+        //     a queued archive counts once the session is no longer live, and the failed one not.
+        [Test]
+        public async Task ArchiveAllCarriesOnPastAFailureAndCountsWhatIsArchived()
+        {
+            var lists = 0;
+            backend.OnList = _ => Json(++lists switch
+            {
+                1 => LiveList("session-a", "session-b", "session-c"),
+                // The first look: session-c's archive is still queued
+                2 => LiveList("session-b", "session-c"),
+                _ => LiveList("session-b"),
+            });
+            backend.OnSnapshot = request => PathSession(request) == "session-b"
+                ? new HttpResponse { Failure = HttpFailure.Incomplete }
+                : Json(SnapshotOf(PathSession(request)));
+            var archived = new List<JObject>();
+            backend.OnCommand = request =>
+            {
+                var command = JObject.Parse(request.Body);
+                archived.Add(command);
+                return Json(backend.Status((string)command["session_id"] == "session-c" ? "QUEUED" : "APPLIED"), 202);
+            };
+
+            var (live, done) = await controller.ArchiveAllAsync();
+
+            Assert.AreEqual(3, live);
+            Assert.AreEqual(2, done, "session-a, and session-c once its queued archive applied; not session-b");
+            CollectionAssert.AreEqual(new[] { "session-a", "session-c" }, archived.Select(c => (string)c["session_id"]).ToArray(),
+                "the timeout on session-b did not stop session-c");
+            foreach (var command in archived)
+            {
+                Assert.AreEqual("ARCHIVE", (string)command["command_type"]);
+                Assert.AreEqual((string)command["session_id"], (string)command["target_id"]);
+                Assert.AreEqual(7, (long)command["expected_revision"], "the revision its snapshot gave");
+            }
+            Assert.That(waits, Has.Member(SessionController.ArchiveCheckInterval), "it looked again before counting");
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: AQueuedArchiveThatNeverAppliesIsNotCounted
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A session whose archive stays queued is still live, so it is not reported as archived.
+        [Test]
+        public async Task AQueuedArchiveThatNeverAppliesIsNotCounted()
+        {
+            backend.OnList = _ => Json(LiveList("session-a"));
+            backend.OnSnapshot = request => Json(SnapshotOf(PathSession(request)));
+            backend.OnCommand = _ => Json(backend.Status("QUEUED"), 202);
+
+            var (live, done) = await controller.ArchiveAllAsync();
+
+            Assert.AreEqual(1, live);
+            Assert.AreEqual(0, done);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: ArchiveAllArchivesTheJoinedSessionThroughItsOwnCommand
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The joined session is archived as its Archive button does, through the one open
+        //     command, so the controller knows of it; its snapshot is not fetched a second way.
+        [Test]
+        public async Task ArchiveAllArchivesTheJoinedSessionThroughItsOwnCommand()
+        {
+            await controller.JoinAsync(SessionId);
+            var lists = 0;
+            backend.OnList = _ => Json(++lists == 1 ? LiveList(SessionId) : LiveList());
+            var finished = outcomes.Count;
+
+            var (live, done) = await controller.ArchiveAllAsync();
+
+            Assert.AreEqual((1, 1), (live, done));
+            Assert.AreEqual("ARCHIVE", (string)backend.LastCommand["command_type"]);
+            Assert.AreEqual(SessionId, (string)backend.LastCommand["session_id"]);
+            Assert.Greater(outcomes.Count, finished, "the controller saw its own command finish");
         }
     }
 }

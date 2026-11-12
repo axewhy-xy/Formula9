@@ -47,7 +47,7 @@ namespace Formula9.UI
         private bool signUp, busy, loggingOut;
         private List<SessionListEntry> listedSessions = new List<SessionListEntry>();
         private string lastListedState;
-        private const int SessionListPage = 50, MaxSessionListLimit = 500;
+        private const int SessionListPage = 50, MaxSessionListLimit = 500, KeptByPurge = 20;
         private int sessionListLimit = SessionListPage;
         private long liveSessions = -1;
         private bool cleanupBusy;
@@ -374,7 +374,7 @@ namespace Formula9.UI
             reclaimDisk = root.Q<Button>("reclaim-disk");
             archiveAll.clicked += ConfirmArchiveAll;
             deleteSession.clicked += ConfirmDeleteSession;
-            purgeSessions.clicked += ConfirmPurgeSessions;
+            purgeSessions.clicked += () => Run(ConfirmPurgeSessions());
             reclaimDisk.clicked += () => Run(Cleanup("Reclaiming disk space…", async () => TrainingPresenter.Reclaimed(await api.CompactSessionsAsync())));
             RenderCleanup();
 
@@ -577,31 +577,16 @@ namespace Formula9.UI
         // Function: ConfirmArchiveAll
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function asks before archiving every live session, which frees their slots so
-        //     new sessions can be created. Each is archived as Archive session would, without
-        //     joining it. One that cannot be archived is counted and the rest carry on.
+        //     This function asks before archiving every live session on the backend, other
+        //     trainees' too, which frees their slots so new sessions can be created. It is an
+        //     admin action, and the dialog says so. SessionController.ArchiveAllAsync does the
+        //     work and reports how many were really archived.
         private void ConfirmArchiveAll() => Confirm(
-            "Archive every live session? Each attempt ends and its slot is freed, for everyone in it. Their history stays available.",
+            "Archive every live session on this backend, including other trainees' running ones? Each attempt ends for everyone in it and its slot is freed. Their history stays available.",
             "Archive all", () => Cleanup("Archiving live sessions…", async () =>
             {
-                var list = await api.ListSessionsAsync(MaxSessionListLimit);
-                var live = list.Sessions
-                    .Where(s => s.OccupiesCapacity)
-                    .Select(s => s.SessionId)
-                    .ToList();
-                var failed = 0;
-                foreach (var id in live)
-                {
-                    try
-                    {
-                        var status = await api.ArchiveSessionAsync(id);
-                        if (status.Status == "REJECTED") failed++;
-                    }
-                    catch (BackendErrorException) { failed++; }
-                }
-                return failed == 0
-                    ? $"Archived {live.Count} live sessions."
-                    : $"Archived {live.Count - failed} of {live.Count} live sessions; {failed} could not be archived.";
+                var (live, archived) = await session.ArchiveAllAsync();
+                return TrainingPresenter.ArchivedAll(live, archived);
             }));
 
         // -----------------------------------------------------------------------------------
@@ -628,16 +613,25 @@ namespace Formula9.UI
         // Function: ConfirmPurgeSessions
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function asks before permanently deleting every finished session: archived,
-        //     completed or failed. The backend keeps live sessions, so it frees no live slots;
-        //     archive those first.
-        private void ConfirmPurgeSessions() => Confirm(
-            "Permanently delete every archived, completed or failed session? Live sessions are kept. Their history is removed for everyone. This cannot be undone.",
-            "Delete finished sessions", () => Cleanup("Deleting finished sessions…", async () =>
+        //     This function reads the session counts, then asks before deleting the finished
+        //     sessions older than the KeptByPurge newest, saying exactly how many go; with none
+        //     to delete it says so instead of asking. Live sessions are never deleted.
+        //
+        // Returns:
+        //     Task: The count and the question.
+        private async Task ConfirmPurgeSessions()
+        {
+            var list = await api.ListSessionsAsync(1);
+            var deleted = TrainingPresenter.PurgeCount(list, KeptByPurge);
+            if (deleted == 0)
             {
-                var deleted = await api.PurgeSessionsAsync(0);
-                return deleted == 0 ? "No finished sessions to delete." : $"Deleted {deleted} finished training sessions.";
-            }));
+                ShowMessage(TrainingPresenter.PurgeQuestion(list, KeptByPurge));
+                return;
+            }
+            Confirm(TrainingPresenter.PurgeQuestion(list, KeptByPurge), $"Delete {deleted}", () => Cleanup(
+                "Deleting old sessions…",
+                async () => TrainingPresenter.Purged(await api.PurgeSessionsAsync(KeptByPurge))));
+        }
 
         // -----------------------------------------------------------------------------------
         // Function: ConfirmArchive
