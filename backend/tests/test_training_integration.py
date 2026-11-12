@@ -190,7 +190,10 @@ def test_one_live_session_runs_route_incident_depot_and_charging(runtime):
     assert reserve(runtime)["status"] == "APPLIED"
     advance(runtime, 240)
     detected = read(runtime)
-    assert detected["vehicles"][0]["service_state"] == "AWAITING_GUIDANCE"
+    # With background traffic the incident does not hold its shuttle where it was detected: it drives on
+    # until the closure stops it (test_traffic_events)
+    assert detected["incidents"][0]["state"] == "OPTIONS_READY" and detected["incidents"][0]["vehicle_id"] == "shuttle-01"
+    assert detected["vehicles"][0]["service_state"] != "AWAITING_GUIDANCE"
     assert detected["vehicles"][0]["position"] != initial["vehicles"][0]["position"]
     assert detected["vehicles"][1]["position"] != initial["vehicles"][1]["position"]
     incident_id = detected["incidents"][0]["incident_id"]

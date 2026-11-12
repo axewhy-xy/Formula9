@@ -590,6 +590,14 @@ class TrainingSessionService:
             raise TrainingStoreError("INVALID_REFERENCE", "This training session has no traffic")
         return session
 
+    def signal_state(self, session_id: str) -> dict:
+        """A live integrated session's traffic lights now, on its own clock, with the junctions a signal
+        fault has stuck on red: what its shuttles and its traffic obey, for a 3D view to draw."""
+        session = self.sessions.get(session_id)
+        if session is None or session.failed or not isinstance(session.actor, IntegratedSessionActor):
+            raise TrainingStoreError("INVALID_REFERENCE", "No live signals for this training session")
+        return {"session_id": session_id, **session.actor.signal_state()}
+
     def traffic(self, session_id: str, after_tick: int) -> list[str]:
         """The latest traffic frames of a live session after a tick, oldest first, as JSON: at most
         TRAFFIC_REPLY_FRAMES, the newest.

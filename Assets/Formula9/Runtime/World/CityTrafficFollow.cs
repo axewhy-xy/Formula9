@@ -53,6 +53,14 @@ namespace Formula9.World
         // The clock the backend's frames are drawn on, for diagnostics.
         public TrafficPlaybackClock Playback => playback;
 
+        // Whether the backend's frames have a junction's lights stuck on red by a signal fault at the drawn
+        // time; false without frames, when the lights run their usual cycle.
+        public bool SignalFaulted(string junctionId)
+        {
+            if (junctionId == null || followIndex < 0 || followIndex >= backendFrames.Count) return false;
+            return backendFrames[followIndex].SignalFaults.TryGetValue(junctionId, out var until) && SignalClockS < until;
+        }
+
         // Takes the backend's newest frames, as they arrive. Ones no newer than those it has are left out.
         public void FollowBackend(IReadOnlyList<TrafficFrame> frames) => FollowBackend(frames, Time.realtimeSinceStartupAsDouble);
 
@@ -295,6 +303,7 @@ namespace Formula9.World
         {
             public double TimeS;
             public readonly Dictionary<string, BodyPose> Shuttles = new Dictionary<string, BodyPose>();
+            public readonly Dictionary<string, double> SignalFaults = new Dictionary<string, double>();
             private bool[] has = Array.Empty<bool>();
             private BodyPose[] poses = Array.Empty<BodyPose>();
 
@@ -319,6 +328,9 @@ namespace Formula9.World
                     has[seed] = true;
                     poses[seed] = BodyPose.Of(v[i + 1] / 100f, v[i + 2] / 100f, v[i + 3] / 10f, v[i + 4] / 100f);
                 }
+                SignalFaults.Clear();
+                if (frame.SignalFaults != null)
+                    foreach (var fault in frame.SignalFaults) SignalFaults[fault.Key] = fault.Value;
                 Shuttles.Clear();
                 if (frame.Shuttles == null) return;
                 foreach (var shuttle in frame.Shuttles)

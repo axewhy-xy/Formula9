@@ -31,6 +31,9 @@ namespace Formula9.Backend
         public double SimulationTimeS;
         public int[] Vehicles = Array.Empty<int>();
         public List<TrafficShuttlePose> Shuttles = new List<TrafficShuttlePose>();
+        // The junctions a signal fault has stuck on red, and the simulation second each clears: the
+        // backend's traffic and shuttles stop at every approach until then, so its lights are drawn red.
+        public Dictionary<string, double> SignalFaults = new Dictionary<string, double>();
 
         // -----------------------------------------------------------------------------------
         // Function: UnpackVehicles
@@ -150,6 +153,10 @@ namespace Formula9.Backend
                             HeadingDeg = (double)shuttle["heading_deg"],
                             SpeedMps = (double)shuttle["speed_mps"],
                         });
+                    // A backend from before signal faults sends none
+                    foreach (var fault in item["signal_faults"] as JArray ?? new JArray())
+                        frame.SignalFaults[(string)fault["junction_id"] ?? throw new ContractException("Signal fault names no junction")] =
+                            (double)fault["until_s"];
                     frames.Add(frame);
                 }
                 return frames;

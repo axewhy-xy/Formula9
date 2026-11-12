@@ -1255,6 +1255,18 @@ namespace Formula9.Tests
             Assert.Throws<Formula9.Contracts.ContractException>(() => TrainingApi.ParseTrafficFrames(reply.Replace(packed, "BwA5MAAA"), "s1"), "a vehicle cut short");
             Assert.Throws<Formula9.Contracts.ContractException>(() => TrainingApi.ParseTrafficFrames(
                 "{\"session_id\":\"s1\",\"frames\":[{\"tick\":4,\"simulation_time_s\":0.2,\"vehicle_count\":1,\"vehicles\":[7,1,2,3,4]}]}", "s1"), "unpacked vehicles");
+            Assert.AreEqual(0, frames[0].SignalFaults.Count, "a backend from before signal faults sends none");
+        }
+
+        [Test]
+        public void ATrafficFrameCarriesTheJunctionsASignalFaultHasStuckOnRed()
+        {
+            const string reply = "{\"session_id\":\"s1\",\"frames\":[{\"tick\":4,\"simulation_time_s\":0.2,\"vehicle_count\":0,\"vehicles\":\"\","
+                + "\"shuttles\":[],\"signal_faults\":[{\"junction_id\":\"junction-028\",\"mode\":\"STUCK_RED\",\"until_s\":75.5}]}]}";
+            var frames = TrainingApi.ParseTrafficFrames(reply, "s1");
+            Assert.AreEqual(75.5, frames[0].SignalFaults["junction-028"], 1e-9);
+            Assert.Throws<Formula9.Contracts.ContractException>(() => TrainingApi.ParseTrafficFrames(reply.Replace("\"junction_id\":\"junction-028\",", ""), "s1"),
+                "a fault that names no junction");
         }
 
         // Feeds frames to the traffic as a backend would send them, one each interval of real time, and

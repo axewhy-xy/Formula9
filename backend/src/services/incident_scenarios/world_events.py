@@ -16,16 +16,22 @@ import math
 import re
 from dataclasses import asdict, dataclass
 
-# Every type a world event can have. The traffic plays each out in phase 3; until then each has the
-# fallback its kind gives it (EVENT_KINDS).
+# Every type a world event can have. With background traffic, the traffic plays each out: a breakdown pins
+# a vehicle in its lane, a collision two and closes its scene, a signal fault sticks a junction's lights on
+# red, and a road closure closes its road (src.traffic.city_traffic). Without it, each has the fallback its
+# kind gives it (EVENT_KINDS): a speed factor on the roads around an accident, a held shuttle at a closure,
+# and a shuttle held at the faulted junction's stop line.
 EVENT_TYPES = ("BREAKDOWN", "COLLISION", "SIGNAL_FAULT", "ROAD_CLOSURE")
 # The incident kind (the closure or congestion model the backend and the 3D client already know) each type
 # is played out as. A breakdown blocks a lane, so it is drawn and slowed like a small accident.
-EVENT_KINDS = {"BREAKDOWN": "ROAD_ACCIDENT", "COLLISION": "ROAD_ACCIDENT", "ROAD_CLOSURE": "ROAD_BLOCK"}
+EVENT_KINDS = {"BREAKDOWN": "ROAD_ACCIDENT", "COLLISION": "ROAD_ACCIDENT", "ROAD_CLOSURE": "ROAD_BLOCK",
+               "SIGNAL_FAULT": "SIGNAL_FAULT"}
 # The world type of each of the random generator's template kinds
 KIND_EVENTS = {"ROAD_ACCIDENT": "COLLISION", "ROAD_BLOCK": "ROAD_CLOSURE"}
-# Types a timeline may schedule now. A signal fault needs the junction signal override (phase 3).
-SCHEDULABLE = ("BREAKDOWN", "COLLISION", "ROAD_CLOSURE")
+# Types a timeline may schedule. A signal fault is at a junction (a signalled junction's id); the rest are
+# on an operating-network edge.
+SCHEDULABLE = ("BREAKDOWN", "COLLISION", "ROAD_CLOSURE", "SIGNAL_FAULT")
+AT_JUNCTION = ("SIGNAL_FAULT",)
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}$")
 
 
@@ -60,7 +66,7 @@ class WorldEvent:
 
     @property
     def kind(self) -> str:
-        """The incident kind it is played out as: ROAD_BLOCK or ROAD_ACCIDENT."""
+        """The incident kind it is played out as: ROAD_BLOCK, ROAD_ACCIDENT or SIGNAL_FAULT."""
         return EVENT_KINDS[self.event_type]
 
     @property
@@ -100,22 +106,23 @@ def legacy_event(record: dict, step_s: float) -> dict:
 @dataclass(frozen=True)
 class ScheduledEvent:
     """One entry of a scenario's timeline, in scenario seconds. Timings the entry leaves out come from the
-    catalogue template of its kind."""
+    catalogue template of its kind. A signal fault is at a junction (node_id), anything else on an edge."""
     event_id: str
     event_type: str
-    edge_id: str
+    edge_id: str | None
     at_s: float
     duration_s: float
     warning_s: float | None = None
     detection_delay_s: float | None = None
     recovery_s: float | None = None
+    node_id: str | None = None
 
     def place(self, step_s: float, template=None) -> WorldEvent:
         """The world event this entry places in a session."""
         def timing(name):
             value = getattr(self, name)
             return value if value is not None else (getattr(template, name) if template is not None else 0.0)
-        return WorldEvent(event_id=self.event_id, event_type=self.event_type, edge_id=self.edge_id, node_id=None,
+        return WorldEvent(event_id=self.event_id, event_type=self.event_type, edge_id=self.edge_id, node_id=self.node_id,
                           start_tick=round(self.at_s / step_s), duration_s=self.duration_s,
                           warning_s=timing("warning_s"), detection_delay_s=timing("detection_delay_s"),
                           recovery_s=timing("recovery_s"))
@@ -128,13 +135,14 @@ TIMELINE_FIELDS = {"event_id", "event_type", "location", "at_s", "duration_s", "
                    "detection_delay_s", "recovery_s"}
 
 
-def load_timeline(rows, edges=None) -> list[ScheduledEvent]:
+def load_timeline(rows, edges=None, junctions=None) -> list[ScheduledEvent]:
     """A scenario's timeline from its JSON rows, sorted by start time (then id).
 
     Each row is {"event_id", "event_type", "location": {"edge_id"}, "at_s", "duration_s"} with optional
-    warning_s, detection_delay_s and recovery_s. With edges (the operating network's edge ids), every
-    location must be one of them. Raises ValueError on anything else, so a bad scenario fails at load
-    rather than in a running session.
+    warning_s, detection_delay_s and recovery_s; a SIGNAL_FAULT's location is {"node_id"}, a signalled
+    junction's id. With edges (the operating network's edge ids) or junctions (the signalled junctions'
+    ids), every such location must be one of them. Raises ValueError on anything else, so a bad scenario
+    fails at load rather than in a running session.
     """
     if rows is None:
         return []
@@ -152,15 +160,17 @@ def load_timeline(rows, edges=None) -> list[ScheduledEvent]:
             raise ValueError(f"Scheduled event id {event_id!r} is missing, malformed or repeated")
         seen.add(event_id)
         event_type = row.get("event_type")
-        if event_type == "SIGNAL_FAULT":
-            raise ValueError("SIGNAL_FAULT needs the junction signal override and cannot be scheduled yet")
         if event_type not in SCHEDULABLE:
             raise ValueError(f"Scheduled event {event_id} has unsupported type {event_type!r}")
         location = row.get("location")
-        if not isinstance(location, dict) or set(location) != {"edge_id"} or not isinstance(location["edge_id"], str):
-            raise ValueError(f"Scheduled event {event_id} must be located on one edge")
-        if edges is not None and location["edge_id"] not in edges:
+        place = "node_id" if event_type in AT_JUNCTION else "edge_id"
+        if not isinstance(location, dict) or set(location) != {place} or not isinstance(location[place], str):
+            raise ValueError(f"Scheduled event {event_id} must be located on one "
+                             f"{'junction' if place == 'node_id' else 'edge'}")
+        if place == "edge_id" and edges is not None and location["edge_id"] not in edges:
             raise ValueError(f"Scheduled event {event_id} is on unknown edge {location['edge_id']!r}")
+        if place == "node_id" and junctions is not None and location["node_id"] not in junctions:
+            raise ValueError(f"Scheduled event {event_id} is at unknown junction {location['node_id']!r}")
         timings = {}
         for name in ("at_s", "duration_s", "warning_s", "detection_delay_s", "recovery_s"):
             value = row.get(name)
@@ -173,5 +183,6 @@ def load_timeline(rows, edges=None) -> list[ScheduledEvent]:
             raise ValueError(f"Scheduled event {event_id} must last a positive time")
         if timings.get("detection_delay_s", 0.0) >= timings["duration_s"]:
             raise ValueError(f"Scheduled event {event_id} must be detected before it ends")
-        found.append(ScheduledEvent(event_id=event_id, event_type=event_type, edge_id=location["edge_id"], **timings))
+        found.append(ScheduledEvent(event_id=event_id, event_type=event_type, edge_id=location.get("edge_id"),
+                                    node_id=location.get("node_id"), **timings))
     return sorted(found, key=lambda event: (event.at_s, event.event_id))

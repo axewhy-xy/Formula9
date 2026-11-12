@@ -44,7 +44,8 @@ from src.services.incident_scenarios.world_events import KIND_EVENTS, WorldEvent
 from src.services.route_edit import RouteEditService
 from src.services.session_actor import SessionActor
 from src.traffic import incident_hazards, route_signals, signal_cycle
-from src.traffic.city_traffic import COMFORT_BRAKE, HARD_BRAKE, PLAN_AHEAD_M, SHUTTLE_ACCEL, CityTraffic, move_towards
+from src.traffic.city_traffic import COMFORT_BRAKE, HARD_BRAKE, PLAN_AHEAD_M, SHUTTLE_ACCEL, CityTraffic, fnv_hash, \
+    move_towards
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,10 @@ ON_ROUTE = {"IN_SERVICE", "DETOURING"}
 WARNING_WINDOW = (0.5, 1.5)
 # The modes in which a shuttle drives (or is held on) its service route, and so can reach an incident on it
 EXPOSABLE = {"IN_SERVICE", "DWELLING", "DETOURING", "AWAITING_GUIDANCE"}
+# How many traffic vehicles each world event type pins where it happens (CityTraffic.pin_vehicle)
+PINNED_VEHICLES = {"BREAKDOWN": 1, "COLLISION": 2}
+# A shuttle whose front is this far onto a road that is then closed is on it, and drives on off it
+CLOSURE_ENTERED_M = 1.0
 
 
 def upgrade_v3_workflow(workflow: dict, tick: int, step_s: float, timeline=()) -> dict:
@@ -149,9 +154,12 @@ class WorkflowDefinition:
         self.routes = RouteEditService(self, fixture={**self.data["route_edit"], "network": self.network,
                                                       "operating_node_ids": sorted(int(n) for n in self.network["nodes"])})
         self.incidents = IncidentService(self.routes, fixture=incident)
-        # The scenario's scheduled events must stand on roads of this network
+        # The scenario's scheduled events must stand on roads of this network, or at its signalled junctions
         for event in self.incidents.simulated_catalog.timeline:
-            if event.edge_id not in self.network["edges"]:
+            if event.node_id is not None:
+                if event.node_id not in self.signal_junctions:
+                    raise ValueError(f"Scheduled event {event.event_id} is at unknown junction {event.node_id!r}")
+            elif event.edge_id not in self.network["edges"]:
                 raise ValueError(f"Scheduled event {event.event_id} is on unknown edge {event.edge_id!r}")
         original = self.compile_route(self.data["route_edit"]["original_directed_edge_ids"])[0]
         self.actor_routes = [original, *self.data["peer_patterns"]]
@@ -253,6 +261,17 @@ class WorkflowDefinition:
     def footprint(self, kind: str, edge_id: str, closed: frozenset[str]) -> tuple[tuple[str, float, float], ...]:
         """The stretches of road an incident holds up (incident_hazards.footprint), for the roads closed."""
         return incident_hazards.footprint(kind, edge_id, self.network["edges"], set(closed))
+
+    @cached_property
+    def signal_junctions(self) -> dict[str, dict]:
+        """The area's signalled junctions by id: where a signal fault can happen."""
+        return {junction["id"]: junction for junction in route_signals.junctions(SIGNAL_AREA)}
+
+    @lru_cache(maxsize=64)
+    def signal_footprint(self, junction_id: str) -> tuple[tuple[str, float, float], ...]:
+        """The stretches of road a signal fault at a junction holds up (incident_hazards.signal_footprint)."""
+        junction = self.signal_junctions.get(junction_id)
+        return incident_hazards.signal_footprint(junction, self.network["edges"]) if junction else ()
 
     def lies_on(self, x: float, y: float, branch: str, tolerance_m: float = 0.01) -> bool:
         """Whether a point is on a named road chain of the fixture (main, bypass-b, bypass-c, return)."""
@@ -1072,7 +1091,8 @@ class IntegratedSessionActor(SessionActor):
             wait_at = self._yard_entry_m(shuttle)
             if wait_at is not None and shuttle.progress <= wait_at+EPSILON and end > wait_at and not self._may_enter_yard(shuttle):
                 ahead.append(wait_at)
-        hold = self._signal_hold(shuttle)
+        holds = [h for h in (self._signal_hold(shuttle), self._closure_hold(shuttle)) if h is not None]
+        hold = min(holds) if holds else None
         if self.traffic is not None:
             return self._drive_in_traffic(shuttle, shuttle.cruise_vel*speed_factor, ahead, hold)
         if hold is not None:
@@ -1088,7 +1108,12 @@ class IntegratedSessionActor(SessionActor):
 
     def _congestion_factor(self, shuttle):
         """How much live incidents slow a shuttle on the road it is on now: any shuttle, whichever one an
-        incident was placed for. An incident that holds its shuttle for a decision slows no one."""
+        incident was placed for. An incident that holds its shuttle for a decision slows no one.
+
+        This is the fallback for a session without background traffic. With it, nothing is slowed by a
+        factor: the traffic plays the event out, and a shuttle meets the queue it forms (_apply_events)."""
+        if self.traffic is not None:
+            return 1.0
         live = [selection for selection in self.random_incidents
                 if not selection.get("requires_guidance")
                 and selection.get("congested_edge_ids", selection.get("impact_edge_ids"))
@@ -1166,10 +1191,80 @@ class IntegratedSessionActor(SessionActor):
         check that it never drives into a vehicle is exact on every tick."""
         if self.current_tick % TRAFFIC_STEP_TICKS:
             return
-        if self.current_tick % HAZARD_REFRESH_TICKS == 0:
-            self.traffic.set_hazards(incident_hazards.live_hazards(
-                self.random_incidents, self.domain, self.definition.network["edges"], self.STEP_S, self.current_tick))
+        self._apply_events(self.current_tick)
         self.traffic.step(self.STEP_S*TRAFFIC_STEP_TICKS, self.timestamp_second)
+
+    def _live_events(self, tick):
+        """The incident records whose world event is on the road at a tick, with when each clears."""
+        found = []
+        for record in self.random_incidents:
+            start, until = incident_hazards.event_window(record, self.domain.disruptions)
+            if start <= tick < until:
+                found.append((record, until))
+        return found
+
+    def _apply_events(self, tick):
+        """Plays the live world events out in the traffic, before it steps at a tick: the scenes it keeps
+        off and the vehicles breakdowns and collisions pin (every HAZARD_REFRESH_TICKS, as the hazards
+        always were), and the junctions whose lights are stuck (every step). Each is a pure function of the
+        session's records and the traffic's own state at that tick, so a recovered session that drives its
+        traffic on from a checkpoint (_catch_up_traffic) plays them out exactly as they were."""
+        live = self._live_events(tick)
+        for record, until in live:
+            if record.get("kind") == incident_hazards.SIGNAL_FAULT:
+                junction = (record.get("event") or {}).get("node_id")
+                if junction:
+                    self.traffic.set_signal_fault(junction, until*self.STEP_S)
+        if tick % HAZARD_REFRESH_TICKS:
+            return
+        edges = self.definition.network["edges"]
+        self.traffic.set_hazards(incident_hazards.live_hazards(self.random_incidents, self.domain, edges, tick))
+        for record, until in live:
+            event = record.get("event") or {}
+            kind = incident_hazards.event_type(record)
+            if kind not in PINNED_VEHICLES or event.get("edge_id") not in edges:
+                continue
+            key = event.get("event_id") or record["incident_id"]
+            if key in self.traffic.pins:
+                self.traffic.pin_until(key, until*self.STEP_S)
+                continue
+            place = self.traffic.locate([tuple(p) for p in edges[event["edge_id"]]["path"]])
+            if place is None:
+                continue
+            road, distance = place
+            # Which lane it happens in is the event's own, so a replay picks the same one
+            lane = fnv_hash(key) % road.lanes
+            self.traffic.pin_vehicle(key, road, distance, lane, until*self.STEP_S, PINNED_VEHICLES[kind])
+
+    def _signal_faults(self):
+        """The junctions whose lights a live signal fault has stuck on red, and the second each clears."""
+        faults = {}
+        for record, until in self._live_events(self.current_tick):
+            junction = (record.get("event") or {}).get("node_id")
+            if record.get("kind") == incident_hazards.SIGNAL_FAULT and junction:
+                faults[junction] = until*self.STEP_S
+        return faults
+
+    def _closure_hold(self, shuttle):
+        """How far a shuttle may go before a road closed ahead on its route stops it, or None.
+
+        A closure is a live road block's road from when the event starts (before it is detected, as the
+        traffic keeps off it from then), and any other temporary closure still in force; the authored
+        permanent closure is one routes are approved around, not one a shuttle stops at. A shuttle whose
+        front is already on the closed road drives on off it."""
+        closed = {edge for d in self.domain.disruptions
+                  if d.active_until_tick is not None and d.active_from_tick <= self.current_tick < d.active_until_tick
+                  for edge in d.affected_edge_ids}
+        for record, _ in self._live_events(self.current_tick):
+            if record.get("kind") == incident_hazards.BLOCK:
+                closed.update(record.get("affected_edge_ids") or ())
+        if not closed:
+            return None
+        front = shuttle.progress + SHUTTLE_FRONT_M
+        holds = [start - SHUTTLE_FRONT_M - route_signals.STOP_MARGIN_M
+                 for edge, start, _ in self._route_roads(shuttle.route_ID)
+                 if edge in closed and start >= front - CLOSURE_ENTERED_M]
+        return max(shuttle.progress, min(holds)) if holds else None
 
     def _catch_up_traffic(self, saved_tick):
         """Drives traffic checkpointed at saved_tick on to the session's tick, as _drive_traffic would have,
@@ -1180,9 +1275,7 @@ class IntegratedSessionActor(SessionActor):
         for tick in range(saved_tick + 1, self.current_tick + 1):
             if tick % TRAFFIC_STEP_TICKS:
                 continue
-            if tick % HAZARD_REFRESH_TICKS == 0:
-                self.traffic.set_hazards(incident_hazards.live_hazards(
-                    self.random_incidents, self.domain, self.definition.network["edges"], self.STEP_S, tick))
+            self._apply_events(tick)
             self.traffic.step(self.STEP_S*TRAFFIC_STEP_TICKS, tick*self.STEP_S)
         self._place_in_traffic({})
         self.traffic.clear_shuttles()
@@ -1213,8 +1306,19 @@ class IntegratedSessionActor(SessionActor):
         if self.traffic is None:
             return None
         vehicles, count, shuttles = self.traffic.frame()
+        # The junctions whose lights are stuck on red, so the 3D view draws them so
+        faults = [{"junction_id": junction, "mode": signal_cycle.FAULT_MODE, "until_s": round(until, 3)}
+                  for junction, until in sorted(self.traffic.signal_faults.items()) if until > self.timestamp_second]
         return {"tick": self.current_tick, "simulation_time_s": round(self.timestamp_second, 3),
-                "vehicle_count": count, "vehicles": base64.b64encode(vehicles).decode("ascii"), "shuttles": shuttles}
+                "vehicle_count": count, "vehicles": base64.b64encode(vehicles).decode("ascii"), "shuttles": shuttles,
+                "signal_faults": faults}
+
+    def signal_state(self) -> dict:
+        """Every signalled junction's colours now, on the session's clock, with any fault on it: the lights
+        the shuttles and the traffic of this session obey (signal_cycle)."""
+        junctions = list(self.definition.signal_junctions.values())
+        return {"t": round(self.timestamp_second, 3), "tick": self.current_tick, "simulated": True,
+                "junctions": signal_cycle.junction_states(junctions, self.timestamp_second, self._signal_faults())}
 
     def traffic_frame_due(self) -> bool:
         """True on a tick the background traffic stepped. Its frame then shows the vehicles and the shuttles
@@ -1232,7 +1336,8 @@ class IntegratedSessionActor(SessionActor):
         lines = self._route_stop_lines(shuttle.route_ID)
         if not lines:
             return None
-        return route_signals.hold_point(lines, self.timestamp_second, shuttle.progress, SHUTTLE_FRONT_M, shuttle.curr_vel)
+        return route_signals.hold_point(lines, self.timestamp_second, shuttle.progress, SHUTTLE_FRONT_M, shuttle.curr_vel,
+                                        faults=self._signal_faults())
 
     def _route_stop_lines(self, route_id):
         """The stop lines along a route, worked out again only when the route's path changes."""
@@ -1443,18 +1548,32 @@ class IntegratedSessionActor(SessionActor):
         network = self.definition.network
         edge = event.edge_id
         policy = self.incident_catalog.policy
-        # Congestion spreads one network hop; not an arbitrary spatial radius. A breakdown blocks one lane
-        # of its own road only.
-        congested = {edge} if event.event_type == "BREAKDOWN" else self.definition.neighbours(edge)
-        impacted = [candidate for candidate in target["remaining"] if candidate in congested] if target else []
-        ahead_m = next((distance for candidate, distance in target["ahead"] if candidate == edge), None) if target else None
         vehicle = target["vehicle"] if target else None
-        # World coordinates are the same planar metres as the route scene.
-        road = network["edges"][edge]
-        start_xy = network["nodes"][str(road["source"])]
-        end_xy = network["nodes"][str(road["target"])]
+        if event.node_id is not None:
+            # A signal fault: at the junction, holding up the roads that approach it. Nothing is slowed by a
+            # factor; its red lights hold whoever comes to them.
+            junction = self.definition.signal_junctions[event.node_id]
+            approaches = sorted({stretch[0] for stretch in self.definition.signal_footprint(event.node_id)})
+            affected, congested = approaches, set()
+            impacted = [candidate for candidate in target["remaining"] if candidate in approaches] if target else []
+            names = sorted({a.get("road_name") for a in junction.get("approaches", ()) if a.get("road_name")})
+            road_name = f"the junction of {' and '.join(names)}" if names else event.node_id
+            start_xy = end_xy = (junction["x_m"], junction["y_m"])
+        else:
+            # Congestion spreads one network hop; not an arbitrary spatial radius. A breakdown blocks one lane
+            # of its own road only.
+            congested = {edge} if event.event_type == "BREAKDOWN" else self.definition.neighbours(edge)
+            affected = [edge]
+            impacted = [candidate for candidate in target["remaining"] if candidate in congested] if target else []
+            # World coordinates are the same planar metres as the route scene.
+            road = network["edges"][edge]
+            road_name = road.get("road")
+            start_xy = network["nodes"][str(road["source"])]
+            end_xy = network["nodes"][str(road["target"])]
+        ahead_m = next((distance for candidate, distance in target["ahead"] if candidate == edge), None) if target else None
         placed = f"placed for {vehicle_label(vehicle.vehicle_id)}" if vehicle else "belongs to no shuttle"
         detected = event.detected_tick(self.STEP_S)
+        traffic = self.traffic is not None
         return {
             "map_marker": {
                 "edge_id": edge,
@@ -1468,24 +1587,30 @@ class IntegratedSessionActor(SessionActor):
             "kind": event.kind,
             "vehicle_id": vehicle.vehicle_id if vehicle else None,
             "route_id": vehicle.route_id if vehicle else None,
-            "road_name": road.get("road"),
-            "affected_edge_ids": [edge],
+            "road_name": road_name,
+            "affected_edge_ids": affected,
             "impact_edge_ids": impacted,
             "congested_edge_ids": sorted(congested),
             "requires_guidance": requires_guidance,
             "speed_factor": 1.0 if requires_guidance else float(policy.get("congestion_speed_factor", 0.5)),
+            # Without traffic a shuttle asked for a decision is held where it was told; with it, it drives
+            # on and the closure stops it, as it would any vehicle
+            "holds_vehicle": not traffic,
             "block_current_route_entrance": False,
             "warning_m": None if ahead_m is None else round(ahead_m, 1),
             "assumptions": [
                 origin,
-                f"Type: {event.event_type} ({event.kind}); {placed}; incident edge: {edge}; affected route edges: {impacted}.",
+                f"Type: {event.event_type} ({event.kind}); {placed}; incident location: {edge or event.node_id}; affected route edges: {impacted}.",
                 f"Operational impact: {'route directly blocked' if requires_guidance else 'traffic delay possible' if impacted else 'none for the shuttle it was placed for'}.",
+                "The background traffic plays the event out; any delay is the queue it forms, not a set factor."
+                if traffic else
                 "Traffic impact estimated from shared endpoints (one graph hop); it slows every shuttle on those roads.",
-                TRAFFIC_ASSUMPTION if self.traffic is not None else
+                TRAFFIC_ASSUMPTION if traffic else
                 "No traffic volume or lanes are modelled; shuttles stop at simulated traffic lights with made-up timings.",
                 "Exposed shuttles are those whose remaining route crosses the scene or its queue before it clears; "
                 "their ETAs assume cruising speed and the usual dwell at each stop.",
-                "Nearby incidents may reduce speed on connected roads; direct closures require guidance.",
+                "Shuttles meet the queue an incident forms in the traffic; direct closures require guidance."
+                if traffic else "Nearby incidents may reduce speed on connected roads; direct closures require guidance.",
                 "Scoring is provisional and not calibrated for real-world safety.",
             ],
             # The operator is told detection_delay_s after it starts; it clears duration_s after it starts
@@ -1499,15 +1624,18 @@ class IntegratedSessionActor(SessionActor):
 
         A scheduled event belongs to no shuttle. Only a road closure on the road ahead of a shuttle the
         route editor can take round it, and that is not already handling a direct obstruction, asks that
-        shuttle (the nearest such) for a decision, as a random one does; until phase 3 lets the traffic
-        stop the shuttles, a closure no shuttle is asked about is only a closure to route planning.
+        shuttle (the nearest such) for a decision, as a random one does. Any other closure still stops
+        every shuttle that comes to it (_closure_hold); a breakdown, a collision or a signal fault is
+        played out by the traffic, or by its fallback without it.
         """
         timeline = self.incident_catalog.timeline
         while self.timeline_next < len(timeline) and timeline[self.timeline_next].start_tick(self.STEP_S) <= self.current_tick:
             scheduled = timeline[self.timeline_next]
             self.timeline_next += 1
             kind = "ROAD_BLOCK" if scheduled.event_type == "ROAD_CLOSURE" else "ROAD_ACCIDENT"
-            event = scheduled.place(self.STEP_S, self.incident_catalog.template(kind))
+            # A signal fault has no template of its own: its timings are all its entry's
+            template = None if scheduled.event_type == "SIGNAL_FAULT" else self.incident_catalog.template(kind)
+            event = scheduled.place(self.STEP_S, template)
             target, requires_guidance = None, False
             if event.kind == "ROAD_BLOCK":
                 blocked = {edge for d in self.domain.disruptions
@@ -1528,8 +1656,8 @@ class IntegratedSessionActor(SessionActor):
                 requires_guidance=requires_guidance, origin="Scheduled world event from the scenario timeline.")
             self.random_incident = record
             self.random_incidents.append(record)
-            logger.debug("[INCIDENT DEBUG] SCHEDULED id=%s type=%s edge=%s guidance=%s", record["incident_id"],
-                         event.event_type, event.edge_id, requires_guidance)
+            logger.debug("[INCIDENT DEBUG] SCHEDULED id=%s type=%s at=%s guidance=%s", record["incident_id"],
+                         event.event_type, event.edge_id or event.node_id, requires_guidance)
 
     def _exposure(self, record, closed):
         """The shuttles a live incident's footprint lies ahead of, and the stretch it covers.
@@ -1538,10 +1666,14 @@ class IntegratedSessionActor(SessionActor):
         its queue (WorkflowDefinition.footprint) and it would get there before the incident clears. Its
         distance is to where it first meets the footprint, and its ETA that at cruising speed plus the usual
         dwell at each stop before it. Returns (exposures nearest first, footprint edge ids)."""
-        edge_id = record["affected_edge_ids"][0] if record.get("affected_edge_ids") else None
-        if edge_id is None or edge_id not in self.definition.network["edges"]:
-            return [], []
-        stretches = self.definition.footprint(record["kind"], edge_id, frozenset(closed - {edge_id}))
+        junction = (record.get("event") or {}).get("node_id")
+        if record.get("kind") == incident_hazards.SIGNAL_FAULT and junction:
+            stretches = self.definition.signal_footprint(junction)
+        else:
+            edge_id = record["affected_edge_ids"][0] if record.get("affected_edge_ids") else None
+            if edge_id is None or edge_id not in self.definition.network["edges"]:
+                return [], []
+            stretches = self.definition.footprint(record["kind"], edge_id, frozenset(closed - {edge_id}))
         by_edge = {}
         for road, low, high in stretches:
             by_edge.setdefault(road, []).append((low, high))

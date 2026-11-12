@@ -40,7 +40,12 @@ RECORD_FIELDS = frozenset({
     # The world event it stands for, the shuttles that will reach it (refreshed by the actor) and the roads
     # its scene and queue cover
     "event", "exposures", "footprint_edge_ids",
+    # Whether a decision holds its shuttle where it was when the incident was detected (a session without
+    # background traffic), rather than letting it drive on until the closure stops it
+    "holds_vehicle",
 })
+# Where a shuttle that is not held may be when its operator decides: on its route, driving, held up or at a stop
+ON_ITS_ROUTE = {"IN_SERVICE", "BLOCKED", "DWELLING"}
 # How an alert names each world event type, and the type of a record from before world events
 EVENT_NAMES = {"BREAKDOWN": "a breakdown", "COLLISION": "a collision", "SIGNAL_FAULT": "a signal fault",
                "ROAD_CLOSURE": "a road closure"}
@@ -69,9 +74,10 @@ def vehicle_label(vehicle_id: str | None) -> str:
 
 
 def event_phrase(event_type: str | None, road_name: str | None) -> str:
-    """An event and where it is, as an alert says it: "a collision on Lorong 6 Toa Payoh"."""
+    """An event and where it is, as an alert says it: "a collision on Lorong 6 Toa Payoh", "a signal fault
+    at the junction of Braddell Road and Lorong 6 Toa Payoh"."""
     name = EVENT_NAMES.get(event_type or "", "an incident")
-    return f"{name} on {road_name}" if road_name else name
+    return f"{name} {'at' if event_type == 'SIGNAL_FAULT' else 'on'} {road_name}" if road_name else name
 
 
 def exposure_headline(event_type: str | None, road_name: str | None, exposures) -> str:
@@ -138,6 +144,11 @@ class IncidentService:
         if self.config.get("impact_edge_ids"):
             return f"Potential traffic delay on {label}'s route{road}"
         return "No effect on operations — no action required"
+
+    def _holds_vehicle(self) -> bool:
+        """Whether a decision holds its shuttle where it was detected; a record from before traffic played
+        incidents out does."""
+        return self.config.get("holds_vehicle", True)
 
     def _event_type(self) -> str | None:
         """The world event's type; a record from before world events has its kind's."""
@@ -281,7 +292,8 @@ class IncidentService:
                 validation = continuation.validation if metrics else "UNKNOWN"
                 checks = [c.model_dump(mode="json") for c in continuation.checks]
                 checks.append({"check": "SAFE_HOLD", "status": "PASS",
-                               "message": "Remain stopped until the authored obstruction is cleared"})
+                               "message": "Remain stopped until the authored obstruction is cleared" if self._holds_vehicle()
+                               else "Keep the route; the shuttle stops short of the closure until it clears"})
             candidate = Candidate(
                 candidate_id=candidate_id, incident_id=incident.incident_id, revision=1, action=action,
                 validation=validation, expires_at_tick=snapshot.tick + self.config["option_lifetime_ticks"],
@@ -369,8 +381,10 @@ class IncidentService:
                 "alert": bool(incident.exposed_vehicle_ids),
                 **self._world(),
             }))
+        holds = self._holds_vehicle()
         if (not informational and incident is None and snapshot.tick >= self.config["trigger_tick"] and
-            vehicle.route_id == self.config["route_id"] and vehicle.service_state == "IN_SERVICE"):
+            vehicle.route_id == self.config["route_id"]
+                and (vehicle.service_state == "IN_SERVICE" or (not holds and vehicle.service_state in ON_ITS_ROUTE))):
             snapshot.source = self._source(snapshot)
             for item in snapshot.vehicles:
                 item.provenance = snapshot.source.model_copy(deep=True)
@@ -387,8 +401,9 @@ class IncidentService:
             snapshot.disruptions.append(disruption)
             incident = self._new_incident(snapshot, revision=2, vehicle_id=vehicle.vehicle_id, state="OPTIONS_READY")
             snapshot.incidents.append(incident)
-            vehicle.service_state = "AWAITING_GUIDANCE"
-            vehicle.aggregate_revision += 1
+            if holds:
+                vehicle.service_state = "AWAITING_GUIDANCE"
+                vehicle.aggregate_revision += 1
             options = self._options(snapshot, incident)
             events.append(self._event(snapshot, incident, "OPTIONS_READY", {
                 "fixture_id": self.config["fixture_id"], "map_marker": self.config.get("map_marker"),
@@ -398,7 +413,7 @@ class IncidentService:
                 "detected_at_utc": datetime.now(UTC).isoformat(),
                 "battery_at_detection_kwh": vehicle.battery_kwh,
                 "transitions": ["DETECTED", "AWAITING_REVIEW", "OPTIONS_READY"],
-                "vehicle_transitions": ["BLOCKED", "AWAITING_GUIDANCE"], "options": options,
+                "vehicle_transitions": ["BLOCKED", "AWAITING_GUIDANCE"] if holds else [], "options": options,
                 **self._world(),
             }))
         if incident is not None and informational:
@@ -436,15 +451,17 @@ class IncidentService:
                         "reason": "Refresh options after dependency changes", "options": options,
                     }))
             if incident.state in {"OPTIONS_READY", "WAITING", "ESCALATED"}:
-                vehicle.position = before_vehicle.position.model_copy(deep=True)
-                vehicle.speed_mps = 0.0
-                vehicle.service_state = "AWAITING_GUIDANCE"
+                if holds:
+                    vehicle.position = before_vehicle.position.model_copy(deep=True)
+                    vehicle.speed_mps = 0.0
+                    vehicle.service_state = "AWAITING_GUIDANCE"
                 if disruption.active_until_tick is not None and snapshot.tick >= disruption.active_until_tick:
                     # An unanswered incident is unresolved, even though traffic can proceed.
                     incident.state = "UNRESOLVED" if incident.state == "OPTIONS_READY" else "RESOLVED"
                     incident.aggregate_revision += 1
-                    vehicle.service_state = "IN_SERVICE"
-                    vehicle.aggregate_revision += 1
+                    if holds:
+                        vehicle.service_state = "IN_SERVICE"
+                        vehicle.aggregate_revision += 1
                     data = {"reason": "Authored obstruction cleared", "camera": None,
                             "service_state": vehicle.service_state,
                             "operational_delay_s": (snapshot.tick - incident.detected_tick) * self.config["step_s"],
@@ -505,8 +522,12 @@ class IncidentService:
         if not (disruption.active_from_tick <= snapshot.tick < disruption.active_until_tick):
             raise TrainingStoreError("STALE_REVISION", "Obstruction is no longer active")
         vehicle = next(v for v in snapshot.vehicles if v.vehicle_id == incident.vehicle_id)
-        if vehicle.service_state != "AWAITING_GUIDANCE" or vehicle.speed_mps != 0.0:
-            raise TrainingStoreError("INVALID_TRANSITION", "Affected shuttle must be safely stopped")
+        if self._holds_vehicle():
+            if vehicle.service_state != "AWAITING_GUIDANCE" or vehicle.speed_mps != 0.0:
+                raise TrainingStoreError("INVALID_TRANSITION", "Affected shuttle must be safely stopped")
+        elif vehicle.service_state not in ON_ITS_ROUTE or vehicle.route_id != self.config.get("route_id"):
+            # Not held, it may be decided for before it gets there, so long as it is still on its route
+            raise TrainingStoreError("INVALID_TRANSITION", "Affected shuttle is no longer on the incident's route")
         candidate = next(c for c in snapshot.candidates if c.candidate_id == candidate_id)
         if candidate.action != option["action"] or candidate.validation != option["validation"]:
             raise TrainingStoreError("STALE_REVISION", "Option evidence changed")

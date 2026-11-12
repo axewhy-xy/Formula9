@@ -137,7 +137,7 @@ namespace Formula9.World
     // drives (src/traffic/incident_hazards.py), and this traffic uses them when it drives itself.
     public static class IncidentSimulation
     {
-        public const string Block = "ROAD_BLOCK", Accident = "ROAD_ACCIDENT";
+        public const string Block = "ROAD_BLOCK", Accident = "ROAD_ACCIDENT", SignalFault = "SIGNAL_FAULT";
         public const float ReachM = 140, GrowthMps = 5, LaneOffsetM = 3.5f;
         private const float WreckClearM = 12, FirstCarM = 6, CarSpacingM = 9, CarJitterM = 3;
         private const float RollInS = 3, RollInMps = 8, CreepM = 0.8f, CreepRate = 0.9f, CreepWaveM = 0.06f;

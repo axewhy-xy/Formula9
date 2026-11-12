@@ -398,11 +398,15 @@ def run(output: Path, *, ticks=None, validation_samples=None, reconnect_samples=
                     # Random incidents fire mid-route, so the hold is measured from detection.
                     held = wait_for(client, store, session_id, lambda s: any(a.position != b.position
                         for a, b in zip(s.vehicles[1:], detected.vehicles[1:])), "incident_hold_observed")
-                    check("incident_stops_only_affected_vehicle", detected.vehicles[0].service_state == "AWAITING_GUIDANCE"
-                          and held.vehicles[0].service_state == "AWAITING_GUIDANCE"
+                    # Without background traffic the affected shuttle is held where the incident was detected;
+                    # with it, it is not held there but drives on until the closure stops it
+                    holds = app.state.training_services[store].sessions[session_id].actor.traffic is None
+                    check("incident_stops_only_affected_vehicle", detected.vehicles[1].position != initial.vehicles[1].position
                           and detected.vehicles[0].position != initial.vehicles[0].position
-                          and held.vehicles[0].position == detected.vehicles[0].position
-                          and detected.vehicles[1].position != initial.vehicles[1].position)
+                          and (detected.vehicles[0].service_state == "AWAITING_GUIDANCE"
+                               and held.vehicles[0].service_state == "AWAITING_GUIDANCE"
+                               and held.vehicles[0].position == detected.vehicles[0].position if holds
+                               else held.vehicles[0].service_state != "AWAITING_GUIDANCE"))
                     check("depot_return_executes", detected.vehicles[4].service_state == "RETURNING_TO_DEPOT"
                           and detected.vehicles[4].position != initial.vehicles[4].position)
                     incident = detected.incidents[0]

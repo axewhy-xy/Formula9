@@ -108,7 +108,7 @@ def prepare(output, phases):
     from src.app import app
     from src.persistence.training_store import TrainingStore
     from src.services.training_benchmark import _ManualSessionService
-    from src.services.integrated_actor import SCENARIO_SELECTOR, get_workflow_definition
+    from src.services.integrated_actor import SCENARIO_SELECTOR, IntegratedSessionActor, get_workflow_definition
 
     previous = dict(app.dependency_overrides)
     seeds = {}
@@ -117,6 +117,11 @@ def prepare(output, phases):
     opening = get_workflow_definition().incidents.simulated_catalog.policy["tutorial_opening"]
     opening_enabled = opening["enabled"]
     opening["enabled"] = True
+    # It holds the shuttle where the incident was detected, which a session does only without background
+    # traffic: with it, the shuttle drives on until the closure stops it. A restored session keeps the
+    # traffic its checkpoint has, none.
+    traffic = IntegratedSessionActor.TRAFFIC
+    IntegratedSessionActor.TRAFFIC = False
     try:
         with TrainingStore(output/"preparation.sqlite") as store:
             app.dependency_overrides[get_training_store] = lambda: store
@@ -188,6 +193,7 @@ def prepare(output, phases):
                     save("CHARGING")
     finally:
         opening["enabled"] = opening_enabled
+        IntegratedSessionActor.TRAFFIC = traffic
         app.dependency_overrides.clear()
         app.dependency_overrides.update(previous)
     return seeds
