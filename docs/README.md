@@ -1,28 +1,35 @@
 # Formula9 technical documentation
 
-Current direction: **3D AV shuttle fleet manager training simulator**, approved product direction dated 20 October 2026, with the user's mandatory-3D clarification incorporated on 27 October.
+Formula9 is an AV shuttle fleet manager training simulator. It has one Unity client and a
+Python/FastAPI backend, both in this repository. To set up, run, build and test it, start with the
+[repository README](../README.md).
 
-Start with [technical architecture](architecture.md), [mandatory 3D contract](three_d_simulation.md), [integrated M2-M6 roadmap](milestones.md) and [performance acceptance](performance.md). [Product traceability](product_direction.md) maps the approved brief, five visual concepts and later 3D clarification to scope decisions.
+## Current documentation
 
+These describe the system as it is built today.
 
-## Team delivery plans
-
-| Directory | Scope |
+| Document | Covers |
 | --- | --- |
-| [backend](backend/README.md) | Fleet simulation, planning/validation, incidents, charging, durable commands, assessment and reports |
-| [web](web/README.md) | React/TypeScript/three.js web operator and trainer application |
-| [native](native/README.md) | C++20/Qt/OpenGL/FMOD equivalent desktop application |
+| [Technical architecture](architecture.md) | Runtime topology, backend modules and session engine, contracts, the Unity client's layers and views, update rates, data sources, testing and known limitations |
+| [Session creation and recovery](session_creation.md) | Session lifecycle, the v2 HTTP contract, deletion and disk cleanup, runtime and crash recovery, instrumentation |
+| [Training contract v2](../contracts/v2/README.md) | Wire rules, entities, battery and booking additions, state transition tables |
+| [Backend](../backend/README.md) | Running the server and the headless actors |
+| [Backend migration record](backend-migration.md) | What moved from `Formula_9`, how it was adapted and validated ([source hashes](backend-migration-source.json)) |
+| [Third-party vehicle assets](third_party_assets.md) | Imported model packs and their licence status |
+| [Product direction](product_direction.md) | The approved training brief and how its open questions were interpreted. Its concept images are in [assets](assets). |
 
-Each directory contains a track overview and separate `m2.md` through `m6.md`, with task IDs, dependencies, deliverables, failure tests and exit gates. `app` refers to the web client whose source remains under `frontend/`.
+## Historical and planning material
 
-The 3D revision preserves all existing milestone tasks and implementation handoffs, adding new numbered work packages with outputs/verification and additional 3D exit criteria. Both clients require a 3D operational world from M2; optional detail/media and 2D accessibility fallbacks do not waive that gate. Existing status reports do not establish completion of the new tasks.
+These files come from before the Unity migration. They plan for separate React/three.js web and
+C++/Qt native clients, which this repository no longer has. Their targets and task lists are not a
+description of the current system. Keep them for reference only, or remove them.
 
-M3 is the complete workflow MVP, M5 feature complete, and M6 beta release. Numerical budgets are proposed until measured on the declared reference setup.
-
-## Supporting and historical material
-
-- [KITTI trajectory notes](kitti_trajectory_data.md) retain the data foundation; they do not define synthetic incident/decision semantics.
-- [Prior architecture](archive/architecture-decision.md), [prior web plan](archive/deliverables-web-decision.md) and [prior native plan](archive/deliverables-native-decision.md) preserve the superseded direction and historical assessments.
-- Existing top-level deliverables documents redirect to the current team directories.
-
-This documentation update specifies implementation work. It does not itself implement fleet simulation, change runtime contracts, or establish measured performance.
+| Material | What it was |
+| --- | --- |
+| [milestones.md](milestones.md), [backend/](backend/README.md), [web/](web/README.md), [native/](native/README.md), [deliverables_web.md](deliverables_web.md), [deliverables_native.md](deliverables_native.md) | M2–M6 roadmap and per-team milestone deliverables |
+| [milestone_status/](milestone_status/M2) | M2 task handoffs and evidence. `backend/tests/test_spatial_motion.py` reads `M2/be-m2-08-trace.json`, so move or keep that file before removing the folder. |
+| [three_d_simulation.md](three_d_simulation.md) | Planned 3D contract for the web and Qt clients |
+| [performance.md](performance.md) | Proposed performance and resilience targets, not measurements |
+| [archive/](archive) | The earlier decision-policy architecture and client plans |
+| [kitti_trajectory_data.md](kitti_trajectory_data.md), [gps_exports/](gps_exports), [trajectory_plots/](trajectory_plots) | KITTI trajectory notes and outputs, used only by the legacy v1 playback |
+| `Formula 9 – M2 Product & Design Direction (Working Draft).pdf` | The source brief behind [product direction](product_direction.md) |
