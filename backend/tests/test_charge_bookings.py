@@ -534,7 +534,8 @@ def in_bay_ready_to_leave(actor, shuttle, charger_id):
     actor._begin_parking(shuttle, charger_id)
 
 
-@pytest.mark.parametrize("rate", [None, "real"])
+# Also through the background traffic, as a live session drives: the one driving out must still get clear
+@pytest.mark.parametrize("rate", [None, "real", pytest.param("real", marks=pytest.mark.traffic, id="real-traffic")])
 def test_a_shuttle_driving_in_waits_outside_the_yard_for_one_driving_out(rate, request):
     from src.services.integrated_actor import get_workflow_definition
     data = get_workflow_definition().data

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
+import gc
 from collections.abc import Coroutine
 from contextvars import Context
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 import hashlib
+import json
 import logging
 import sqlite3
 from typing import Any, TypeVar
@@ -21,10 +24,11 @@ from src.core.training_telemetry import SessionProgress, boundary
 from src.schemas.shuttle_data import Shuttle
 from src.services.asset_loader import load_routes_from_json
 from src.services.session_actor import SessionActor
-from src.services.integrated_actor import IntegratedSessionActor, SCENARIO_SELECTOR
+from src.services.integrated_actor import IntegratedSessionActor, SCENARIO_SELECTOR, SIGNAL_AREA, get_workflow_definition
 from src.services.training_workflow import approve_workflow_route, publish_workflow, submit_workflow
 from src.services.spatial_session_actor import MotionLimits, SpatialSessionActor
 from src.services.training_scene import SceneValidationError
+from src.traffic.road_network import road_network
 
 logger = logging.getLogger(__name__)
 SCENARIO_REVISION = "scenario-m2-r1"
@@ -34,6 +38,17 @@ T = TypeVar("T")
 
 # The first part of a readable session id: where the exercise takes place.
 SESSION_PLACES = {SCENARIO_SELECTOR: "toa-payoh", SPATIAL_SCENARIO_REVISION: "fleet-3d", SCENARIO_REVISION: "fleet-loop"}
+# A live session keeps this many of its latest traffic frames, one a traffic step (ten a second), for a
+# 3D view that asks again as soon as each reply arrives (wait_for_traffic) and draws a little behind them
+TRAFFIC_FRAMES = 30
+# A reply carries at most this many of the newest frames: a second's worth, more than a 3D view that has
+# fallen behind needs to pick up where the traffic is
+TRAFFIC_REPLY_FRAMES = 10
+# How far a session's clock may fall behind the wall clock and still catch up. A tick that runs late (a
+# checkpoint written on a slow disk, a burst of work) does not push back the ticks after it, so the
+# session's time keeps pace with the wall clock and the 3D view, drawing at the wall clock's pace, never
+# runs out of frames. Further behind than this, as after the process was stalled, the rest is let go.
+MAX_TICK_BACKLOG_S = 0.25
 # Fixed English month names, so the id does not depend on the server's locale.
 _MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
 
@@ -73,7 +88,43 @@ async def wait_for_deadline(trace, deadline_ns, **tags):
             "early_wakeups": early, "wait_enter_lateness_ms": max(0, started-deadline_ns)/1e6}
 
 
-def checkpoint(actor: SessionActor) -> dict:
+def next_deadline(deadline_ns: int, now_ns: int, step_ns: int,
+                  max_backlog_ns: int = round(MAX_TICK_BACKLOG_S * 1e9)) -> int:
+    """The next tick's deadline after the one at deadline_ns, at now_ns.
+
+    One step on, even when that has already passed: a late tick is caught up on rather than pushing back
+    every tick after it, so the session's clock keeps the wall clock's pace on average. Only a backlog
+    longer than max_backlog_ns is let go, so a stalled process does not then rush through minutes of ticks.
+    """
+    return max(deadline_ns + step_ns, now_ns - max_backlog_ns)
+
+
+_static_heap_frozen = False
+
+
+def freeze_static_heap() -> None:
+    """Loads what every integrated session shares, the scenario and its road network, and has the garbage
+    collector leave it, with everything else alive by then, out of its full collections, once a process.
+
+    Those are some 110 thousand objects that live as long as the process, against a few thousand a
+    session's own; a session stages a copy of its actor every tick, so full collections come every few
+    ticks, and walking them all took a fifth of a tick's time. Objects frozen here are still freed when
+    nothing refers to them; only one left in a reference cycle is kept, which the static data never is.
+    """
+    global _static_heap_frozen
+    if _static_heap_frozen:
+        return
+    _static_heap_frozen = True
+    get_workflow_definition()
+    road_network(SIGNAL_AREA)
+    gc.collect()
+    gc.freeze()
+
+
+def checkpoint(actor: SessionActor, *, traffic: bool = True) -> dict:
+    """The actor's private state, committed with its publication. An integrated session's traffic comes
+    with it only when due (IntegratedSessionActor.traffic_checkpoint), which marks the actor; pass traffic
+    False to look at a live actor's state without marking it."""
     state = {
         "version": 1, "seed": actor.seed, "scenario_revision": actor.scenario_revision,
         "tick": actor.current_tick, "command_tick": actor.command_tick,
@@ -86,7 +137,12 @@ def checkpoint(actor: SessionActor) -> dict:
                      limits=asdict(actor.limits), spatial_diagnostics=deepcopy(actor.spatial_diagnostics),
                      spatial_work=actor.spatial_work)
     elif isinstance(actor, IntegratedSessionActor):
-        state.update(version=3, workflow=actor.workflow_state())
+        # The traffic goes in only when its own checkpoint is due (about once a second), and the store
+        # keeps it apart, so the publications in between leave out its 65-100 KB
+        state.update(version=3, workflow=actor.workflow_state(traffic=False))
+        saved = actor.traffic_checkpoint() if traffic else None
+        if saved is not None:
+            state["traffic"] = saved
     return state
 
 
@@ -103,10 +159,28 @@ class LiveSession:
     failed: bool = False
     failure_committed: bool = False
     progress: SessionProgress = field(default_factory=SessionProgress)
+    # (tick, JSON) of the latest traffic frames: presentation only, never checkpointed
+    frames: deque = field(default_factory=lambda: deque(maxlen=TRAFFIC_FRAMES))
+    # Set, and replaced by a fresh one, whenever a frame is added: wakes the 3D views waiting for one
+    frame_signal: asyncio.Event = field(default_factory=asyncio.Event)
+
+    def add_frame(self, tick: int, frame: str) -> None:
+        self.frames.append((tick, frame))
+        self.wake_frame_waiters()
+
+    def wake_frame_waiters(self) -> None:
+        signal, self.frame_signal = self.frame_signal, asyncio.Event()
+        signal.set()
 
 
 class TrainingSessionService:
     MAX_SESSIONS = 16
+    # Of those, sessions that drive the background traffic. Every session ticks on one core (the GIL),
+    # and one with traffic costs several times one without: some 5 ms of each 50 ms tick on a desktop
+    # (about 2.8 ms without traffic), so six running at once take about two thirds of a core and keep
+    # up. A slow laptop took 14.5 ms, so there fewer keep up: past a core, MAX_TICK_BACKLOG_S lets the
+    # missed ticks go. Recovery restores whatever was admitted; only new sessions are refused.
+    MAX_TRAFFIC_SESSIONS = 6
     FAILURE_RETRY_S = 0.25
 
     def __init__(self, store: TrainingStore, *, retention_keep_latest: int | None = None):
@@ -142,6 +216,8 @@ class TrainingSessionService:
         async with self._initialize_lock:
             if self._initialized:
                 return
+            # Before any session is restored, so that only the shared data is frozen
+            await asyncio.to_thread(freeze_static_heap)
             with self.store.trace.span("runtime.recovery") as fields:
                 self.sessions = await asyncio.to_thread(self._restore)
                 fields.update(restored_sessions=len(self.sessions))
@@ -201,7 +277,7 @@ class TrainingSessionService:
         actor.is_paused = snapshot.session.status != "RUNNING"
         actor.shuttles = [Shuttle.model_validate(item) for item in state["shuttles"]]
         if isinstance(actor, IntegratedSessionActor):
-            actor.restore_workflow(state["workflow"], snapshot)
+            actor.restore_workflow(state["workflow"], snapshot, state.get("traffic"))
         if isinstance(actor, SpatialSessionActor):
             actor.validate_restored_shuttles()
         actor.rng.setstate(_tuples(state["rng"]))
@@ -233,6 +309,10 @@ class TrainingSessionService:
                 raise TrainingStoreError("INVALID_REFERENCE", "Scenario revision is not available")
             if self.closed or len(self.sessions) >= self.MAX_SESSIONS:
                 raise TrainingStoreError("QUEUE_FULL", "Training session capacity reached")
+            if (request.scenario_revision_id == SCENARIO_SELECTOR and IntegratedSessionActor.TRAFFIC
+                    and self.traffic_sessions() >= self.MAX_TRAFFIC_SESSIONS):
+                raise TrainingStoreError("QUEUE_FULL", "Training capacity for sessions with traffic reached; "
+                                                       "archive one to start another")
             snapshot, actor = await asyncio.to_thread(self._create_initial, request, actor_id, key, digest)
             session = LiveSession(actor, baseline=snapshot.model_copy(deep=True))
             self.sessions[actor.session_id] = session
@@ -253,6 +333,11 @@ class TrainingSessionService:
         snapshot.session.status = "READY"
         snapshot = self.store.create_session(snapshot, runtime_state=checkpoint(actor), creation=(actor_id, key, digest))
         return snapshot, actor
+
+    def traffic_sessions(self) -> int:
+        """How many live sessions drive the background traffic."""
+        return sum(isinstance(session.actor, IntegratedSessionActor) and session.actor.traffic is not None
+                   for session in self.sessions.values())
 
     def owns(self, session_id: str) -> bool:
         return session_id in self.sessions
@@ -432,19 +517,24 @@ class TrainingSessionService:
                 return
             sample_ns = self.store.trace.clock()
             try:
-                staged, baseline = await asyncio.to_thread(self._step_staged, session.actor, session.baseline, sample_ns)
+                staged, baseline, frame = await asyncio.to_thread(self._step_staged, session.actor, session.baseline, sample_ns)
             except Exception:
                 session.failed = True
                 session.progress.observe(self.store.trace, session.actor, running=False)
                 raise
             if staged is not None:
                 session.actor = staged
+                if frame is not None:
+                    session.add_frame(staged.current_tick, frame)
             session.baseline = baseline
             session.progress.observe(self.store.trace, session.actor, committed=baseline,
                                      sample_ns=sample_ns if staged is not None else None)
 
     def _step_staged(self, actor: SessionActor, baseline: FullSnapshot | None, enqueued_ns: int | None = None
-                     ) -> tuple[SessionActor | None, FullSnapshot | None]:
+                     ) -> tuple[SessionActor | None, FullSnapshot | None, str | None]:
+        """One tick of a staged copy of the actor, committed when it publishes. Returns the copy to
+        install (None to keep the actor), the latest committed snapshot, and, on a tick the session's
+        traffic stepped, the traffic's frame as JSON."""
         tags = {"session_id": actor.session_id, "session_epoch": actor.session_epoch, "tick": actor.current_tick + 1}
         if enqueued_ns is not None:
             self.store.trace.record("tick.worker_wait", enqueued_ns, self.store.trace.clock(), **tags)
@@ -453,17 +543,21 @@ class TrainingSessionService:
                 staged = deepcopy(actor)
             with self.store.trace.span("tick.actor", **tags):
                 staged.tick()
+        # The traffic's frame comes with every step it takes, ten a second, whether or not this tick
+        # publishes; it is taken once the tick is done, so it shows what the tick installs
+        frame_due = (isinstance(staged, IntegratedSessionActor) and staged.current_tick != actor.current_tick
+                     and staged.traffic_frame_due())
         if staged.should_emit_snapshot():
             if baseline is None:
                 baseline = self.store.snapshot(actor.session_id)
             if baseline.session.status != "RUNNING":
-                return None, baseline
+                return None, baseline, None
             with self.store.trace.span("snapshot.build", session_id=actor.session_id,
                                        session_epoch=actor.session_epoch, tick=staged.current_tick):
                 snapshot = self._snapshot(staged, baseline, "RUNNING")
             try:
                 if isinstance(staged, IntegratedSessionActor):
-                    baseline = publish_workflow(self.store, staged, snapshot, checkpoint)
+                    baseline = publish_workflow(self.store, staged, snapshot, checkpoint, baseline)
                 else:
                     baseline = self.store.commit_snapshot(snapshot, expected_snapshot_id=baseline.snapshot_id,
                                                           runtime_state=checkpoint(staged))
@@ -472,8 +566,57 @@ class TrainingSessionService:
                     raise
                 # Another command may have appended an outcome while this tick
                 # was staged. Retry from the installed actor and latest cursor.
-                return None, self.store.snapshot(actor.session_id)
-        return staged, baseline
+                return None, self.store.snapshot(actor.session_id), None
+        if frame_due:
+            with self.store.trace.span("traffic.frame", **tags):
+                return staged, baseline, self._frame_json(staged)
+        return staged, baseline, None
+
+    @staticmethod
+    def _frame_json(actor: SessionActor) -> str | None:
+        frame = actor.traffic_frame() if isinstance(actor, IntegratedSessionActor) else None
+        return json.dumps(frame, separators=(",", ":")) if frame is not None else None
+
+    def _traffic_session(self, session_id: str) -> LiveSession:
+        session = self.sessions.get(session_id)
+        if session is None or session.failed or not isinstance(session.actor, IntegratedSessionActor):
+            raise TrainingStoreError("INVALID_REFERENCE", "No live traffic for this training session")
+        if session.actor.traffic is None:
+            raise TrainingStoreError("INVALID_REFERENCE", "This training session has no traffic")
+        return session
+
+    def traffic(self, session_id: str, after_tick: int) -> list[str]:
+        """The latest traffic frames of a live session after a tick, oldest first, as JSON: at most
+        TRAFFIC_REPLY_FRAMES, the newest.
+
+        A session that has published none since this process started (one paused, or just recovered)
+        gives its current frame, so a 3D view can draw where the traffic stands. Presentation only:
+        the frames are not durable, and a session without traffic, or not live here, has none.
+        """
+        session = self._traffic_session(session_id)
+        frames = [frame for tick, frame in session.frames if tick > after_tick][-TRAFFIC_REPLY_FRAMES:]
+        if not session.frames and session.actor.current_tick > after_tick:
+            frames.append(self._frame_json(session.actor))
+        return frames
+
+    async def wait_for_traffic(self, session_id: str, after_tick: int, wait_s: float) -> list[str]:
+        """As traffic, but with no frame after after_tick yet, waits up to wait_s for the next one.
+
+        A 3D view asks again as soon as each reply comes, so it hears of every frame as it is made,
+        rather than up to a polling interval late: what it draws then needs less of a lead over the
+        newest frame to never run out. A reply after wait_s with no frames means none came, as while
+        the session is paused.
+        """
+        frames = self.traffic(session_id, after_tick)
+        if frames or wait_s <= 0:
+            return frames
+        # Taken in the same turn of the event loop as the check above, so no frame can come between
+        signal = self.sessions[session_id].frame_signal
+        try:
+            await asyncio.wait_for(signal.wait(), wait_s)
+        except (TimeoutError, asyncio.TimeoutError):
+            pass
+        return self.traffic(session_id, after_tick)
 
     async def _run(self, session: LiveSession) -> None:
         step_ns = round(SessionActor.STEP_S * 1e9)
@@ -501,7 +644,7 @@ class TrainingSessionService:
                                             tick=session.actor.current_tick, running=running, lateness_ms=lateness / 1e6,
                                             boundary_ms=(end-start)/1e6,
                                             missed_deadlines=max(0, (end-deadline) // step_ns), **waiting)
-                deadline = max(deadline + step_ns, self.store.trace.clock())
+                deadline = next_deadline(deadline, self.store.trace.clock(), step_ns)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -551,4 +694,6 @@ class TrainingSessionService:
             await asyncio.gather(*tuple(self._operations), return_exceptions=True)
         for session in self.sessions.values():
             session.progress.observe(self.store.trace, session.actor, running=False)
+            # No more frames will come: a 3D view waiting for one hears so now
+            session.wake_frame_waiters()
 

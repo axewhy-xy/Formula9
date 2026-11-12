@@ -13,7 +13,7 @@ namespace Formula9.World
         public bool BothWays;
     }
 
-    // A vehicle the traffic does not move, and so has to keep clear of: a shuttle.
+    // A shuttle the traffic does not drive, posed from outside, and so has to keep clear of.
     public struct TrafficObstacle
     {
         public string Id;
@@ -24,11 +24,14 @@ namespace Formula9.World
     public readonly struct TrafficReport
     {
         public readonly int Driving, Outside, Overlaps, RedLightRuns;
+        // Vehicles or other shuttles touching a shuttle, and red lights the shuttles the traffic drives have run
+        public readonly int ShuttleOverlaps, ShuttleRedLightRuns;
         public readonly float MeanSpeedMps;
 
-        public TrafficReport(int driving, int outside, int overlaps, int redLightRuns, float meanSpeedMps)
+        public TrafficReport(int driving, int outside, int overlaps, int redLightRuns, float meanSpeedMps, int shuttleOverlaps = 0, int shuttleRedLightRuns = 0)
         {
             Driving = driving; Outside = outside; Overlaps = overlaps; RedLightRuns = redLightRuns; MeanSpeedMps = meanSpeedMps;
+            ShuttleOverlaps = shuttleOverlaps; ShuttleRedLightRuns = shuttleRedLightRuns;
         }
     }
 
@@ -96,7 +99,7 @@ namespace Formula9.World
                 var lane = vehicle.Road.Traffic[vehicle.Lane];
                 if (vehicle.LaneIndex + 1 < lane.Count && lane[vehicle.LaneIndex + 1].Distance - lane[vehicle.LaneIndex + 1].Length / 2 < vehicle.Distance + vehicle.Length / 2) overlaps++;
             }
-            return new TrafficReport(driving, outside, overlaps, redLightRuns, driving > 0 ? speed / driving : 0);
+            return new TrafficReport(driving, outside, overlaps, redLightRuns, driving > 0 ? speed / driving : 0, ShuttleOverlaps(), shuttleRedLightRuns);
         }
 
         // Stop lines on the roads, for every light that controls one.
@@ -158,11 +161,13 @@ namespace Formula9.World
             foreach (var vehicle in vehicles) DropBlockedPlan(vehicle);
         }
 
-        // The shuttles as they stand now. Their speed is worked out from where they were last time.
+        // The shuttles posed from outside, as they stand now; any other posed one has gone. Their speed is
+        // worked out from where they were last time. Shuttles the traffic drives are not affected.
         public void SetShuttles(IReadOnlyList<TrafficObstacle> obstacles)
         {
             for (var i = shuttles.Count - 1; i >= 0; i--)
             {
+                if (shuttles[i].Route != null) continue;
                 var found = false;
                 foreach (var obstacle in obstacles) found |= obstacle.Id == shuttles[i].Pose.Id;
                 if (!found) shuttles.RemoveAt(i);
@@ -171,6 +176,8 @@ namespace Formula9.World
             {
                 var known = shuttles.Find(s => s.Pose.Id == obstacle.Id);
                 if (known == null) shuttles.Add(known = new ShuttleState { Last = obstacle.Position });
+                // Posed from outside now, so no longer driven
+                if (known.Route != null) { known.Route = null; known.Last = obstacle.Position; known.GivesWayTo.Clear(); }
                 known.Pose = obstacle;
             }
         }
@@ -214,6 +221,7 @@ namespace Formula9.World
             SignalClockS += dt;
             foreach (var shuttle in shuttles)
             {
+                if (shuttle.Route != null) continue;
                 shuttle.Speed = Vector3.Distance(shuttle.Pose.Position, shuttle.Last) / dt;
                 shuttle.Last = shuttle.Pose.Position;
             }
@@ -222,6 +230,7 @@ namespace Formula9.World
                 if (vehicle.Outside) EnterFromOutside(vehicle);
                 else if (CaughtByHazard(vehicle)) EnterFromOutside(vehicle);
             }
+            ClearShuttleJams();
             FillLanes();
             foreach (var vehicle in vehicles)
             {
@@ -233,8 +242,12 @@ namespace Formula9.World
             AnswerJunctions(dt);
             foreach (var vehicle in vehicles)
                 if (!vehicle.Outside) vehicle.TargetSpeed = SafeSpeed(vehicle);
+            foreach (var shuttle in shuttles)
+                if (shuttle.Route != null) PlanShuttle(shuttle, dt);
             foreach (var vehicle in vehicles)
                 if (!vehicle.Outside) Move(vehicle, dt);
+            foreach (var shuttle in shuttles)
+                if (shuttle.Route != null) MoveShuttle(shuttle, dt);
         }
 
         // A closure or a growing queue that reaches a vehicle takes it off the road: its place in the
@@ -396,7 +409,7 @@ namespace Formula9.World
                 foreach (var request in asked)
                 {
                     var crossed = ConflictsWithClaims(request, claims) || ConflictsWithDenied(request);
-                    if (!crossed && request.CanTake && !ShuttleHoldsNode(request.From) && HasRoomBeyond(request))
+                    if (!crossed && request.CanTake && !ShuttleHoldsNode(request.From, request.Vehicle) && HasRoomBeyond(request))
                     {
                         if (claims == null) claimsByNode[node] = claims = new List<Claim>();
                         var claim = new Claim { Vehicle = request.Vehicle, Node = node, From = request.From, To = request.To, FromLane = request.FromLane, ToLane = request.ToLane, Path = request.Path };
@@ -451,18 +464,23 @@ namespace Formula9.World
             return Vector2.Distance(point, a + along * share);
         }
 
-        // A shuttle does not give way: the backend moves it, so a junction it is about to use stays shut.
-        private bool ShuttleHoldsNode(DirectedRoad arriving)
+        // A junction a shuttle is about to use stays shut. One posed from outside cannot give way. One the
+        // traffic drives leaves the junction to the rest while it stops short of it, for a light or for
+        // traffic, until it has waited its turn, and never shuts it to a vehicle it is giving way to.
+        private bool ShuttleHoldsNode(DirectedRoad arriving, VehicleState vehicle)
         {
             var node = arriving.Points[arriving.Points.Length - 1];
             foreach (var shuttle in shuttles)
             {
+                if (shuttle.GivesWayTo.Contains(vehicle)) continue;
                 var moving = shuttle.Speed > ShuttleMovingMps;
                 var reach = moving ? ShuttleJunctionM : StandingShuttleJunctionM;
                 var toNode = node - shuttle.Pose.Position;
                 toNode.y = 0;
                 if (toNode.sqrMagnitude > reach * reach) continue;
-                if (!moving || Vector3.Dot(toNode, shuttle.Pose.Forward) > -shuttle.Pose.HalfLength - ClearedJunctionM) return true;
+                var ahead = Vector3.Dot(toNode, shuttle.Pose.Forward);
+                if (shuttle.Route != null && shuttle.WaitS < ShuttleTakeTurnS && ahead - shuttle.Pose.HalfLength > shuttle.StopsWithinM) continue;
+                if (!moving || ahead > -shuttle.Pose.HalfLength - ClearedJunctionM) return true;
             }
             return false;
         }
@@ -547,16 +565,21 @@ namespace Formula9.World
             return Mathf.Lerp(3f, full, Mathf.InverseLerp(120f, 15f, Vector3.Angle(road.EndDirection, next.StartDirection)));
         }
 
-        // A shuttle takes the middle of the road and cannot give way. Traffic follows one going its way,
-        // stops for one crossing, and otherwise pulls aside for it to pass or to get past it.
+        // Traffic follows a shuttle going its way, or held up in traffic as it is, stops for one crossing,
+        // and otherwise pulls aside for it to pass or to get past it. One posed from outside may take the
+        // middle of the road and cannot give way. One the traffic drives keeps to its lane and follows the
+        // traffic, so nobody pulls aside for it from in front, and one it gives way to goes first.
         private float ShuttleLimit(VehicleState vehicle, float limit)
         {
             vehicle.TargetAside = 0;
             if (!vehicle.Placed) return limit;
             var half = vehicle.Length / 2;
             var left = Vector3.Cross(vehicle.Forward, Vector3.up).normalized;
+            // It can move this far within its own lane without slowing
+            var inLane = Mathf.Max(0, LaneWidthM / 2 - vehicle.HalfWidth);
             foreach (var shuttle in shuttles)
             {
+                if (shuttle.GivesWayTo.Contains(vehicle)) continue;
                 var to = shuttle.Pose.Position - vehicle.Position;
                 to.y = 0;
                 if (to.sqrMagnitude > ShuttleSightM * ShuttleSightM) continue;
@@ -572,11 +595,13 @@ namespace Formula9.World
                     if (ahead > 0 && Mathf.Abs(side) < clearance + shuttle.Pose.HalfLength) limit = Mathf.Min(limit, Krauss(vehicle.Speed, gap, 0));
                     continue;
                 }
-                if (moving && alike > 0 && ahead > 0)
+                if ((moving || shuttle.InTraffic) && alike > 0 && ahead > 0)
                 {
                     if (Mathf.Abs(side) < clearance) limit = Mathf.Min(limit, Krauss(vehicle.Speed, gap, shuttle.Speed * alike));
                     continue;
                 }
+                // A driven shuttle behind follows this vehicle, as the traffic does
+                if (shuttle.Route != null && alike > 0 && ahead < 0) continue;
                 // What is left is passing: one coming the other way, one standing ahead, or one catching up from behind
                 if (ahead < -shuttle.Pose.HalfLength - half - ShuttlePassBehindM || ahead > ShuttlePassAheadM) continue;
                 if (moving && alike > 0 && shuttle.Speed <= vehicle.Speed) continue;
@@ -584,7 +609,7 @@ namespace Formula9.World
                 var aside = laneSide <= 0 ? Mathf.Max(0, clearance + laneSide) : -Mathf.Max(0, clearance - laneSide);
                 if (aside == 0) continue;
                 if (Mathf.Abs(aside) > Mathf.Abs(vehicle.TargetAside)) vehicle.TargetAside = Mathf.Clamp(aside, -MaxAsideM, MaxAsideM);
-                if (ahead > 0) limit = Mathf.Min(limit, PassingMps);
+                if (ahead > 0 && Mathf.Abs(aside) > inLane) limit = Mathf.Min(limit, PassingMps);
                 // Not yet out of its way: wait where it can still get there
                 if (ahead > 0 && Mathf.Abs(side) < clearance - ShuttleBesideM) limit = Mathf.Min(limit, Krauss(vehicle.Speed, gap, 0));
             }
@@ -693,6 +718,19 @@ namespace Formula9.World
             public TrafficObstacle Pose;
             public Vector3 Last;
             public float Speed;
+            // Set while the traffic drives it: its route, and how far along it the shuttle and the backend are
+            public ShuttleRoute Route;
+            public float Along, TargetAlong, BackendMps, TopBackendMps, TargetSpeed, Height;
+            // Metres to the left of its route, to keep to its lane
+            public float Aside, TargetAside;
+            // How long the traffic has kept it standing, not counting a light
+            public float WaitS;
+            // How far its centre may go before it stops for what is in front of it
+            public float StopsWithinM = float.MaxValue;
+            // Held up by a light or the traffic, rather than by the backend, as at one of its own stops
+            public bool InTraffic;
+            public bool Placed;
+            public readonly HashSet<VehicleState> GivesWayTo = new HashSet<VehicleState>();
         }
 
         // The way a vehicle drives through a junction: along its lane to the junction, across it, and out

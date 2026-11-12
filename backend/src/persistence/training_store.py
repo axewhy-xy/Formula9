@@ -13,12 +13,12 @@ import os
 import queue
 import sqlite3
 from concurrent.futures import Future
-from contextlib import closing
+from contextlib import closing, contextmanager
 from contextvars import copy_context
 from datetime import UTC, datetime
 from pathlib import Path
-from threading import Thread
-from typing import BinaryIO, Callable, TypeVar
+from threading import Lock, Thread, local
+from typing import BinaryIO, Callable, Iterator, TypeVar
 from uuid import uuid4
 
 from src.core.training_telemetry import TrainingTrace, boundary, correlate
@@ -127,6 +127,10 @@ class TrainingStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock_file = _lock_database(self.path)
         self._jobs: queue.Queue = queue.Queue(maxsize=queue_size)
+        # Each thread's read-only connection, kept open between reads (see _reading)
+        self._readers = local()
+        self._reader_connections: list[sqlite3.Connection] = []
+        self._readers_lock = Lock()
         self._ready: Future[None] = Future()
         self._thread = Thread(target=self._run, name="training-sqlite-writer", daemon=True)
         self._thread.start()
@@ -184,6 +188,10 @@ class TrainingStore:
         if self._thread.is_alive():
             self._jobs.put(None)
             self._thread.join()
+        with self._readers_lock:
+            readers, self._reader_connections = self._reader_connections, []
+        for connection in readers:
+            connection.close()
         if not self._lock_file.closed:
             _unlock_database(self._lock_file)
 
@@ -308,7 +316,19 @@ class TrainingStore:
 
     @staticmethod
     def _write_runtime(connection: sqlite3.Connection, session_id: str, state: dict | None) -> None:
+        """Upserts an actor checkpoint. Its "traffic", when it has one ({"tick", "state"}), is kept apart
+        in session_traffic: written only when the actor gives one, about once a second, and given back
+        with the rest by runtime."""
         if state is not None:
+            traffic = state.get("traffic")
+            if traffic is not None:
+                state = {key: value for key, value in state.items() if key != "traffic"}
+                raw = _json(traffic)
+                connection.execute(
+                    "INSERT INTO session_traffic VALUES (?, ?, ?, ?) ON CONFLICT(session_id) "
+                    "DO UPDATE SET tick=excluded.tick, traffic_json=excluded.traffic_json, state_hash=excluded.state_hash",
+                    (session_id, traffic["tick"], raw, _hash(raw)),
+                )
             raw = _json(state)
             connection.execute(
                 "INSERT INTO session_runtimes VALUES (?, ?, ?) ON CONFLICT(session_id) "
@@ -317,7 +337,7 @@ class TrainingStore:
             )
 
     def creation(self, actor_id: str, key: str, request_hash: str) -> FullSnapshot | None:
-        with closing(self._read_connection()) as connection:
+        with self._reading() as connection:
             row = connection.execute(
                 "SELECT * FROM session_creations WHERE actor_id=? AND idempotency_key=?", (actor_id, key),
             ).fetchone()
@@ -329,12 +349,12 @@ class TrainingStore:
 
     def list_sessions(self, limit: int = -1, offset: int = 0) -> list[dict]:
         """Read public metadata with live attempts before history, newest first."""
-        with closing(self._read_connection()) as connection:
+        with self._reading() as connection:
             return self._session_rows(connection, limit, offset)
 
     def session_page(self, limit: int, offset: int = 0) -> dict:
         """Read one list page and its whole-table counts from one consistent view."""
-        with closing(self._read_connection()) as connection:
+        with self._reading() as connection:
             connection.execute("BEGIN")
             total, live = connection.execute(f"SELECT COUNT(*), COALESCE(SUM({_OCCUPIES_CAPACITY}), 0) FROM sessions s").fetchone()
             return {"sessions": self._session_rows(connection, limit, offset), "live_count": live, "total": total}
@@ -351,7 +371,7 @@ class TrainingStore:
 
     def expired_session_ids(self, keep_latest: int) -> list[str]:
         """Terminal attempts older than the newest keep_latest, by creation order."""
-        with closing(self._read_connection()) as connection:
+        with self._reading() as connection:
             rows = connection.execute(
                 "SELECT session_id FROM sessions WHERE status IN ('ARCHIVED', 'COMPLETED', 'FAILED')"
                 " ORDER BY rowid DESC LIMIT -1 OFFSET ?",
@@ -371,7 +391,8 @@ class TrainingStore:
             if row is not None:
                 if row["status"] not in {"ARCHIVED", "COMPLETED", "FAILED"}:
                     raise TrainingStoreError("INVALID_TRANSITION", "Archive the session before permanently deleting it")
-                for table in ("session_creations", "session_runtimes", "commands", "events", "checkpoints", "sessions"):
+                for table in ("session_creations", "session_runtimes", "session_traffic", "commands", "events",
+                              "checkpoints", "sessions"):
                     connection.execute(f"DELETE FROM {table} WHERE session_id=?", (session_id,))
             connection.commit()
         self._submit(write)
@@ -395,7 +416,7 @@ class TrainingStore:
         return self._submit(write)
 
     def runtime_ids(self) -> list[str]:
-        with closing(self._read_connection()) as connection:
+        with self._reading() as connection:
             rows = connection.execute(
                 "SELECT s.session_id FROM sessions s WHERE s.status IN ('READY', 'PAUSED', 'RUNNING')"
                 " AND (EXISTS (SELECT 1 FROM session_runtimes r WHERE r.session_id=s.session_id)"
@@ -404,16 +425,22 @@ class TrainingStore:
             return [row[0] for row in rows]
 
     def runtime(self, session_id: str) -> tuple[FullSnapshot, dict]:
-        with closing(self._read_connection()) as connection:
+        with self._reading() as connection:
             row = connection.execute(
-                "SELECT s.*, r.checkpoint_json, r.state_hash AS runtime_hash FROM sessions s "
-                "LEFT JOIN session_runtimes r USING(session_id) WHERE s.session_id=?", (session_id,),
+                "SELECT s.*, r.checkpoint_json, r.state_hash AS runtime_hash, t.traffic_json,"
+                " t.state_hash AS traffic_hash FROM sessions s LEFT JOIN session_runtimes r USING(session_id)"
+                " LEFT JOIN session_traffic t USING(session_id) WHERE s.session_id=?", (session_id,),
             ).fetchone()
             if row is None:
                 raise TrainingStoreError("INVALID_REFERENCE", "Training session was not found")
             if row["checkpoint_json"] is None or _hash(row["checkpoint_json"]) != row["runtime_hash"]:
                 raise TrainingStoreError("CORRUPT_CHECKPOINT", "Actor checkpoint hash does not match")
-            return _load_snapshot(row), json.loads(row["checkpoint_json"])
+            state = json.loads(row["checkpoint_json"])
+            if row["traffic_json"] is not None:
+                if _hash(row["traffic_json"]) != row["traffic_hash"]:
+                    raise TrainingStoreError("CORRUPT_CHECKPOINT", "Traffic checkpoint hash does not match")
+                state["traffic"] = json.loads(row["traffic_json"])
+            return _load_snapshot(row), state
 
     def runtimes(self) -> list[tuple[FullSnapshot, dict]]:
         return [self.runtime(session_id) for session_id in self.runtime_ids()]
@@ -440,13 +467,40 @@ class TrainingStore:
             return snapshot
         return self._submit(write)
 
-    def _read_connection(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(f"file:{self.path.as_posix()}?mode=ro", uri=True)
+    def _read_connection(self, *, check_same_thread: bool = True) -> sqlite3.Connection:
+        connection = sqlite3.connect(f"file:{self.path.as_posix()}?mode=ro", uri=True,
+                                     check_same_thread=check_same_thread)
         connection.row_factory = sqlite3.Row
         return connection
 
+    @contextmanager
+    def _reading(self) -> Iterator[sqlite3.Connection]:
+        """This thread's read-only connection, for one read.
+
+        Kept open between reads: opening one costs the database and its write-ahead log being opened
+        again, which right after a commit took some 20 ms (against well under one for the query), and a
+        live session reads at its publications. Each read sees the latest commit, as on a new
+        connection: a read transaction it began is ended when it is done, and no statement is left
+        running. A store that is closed opens one for the read alone.
+        """
+        connection = getattr(self._readers, "connection", None)
+        if connection is None:
+            if self._lock_file.closed:
+                with closing(self._read_connection()) as connection:
+                    yield connection
+                return
+            connection = self._read_connection(check_same_thread=False)
+            with self._readers_lock:
+                self._reader_connections.append(connection)
+            self._readers.connection = connection
+        try:
+            yield connection
+        finally:
+            if connection.in_transaction:
+                connection.rollback()
+
     def snapshot(self, session_id: str) -> FullSnapshot:
-        with closing(self._read_connection()) as connection:
+        with self._reading() as connection:
             row = connection.execute("SELECT * FROM sessions WHERE session_id=?", (session_id,)).fetchone()
             if row is None:
                 raise TrainingStoreError("INVALID_REFERENCE", "Training session was not found")
@@ -466,7 +520,7 @@ class TrainingStore:
         )
 
     def command_record(self, session_id: str, actor_id: str, key: str) -> tuple[CommandStatus, DispatcherCommand]:
-        with closing(self._read_connection()) as connection:
+        with self._reading() as connection:
             connection.execute("BEGIN")
             session = connection.execute("SELECT * FROM sessions WHERE session_id=?", (session_id,)).fetchone()
             row = connection.execute(
@@ -721,7 +775,7 @@ class TrainingStore:
         """One committed checkpoint per tick, bounded to ten seconds at 20 Hz."""
         if start_tick < 0 or end_tick < start_tick or end_tick - start_tick > 200:
             raise TrainingStoreError("INVALID_PAYLOAD", "History window must be at most 200 ticks")
-        with closing(self._read_connection()) as connection:
+        with self._reading() as connection:
             rows = connection.execute(
                 "SELECT c.* FROM checkpoints c JOIN ("
                 " SELECT tick, MAX(event_sequence) AS sequence FROM checkpoints"
@@ -734,7 +788,7 @@ class TrainingStore:
 
     def entity_events(self, session_id: str, entity_id: str, through_sequence: int) -> list[Event]:
         """Read durable incident evidence without the event-replay page limit."""
-        with closing(self._read_connection()) as connection:
+        with self._reading() as connection:
             rows = connection.execute(
                 "SELECT event_json FROM events WHERE session_id=? AND event_sequence<=?"
                 " AND json_extract(event_json, '$.entity_id')=? ORDER BY event_sequence",
@@ -743,7 +797,7 @@ class TrainingStore:
             return [Event.model_validate_json(row[0]) for row in rows]
 
     def incident_attempts(self, session_id: str, incident_id: str) -> list[dict]:
-        with closing(self._read_connection()) as connection:
+        with self._reading() as connection:
             rows = connection.execute(
                 "SELECT command_id, command_json, status, failure_code, accepted_at_utc, applied_tick"
                 " FROM commands WHERE session_id=? AND target_type='INCIDENT' AND target_id=? ORDER BY rowid",
@@ -758,7 +812,7 @@ class TrainingStore:
 
     def rejected_commands(self, session_id: str, command_types: set[str], since_tick: int) -> list[DispatcherCommand]:
         """Commands of these types rejected at or after since_tick, oldest first."""
-        with closing(self._read_connection()) as connection:
+        with self._reading() as connection:
             rows = connection.execute(
                 "SELECT c.command_json FROM commands c JOIN events e ON e.event_id = c.result_event_id"
                 " WHERE c.session_id=? AND c.status='REJECTED'"
@@ -771,7 +825,7 @@ class TrainingStore:
     def replay(self, session_id: str, after: int, limit: int = 100) -> EventReplay:
         if not 1 <= limit <= 500:
             raise TrainingStoreError("INVALID_PAYLOAD", "Event page limit must be between 1 and 500")
-        with closing(self._read_connection()) as connection:
+        with self._reading() as connection:
             connection.execute("BEGIN")
             row = connection.execute("SELECT * FROM sessions WHERE session_id=?", (session_id,)).fetchone()
             if row is None:

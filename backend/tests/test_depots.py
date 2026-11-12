@@ -24,7 +24,7 @@ import pytest
 from contracts.v2.models import FullSnapshot
 from src.energy.decisions import charge_options, energy_forecasts
 from src.energy.forecast import reserve_kwh
-from src.energy.model import ENERGY_R1
+from src.energy.model import ENERGY_R1, auxiliary_energy_kwh
 from src.routing.build_singapore_fleet_fixture import low_battery_kwh
 from src.services.integrated_actor import IntegratedSessionActor
 
@@ -120,6 +120,8 @@ def test_an_ignored_low_shuttle_turns_back_in_time_and_charges_above_its_reserve
     shuttle = actor.shuttles[1]
     shuttle.battery = (low_battery_kwh(actor, 1)-0.3)*100/actor.BATTERY_CAPACITY_KWH
     reserve = reserve_kwh(ENERGY_R1, actor.BATTERY_CAPACITY_KWH)
+    # Red lights on the way in may hold it up, which the reserve takes: at most this much
+    lights_kwh = max(auxiliary_energy_kwh(ENERGY_R1, actor._signal_wait_s(shuttle, depot)) for depot in actor.definition.depots)
     turned, before = run_until(actor, 1, "SAFETY_RETURN")
     assert "BATTERY_EXHAUSTED" not in {e.event_type for e in before}
     assert turned.data["depot_id"] == depot_id and turned.data["charger_id"] in chargers
@@ -131,7 +133,7 @@ def test_an_ignored_low_shuttle_turns_back_in_time_and_charges_above_its_reserve
     set_down, _ = run_until(actor, 1, "PASSENGERS_SET_DOWN")
     assert set_down.data["stop_id"] == turned.data["set_down_stop_id"], "riders get off before it heads in"
     run_until(actor, 1, "DEPOT_BAY_ARRIVED")
-    assert shuttle.battery*actor.BATTERY_CAPACITY_KWH/100 >= reserve
+    assert shuttle.battery*actor.BATTERY_CAPACITY_KWH/100 >= reserve - lights_kwh
     assert (shuttle.position.x, shuttle.position.y) == tuple(actor.definition.bay_positions[turned.data["charger_id"]])
     started = shuttle.battery
     run_until(actor, 1, "CHARGING_STARTED")

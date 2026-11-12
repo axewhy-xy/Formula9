@@ -84,11 +84,11 @@ namespace Formula9.World
     }
 
     // Turns the backend's incident into what the 3D city draws: the scene on the road, and the traffic
-    // backing up along the roads leading to it. The backend models no other traffic ("No traffic
-    // volume, lanes or signal timings are modelled"), so the queue is illustration: it follows the real
-    // road graph and the incident's own clock, and never affects the shuttle. Only the backend moves
-    // the shuttle, and only on the incident's impact edges. The background traffic keeps off the scene
-    // and stops behind the queue, by way of Hazards.
+    // backing up along the roads leading to it. The queue's cars are illustration: they follow the real
+    // road graph and the incident's own clock, and never affect the shuttle. Only the backend moves the
+    // shuttle, and only on the incident's impact edges. The background traffic keeps off the scene and
+    // stops behind the queue, by way of Hazards: the backend works out the same hazards for the traffic it
+    // drives (src/traffic/incident_hazards.py), and this traffic uses them when it drives itself.
     public static class IncidentSimulation
     {
         public const string Block = "ROAD_BLOCK", Accident = "ROAD_ACCIDENT";
