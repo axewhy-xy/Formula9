@@ -316,7 +316,19 @@ class TrainingStore:
 
     @staticmethod
     def _write_runtime(connection: sqlite3.Connection, session_id: str, state: dict | None) -> None:
+        """Upserts an actor checkpoint. Its "traffic", when it has one ({"tick", "state"}), is kept apart
+        in session_traffic: written only when the actor gives one, about once a second, and given back
+        with the rest by runtime."""
         if state is not None:
+            traffic = state.get("traffic")
+            if traffic is not None:
+                state = {key: value for key, value in state.items() if key != "traffic"}
+                raw = _json(traffic)
+                connection.execute(
+                    "INSERT INTO session_traffic VALUES (?, ?, ?, ?) ON CONFLICT(session_id) "
+                    "DO UPDATE SET tick=excluded.tick, traffic_json=excluded.traffic_json, state_hash=excluded.state_hash",
+                    (session_id, traffic["tick"], raw, _hash(raw)),
+                )
             raw = _json(state)
             connection.execute(
                 "INSERT INTO session_runtimes VALUES (?, ?, ?) ON CONFLICT(session_id) "
@@ -379,7 +391,8 @@ class TrainingStore:
             if row is not None:
                 if row["status"] not in {"ARCHIVED", "COMPLETED", "FAILED"}:
                     raise TrainingStoreError("INVALID_TRANSITION", "Archive the session before permanently deleting it")
-                for table in ("session_creations", "session_runtimes", "commands", "events", "checkpoints", "sessions"):
+                for table in ("session_creations", "session_runtimes", "session_traffic", "commands", "events",
+                              "checkpoints", "sessions"):
                     connection.execute(f"DELETE FROM {table} WHERE session_id=?", (session_id,))
             connection.commit()
         self._submit(write)
@@ -414,14 +427,20 @@ class TrainingStore:
     def runtime(self, session_id: str) -> tuple[FullSnapshot, dict]:
         with self._reading() as connection:
             row = connection.execute(
-                "SELECT s.*, r.checkpoint_json, r.state_hash AS runtime_hash FROM sessions s "
-                "LEFT JOIN session_runtimes r USING(session_id) WHERE s.session_id=?", (session_id,),
+                "SELECT s.*, r.checkpoint_json, r.state_hash AS runtime_hash, t.traffic_json,"
+                " t.state_hash AS traffic_hash FROM sessions s LEFT JOIN session_runtimes r USING(session_id)"
+                " LEFT JOIN session_traffic t USING(session_id) WHERE s.session_id=?", (session_id,),
             ).fetchone()
             if row is None:
                 raise TrainingStoreError("INVALID_REFERENCE", "Training session was not found")
             if row["checkpoint_json"] is None or _hash(row["checkpoint_json"]) != row["runtime_hash"]:
                 raise TrainingStoreError("CORRUPT_CHECKPOINT", "Actor checkpoint hash does not match")
-            return _load_snapshot(row), json.loads(row["checkpoint_json"])
+            state = json.loads(row["checkpoint_json"])
+            if row["traffic_json"] is not None:
+                if _hash(row["traffic_json"]) != row["traffic_hash"]:
+                    raise TrainingStoreError("CORRUPT_CHECKPOINT", "Traffic checkpoint hash does not match")
+                state["traffic"] = json.loads(row["traffic_json"])
+            return _load_snapshot(row), state
 
     def runtimes(self) -> list[tuple[FullSnapshot, dict]]:
         return [self.runtime(session_id) for session_id in self.runtime_ids()]

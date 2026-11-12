@@ -22,6 +22,7 @@ import pytest
 
 from contracts.v2.models import DispatcherCommand
 from contracts.v2.route_edit import RouteApprovalRequest, RouteEditRequest
+from src.services import integrated_actor
 from src.services.integrated_actor import SHUTTLE_FRONT_M, IntegratedSessionActor
 from src.services import training_sessions
 from src.services.training_sessions import TrainingSessionService, checkpoint, next_deadline
@@ -393,6 +394,161 @@ def test_a_recovered_session_drives_its_traffic_on_exactly(tmp_path, monkeypatch
     assert traffic_r == traffic and shuttles_r == shuttles
     # The latest frames, one a published tick, as the 3D view polls them
     assert [json.loads(frame)["tick"] for frame in frames] == [396, 398, 400]
+
+
+async def _start(service, store, actor):
+    """Approves the bypass the closed main road needs and starts the session."""
+    draft = actor.definition.routes.preview(store.snapshot(actor.session_id), RouteEditRequest(
+        route_id="route-m2-detour", expected_route_revision=1, draft_revision=1))
+    approved = await service.approve_route("operator", actor.session_id, RouteApprovalRequest(
+        preview_id=draft.preview_id, preview_revision=draft.preview_revision, command_id="route",
+        idempotency_key="route", target_vehicle_ids=["shuttle-01"], reason="Pre-trip bypass"))
+    assert approved.status == "APPLIED"
+    snapshot = store.snapshot(actor.session_id)
+    start = await service.submit("operator", DispatcherCommand(contract_version="2.0", command_id="start",
+        idempotency_key="start", session_id=actor.session_id, command_type="START", expected_epoch=1,
+        expected_revision=snapshot.session.aggregate_revision, target_type="SESSION", target_id=actor.session_id,
+        payload={}))
+    assert start.status == "APPLIED"
+
+
+@pytest.mark.traffic
+def test_the_traffic_is_checkpointed_apart_about_once_a_second(tmp_path, monkeypatch):
+    monkeypatch.setattr(TrainingSessionService, "_run", _manual_clock)
+
+    async def exercise():
+        actor = IntegratedSessionActor(1000, session_id="traffic-apart")
+        with TrainingStore(tmp_path / "apart.sqlite") as store:
+            store.create_session(actor.generate_snapshot(), runtime_state=checkpoint(actor))
+            service = TrainingSessionService(store)
+            await service.initialize()
+            await _start(service, store, actor)
+            saved = []
+            for _ in range(70):
+                await service.step(service.sessions[actor.session_id])
+                with store._reading() as connection:
+                    runtime, = connection.execute("SELECT checkpoint_json FROM session_runtimes").fetchone()
+                    traffic_tick, = connection.execute("SELECT tick FROM session_traffic").fetchone()
+                runtime = json.loads(runtime)
+                saved.append((runtime["tick"], traffic_tick, "traffic" in runtime, runtime["workflow"]["traffic"]))
+            await service.close()
+            return saved
+
+    saved = asyncio.run(exercise())
+    # Every publication checkpoints the rest of the state, which only notes that the traffic is apart
+    assert all(not inline and workflow == integrated_actor.TRAFFIC_APART for _, _, inline, workflow in saved)
+    # The traffic only every TRAFFIC_CHECKPOINT_TICKS, so never further behind than that
+    every = integrated_actor.TRAFFIC_CHECKPOINT_TICKS
+    assert all(0 <= tick - traffic_tick < every for tick, traffic_tick, _, _ in saved)
+    assert len({traffic_tick for _, traffic_tick, _, _ in saved}) <= 70 // every + 1
+
+
+@pytest.mark.traffic
+def test_a_session_recovered_between_traffic_checkpoints_drives_its_traffic_on(tmp_path, monkeypatch):
+    monkeypatch.setattr(TrainingSessionService, "_run", _manual_clock)
+
+    async def exercise():
+        actor = IntegratedSessionActor(1000, session_id="traffic-between")
+        with TrainingStore(tmp_path / "between.sqlite") as store:
+            store.create_session(actor.generate_snapshot(), runtime_state=checkpoint(actor))
+            service = TrainingSessionService(store)
+            await service.initialize()
+            await _start(service, store, actor)
+            for _ in range(212):
+                await service.step(service.sessions[actor.session_id])
+            with store._reading() as connection:
+                traffic_tick, = connection.execute("SELECT tick FROM session_traffic").fetchone()
+            await service.close()
+            service = TrainingSessionService(store)
+            await service.initialize()
+            restored = service.sessions[actor.session_id].actor
+            result = {"tick": restored.current_tick, "traffic_tick": traffic_tick,
+                      "time_s": restored.traffic.time_s, "overlaps": restored.traffic.shuttle_overlaps(),
+                      "saved_tick": restored.traffic_saved_tick}
+            # The store stayed open, so the session was not paused by a store recovery
+            assert not restored.is_paused
+            before = [s.progress for s in service.sessions[actor.session_id].actor.shuttles]
+            overlaps = []
+            for _ in range(200):
+                await service.step(service.sessions[actor.session_id])
+                overlaps += service.sessions[actor.session_id].actor.traffic.shuttle_overlaps()
+            live = service.sessions[actor.session_id].actor
+            result.update(after=[s.progress for s in live.shuttles], before=before, overlaps_after=overlaps,
+                          frames=service.traffic(actor.session_id, live.current_tick - 4))
+            await service.close()
+            return result
+
+    result = asyncio.run(exercise())
+    # Recovered between traffic checkpoints: the saved traffic is older than the session...
+    assert result["traffic_tick"] < result["tick"] and result["saved_tick"] == result["traffic_tick"]
+    # ...and is driven on to the session's own time, with nothing left under a shuttle
+    assert result["time_s"] == pytest.approx(result["tick"] * IntegratedSessionActor.STEP_S)
+    assert result["overlaps"] == []
+    # It drives on: shuttles move, never into a vehicle, and frames keep coming
+    assert result["after"] != result["before"]
+    assert result["overlaps_after"] == []
+    assert result["frames"]
+
+
+@pytest.mark.traffic
+@pytest.mark.parametrize("damage", ["hash", "missing", "ahead"])
+def test_a_damaged_traffic_checkpoint_fails_its_session_rather_than_being_trusted(tmp_path, monkeypatch, damage):
+    import hashlib
+    import sqlite3
+    monkeypatch.setattr(TrainingSessionService, "_run", _manual_clock)
+    database = tmp_path / "damaged.sqlite"
+    actor = IntegratedSessionActor(1000, session_id="traffic-damaged")
+    with TrainingStore(database) as store:
+        store.create_session(actor.generate_snapshot(), runtime_state=checkpoint(actor))
+    with sqlite3.connect(database) as connection:
+        if damage == "hash":
+            connection.execute("UPDATE session_traffic SET state_hash='bad'")
+        elif damage == "missing":
+            connection.execute("DELETE FROM session_traffic")
+        else:
+            raw, = connection.execute("SELECT traffic_json FROM session_traffic").fetchone()
+            saved = json.loads(raw)
+            saved["tick"] += 2
+            raw = json.dumps(saved)
+            connection.execute("UPDATE session_traffic SET traffic_json=?, state_hash=?",
+                               (raw, hashlib.sha256(raw.encode()).hexdigest()))
+
+    async def recover():
+        with TrainingStore(database) as store:
+            service = TrainingSessionService(store)
+            await service.initialize()
+            try:
+                events = store.replay(actor.session_id, 0, 100).events
+                return len(service.sessions), store.snapshot(actor.session_id).session.status, events[-1].data
+            finally:
+                await service.close()
+
+    assert asyncio.run(recover()) == (0, "FAILED", {"status": "FAILED", "reason": "CORRUPT_CHECKPOINT"})
+
+
+def test_sessions_with_traffic_are_admitted_only_up_to_their_limit(tmp_path, monkeypatch):
+    from contracts.v2.sessions import CreateSessionRequest
+    from src.persistence.training_store import TrainingStoreError
+    monkeypatch.setattr(TrainingSessionService, "_run", _manual_clock)
+    monkeypatch.setattr(TrainingSessionService, "MAX_TRAFFIC_SESSIONS", 1)
+    monkeypatch.setattr(IntegratedSessionActor, "TRAFFIC", True)
+
+    async def exercise():
+        with TrainingStore(tmp_path / "limit.sqlite") as store:
+            service = TrainingSessionService(store)
+            request = CreateSessionRequest(scenario_revision_id=training_sessions.SCENARIO_SELECTOR)
+            await service.create(request, "operator", "first")
+            try:
+                with pytest.raises(TrainingStoreError) as refused:
+                    await service.create(request, "operator", "second")
+                # A session without traffic still has room
+                await service.create(CreateSessionRequest(scenario_revision_id=training_sessions.SCENARIO_REVISION),
+                                     "operator", "plain")
+                return refused.value.code, service.traffic_sessions(), len(service.sessions)
+            finally:
+                await service.close()
+
+    assert asyncio.run(exercise()) == ("QUEUE_FULL", 1, 2)
 
 
 def test_a_session_without_traffic_has_no_frames(tmp_path, monkeypatch):

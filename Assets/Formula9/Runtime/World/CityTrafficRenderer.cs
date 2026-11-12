@@ -8,6 +8,12 @@ using UnityEngine.Rendering;
 namespace Formula9.World
 {
     // Draws and moves the background traffic sample from /api/traffic/{area}.
+    //
+    // The backend's traffic (backend/src/traffic/city_traffic.py) is the source of truth for how the
+    // traffic and the shuttles in it drive: a session whose backend drives the traffic sends its frames,
+    // which are only drawn here (CityTrafficFollow). The driving in CityTrafficDriving and
+    // CityTrafficShuttles is a fallback for a session whose backend sends none; a change to how traffic
+    // drives is made in the backend first, and ported here only if the fallback should match.
     public sealed partial class CityTrafficRenderer : IDisposable
     {
         private const float LaneWidthM = 3.2f;

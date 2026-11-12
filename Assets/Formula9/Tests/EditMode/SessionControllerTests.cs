@@ -285,6 +285,8 @@ namespace Formula9.Tests
         private List<string> errors;
         private List<CommandOutcome> outcomes;
         private List<(FullSnapshot snapshot, bool reset)> snapshots;
+        // The controller's clock, which a test moves on itself
+        private DateTime clock;
         private const string SessionId = "session-001";
 
         // -----------------------------------------------------------------------------------
@@ -292,7 +294,8 @@ namespace Formula9.Tests
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function gives each test a fresh fake backend, a login, a controller with an
-        //     instant retry delay, and lists of the errors, outcomes and snapshots it reports.
+        //     instant retry delay and a clock of its own, and lists of the errors, outcomes and
+        //     snapshots it reports.
         [SetUp]
         public void SetUp()
         {
@@ -300,8 +303,9 @@ namespace Formula9.Tests
             auth = new AuthSession();
             auth.Begin("trainee", "token-1", 3600);
             waits = new List<TimeSpan>();
+            clock = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             controller = new SessionController(new TrainingApi(backend, auth, new Uri("http://backend.test")), auth,
-                delay: (wait, _) => { waits.Add(wait); return Task.CompletedTask; });
+                delay: (wait, _) => { waits.Add(wait); return Task.CompletedTask; }, now: () => clock);
             errors = new List<string>();
             outcomes = new List<CommandOutcome>();
             snapshots = new List<(FullSnapshot, bool)>();
@@ -771,15 +775,16 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: TrafficIsPolledFromTheNewestFrameUntilTheSessionHasNone
+        // Function: TrafficIsPolledFromTheNewestFrameAndAskedAgainLaterWhenThereIsNone
         // -----------------------------------------------------------------------------------
         // Description:
         //     The first traffic poll of a session asks for every frame the backend keeps, and each
         //     later one only for frames after the newest taken, which are reported in order, with
-        //     how long the backend may wait for one. A session the backend drives no traffic for is
-        //     not asked again.
+        //     how long the backend may wait for one. A session the backend has no traffic for is
+        //     not asked again for a while, then is, and picks up where it left off once the
+        //     backend has traffic for it again.
         [Test]
-        public async Task TrafficIsPolledFromTheNewestFrameUntilTheSessionHasNone()
+        public async Task TrafficIsPolledFromTheNewestFrameAndAskedAgainLaterWhenThereIsNone()
         {
             var accepted = new List<IReadOnlyList<TrafficFrame>>();
             controller.TrafficFramesAccepted += accepted.Add;
@@ -809,9 +814,19 @@ namespace Formula9.Tests
             var asked = backend.To("/traffic").Count();
             Assert.AreEqual(-1, await controller.RefreshTrafficAsync(), "nothing asked");
             await controller.RefreshTrafficAsync();
-            Assert.AreEqual(asked, backend.To("/traffic").Count(), "a session without traffic is not asked again");
+            clock += SessionController.NoTrafficRetryInterval - TimeSpan.FromSeconds(0.1);
+            await controller.RefreshTrafficAsync();
+            Assert.AreEqual(asked, backend.To("/traffic").Count(), "a session without traffic is not asked again for a while");
             Assert.AreEqual(2, accepted.Count);
             Assert.IsEmpty(errors, "no traffic is not an error");
+
+            // Having none may have been passing, as while the backend recovered: it is asked again later
+            clock += TimeSpan.FromSeconds(0.1);
+            backend.OnTraffic = _ => Json(backend.Traffic(16));
+            Assert.AreEqual(1, await controller.RefreshTrafficAsync());
+            Assert.AreEqual(asked + 1, backend.To("/traffic").Count());
+            Assert.AreEqual(14L, FakeBackend.AfterTick(backend.To("/traffic").Last()), "from the newest frame taken");
+            CollectionAssert.AreEqual(new long[] { 16 }, accepted[2].Select(f => f.Tick).ToList());
         }
 
         // -----------------------------------------------------------------------------------

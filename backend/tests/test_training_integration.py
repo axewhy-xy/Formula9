@@ -174,6 +174,7 @@ def reserve(runtime, vehicle_id="shuttle-05", key="battery-choice"):
         payload={"option_id": option["option_id"], "option_revision": option["revision"]}, key=key)
 
 
+@pytest.mark.traffic
 def test_one_live_session_runs_route_incident_depot_and_charging(runtime):
     client, store, service, session_id = runtime
     initial = read(runtime)
@@ -206,7 +207,8 @@ def test_one_live_session_runs_route_incident_depot_and_charging(runtime):
     charging = read(runtime)
     assert charging["vehicles"][4]["position"] == bay()
     before_charge = charging["vehicles"][4]["battery_kwh"]
-    advance_until(runtime, lambda s: s.vehicles[4].service_state == "STANDBY", limit=1600)
+    # In the traffic it accelerates and brakes along the yard path rather than driving it at full speed
+    advance_until(runtime, lambda s: s.vehicles[4].service_state == "STANDBY", limit=2400)
     finished = read(runtime)
     assert finished["vehicles"][4]["battery_kwh"] > before_charge
     assert all("shuttle-05" not in c["occupied_vehicle_ids"] for c in finished["chargers"])
@@ -468,6 +470,7 @@ def test_identical_seed_and_inputs_replay_identical_workflow_state(tmp_path, mon
     assert first == second
 
 
+@pytest.mark.traffic
 def test_recovery_preserves_route_hold_and_depot_execution_and_reconfirms_queued_input(tmp_path, monkeypatch):
     monkeypatch.setattr(TrainingSessionService, "_run", manual_clock)
     previous = dict(app.dependency_overrides)
@@ -515,7 +518,7 @@ def test_recovery_preserves_route_hold_and_depot_execution_and_reconfirms_queued
                 runtime = (client, store, app.state.training_services[store], session_id)
                 assert read(runtime)["vehicles"][4]["service_state"] == "CHARGING"
                 send(runtime, "RESUME")
-                advance_until(runtime, lambda s: s.vehicles[4].service_state == "STANDBY", limit=1600)
+                advance_until(runtime, lambda s: s.vehicles[4].service_state == "STANDBY", limit=2400)
                 assert not read(runtime)["chargers"][0]["occupied_vehicle_ids"]
     finally:
         app.dependency_overrides.clear()

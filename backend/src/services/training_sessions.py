@@ -121,7 +121,10 @@ def freeze_static_heap() -> None:
     gc.freeze()
 
 
-def checkpoint(actor: SessionActor) -> dict:
+def checkpoint(actor: SessionActor, *, traffic: bool = True) -> dict:
+    """The actor's private state, committed with its publication. An integrated session's traffic comes
+    with it only when due (IntegratedSessionActor.traffic_checkpoint), which marks the actor; pass traffic
+    False to look at a live actor's state without marking it."""
     state = {
         "version": 1, "seed": actor.seed, "scenario_revision": actor.scenario_revision,
         "tick": actor.current_tick, "command_tick": actor.command_tick,
@@ -134,7 +137,12 @@ def checkpoint(actor: SessionActor) -> dict:
                      limits=asdict(actor.limits), spatial_diagnostics=deepcopy(actor.spatial_diagnostics),
                      spatial_work=actor.spatial_work)
     elif isinstance(actor, IntegratedSessionActor):
-        state.update(version=3, workflow=actor.workflow_state())
+        # The traffic goes in only when its own checkpoint is due (about once a second), and the store
+        # keeps it apart, so the publications in between leave out its 65-100 KB
+        state.update(version=3, workflow=actor.workflow_state(traffic=False))
+        saved = actor.traffic_checkpoint() if traffic else None
+        if saved is not None:
+            state["traffic"] = saved
     return state
 
 
@@ -167,6 +175,12 @@ class LiveSession:
 
 class TrainingSessionService:
     MAX_SESSIONS = 16
+    # Of those, sessions that drive the background traffic. Every session ticks on one core (the GIL),
+    # and one with traffic costs several times one without: some 5 ms of each 50 ms tick on a desktop
+    # (about 2.8 ms without traffic), so six running at once take about two thirds of a core and keep
+    # up. A slow laptop took 14.5 ms, so there fewer keep up: past a core, MAX_TICK_BACKLOG_S lets the
+    # missed ticks go. Recovery restores whatever was admitted; only new sessions are refused.
+    MAX_TRAFFIC_SESSIONS = 6
     FAILURE_RETRY_S = 0.25
 
     def __init__(self, store: TrainingStore, *, retention_keep_latest: int | None = None):
@@ -263,7 +277,7 @@ class TrainingSessionService:
         actor.is_paused = snapshot.session.status != "RUNNING"
         actor.shuttles = [Shuttle.model_validate(item) for item in state["shuttles"]]
         if isinstance(actor, IntegratedSessionActor):
-            actor.restore_workflow(state["workflow"], snapshot)
+            actor.restore_workflow(state["workflow"], snapshot, state.get("traffic"))
         if isinstance(actor, SpatialSessionActor):
             actor.validate_restored_shuttles()
         actor.rng.setstate(_tuples(state["rng"]))
@@ -295,6 +309,10 @@ class TrainingSessionService:
                 raise TrainingStoreError("INVALID_REFERENCE", "Scenario revision is not available")
             if self.closed or len(self.sessions) >= self.MAX_SESSIONS:
                 raise TrainingStoreError("QUEUE_FULL", "Training session capacity reached")
+            if (request.scenario_revision_id == SCENARIO_SELECTOR and IntegratedSessionActor.TRAFFIC
+                    and self.traffic_sessions() >= self.MAX_TRAFFIC_SESSIONS):
+                raise TrainingStoreError("QUEUE_FULL", "Training capacity for sessions with traffic reached; "
+                                                       "archive one to start another")
             snapshot, actor = await asyncio.to_thread(self._create_initial, request, actor_id, key, digest)
             session = LiveSession(actor, baseline=snapshot.model_copy(deep=True))
             self.sessions[actor.session_id] = session
@@ -315,6 +333,11 @@ class TrainingSessionService:
         snapshot.session.status = "READY"
         snapshot = self.store.create_session(snapshot, runtime_state=checkpoint(actor), creation=(actor_id, key, digest))
         return snapshot, actor
+
+    def traffic_sessions(self) -> int:
+        """How many live sessions drive the background traffic."""
+        return sum(isinstance(session.actor, IntegratedSessionActor) and session.actor.traffic is not None
+                   for session in self.sessions.values())
 
     def owns(self, session_id: str) -> bool:
         return session_id in self.sessions

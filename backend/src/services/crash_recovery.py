@@ -252,7 +252,8 @@ def serve(database, output):
         service = app.state.training_services[store]
         session = next(iter(service.sessions.values()))
         async with session.lock:
-            return {"runtime": checkpoint(session.actor), "is_paused": session.actor.is_paused,
+            # As the store keeps it: the traffic's own checkpoint is apart (TrainingStore.runtime)
+            return {"runtime": checkpoint(session.actor, traffic=False), "is_paused": session.actor.is_paused,
                     "session_count": len(service.sessions), "trace": store.trace.export()}
 
     @app.post("/_crash_probe/stop")

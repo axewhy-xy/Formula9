@@ -87,6 +87,9 @@ namespace Formula9.Session
         public static readonly TimeSpan TrafficWait = TimeSpan.FromSeconds(1);
         // After a traffic request fails, or while there is nothing to ask, the next waits this long
         public static readonly TimeSpan TrafficRetryInterval = TimeSpan.FromSeconds(0.25);
+        // A session and epoch the backend has no traffic for is asked again only after this long: it may
+        // have had none for the moment only, as while the backend was still recovering it
+        public static readonly TimeSpan NoTrafficRetryInterval = TimeSpan.FromSeconds(5);
         private static readonly Regex IdPattern = new Regex("^[A-Za-z0-9][A-Za-z0-9_.:-]*$");
         private static readonly HashSet<string> SessionControls = new HashSet<string> { "START", "PAUSE", "RESUME", "ARCHIVE" };
 
@@ -110,6 +113,7 @@ namespace Formula9.Session
         private readonly TrainingApi api;
         private readonly AuthSession auth;
         private readonly Func<TimeSpan, CancellationToken, Task> delay;
+        private readonly Func<DateTime> now;
         private readonly CancellationTokenSource lifetime = new CancellationTokenSource();
 
         private long generation;
@@ -121,9 +125,10 @@ namespace Formula9.Session
         private string joiningSessionId;
         private object snapshotRequest, eventsRequest, commandRequest, createRequest, trafficRequest;
         // The newest traffic frame taken, for the session and epoch named by trafficKey; and a session
-        // and epoch whose backend drives no traffic, which is not asked again
+        // and epoch the backend had no traffic for, which is not asked again until noTrafficUntil
         private long trafficCursor = -1;
         private string trafficKey, noTrafficKey;
+        private DateTime noTrafficUntil;
         private string creationKey, creationOwner, creationScenario;
         private PendingCommand pending;
 
@@ -166,16 +171,19 @@ namespace Formula9.Session
         //     store (SessionStore): Where state is kept; a new store when null.
         //     delay (Func<TimeSpan, CancellationToken, Task>): Waits between retries; Task.Delay
         //         when null. Tests pass an instant delay.
+        //     now (Func<DateTime>): The time, for how long a session without traffic is left alone;
+        //         DateTime.UtcNow when null. Tests pass their own clock.
         //
         // Throws:
         //     ArgumentNullException: If api or auth is null.
         public SessionController(TrainingApi api, AuthSession auth, SessionStore store = null,
-            Func<TimeSpan, CancellationToken, Task> delay = null)
+            Func<TimeSpan, CancellationToken, Task> delay = null, Func<DateTime> now = null)
         {
             this.api = api ?? throw new ArgumentNullException(nameof(api));
             this.auth = auth ?? throw new ArgumentNullException(nameof(auth));
             Store = store ?? new SessionStore();
             this.delay = delay ?? Task.Delay;
+            this.now = now ?? (() => DateTime.UtcNow);
         }
 
         // -----------------------------------------------------------------------------------
@@ -323,8 +331,9 @@ namespace Formula9.Session
         //     This function is one request for the joined session's traffic: the backend's frames
         //     since the newest taken, which TrafficFramesAccepted reports. Given a wait, the backend
         //     holds the request that long for a frame newer than those taken. A new session or epoch
-        //     starts over. A session whose backend drives no traffic is not asked again; any other
-        //     failure is left to the snapshot poll to report, and the next request tries again.
+        //     starts over. A session the backend has no traffic for is not asked again for
+        //     NoTrafficRetryInterval, since that may be passing (as while the backend recovers); any
+        //     other failure is left to the snapshot poll to report, and the next request tries again.
         //
         // Args:
         //     wait (TimeSpan): How long the backend may hold the request for the next frame; none by default.
@@ -337,7 +346,7 @@ namespace Formula9.Session
             var sessionId = SessionId;
             if (!auth.IsLoggedIn || sessionId == null || !Available || trafficRequest != null) return -1;
             var key = $"{sessionId}/{epoch}";
-            if (key == noTrafficKey) return -1;
+            if (key == noTrafficKey && now() < noTrafficUntil) return -1;
             if (key != trafficKey) { trafficKey = key; trafficCursor = -1; }
             var token = trafficRequest = new object();
             var started = generation;
@@ -349,7 +358,11 @@ namespace Formula9.Session
             catch (BackendErrorException error) when (error.Error.Code == "INVALID_REFERENCE")
             {
                 if (trafficRequest == token) trafficRequest = null;
-                if (started == generation) noTrafficKey = key;
+                if (started == generation)
+                {
+                    noTrafficKey = key;
+                    noTrafficUntil = now() + NoTrafficRetryInterval;
+                }
                 return -1;
             }
             catch (Exception error) when (!(error is OperationCanceledException))

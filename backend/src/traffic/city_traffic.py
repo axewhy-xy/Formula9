@@ -17,6 +17,11 @@ way to them, as they did in the Unity client.
 Everything is deterministic: the same session from the same state drives the same way, and state() and
 from_state() carry it through a checkpoint exactly. Unity's float arithmetic is not reproduced, so the
 two never ran in lockstep; the client now draws this traffic instead of driving its own.
+
+This is the source of truth for how the traffic and the shuttles in it drive. The client's
+CityTrafficDriving.cs and CityTrafficShuttles.cs remain only as a fallback, for a session whose backend
+sends no traffic frames: change the driving here, and port a change there only if the fallback should
+match.
 """
 
 from __future__ import annotations

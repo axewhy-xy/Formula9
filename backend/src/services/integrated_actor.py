@@ -63,6 +63,12 @@ HAZARD_REFRESH_TICKS = 10
 # The background traffic steps every this many ticks: a tenth of a second, the longest step the 3D view
 # ever took, and on the ticks a snapshot is published, so each traffic frame shows a fresh step
 TRAFFIC_STEP_TICKS = 2
+# The traffic is checkpointed at most this often (a second), apart from the rest of the session's state,
+# which is checkpointed at every publication: the traffic is 65-100 KB, the rest some 35 KB. A recovered
+# session drives the traffic it saved on to the session's tick (restore_workflow).
+TRAFFIC_CHECKPOINT_TICKS = 20
+# What a checkpoint's workflow holds for a traffic checkpointed apart (see TrainingStore.runtime)
+TRAFFIC_APART = "apart"
 # What every incident says the session models of the roads
 TRAFFIC_ASSUMPTION = ("Background traffic is a 0.1% sample of Singapore's registered vehicles driving a simple "
                       "car-following model on OpenStreetMap roads; shuttles keep to the kerb lane, queue behind it and "
@@ -278,6 +284,8 @@ class IntegratedSessionActor(SessionActor):
         self.domain = self.generate_snapshot()
         # How each shuttle was held this step, for the traffic around it; never outlives the step
         self.traffic_holds = {}
+        # The tick of the traffic's latest checkpoint; None before its first (see traffic_checkpoint)
+        self.traffic_saved_tick = None
         if self.TRAFFIC:
             self.traffic = CityTraffic.start(SIGNAL_AREA)
             if self.traffic is not None:
@@ -1038,6 +1046,22 @@ class IntegratedSessionActor(SessionActor):
                 self.random_incidents, self.domain, self.definition.network["edges"], self.STEP_S, self.current_tick))
         self.traffic.step(self.STEP_S*TRAFFIC_STEP_TICKS, self.timestamp_second)
 
+    def _catch_up_traffic(self, saved_tick):
+        """Drives traffic checkpointed at saved_tick on to the session's tick, as _drive_traffic would have,
+        then places the shuttles in it where they are now, sending off any vehicle under one.
+
+        The shuttles' moves since are not known, so the traffic drives on around them where they were
+        then; a shuttle has moved on along its own lane since, so this seldom puts anything under one."""
+        for tick in range(saved_tick + 1, self.current_tick + 1):
+            if tick % TRAFFIC_STEP_TICKS:
+                continue
+            if tick % HAZARD_REFRESH_TICKS == 0:
+                self.traffic.set_hazards(incident_hazards.live_hazards(
+                    self.random_incidents, self.domain, self.definition.network["edges"], self.STEP_S, tick))
+            self.traffic.step(self.STEP_S*TRAFFIC_STEP_TICKS, tick*self.STEP_S)
+        self._place_in_traffic({})
+        self.traffic.clear_shuttles()
+
     def _place_in_traffic(self, moved, blocked=()):
         """Tells the traffic where every shuttle is now and how fast it went (moved, metres this step).
 
@@ -1392,7 +1416,9 @@ class IntegratedSessionActor(SessionActor):
         if self.traffic is not None:
             self._place_in_traffic(moved, blocked)
 
-    def workflow_state(self):
+    def workflow_state(self, *, traffic: bool = True):
+        """The session's private state. With traffic False, the traffic is left to traffic_checkpoint
+        and only noted as TRAFFIC_APART (None for a session without it)."""
         return {"domain": self.domain.model_dump(mode="json"), "modes": {str(k): v for k, v in self.modes.items()},
             "charge_elapsed": {str(k): v for k, v in self.charge_elapsed.items()},
             "charge_started_kwh": {str(k): v for k, v in self.charge_started_kwh.items()},
@@ -1405,10 +1431,27 @@ class IntegratedSessionActor(SessionActor):
             "stop_names": self.stop_names,
             "loop_started": {str(k): list(v) for k, v in self.loop_started.items()},
             "pending_events": [e.model_dump(mode="json") for e in self.pending_events],
-            "traffic": self.traffic.state() if self.traffic is not None else None}
+            "traffic": None if self.traffic is None else self.traffic.state() if traffic else TRAFFIC_APART}
 
-    def restore_workflow(self, state, snapshot):
-        """Restore checkpointed execution; reject disagreement with durable public state."""
+    def traffic_checkpoint(self):
+        """The traffic's checkpoint, {"tick", "state"}, when one is due: the first, or TRAFFIC_CHECKPOINT_TICKS
+        after the latest. None when none is due, or the session has no traffic.
+
+        Taking one marks it as the latest. A checkpoint is taken on a staged copy of the actor, which is
+        installed only once its commit is durable, so the mark never runs ahead of what was committed.
+        """
+        if self.traffic is None or not (self.traffic_saved_tick is None
+                                        or self.current_tick - self.traffic_saved_tick >= TRAFFIC_CHECKPOINT_TICKS):
+            return None
+        self.traffic_saved_tick = self.current_tick
+        return {"tick": self.current_tick, "state": self.traffic.state()}
+
+    def restore_workflow(self, state, snapshot, traffic=None):
+        """Restore checkpointed execution; reject disagreement with durable public state.
+
+        traffic is the traffic's own latest checkpoint ({"tick", "state"}, see traffic_checkpoint), for a
+        workflow that holds TRAFFIC_APART. Taken at most TRAFFIC_CHECKPOINT_TICKS before the session's
+        tick, its traffic is driven on to that tick, and the shuttles placed in it where they now are."""
         domain = FullSnapshot.model_validate(state["domain"])
         excluded = {"snapshot_id", "event_sequence", "session_epoch", "session"}
         if domain.model_dump(exclude=excluded) != snapshot.model_dump(exclude=excluded):
@@ -1434,13 +1477,22 @@ class IntegratedSessionActor(SessionActor):
         self.incident_due_tick = state.get("incident_due_tick", self.incident_due_tick)
         self.random_incident = state.get("random_incident")
         self.random_incidents = state.get("random_incidents", [self.random_incident] if self.random_incident else [])
+        # The traffic checkpointed apart, as it is since that made publications cheaper: taken at saved_tick
+        saved_tick = self.current_tick
+        if state.get("traffic") == TRAFFIC_APART:
+            if (not isinstance(traffic, dict) or type(traffic.get("tick")) is not int
+                    or not 0 <= traffic["tick"] <= self.current_tick):
+                raise TrainingStoreError("CORRUPT_CHECKPOINT", "Traffic checkpoint is missing or ahead of the session")
+            saved_tick = traffic["tick"]
+            state = {**state, "traffic": traffic.get("state")}
         # A checkpoint from before the backend drove the traffic has none: its traffic starts from the
         # area's sample now, as a new session's does
         if "traffic" in state:
             try:
                 self.traffic = CityTraffic.from_state(state["traffic"]) if state["traffic"] is not None else None
-            except (ValueError, KeyError, TypeError, IndexError) as error:
+            except (ValueError, KeyError, TypeError, IndexError, AttributeError) as error:
                 raise TrainingStoreError("CORRUPT_CHECKPOINT", "Traffic checkpoint is invalid") from error
+        self.traffic_saved_tick = saved_tick if self.traffic is not None else None
         self.traffic_holds = {}
         self.domain = snapshot.model_copy(deep=True)
         if set(self.modes) != set(range(5)) or [s.ID for s in self.shuttles] != list(range(5)):
@@ -1467,3 +1519,5 @@ class IntegratedSessionActor(SessionActor):
                 path = self.traffic.shuttle_route(shuttle.route_ID, self._routes[shuttle.route_ID]["waypoints"])
                 if record is not None and record.route_sig == path.sig:
                     record.route = path
+            if saved_tick < self.current_tick:
+                self._catch_up_traffic(saved_tick)

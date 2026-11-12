@@ -56,8 +56,18 @@ U-turns are refused. `GET /api/v2/sessions/{id}/routes/{route}/outcome` reads ba
 An integrated session drives its shuttles through the area's background traffic
 (`src/traffic/city_traffic.py`): the 0.1% sample of Singapore's vehicles from
 `fixtures/traffic/toa-payoh.json` on its OpenStreetMap roads, under the simulated lights of
-`fixtures/traffic/toa-payoh-signals.json`, ported from the 3D client's traffic. The session owns and
-checkpoints it, so a recovered session drives on exactly as the original would. In the traffic a
+`fixtures/traffic/toa-payoh-signals.json`, ported from the 3D client's traffic. `city_traffic.py` is
+the source of truth for how the traffic drives: the client's own driving
+(`Assets/Formula9/Runtime/World/CityTrafficDriving.cs` and `CityTrafficShuttles.cs`) is only a fallback
+for a session whose backend sends no traffic frames, so a change to how traffic or shuttles drive is
+made here, and ported to the client only if the fallback should match. The session owns and
+checkpoints it: the rest of its private state (some 35 KB) with every publication, the traffic
+(65-100 KB) apart, in `session_traffic`, and at most once a second (`TRAFFIC_CHECKPOINT_TICKS`). A recovered session drives
+the saved traffic on to its own tick around where its shuttles were, then places them where they now
+are, sending off any vehicle under one; so it drives on exactly as the original would only when it
+was saved on a traffic checkpoint. Each session with traffic costs several times one without (about
+5 ms of a 50 ms tick on a desktop, 14.5 ms on a slow laptop, all on one core), so at most
+`TrainingSessionService.MAX_TRAFFIC_SESSIONS` of them are admitted at once. In the traffic a
 shuttle keeps to the kerb lane, accelerates and brakes, follows the vehicle in front, gives way, and
 queues behind vehicles waiting at a red light; incidents close their road and back the traffic up
 (`src/traffic/incident_hazards.py`). `GET /api/v2/sessions/{id}/traffic?after_tick=N&wait_ms=M`
@@ -72,7 +82,8 @@ late does not push back the ticks after it: `TrainingSessionService` catches up 
 pace. The client draws the frames a little behind the newest on a clock that matches their pace and
 lateness (`Assets/Formula9/Runtime/World/TrafficPlaybackClock.cs`). The tests run integrated
 sessions without traffic unless marked `traffic` (`tests/conftest.py`); `tests/test_city_traffic.py`
-covers it.
+covers it, and the main workflow and recovery tests of `tests/test_training_integration.py` also run
+with it.
 
 A session pins the fixture it started on. After the network or scenario changes, sessions from
 the old revision can't be recovered: they are marked `FAILED` with `CORRUPT_CHECKPOINT`, stay
