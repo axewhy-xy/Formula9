@@ -79,8 +79,9 @@
 
                 <ui:Foldout text="Session maintenance" value="false" class="session-tools session-maintenance">
                     <ui:VisualElement class="row">
+                        <ui:Button name="archive-all" text="Archive everyone's live sessions…" class="session-button session-caution" tooltip="Admin action: ends every live session on this backend, other trainees' too, and frees its slot. Their history stays available." />
                         <ui:Button name="delete-session" text="Delete permanently…" class="session-button session-caution" tooltip="Remove the selected archived, completed or failed session and all of its history, for everyone." />
-                        <ui:Button name="purge-sessions" text="Delete old sessions…" class="session-button session-caution" tooltip="Remove every finished session except the most recent ones." />
+                        <ui:Button name="purge-sessions" text="Delete old sessions…" class="session-button session-caution" tooltip="Permanently remove finished sessions older than the 20 newest. The dialog says how many first. Live sessions are kept." />
                         <ui:Button name="reclaim-disk" text="Reclaim disk space" class="session-button session-quiet" tooltip="Return space freed by deletions to the disk. Archive all live sessions first." />
                     </ui:VisualElement>
                 </ui:Foldout>

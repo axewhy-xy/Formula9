@@ -51,7 +51,7 @@ namespace Formula9.UI
         private int sessionListLimit = SessionListPage;
         private long liveSessions = -1;
         private bool cleanupBusy;
-        private Button moreSessions, deleteSession, purgeSessions, reclaimDisk, dialogCancel, dialogConfirm;
+        private Button moreSessions, archiveAll, deleteSession, purgeSessions, reclaimDisk, dialogCancel, dialogConfirm;
         private VisualElement dialogOverlay;
         private Label dialogText;
         private Func<Task> dialogAction;
@@ -406,11 +406,13 @@ namespace Formula9.UI
                 sessionListLimit = Math.Min(sessionListLimit + SessionListPage, MaxSessionListLimit);
                 Run(RefreshSessionList());
             };
+            archiveAll = root.Q<Button>("archive-all");
             deleteSession = root.Q<Button>("delete-session");
             purgeSessions = root.Q<Button>("purge-sessions");
             reclaimDisk = root.Q<Button>("reclaim-disk");
+            archiveAll.clicked += ConfirmArchiveAll;
             deleteSession.clicked += ConfirmDeleteSession;
-            purgeSessions.clicked += ConfirmPurgeSessions;
+            purgeSessions.clicked += () => Run(ConfirmPurgeSessions());
             reclaimDisk.clicked += () => Run(Cleanup("Reclaiming disk space…", async () => TrainingPresenter.Reclaimed(await api.CompactSessionsAsync())));
             RenderCleanup();
 
@@ -603,10 +605,27 @@ namespace Formula9.UI
         //     purge, and reclaim disk space only when no session is live.
         private void RenderCleanup()
         {
+            archiveAll.SetEnabled(!cleanupBusy && liveSessions > 0);
             deleteSession.SetEnabled(!cleanupBusy && TrainingPresenter.CanDelete(SelectedEntry));
             purgeSessions.SetEnabled(!cleanupBusy);
             reclaimDisk.SetEnabled(!cleanupBusy && liveSessions == 0);
         }
+
+        // -----------------------------------------------------------------------------------
+        // Function: ConfirmArchiveAll
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function asks before archiving every live session on the backend, other
+        //     trainees' too, which frees their slots so new sessions can be created. It is an
+        //     admin action, and the dialog says so. SessionController.ArchiveAllAsync does the
+        //     work and reports how many were really archived.
+        private void ConfirmArchiveAll() => Confirm(
+            "Archive every live session on this backend, including other trainees' running ones? Each attempt ends for everyone in it and its slot is freed. Their history stays available.",
+            "Archive all", () => Cleanup("Archiving live sessions…", async () =>
+            {
+                var (live, archived) = await session.ArchiveAllAsync();
+                return TrainingPresenter.ArchivedAll(live, archived);
+            }));
 
         // -----------------------------------------------------------------------------------
         // Function: ConfirmDeleteSession
@@ -632,15 +651,25 @@ namespace Formula9.UI
         // Function: ConfirmPurgeSessions
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function asks before deleting every finished session except the most recent
-        //     ones.
-        private void ConfirmPurgeSessions() => Confirm(
-            $"Permanently delete every archived, completed or failed session except the {KeptByPurge} most recent? Their history is removed for everyone. This cannot be undone.",
-            "Delete old sessions", () => Cleanup("Deleting old sessions…", async () =>
+        //     This function reads the session counts, then asks before deleting the finished
+        //     sessions older than the KeptByPurge newest, saying exactly how many go; with none
+        //     to delete it says so instead of asking. Live sessions are never deleted.
+        //
+        // Returns:
+        //     Task: The count and the question.
+        private async Task ConfirmPurgeSessions()
+        {
+            var list = await api.ListSessionsAsync(1);
+            var deleted = TrainingPresenter.PurgeCount(list, KeptByPurge);
+            if (deleted == 0)
             {
-                var deleted = await api.PurgeSessionsAsync(KeptByPurge);
-                return deleted == 0 ? "No old sessions to delete." : $"Deleted {deleted} old training sessions.";
-            }));
+                ShowMessage(TrainingPresenter.PurgeQuestion(list, KeptByPurge));
+                return;
+            }
+            Confirm(TrainingPresenter.PurgeQuestion(list, KeptByPurge), $"Delete {deleted}", () => Cleanup(
+                "Deleting old sessions…",
+                async () => TrainingPresenter.Purged(await api.PurgeSessionsAsync(KeptByPurge))));
+        }
 
         // -----------------------------------------------------------------------------------
         // Function: ConfirmArchive

@@ -92,6 +92,12 @@ namespace Formula9.Session
         public static readonly TimeSpan NoTrafficRetryInterval = TimeSpan.FromSeconds(5);
         private static readonly Regex IdPattern = new Regex("^[A-Za-z0-9][A-Za-z0-9_.:-]*$");
         private static readonly HashSet<string> SessionControls = new HashSet<string> { "START", "PAUSE", "RESUME", "ARCHIVE" };
+        // Archive all lists one page: live sessions come first, and at most the capacity (16) are live
+        private const int ArchiveListPage = 50;
+        // A queued ARCHIVE is applied within a tick or two, so Archive all looks again this many times,
+        // this far apart, before counting a session as still live
+        private const int ArchiveChecks = 5;
+        public static readonly TimeSpan ArchiveCheckInterval = TimeSpan.FromSeconds(0.5);
 
         // -----------------------------------------------------------------------------------
         // Class: PendingCommand
@@ -397,13 +403,85 @@ namespace Formula9.Session
         {
             if (!SessionControls.Contains(commandType)) throw new ArgumentException("Not a session control", nameof(commandType));
             if (Session == null) return Refuse();
-            return SubmitAsync(new DispatcherCommand
+            return SubmitAsync(ControlCommand(Session.SessionId, Session.SessionEpoch, Session.AggregateRevision, commandType));
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: ControlCommand
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function builds a session control command (START, PAUSE, RESUME or ARCHIVE)
+        //     for a session at a given epoch and revision. It is the one place such commands are
+        //     made, for the joined session and for the sessions Archive all ends.
+        //
+        // Args:
+        //     sessionId (string): The session.
+        //     epoch (long): The session's current epoch.
+        //     revision (long): The session's current aggregate revision.
+        //     commandType (string): The control.
+        //
+        // Returns:
+        //     DispatcherCommand: The command, ready to submit.
+        public static DispatcherCommand ControlCommand(string sessionId, long epoch, long revision, string commandType) =>
+            new DispatcherCommand
             {
                 ContractVersion = "2.0", CommandId = Guid.NewGuid().ToString(), IdempotencyKey = Guid.NewGuid().ToString(),
-                SessionId = Session.SessionId, CommandType = commandType, ExpectedEpoch = Session.SessionEpoch,
-                ExpectedRevision = Session.AggregateRevision, TargetType = "SESSION", TargetId = Session.SessionId,
+                SessionId = sessionId, CommandType = commandType, ExpectedEpoch = epoch,
+                ExpectedRevision = revision, TargetType = "SESSION", TargetId = sessionId,
                 Payload = new Newtonsoft.Json.Linq.JObject(), Reason = null,
-            });
+            };
+
+        // -----------------------------------------------------------------------------------
+        // Function: ArchiveAllAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function archives every live session on the backend, whoever started it, to
+        //     free their slots. The joined session goes through SendControlAsync, as its Archive
+        //     button does, so the one open command and the refresh after it still hold; any other
+        //     is archived at the epoch and revision its snapshot gives. A session that fails, for
+        //     any reason but a login that has run out, is left live and the rest carry on. What
+        //     was archived is then read back from the session list rather than from the replies,
+        //     since a queued ARCHIVE is only applied a tick or two later.
+        //
+        // Returns:
+        //     Task<(int Live, int Archived)>: How many sessions were live, and how many of those
+        //         are no longer live.
+        //
+        // Throws:
+        //     NotLoggedInException: If the login runs out.
+        public async Task<(int Live, int Archived)> ArchiveAllAsync()
+        {
+            var listed = await api.ListSessionsAsync(ArchiveListPage, lifetime.Token);
+            var live = listed.Sessions.Where(s => s.OccupiesCapacity).Select(s => s.SessionId).ToList();
+            foreach (var id in live)
+            {
+                try
+                {
+                    if (id == SessionId && Session != null)
+                    {
+                        await SendControlAsync("ARCHIVE");
+                        continue;
+                    }
+                    var snapshot = await api.GetSnapshotAsync(id, lifetime.Token);
+                    await api.SubmitCommandAsync(ControlCommand(id, snapshot.SessionEpoch, snapshot.Session.AggregateRevision, "ARCHIVE"), lifetime.Token);
+                }
+                catch (NotLoggedInException) { throw; }
+                // A timeout, a refusal or a bad reply: this one stays live, counted below
+                catch (Exception) { }
+            }
+            var stillLive = new HashSet<string>(live);
+            for (var check = 0; check < ArchiveChecks && stillLive.Count > 0; check++)
+            {
+                if (check > 0) await delay(ArchiveCheckInterval, lifetime.Token);
+                try
+                {
+                    var now = await api.ListSessionsAsync(ArchiveListPage, lifetime.Token);
+                    stillLive.IntersectWith(now.Sessions.Where(s => s.OccupiesCapacity).Select(s => s.SessionId));
+                }
+                catch (NotLoggedInException) { throw; }
+                catch (Exception) { break; }
+            }
+            return (live.Count, live.Count - stillLive.Count);
         }
 
         // -----------------------------------------------------------------------------------
