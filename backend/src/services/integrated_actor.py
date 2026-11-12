@@ -284,6 +284,23 @@ class IntegratedSessionActor(SessionActor):
                 self._place_in_traffic({})
                 self.traffic.clear_shuttles()
 
+    def __deepcopy__(self, memo):
+        """A staged session copies its actor every tick, so the copy shares the route geometry, which is
+        never changed in place: a path (its dict and its waypoints) is only replaced or dropped
+        (_adopt_route, _head_for_bay, synchronize), and so is each of the domain's routes, which a
+        command or incident edits in a snapshot copy that synchronize then installs. Everything else,
+        the domain's route list included, is copied as deepcopy would."""
+        for path in (*self._routes.values(), *self.route):
+            memo[id(path)] = path
+            memo[id(path["waypoints"])] = path["waypoints"]
+        for route in self.domain.routes:
+            memo[id(route)] = route
+        copy = type(self).__new__(type(self))
+        memo[id(self)] = copy
+        for name, value in self.__dict__.items():
+            copy.__dict__[name] = deepcopy(value, memo)
+        return copy
+
     def _validated_routes(self, route):
         return validate_routes(route, MAX_ROUTE_WAYPOINTS)
 
@@ -795,7 +812,7 @@ class IntegratedSessionActor(SessionActor):
     def depot_distances(self):
         return {self.domain.vehicles[shuttle.ID].vehicle_id: self.depot_choice(shuttle)[1] for shuttle in self.shuttles}
 
-    def battery_decisions(self, model, snapshot):
+    def battery_decisions(self, model, snapshot, *, in_place=False):
         choices = {self.domain.vehicles[shuttle.ID].vehicle_id: self.depot_choice(shuttle) for shuttle in self.shuttles}
         # From each loop's end, the way in to the furthest depot it must keep in reach (see _safety_returns)
         returns = {self.domain.vehicles[shuttle.ID].vehicle_id: max(self._route_tail(shuttle, depot) for depot in self._guarded_depots(shuttle))
@@ -809,10 +826,12 @@ class IntegratedSessionActor(SessionActor):
                 for shuttle, vehicle in zip(self.shuttles, snapshot.vehicles)
                 for charger_id in self.definition.bay_positions},
             depot_choices={vehicle_id: depot["depot_id"] for vehicle_id, (depot, _) in choices.items()},
-            return_distances_m=returns)
+            return_distances_m=returns, in_place=in_place)
 
-    def generate_snapshot(self) -> FullSnapshot:
-        result = self.domain.model_copy(deep=True)
+    def generate_snapshot(self, *, in_place: bool = False) -> FullSnapshot:
+        """The public snapshot of where the session is now: a copy of the domain, or with in_place the
+        domain itself, filled in (for a caller about to replace the domain with it)."""
+        result = self.domain if in_place else self.domain.model_copy(deep=True)
         result.tick, result.simulation_time_s = self.current_tick, self.current_tick*self.STEP_S
         result.session_epoch = result.session.session_epoch = self.session_epoch
         result.session.aggregate_revision = self.command_revision
@@ -826,7 +845,8 @@ class IntegratedSessionActor(SessionActor):
             a = self._route_evaluation(shuttle.route_ID, max(0, shuttle.progress-.01))
             b = self._route_evaluation(shuttle.route_ID, shuttle.progress+.01)
             vehicle.heading_deg = math.degrees(math.atan2(b.y-a.y, b.x-a.x))
-        return self.battery_decisions(ENERGY_R1, result)
+        # result is this call's own copy: fill it rather than copy it again
+        return self.battery_decisions(ENERGY_R1, result, in_place=True)
 
     @staticmethod
     def _project(path, point):
@@ -844,8 +864,9 @@ class IntegratedSessionActor(SessionActor):
             raise TrainingStoreError("INVALID_PAYLOAD", "Approved path does not connect to the shuttle position")
         return best[1]
 
-    def synchronize(self, snapshot: FullSnapshot):
-        """Apply validated domain consequences to a staged controller, before commit."""
+    def synchronize(self, snapshot: FullSnapshot, *, adopt: bool = False):
+        """Apply validated domain consequences to a staged controller, before commit. With adopt, the
+        snapshot itself becomes the domain rather than a copy of it: for a caller that no longer uses it."""
         starting = self.domain.session.status == "READY" and snapshot.session.status == "RUNNING"
         old = {v.vehicle_id: v for v in self.domain.vehicles}
         known = {route.route_id: route.revision for route in self.domain.routes}
@@ -900,7 +921,7 @@ class IntegratedSessionActor(SessionActor):
                 self._routes.pop(detour, None)
                 self.stop_progress.pop(detour, None)
                 self.stop_names.pop(detour, None)
-        self.domain = snapshot.model_copy(deep=True)
+        self.domain = snapshot if adopt else snapshot.model_copy(deep=True)
         self.command_revision = snapshot.session.aggregate_revision
         self.is_paused = snapshot.session.status != "RUNNING"
 

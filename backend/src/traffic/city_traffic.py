@@ -361,6 +361,8 @@ class CityTraffic:
         self._look: list[tuple[float, float]] = []
         self._bodies: list[tuple] = []
         self._shuttle_routes: dict[str, tuple] = {}
+        # False while the vehicles (and their claims) are shared with a copy: see _own_vehicles
+        self._owns_vehicles = True
 
     # ---------------------------------------------------------------- building and copying
 
@@ -416,22 +418,37 @@ class CityTraffic:
         self.vehicles.append(vehicle)
 
     def __deepcopy__(self, memo) -> CityTraffic:
-        """A staged session copies its actor every step, so this copies only what changes."""
+        """A staged session copies its actor every tick, so this copies only what changes.
+
+        The vehicles change only when the traffic steps, every TRAFFIC_STEP_TICKS ticks, or takes new
+        hazards: until then the copy and the original share them, and whichever changes them first takes
+        its own copy (_own_vehicles). A tick the traffic does not step clones none of them."""
         copy = CityTraffic.__new__(CityTraffic)
         copy.__dict__.update(self.__dict__)
-        copy.vehicles = [vehicle.clone() for vehicle in self.vehicles]
+        self._owns_vehicles = copy._owns_vehicles = False
         copy.shuttles = {key: shuttle.clone() for key, shuttle in self.shuttles.items()}
         copy.hazards = {road: spans[:] for road, spans in self.hazards.items()}
-        copy._claims_by_node = {}
-        for vehicle in copy.vehicles:
-            for claim in vehicle.claims:
-                copy._claims_by_node.setdefault(claim.node, []).append(claim)
         copy._lanes, copy._filled, copy._requests, copy._asked, copy._look, copy._bodies = {}, [], {}, [], [], []
         # Keyed by the actor's own waypoint lists, which the same deepcopy copies: keep them the same objects
         copy._shuttle_routes = {key: (deepcopy(waypoints, memo), route)
                                 for key, (waypoints, route) in self._shuttle_routes.items()}
         memo[id(self)] = copy
         return copy
+
+    def _own_vehicles(self) -> None:
+        """Before anything changes a vehicle: vehicles shared with a copy are cloned first, so a staged
+        copy never changes the traffic it was taken from, nor that traffic its copies. Their junction
+        claims are gathered again in the vehicles' order, as a copy always did."""
+        if self._owns_vehicles:
+            return
+        self.vehicles = [vehicle.clone() for vehicle in self.vehicles]
+        self._claims_by_node = {}
+        for vehicle in self.vehicles:
+            for claim in vehicle.claims:
+                self._claims_by_node.setdefault(claim.node, []).append(claim)
+        # The lanes list the vehicles that were shared
+        self._lanes, self._filled = {}, []
+        self._owns_vehicles = True
 
     def state(self) -> dict:
         """Everything a checkpoint needs to carry on exactly as this would."""
@@ -487,6 +504,7 @@ class CityTraffic:
     def set_hazards(self, hazards: list[tuple[list[tuple[float, float]], bool]]) -> None:
         """Replaces what traffic must keep off: (line, both ways) pairs, a one-way line running the way
         the traffic it holds up goes. Vehicles change their minds about roads they had not yet reached."""
+        self._own_vehicles()
         found: dict[int, list[tuple[float, float]]] = {}
         for path, both_ways in hazards:
             if len(path) < 2:
@@ -528,6 +546,7 @@ class CityTraffic:
 
     def step(self, dt: float, time_s: float) -> None:
         """Drives every vehicle for dt seconds, the lights showing their colours at time_s."""
+        self._own_vehicles()
         self.time_s = time_s
         # The shuttles' bodies, which no vehicle drives or comes in on top of this step
         self._bodies = [(s.x, s.y, s.fx, s.fy, s.half_length, s.half_width) for s in self.shuttles.values() if s.placed]
@@ -1306,6 +1325,7 @@ class CityTraffic:
 
     def clear_shuttles(self) -> None:
         """Sends off the map any vehicle under a shuttle, as one the sample happened to place there."""
+        self._own_vehicles()
         self._fill_lanes()
         self._bodies = [(s.x, s.y, s.fx, s.fy, s.half_length, s.half_width) for s in self.shuttles.values() if s.placed]
         for shuttle in self.shuttles.values():
@@ -1344,6 +1364,8 @@ class CityTraffic:
     def report(self) -> dict:
         """Counts for tests and diagnostics: vehicles driving and waiting outside, vehicles overlapping the
         one in front in their lane, red lights run, the mean speed, and bodies touching a shuttle."""
+        # Filling the lanes numbers the vehicles in them
+        self._own_vehicles()
         self._fill_lanes()
         driving = outside = overlaps = 0
         speed = 0.0

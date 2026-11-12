@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+import gc
 from collections.abc import Coroutine
 from contextvars import Context
 from copy import deepcopy
@@ -23,10 +24,11 @@ from src.core.training_telemetry import SessionProgress, boundary
 from src.schemas.shuttle_data import Shuttle
 from src.services.asset_loader import load_routes_from_json
 from src.services.session_actor import SessionActor
-from src.services.integrated_actor import IntegratedSessionActor, SCENARIO_SELECTOR
+from src.services.integrated_actor import IntegratedSessionActor, SCENARIO_SELECTOR, SIGNAL_AREA, get_workflow_definition
 from src.services.training_workflow import approve_workflow_route, publish_workflow, submit_workflow
 from src.services.spatial_session_actor import MotionLimits, SpatialSessionActor
 from src.services.training_scene import SceneValidationError
+from src.traffic.road_network import road_network
 
 logger = logging.getLogger(__name__)
 SCENARIO_REVISION = "scenario-m2-r1"
@@ -95,6 +97,28 @@ def next_deadline(deadline_ns: int, now_ns: int, step_ns: int,
     longer than max_backlog_ns is let go, so a stalled process does not then rush through minutes of ticks.
     """
     return max(deadline_ns + step_ns, now_ns - max_backlog_ns)
+
+
+_static_heap_frozen = False
+
+
+def freeze_static_heap() -> None:
+    """Loads what every integrated session shares, the scenario and its road network, and has the garbage
+    collector leave it, with everything else alive by then, out of its full collections, once a process.
+
+    Those are some 110 thousand objects that live as long as the process, against a few thousand a
+    session's own; a session stages a copy of its actor every tick, so full collections come every few
+    ticks, and walking them all took a fifth of a tick's time. Objects frozen here are still freed when
+    nothing refers to them; only one left in a reference cycle is kept, which the static data never is.
+    """
+    global _static_heap_frozen
+    if _static_heap_frozen:
+        return
+    _static_heap_frozen = True
+    get_workflow_definition()
+    road_network(SIGNAL_AREA)
+    gc.collect()
+    gc.freeze()
 
 
 def checkpoint(actor: SessionActor) -> dict:
@@ -178,6 +202,8 @@ class TrainingSessionService:
         async with self._initialize_lock:
             if self._initialized:
                 return
+            # Before any session is restored, so that only the shared data is frozen
+            await asyncio.to_thread(freeze_static_heap)
             with self.store.trace.span("runtime.recovery") as fields:
                 self.sessions = await asyncio.to_thread(self._restore)
                 fields.update(restored_sessions=len(self.sessions))
@@ -508,7 +534,7 @@ class TrainingSessionService:
                 snapshot = self._snapshot(staged, baseline, "RUNNING")
             try:
                 if isinstance(staged, IntegratedSessionActor):
-                    baseline = publish_workflow(self.store, staged, snapshot, checkpoint)
+                    baseline = publish_workflow(self.store, staged, snapshot, checkpoint, baseline)
                 else:
                     baseline = self.store.commit_snapshot(snapshot, expected_snapshot_id=baseline.snapshot_id,
                                                           runtime_state=checkpoint(staged))
