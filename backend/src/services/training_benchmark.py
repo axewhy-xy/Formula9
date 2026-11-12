@@ -331,6 +331,11 @@ def run(output: Path, *, ticks=None, validation_samples=None, reconnect_samples=
     def write(name, value):
         (output/name).write_text(json.dumps(value, indent=2, sort_keys=True)+"\n", encoding="utf-8")
 
+    # The benchmark measures the hold at the scenario's tutorial road block on shuttle-01, which new
+    # sessions only open with when the scenario turns it on
+    opening = get_workflow_definition().incidents.simulated_catalog.policy["tutorial_opening"]
+    opening_enabled = opening["enabled"]
+    opening["enabled"] = True
     try:
         try:
             metadata = source_metadata()
@@ -572,6 +577,8 @@ def run(output: Path, *, ticks=None, validation_samples=None, reconnect_samples=
         write("failure.json", {"diagnostic_status": "FAIL", "acceptance_status": "BLOCKED",
             "error_code": getattr(error, "code", type(error).__name__), "checks": checks})
         raise
+    finally:
+        opening["enabled"] = opening_enabled
 
 
 def main():

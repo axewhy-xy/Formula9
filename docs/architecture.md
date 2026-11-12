@@ -137,7 +137,9 @@ The integrated fixture (`backend/fixtures/m2_integrated.json`) is built by
 - five shuttles on one editable route (`route-m2-detour`) and four peer routes, with LTA bus stops
 - two depots: Toa Payoh Interchange and Saint Michael's Bus Terminal
 - a permanent closure that must be routed around before Start
-- an obstruction on shuttle-01 at tick 240, then random incidents from `fixtures/incidents/predefined_scenarios.json`
+- random incidents from `fixtures/incidents/predefined_scenarios.json`, each placed for an in-service shuttle
+  chosen with the session RNG, about `warning_s` at cruising speed ahead of it; the scripted road block on
+  shuttle-01's next road 10–11 s in is now the optional `tutorial_opening` setting there, off by default
 - shuttle-05 starting near its energy reserve, so it gets a charging decision early
 
 ### 4.3 Session service and ticking
@@ -180,8 +182,12 @@ Each tick, `IntegratedSessionActor` does the following:
 - **Energy:** charges travel and auxiliary energy with energy model `ENERGY_R1`. It also issues
   `CONTINUE` and `CHARGE_NOW` offers, runs scheduled charger bookings, and sends a shuttle back to a
   depot when its reserve requires it.
-- **Incidents:** schedules the first incident, then random ones. It offers WAIT, ESCALATE or
-  ROAD_DETOUR candidates and holds the affected shuttle until a decision clears it.
+- **Incidents:** schedules random incidents for any shuttle on its route (and the tutorial opener when a
+  scenario turns it on). A road block on the remaining route of a shuttle the route editor can take round
+  it (today only shuttle-01's) offers WAIT, ESCALATE or ROAD_DETOUR candidates and holds that shuttle until
+  a decision clears it. Any other incident is informational; its congestion slows every shuttle on its
+  road and the roads sharing a junction with it. Each incident's config is the scenario's shared rules
+  plus its own checkpointed record.
 
 Domain consequences go through the existing services (`RouteEditService`, `IncidentService`, the
 energy package). The actor adds its private execution state to the same commit.

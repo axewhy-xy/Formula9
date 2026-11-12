@@ -108,10 +108,15 @@ def prepare(output, phases):
     from src.app import app
     from src.persistence.training_store import TrainingStore
     from src.services.training_benchmark import _ManualSessionService
-    from src.services.integrated_actor import SCENARIO_SELECTOR
+    from src.services.integrated_actor import SCENARIO_SELECTOR, get_workflow_definition
 
     previous = dict(app.dependency_overrides)
     seeds = {}
+    # The drill holds its shuttle at the scenario's tutorial road block, which new sessions only open
+    # with when the scenario turns it on
+    opening = get_workflow_definition().incidents.simulated_catalog.policy["tutorial_opening"]
+    opening_enabled = opening["enabled"]
+    opening["enabled"] = True
     try:
         with TrainingStore(output/"preparation.sqlite") as store:
             app.dependency_overrides[get_training_store] = lambda: store
@@ -182,6 +187,7 @@ def prepare(output, phases):
                     client.portal.call(advance_until, lambda s: s["tick"] >= target_tick, 40)
                     save("CHARGING")
     finally:
+        opening["enabled"] = opening_enabled
         app.dependency_overrides.clear()
         app.dependency_overrides.update(previous)
     return seeds

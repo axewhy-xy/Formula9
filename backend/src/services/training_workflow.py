@@ -21,27 +21,23 @@ from contracts.v2.models import Event
 from src.persistence.training_store import TrainingStoreError
 from src.services.battery_decision import submit_battery_decision
 from src.services.charge_booking import BOOKING_COMMANDS, submit_booking_command
-from src.services.incidents import IncidentService
 
 logger = logging.getLogger(__name__)
 
 
 def session_incidents(actor, incident_id=None):
-    """Use the per-session JSON incident config, never shared mutable globals."""
+    """The service for one of the session's incidents, built from the scenario's shared rules and that
+    incident's own checkpointed record; never from shared mutable globals or another incident's fields."""
     service = actor.definition.incidents
     selections = getattr(actor, "random_incidents", [])
     if not selections and getattr(actor, "random_incident", None):
         selections = [actor.random_incident]
     selection = next((item for item in selections if item["incident_id"] == incident_id), None) if incident_id else (selections[-1] if selections else None)
-    config = deepcopy(service.config)
     if selection is None:
-        config["trigger_tick"] = 10**12
-        # A settled incident left the active list; a retried or late decision still targets it.
-        if incident_id:
-            config["incident_id"] = incident_id
-    else:
-        config.update(selection)
-    return IncidentService(actor.definition.routes, fixture=config)
+        # A settled incident left the active list; a retried or late decision still targets it. With no
+        # incident at all, the record names no shuttle and never triggers, so staging it changes nothing.
+        selection = {"incident_id": incident_id or service.config["incident_id"]}
+    return service.instance(selection)
 
 
 def _settled(item, snapshot):

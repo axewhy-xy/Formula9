@@ -8,6 +8,8 @@ import pytest
 from backend.tests.test_training_integration import (
     advance, approve, read, runtime, send, stage_boundary,
 )
+from src.services.incidents import NEVER, vehicle_label
+from src.services.integrated_actor import IntegratedSessionActor, get_workflow_definition
 from src.services.training_sessions import TrainingSessionService
 
 
@@ -371,3 +373,140 @@ def test_settled_incidents_leave_the_checkpoint_but_keep_their_evidence(runtime)
     actor = service.sessions[session_id].actor
     assert actor.random_incident["incident_id"] != incident["incident_id"]
     assert actor.random_incident["clear_after_ticks"] == round(30/actor.STEP_S)
+
+
+# ---------------------------------------------------------------- incidents as world events (redesign phase 1)
+
+def running_actor(seed, warm_s=20.0):
+    """An integrated actor started without the HTTP layer, run until every shuttle is on its route."""
+    actor = IntegratedSessionActor(seed, session_id=f"phase-1-{seed}")
+    snapshot = actor.generate_snapshot()
+    snapshot.session.status = "RUNNING"
+    actor.synchronize(snapshot)
+    actor.incident_due_tick = 10**12
+    for _ in range(round(warm_s/actor.STEP_S)):
+        actor.tick()
+    return actor
+
+
+def schedule(actor, count):
+    """Places up to count incidents on consecutive ticks, each with every shuttle's target view just
+    before it was placed (scheduling runs before the shuttles move)."""
+    placed = []
+    for _ in range(count):
+        before = {s.ID: actor._incident_target(s, set()) for s in actor.shuttles}
+        actor.incident_due_tick = actor.current_tick + 1
+        known = len(actor.random_incidents)
+        actor.tick()
+        if len(actor.random_incidents) > known:
+            placed.append((actor.random_incidents[-1], before))
+    actor.incident_due_tick = 10**12
+    return placed
+
+
+@pytest.mark.random_opening
+def test_a_new_session_does_not_open_with_the_scripted_road_block():
+    catalog = get_workflow_definition().incidents.simulated_catalog
+    assert catalog.opening is None
+    for seed in range(5):
+        actor = IntegratedSessionActor(seed, session_id=f"opening-{seed}")
+        # The first incident comes after an ordinary interval, not 10-11 s in
+        assert actor.incident_due_tick*actor.STEP_S >= catalog.policy["min_interval_s"]
+
+
+@pytest.mark.random_opening
+def test_incidents_are_placed_for_any_shuttle_and_only_editable_routes_are_held():
+    edges = get_workflow_definition().network["edges"]
+    placed = []
+    for seed in (3, 11):
+        actor = running_actor(seed)
+        for selection, before in schedule(actor, 30):
+            placed.append(selection)
+            target = next(t for t in before.values() if t and t["vehicle"].vehicle_id == selection["vehicle_id"])
+            # Every incident is on a road of the operating network, named in its marker
+            edge = selection["affected_edge_ids"][0]
+            assert edge in edges and selection["map_marker"]["edge_id"] == edge
+            assert set(selection["impact_edge_ids"]) <= set(target["remaining"])
+            if selection["requires_guidance"]:
+                # Only a road block on the remaining route of a shuttle the route editor can take round it
+                assert selection["kind"] == "ROAD_BLOCK" and target["editable"]
+                assert edge in target["remaining"] and selection["speed_factor"] == 1.0
+            elif selection["kind"] == "ROAD_BLOCK":
+                # A road block nobody decides on stands on no road a shuttle drives through
+                for shuttle in actor.shuttles:
+                    assert edge not in {e for e, _, _ in actor._route_roads(shuttle.route_ID)}
+            if selection["warning_m"] is not None and selection["kind"] == "ROAD_ACCIDENT":
+                # About warning_s at cruising speed ahead: within the window when the route has a road there
+                warning = 60.0*target["shuttle"].cruise_vel
+                if any(0.5*warning <= d <= 1.5*warning for _, d in target["ahead"]):
+                    assert 0.5*warning - 0.1 <= selection["warning_m"] <= 1.5*warning + 0.1
+    vehicles = {s["vehicle_id"] for s in placed}
+    assert len(vehicles) >= 3 and vehicles - {"shuttle-01"}
+    # The peer loops are not drawn on the network, so the route editor cannot take them round a closure
+    assert all(s["vehicle_id"] == "shuttle-01" for s in placed if s["requires_guidance"])
+
+
+def test_peer_loops_follow_roads_of_the_operating_network():
+    actor = running_actor(1, warm_s=0.0)
+    for shuttle in actor.shuttles[1:]:
+        spans = actor._route_roads(shuttle.route_ID)
+        length = actor._routes[shuttle.route_ID]["total_length"]
+        assert sum(end - start for _, start, end in spans) >= 0.9*length
+        assert all(a[2] <= b[1] + 1.0 for a, b in zip(spans, spans[1:]))
+
+
+def test_congestion_slows_every_shuttle_on_its_roads_whichever_shuttle_it_was_placed_for():
+    actor = running_actor(1)
+    peer = next(s for s in actor.shuttles[1:] if actor._road_at(s.route_ID, s.progress) is not None)
+    road = actor._road_at(peer.route_ID, peer.progress)
+    accident = dict(incident_id="random-elsewhere", kind="ROAD_ACCIDENT", vehicle_id="shuttle-01",
+                    requires_guidance=False, speed_factor=0.5, affected_edge_ids=[road], impact_edge_ids=[],
+                    congested_edge_ids=sorted(actor.definition.neighbours(road)),
+                    trigger_tick=actor.current_tick, clear_after_ticks=100)
+    actor.random_incidents = [accident]
+    assert actor._congestion_factor(peer) == 0.5
+    # A road block that holds its shuttle for a decision slows no one else
+    actor.random_incidents = [dict(accident, requires_guidance=True, speed_factor=1.0)]
+    assert actor._congestion_factor(peer) == 1.0
+    # Nor does an incident that has cleared
+    actor.random_incidents = [dict(accident, trigger_tick=actor.current_tick - 200)]
+    assert actor._congestion_factor(peer) == 1.0
+
+
+def test_each_incident_is_configured_from_its_own_record():
+    service = get_workflow_definition().incidents
+    config = service.instance({"incident_id": "random-x", "vehicle_id": "shuttle-03", "kind": "ROAD_ACCIDENT"}).config
+    # The scenario's shared rules, and nothing of its authored incident
+    assert config["rubric"] == service.config["rubric"] and config["step_s"] == service.config["step_s"]
+    assert config["vehicle_id"] == "shuttle-03" and config["trigger_tick"] == NEVER
+    assert not config["block_current_route_entrance"]
+    assert "route_id" not in config and "disruption_id" not in config
+    with pytest.raises(ValueError):
+        service.instance({"incident_id": "random-x", "rubric": {"safety_compliance": 100}})
+
+
+def test_an_alert_names_the_shuttle_the_incident_was_placed_for(runtime):
+    client, store, service, session_id = runtime
+    approve(runtime)
+    send(runtime, "START")
+
+    def seed(actor):
+        peer = actor.shuttles[2]
+        road = actor._route_roads(peer.route_ID)[-1][0]
+        selection = dict(incident_id="random-peer", disruption_id="random-peer-disruption", kind="ROAD_ACCIDENT",
+                         vehicle_id="shuttle-03", route_id=actor.domain.vehicles[2].route_id,
+                         road_name="Lorong 6 Toa Payoh", affected_edge_ids=[road], impact_edge_ids=[road],
+                         congested_edge_ids=[road], requires_guidance=False, speed_factor=0.5,
+                         trigger_tick=actor.current_tick+2, clear_after_ticks=10)
+        actor.incident_due_tick = 10**9
+        actor.random_incidents = [selection]
+        actor.random_incident = selection
+
+    stage_boundary(runtime, seed)
+    detected = store.snapshot(session_id)
+    incident = next(i for i in detected.incidents if i.incident_id == "random-peer")
+    assert incident.vehicle_id == "shuttle-03" and incident.state == "DETECTED"
+    event = next(e for e in store.entity_events(session_id, "random-peer", detected.event_sequence)
+                 if e.event_type == "INCIDENT_DETECTED")
+    assert event.data["operational_impact"] == "Potential traffic delay on Shuttle 03's route at Lorong 6 Toa Payoh"
+    assert vehicle_label("shuttle-03") == "Shuttle 03"

@@ -27,6 +27,38 @@ from src.services.incident_scenarios.simulated_catalog import SimulatedIncidentC
 FIXTURE_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "m2_incident.json"
 # A shuttle in one of these has left service for a charger (or run flat) and will not finish a detour
 LEFT_SERVICE = {"RETURNING_TO_DEPOT", "QUEUED_FOR_CHARGE", "CHARGING", "STANDBY", "OUT_OF_SERVICE"}
+# What every incident of a scenario shares: its clock, option lifetimes, rubric and assumptions
+RULE_FIELDS = ("scenario_id", "fixture_id", "step_s", "escalation_after_ticks", "option_lifetime_ticks",
+               "history_ticks", "maximum_history_gap_ticks", "reference_acceptable_actions",
+               "rubric_revision", "rubric", "full_time_credit_s", "zero_time_credit_s", "assumptions")
+# What one incident says about itself. Nothing else may come from its record, and nothing of the
+# scenario's authored incident (its id, shuttle, trigger or closure) reaches it.
+RECORD_FIELDS = frozenset({
+    "incident_id", "disruption_id", "kind", "vehicle_id", "route_id", "road_name", "map_marker",
+    "affected_edge_ids", "impact_edge_ids", "congested_edge_ids", "requires_guidance", "speed_factor",
+    "block_current_route_entrance", "trigger_tick", "clear_after_ticks", "warning_m", "assumptions",
+})
+# A record that never triggers: for an incident whose record has left the checkpoint
+NEVER = 10**12
+
+
+def incident_config(rules: dict, record: dict) -> dict:
+    """One incident's config: the scenario's shared rules and the incident's own record, and nothing else."""
+    unknown = set(record) - RECORD_FIELDS
+    if unknown:
+        raise ValueError(f"Incident record has unknown fields: {sorted(unknown)}")
+    config = {key: deepcopy(rules[key]) for key in RULE_FIELDS if key in rules}
+    config.update(deepcopy(record))
+    config.setdefault("block_current_route_entrance", False)
+    config.setdefault("trigger_tick", NEVER)
+    return config
+
+
+def vehicle_label(vehicle_id: str | None) -> str:
+    """How an alert names a shuttle: shuttle-03 is Shuttle 03."""
+    if not vehicle_id:
+        return "the shuttle"
+    return " ".join(part.capitalize() if part.isalpha() else part for part in vehicle_id.split("-"))
 
 
 class IncidentService:
@@ -55,8 +87,22 @@ class IncidentService:
             # event log and shared rubric, not the per-incident selection.
             if incident.state not in {"RESOLVED", "UNRESOLVED"}:
                 raise TrainingStoreError("INVALID_REFERENCE", "Incident configuration is unavailable")
-            return IncidentService(self.routes, fixture={**self.config, "incident_id": incident_id})
-        return IncidentService(self.routes, fixture={**self.config, **selection})
+            selection = {"incident_id": incident_id, "vehicle_id": incident.vehicle_id}
+        return self.instance(selection)
+
+    def instance(self, record: dict) -> IncidentService:
+        """The service for one incident, from this scenario's rules and the incident's own record."""
+        return IncidentService(self.routes, fixture=incident_config(self.config, record))
+
+    def _impact(self, guidance: bool) -> str:
+        """What an incident means for operations, naming the shuttle it is about and the road."""
+        label = vehicle_label(self.config.get("vehicle_id"))
+        road = f" at {self.config['road_name']}" if self.config.get("road_name") else ""
+        if guidance:
+            return f"Road closure on {label}'s route{road} — operator review required"
+        if self.config.get("impact_edge_ids"):
+            return f"Potential traffic delay on {label}'s route{road}"
+        return "No effect on operations — no action required"
 
     def _incident(self, snapshot: FullSnapshot, incident_id: str) -> Incident:
         if not self.owns(snapshot) or incident_id != self.config["incident_id"]:
@@ -187,7 +233,11 @@ class IncidentService:
             raise TrainingStoreError("STALE_REVISION", "Actor must stage from the latest committed checkpoint")
         events = []
         incident = next((i for i in snapshot.incidents if i.incident_id == self.config["incident_id"]), None)
-        vehicle = next(v for v in snapshot.vehicles if v.vehicle_id == self.config["vehicle_id"])
+        vehicle_id = incident.vehicle_id if incident is not None else self.config.get("vehicle_id")
+        vehicle = next((v for v in snapshot.vehicles if v.vehicle_id == vehicle_id), None)
+        if vehicle is None:
+            # A record that names no shuttle has nothing to stage (none is live, or it has settled)
+            return snapshot, ()
         before_vehicle = next(v for v in previous.vehicles if v.vehicle_id == vehicle.vehicle_id)
         # Defer until eligible so a dwell or different route cannot stall fleet publications.
         informational = not self.config.get("requires_guidance", True)
@@ -213,7 +263,7 @@ class IncidentService:
                 "impact_edge_ids": self.config.get("impact_edge_ids", []),
                 "requires_guidance": False,
                 "active_until_tick": snapshot.tick + self.config["clear_after_ticks"],
-                "operational_impact": "Potential traffic delay on Shuttle 01 route" if self.config.get("impact_edge_ids") else "No effect on operations — no action required",
+                "operational_impact": self._impact(False),
                 "reason": "Informational network incident; no operator decision required",
             }))
         if (not informational and incident is None and snapshot.tick >= self.config["trigger_tick"] and
@@ -243,7 +293,7 @@ class IncidentService:
                 "fixture_id": self.config["fixture_id"], "map_marker": self.config.get("map_marker"),
                 "incident_type": self.config.get("kind"),
                 "impact_edge_ids": self.config.get("impact_edge_ids", []),
-                "operational_impact": "Road closure on Shuttle 01 route — operator review required",
+                "operational_impact": self._impact(True),
                 "detected_at_utc": datetime.now(UTC).isoformat(),
                 "battery_at_detection_kwh": vehicle.battery_kwh,
                 "transitions": ["DETECTED", "AWAITING_REVIEW", "OPTIONS_READY"],
