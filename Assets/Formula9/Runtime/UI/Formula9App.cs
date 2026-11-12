@@ -47,11 +47,11 @@ namespace Formula9.UI
         private bool signUp, busy, loggingOut;
         private List<SessionListEntry> listedSessions = new List<SessionListEntry>();
         private string lastListedState;
-        private const int SessionListPage = 50, MaxSessionListLimit = 500, KeptByPurge = 20;
+        private const int SessionListPage = 50, MaxSessionListLimit = 500;
         private int sessionListLimit = SessionListPage;
         private long liveSessions = -1;
         private bool cleanupBusy;
-        private Button moreSessions, deleteSession, purgeSessions, reclaimDisk, dialogCancel, dialogConfirm;
+        private Button moreSessions, archiveAll, deleteSession, purgeSessions, reclaimDisk, dialogCancel, dialogConfirm;
         private VisualElement dialogOverlay;
         private Label dialogText;
         private Func<Task> dialogAction;
@@ -368,9 +368,11 @@ namespace Formula9.UI
                 sessionListLimit = Math.Min(sessionListLimit + SessionListPage, MaxSessionListLimit);
                 Run(RefreshSessionList());
             };
+            archiveAll = root.Q<Button>("archive-all");
             deleteSession = root.Q<Button>("delete-session");
             purgeSessions = root.Q<Button>("purge-sessions");
             reclaimDisk = root.Q<Button>("reclaim-disk");
+            archiveAll.clicked += ConfirmArchiveAll;
             deleteSession.clicked += ConfirmDeleteSession;
             purgeSessions.clicked += ConfirmPurgeSessions;
             reclaimDisk.clicked += () => Run(Cleanup("Reclaiming disk space…", async () => TrainingPresenter.Reclaimed(await api.CompactSessionsAsync())));
@@ -565,10 +567,42 @@ namespace Formula9.UI
         //     purge, and reclaim disk space only when no session is live.
         private void RenderCleanup()
         {
+            archiveAll.SetEnabled(!cleanupBusy && liveSessions > 0);
             deleteSession.SetEnabled(!cleanupBusy && TrainingPresenter.CanDelete(SelectedEntry));
             purgeSessions.SetEnabled(!cleanupBusy);
             reclaimDisk.SetEnabled(!cleanupBusy && liveSessions == 0);
         }
+
+        // -----------------------------------------------------------------------------------
+        // Function: ConfirmArchiveAll
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function asks before archiving every live session, which frees their slots so
+        //     new sessions can be created. Each is archived as Archive session would, without
+        //     joining it. One that cannot be archived is counted and the rest carry on.
+        private void ConfirmArchiveAll() => Confirm(
+            "Archive every live session? Each attempt ends and its slot is freed, for everyone in it. Their history stays available.",
+            "Archive all", () => Cleanup("Archiving live sessions…", async () =>
+            {
+                var list = await api.ListSessionsAsync(MaxSessionListLimit);
+                var live = list.Sessions
+                    .Where(s => s.OccupiesCapacity)
+                    .Select(s => s.SessionId)
+                    .ToList();
+                var failed = 0;
+                foreach (var id in live)
+                {
+                    try
+                    {
+                        var status = await api.ArchiveSessionAsync(id);
+                        if (status.Status == "REJECTED") failed++;
+                    }
+                    catch (BackendErrorException) { failed++; }
+                }
+                return failed == 0
+                    ? $"Archived {live.Count} live sessions."
+                    : $"Archived {live.Count - failed} of {live.Count} live sessions; {failed} could not be archived.";
+            }));
 
         // -----------------------------------------------------------------------------------
         // Function: ConfirmDeleteSession
@@ -594,14 +628,15 @@ namespace Formula9.UI
         // Function: ConfirmPurgeSessions
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function asks before deleting every finished session except the most recent
-        //     ones.
+        //     This function asks before permanently deleting every finished session: archived,
+        //     completed or failed. The backend keeps live sessions, so it frees no live slots;
+        //     archive those first.
         private void ConfirmPurgeSessions() => Confirm(
-            $"Permanently delete every archived, completed or failed session except the {KeptByPurge} most recent? Their history is removed for everyone. This cannot be undone.",
-            "Delete old sessions", () => Cleanup("Deleting old sessions…", async () =>
+            "Permanently delete every archived, completed or failed session? Live sessions are kept. Their history is removed for everyone. This cannot be undone.",
+            "Delete finished sessions", () => Cleanup("Deleting finished sessions…", async () =>
             {
-                var deleted = await api.PurgeSessionsAsync(KeptByPurge);
-                return deleted == 0 ? "No old sessions to delete." : $"Deleted {deleted} old training sessions.";
+                var deleted = await api.PurgeSessionsAsync(0);
+                return deleted == 0 ? "No finished sessions to delete." : $"Deleted {deleted} finished training sessions.";
             }));
 
         // -----------------------------------------------------------------------------------

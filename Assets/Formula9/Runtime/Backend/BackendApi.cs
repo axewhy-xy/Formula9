@@ -583,6 +583,38 @@ namespace Formula9.Backend
             Expect<CommandStatus>(await SendTrainingAsync("GET", $"/{Segment(sessionId)}/commands/{Segment(idempotencyKey)}", null, cancellation));
 
         // -----------------------------------------------------------------------------------
+        // Function: ArchiveSessionAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function archives a live session without joining it: it reads the session's
+        //     current epoch and revision, then sends it an ARCHIVE command, as Archive session does.
+        //
+        // Args:
+        //     sessionId (string): The training session ID.
+        //     cancellation (CancellationToken): Cancels the request.
+        //
+        // Returns:
+        //     Task<CommandStatus>: The command's status.
+        public async Task<CommandStatus> ArchiveSessionAsync(string sessionId, CancellationToken cancellation = default)
+        {
+            var snapshot = await GetSnapshotAsync(sessionId, cancellation);
+            return await SubmitCommandAsync(new DispatcherCommand
+            {
+                ContractVersion = "2.0",
+                CommandId = Guid.NewGuid().ToString(),
+                IdempotencyKey = Guid.NewGuid().ToString(),
+                SessionId = sessionId,
+                CommandType = "ARCHIVE",
+                ExpectedEpoch = snapshot.SessionEpoch,
+                ExpectedRevision = snapshot.Session.AggregateRevision,
+                TargetType = "SESSION",
+                TargetId = sessionId,
+                Payload = new JObject(),
+                Reason = null,
+            }, cancellation);
+        }
+
+        // -----------------------------------------------------------------------------------
         // Function: SendTrainingAsync
         // -----------------------------------------------------------------------------------
         // Description:
