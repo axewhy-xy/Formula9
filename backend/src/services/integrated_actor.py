@@ -40,6 +40,7 @@ from src.schemas.shuttle_data import ShuttleState, Vector2D
 from src.services.asset_loader import MAX_ROUTE_WAYPOINTS, validate_routes
 from src.services.incidents import FIXTURE_PATH as INCIDENT_FIXTURE, IncidentService, vehicle_label
 from src.services.incident_scenarios.simulated_catalog import SimulatedIncidentCatalog
+from src.services.incident_scenarios.world_events import KIND_EVENTS, WorldEvent, legacy_event
 from src.services.route_edit import RouteEditService
 from src.services.session_actor import SessionActor
 from src.traffic import incident_hazards, route_signals, signal_cycle
@@ -81,6 +82,28 @@ MATCH_M = 6.0
 ON_ROUTE = {"IN_SERVICE", "DETOURING"}
 # An incident is placed between these shares of its warning distance ahead of the shuttle, when it can be
 WARNING_WINDOW = (0.5, 1.5)
+# The modes in which a shuttle drives (or is held on) its service route, and so can reach an incident on it
+EXPOSABLE = {"IN_SERVICE", "DWELLING", "DETOURING", "AWAITING_GUIDANCE"}
+
+
+def upgrade_v3_workflow(workflow: dict, tick: int, step_s: float, timeline=()) -> dict:
+    """A version 3 actor checkpoint's workflow as version 4 holds it: each incident record with the world
+    event it stands for (legacy_event), and the scenario's timeline taken as already past up to the tick,
+    since the session never placed those events. Exposure is worked out again on the next tick."""
+    upgraded = deepcopy(workflow)
+    records = upgraded.get("random_incidents")
+    if records is None:
+        records = [upgraded["random_incident"]] if upgraded.get("random_incident") else []
+        upgraded["random_incidents"] = records
+    for record in records:
+        record.setdefault("event", legacy_event(record, step_s))
+    latest = upgraded.get("random_incident")
+    if latest is not None:
+        # The latest selection is one of the records; keep it the same object's content
+        match = next((r for r in records if r["incident_id"] == latest["incident_id"]), None)
+        upgraded["random_incident"] = match if match is not None else {**latest, "event": legacy_event(latest, step_s)}
+    upgraded["timeline_next"] = sum(1 for event in timeline if event.start_tick(step_s) <= tick)
+    return upgraded
 
 
 def geometry(identifier: str, points: list) -> dict:
@@ -126,6 +149,10 @@ class WorkflowDefinition:
         self.routes = RouteEditService(self, fixture={**self.data["route_edit"], "network": self.network,
                                                       "operating_node_ids": sorted(int(n) for n in self.network["nodes"])})
         self.incidents = IncidentService(self.routes, fixture=incident)
+        # The scenario's scheduled events must stand on roads of this network
+        for event in self.incidents.simulated_catalog.timeline:
+            if event.edge_id not in self.network["edges"]:
+                raise ValueError(f"Scheduled event {event.event_id} is on unknown edge {event.edge_id!r}")
         original = self.compile_route(self.data["route_edit"]["original_directed_edge_ids"])[0]
         self.actor_routes = [original, *self.data["peer_patterns"]]
         # Every depot and its charger bays; each charger belongs to exactly one depot.
@@ -222,6 +249,11 @@ class WorkflowDefinition:
                 spans.append((identifier, along[0][1], along[-1][1]))
         return tuple(sorted(spans, key=lambda span: (span[1], span[0])))
 
+    @lru_cache(maxsize=128)
+    def footprint(self, kind: str, edge_id: str, closed: frozenset[str]) -> tuple[tuple[str, float, float], ...]:
+        """The stretches of road an incident holds up (incident_hazards.footprint), for the roads closed."""
+        return incident_hazards.footprint(kind, edge_id, self.network["edges"], set(closed))
+
     def lies_on(self, x: float, y: float, branch: str, tolerance_m: float = 0.01) -> bool:
         """Whether a point is on a named road chain of the fixture (main, bypass-b, bypass-c, return)."""
         for identifier in self.network["chains"][branch]:
@@ -276,6 +308,8 @@ class IntegratedSessionActor(SessionActor):
         self.incident_due_tick = self.incident_catalog.first_due_ticks(self.rng, self.STEP_S)
         self.random_incident = None
         self.random_incidents = []
+        # How many of the scenario's scheduled events (its timeline) have been placed
+        self.timeline_next = 0
         logger.debug("[INCIDENT DEBUG] session=%s first_due_tick=%s", session_id, self.incident_due_tick)
         self.stop_names = {}
         self.loop_started = {}
@@ -1045,13 +1079,20 @@ class IntegratedSessionActor(SessionActor):
             ahead.append(hold)
         return min([end, *ahead])
 
+    @staticmethod
+    def _incident_window(selection):
+        """The ticks an incident is on the road: from its world event's start (before it is detected, when
+        detection is delayed) to when it clears."""
+        start = (selection.get("event") or {}).get("start_tick", selection["trigger_tick"])
+        return min(start, selection["trigger_tick"]), selection["trigger_tick"] + selection["clear_after_ticks"]
+
     def _congestion_factor(self, shuttle):
         """How much live incidents slow a shuttle on the road it is on now: any shuttle, whichever one an
         incident was placed for. An incident that holds its shuttle for a decision slows no one."""
         live = [selection for selection in self.random_incidents
                 if not selection.get("requires_guidance")
                 and selection.get("congested_edge_ids", selection.get("impact_edge_ids"))
-                and selection["trigger_tick"] <= self.current_tick < selection["trigger_tick"] + selection["clear_after_ticks"]]
+                and self._incident_window(selection)[0] <= self.current_tick < self._incident_window(selection)[1]]
         if not live:
             return 1.0
         road = self._road_at(shuttle.route_ID, shuttle.progress)
@@ -1375,20 +1416,46 @@ class IntegratedSessionActor(SessionActor):
             logger.debug("[INCIDENT DEBUG] IMPACT_POLICY vehicle=%s kind=%s target=%s probability=%.2f pool=%s "
                          "chosen=%s can_hold=%s warning_m=%.0f", vehicle.vehicle_id, template.kind, wants_impact,
                          impact_probability, len(pool), edge, can_hold, warning_m)
-        # Congestion spreads one network hop; not an arbitrary spatial radius.
-        congested = self.definition.neighbours(edge)
-        impacted = [candidate for candidate in target["remaining"] if candidate in congested]
         is_closure = template.kind == "ROAD_BLOCK"
         # Only a closure on the remaining route of a shuttle that can be taken round it asks for a decision.
         requires_guidance = (is_closure and edge in target["remaining"] and target["editable"]
                              and not target["busy"])
-        ahead_m = next((distance for candidate, distance in target["ahead"] if candidate == edge), None)
+        event = WorldEvent(event_id=f"random-{template.kind.lower()}-{self.current_tick}",
+                           event_type=KIND_EVENTS[template.kind], edge_id=edge, node_id=None,
+                           start_tick=self.current_tick, duration_s=duration_s, warning_s=template.warning_s,
+                           detection_delay_s=template.detection_delay_s, recovery_s=template.recovery_s)
+        selection = self._incident_record(
+            event, incident_id=event.event_id, disruption_id=f"random-disruption-{self.current_tick}",
+            target=target, requires_guidance=requires_guidance,
+            origin="Synthetic training incident from predefined_scenarios.json.")
+        self.random_incident = selection
+        self.random_incidents.append(selection)
+        self.incident_due_tick = self.current_tick + self.incident_catalog.next_interval_ticks(self.rng, self.STEP_S)
+        logger.debug("[INCIDENT DEBUG] SELECTED opening=%s id=%s vehicle=%s edge=%s ahead_m=%s impact=%s "
+                     "guidance=%s next_due=%s", opening is not None, selection["incident_id"], vehicle.vehicle_id,
+                     edge, selection["warning_m"], selection["impact_edge_ids"], requires_guidance,
+                     self.incident_due_tick)
+
+    def _incident_record(self, event: WorldEvent, *, incident_id, disruption_id, target, requires_guidance, origin):
+        """The checkpointed record of one placed world event: what the IncidentService stages, what slows the
+        shuttles and what the traffic keeps off. target is the shuttle it was placed ahead of or asks for a
+        decision (from _incident_target), or None for an event that belongs to no shuttle."""
+        network = self.definition.network
+        edge = event.edge_id
+        policy = self.incident_catalog.policy
+        # Congestion spreads one network hop; not an arbitrary spatial radius. A breakdown blocks one lane
+        # of its own road only.
+        congested = {edge} if event.event_type == "BREAKDOWN" else self.definition.neighbours(edge)
+        impacted = [candidate for candidate in target["remaining"] if candidate in congested] if target else []
+        ahead_m = next((distance for candidate, distance in target["ahead"] if candidate == edge), None) if target else None
+        vehicle = target["vehicle"] if target else None
         # World coordinates are the same planar metres as the route scene.
         road = network["edges"][edge]
         start_xy = network["nodes"][str(road["source"])]
         end_xy = network["nodes"][str(road["target"])]
-        label = vehicle_label(vehicle.vehicle_id)
-        selection = {
+        placed = f"placed for {vehicle_label(vehicle.vehicle_id)}" if vehicle else "belongs to no shuttle"
+        detected = event.detected_tick(self.STEP_S)
+        return {
             "map_marker": {
                 "edge_id": edge,
                 "start": {"x_m": float(start_xy[0]), "y_m": float(start_xy[1])},
@@ -1396,11 +1463,11 @@ class IntegratedSessionActor(SessionActor):
                 "center": {"x_m": (float(start_xy[0]) + float(end_xy[0])) / 2,
                            "y_m": (float(start_xy[1]) + float(end_xy[1])) / 2},
             },
-            "incident_id": f"random-{template.kind.lower()}-{self.current_tick}",
-            "disruption_id": f"random-disruption-{self.current_tick}",
-            "kind": template.kind,
-            "vehicle_id": vehicle.vehicle_id,
-            "route_id": vehicle.route_id,
+            "incident_id": incident_id,
+            "disruption_id": disruption_id,
+            "kind": event.kind,
+            "vehicle_id": vehicle.vehicle_id if vehicle else None,
+            "route_id": vehicle.route_id if vehicle else None,
             "road_name": road.get("road"),
             "affected_edge_ids": [edge],
             "impact_edge_ids": impacted,
@@ -1410,24 +1477,135 @@ class IntegratedSessionActor(SessionActor):
             "block_current_route_entrance": False,
             "warning_m": None if ahead_m is None else round(ahead_m, 1),
             "assumptions": [
-                "Synthetic training incident from predefined_scenarios.json.",
-                f"Type: {template.kind}; placed for {label}; incident edge: {edge}; affected route edges: {impacted}.",
-                f"Operational impact: {'route directly blocked' if requires_guidance else 'traffic delay possible' if impacted else 'none; no action required'}.",
+                origin,
+                f"Type: {event.event_type} ({event.kind}); {placed}; incident edge: {edge}; affected route edges: {impacted}.",
+                f"Operational impact: {'route directly blocked' if requires_guidance else 'traffic delay possible' if impacted else 'none for the shuttle it was placed for'}.",
                 "Traffic impact estimated from shared endpoints (one graph hop); it slows every shuttle on those roads.",
                 TRAFFIC_ASSUMPTION if self.traffic is not None else
                 "No traffic volume or lanes are modelled; shuttles stop at simulated traffic lights with made-up timings.",
+                "Exposed shuttles are those whose remaining route crosses the scene or its queue before it clears; "
+                "their ETAs assume cruising speed and the usual dwell at each stop.",
                 "Nearby incidents may reduce speed on connected roads; direct closures require guidance.",
                 "Scoring is provisional and not calibrated for real-world safety.",
             ],
-            "trigger_tick": self.current_tick,
-            "clear_after_ticks": max(1, round(duration_s/self.STEP_S)),
+            # The operator is told detection_delay_s after it starts; it clears duration_s after it starts
+            "trigger_tick": detected,
+            "clear_after_ticks": event.end_tick(self.STEP_S) - detected,
+            "event": event.to_record(),
         }
-        self.random_incident = selection
-        self.random_incidents.append(selection)
-        self.incident_due_tick = self.current_tick + self.incident_catalog.next_interval_ticks(self.rng, self.STEP_S)
-        logger.debug("[INCIDENT DEBUG] SELECTED opening=%s id=%s vehicle=%s edge=%s ahead_m=%s impact=%s "
-                     "guidance=%s next_due=%s", opening is not None, selection["incident_id"], vehicle.vehicle_id,
-                     edge, ahead_m, impacted, requires_guidance, self.incident_due_tick)
+
+    def _schedule_timeline(self):
+        """Places each of the scenario's scheduled events when its time comes, in timeline order.
+
+        A scheduled event belongs to no shuttle. Only a road closure on the road ahead of a shuttle the
+        route editor can take round it, and that is not already handling a direct obstruction, asks that
+        shuttle (the nearest such) for a decision, as a random one does; until phase 3 lets the traffic
+        stop the shuttles, a closure no shuttle is asked about is only a closure to route planning.
+        """
+        timeline = self.incident_catalog.timeline
+        while self.timeline_next < len(timeline) and timeline[self.timeline_next].start_tick(self.STEP_S) <= self.current_tick:
+            scheduled = timeline[self.timeline_next]
+            self.timeline_next += 1
+            kind = "ROAD_BLOCK" if scheduled.event_type == "ROAD_CLOSURE" else "ROAD_ACCIDENT"
+            event = scheduled.place(self.STEP_S, self.incident_catalog.template(kind))
+            target, requires_guidance = None, False
+            if event.kind == "ROAD_BLOCK":
+                blocked = {edge for d in self.domain.disruptions
+                           if d.active_from_tick <= self.current_tick
+                           and (d.active_until_tick is None or self.current_tick < d.active_until_tick)
+                           for edge in d.affected_edge_ids}
+                holdable = []
+                for shuttle in self.shuttles:
+                    candidate = self._incident_target(shuttle, blocked)
+                    distance = next((d for e, d in candidate["ahead"] if e == event.edge_id), None) if candidate else None
+                    if distance is not None and candidate["editable"] and not candidate["busy"]:
+                        holdable.append((distance, candidate["vehicle"].vehicle_id, candidate))
+                if holdable:
+                    target, requires_guidance = min(holdable, key=lambda item: item[:2])[2], True
+            record = self._incident_record(
+                event, incident_id=f"scheduled-{scheduled.event_id}",
+                disruption_id=f"scheduled-disruption-{scheduled.event_id}", target=target,
+                requires_guidance=requires_guidance, origin="Scheduled world event from the scenario timeline.")
+            self.random_incident = record
+            self.random_incidents.append(record)
+            logger.debug("[INCIDENT DEBUG] SCHEDULED id=%s type=%s edge=%s guidance=%s", record["incident_id"],
+                         event.event_type, event.edge_id, requires_guidance)
+
+    def _exposure(self, record, closed):
+        """The shuttles a live incident's footprint lies ahead of, and the stretch it covers.
+
+        A shuttle is exposed when its remaining route (this loop, or else the next) crosses the scene or
+        its queue (WorkflowDefinition.footprint) and it would get there before the incident clears. Its
+        distance is to where it first meets the footprint, and its ETA that at cruising speed plus the usual
+        dwell at each stop before it. Returns (exposures nearest first, footprint edge ids)."""
+        edge_id = record["affected_edge_ids"][0] if record.get("affected_edge_ids") else None
+        if edge_id is None or edge_id not in self.definition.network["edges"]:
+            return [], []
+        stretches = self.definition.footprint(record["kind"], edge_id, frozenset(closed - {edge_id}))
+        by_edge = {}
+        for road, low, high in stretches:
+            by_edge.setdefault(road, []).append((low, high))
+        _, until = self._incident_window(record)
+        closure = next((d for d in self.domain.disruptions if d.disruption_id == record.get("disruption_id")), None)
+        if closure is not None and closure.active_until_tick is not None:
+            until = closure.active_until_tick
+        left_s = max(0.0, (until - self.current_tick)*self.STEP_S)
+        speed = self.definition.data["speed_mps"]
+        held = record.get("vehicle_id") if record.get("requires_guidance") else None
+        exposures = []
+        for shuttle in self.shuttles:
+            vehicle = self.domain.vehicles[shuttle.ID]
+            if self.modes[shuttle.ID] not in EXPOSABLE or shuttle.route_ID != vehicle.route_id:
+                continue
+            total = self._routes[shuttle.route_ID]["total_length"]
+            entries = []
+            for road, start, end in self._route_roads(shuttle.route_ID):
+                spans = by_edge.get(road)
+                if not spans:
+                    continue
+                length = self.definition.network_spans((road,))[0][2]
+                scale = (end - start) / length if length > EPSILON else 1.0
+                for low, high in spans:
+                    entries.append((start + low*scale, start + high*scale))
+            if not entries:
+                continue
+            ahead = [max(0.0, enter - shuttle.progress) for enter, leave in entries if leave > shuttle.progress + EPSILON]
+            distance = min(ahead) if ahead else total - shuttle.progress + min(enter for enter, _ in entries)
+            # The stops it pulls in at on the way (the loop's end among them when it gets there on the next
+            # loop), and what is left of a dwell it is in now
+            stops = self.stop_progress.get(shuttle.route_ID, [])
+            reach = shuttle.progress + distance
+            if reach <= total + EPSILON:
+                count = sum(1 for stop in stops if shuttle.progress + EPSILON < stop < reach - EPSILON)
+            else:
+                count = (sum(1 for stop in stops if stop > shuttle.progress + EPSILON) + 1
+                         + sum(1 for stop in stops if stop < reach - total - EPSILON))
+            dwell = shuttle.dwell_timer if self.modes[shuttle.ID] == "DWELLING" else 0.0
+            eta = distance/speed + count*self.DWELL_S + dwell
+            if eta > left_s + EPSILON and vehicle.vehicle_id != held:
+                continue
+            exposures.append({"vehicle_id": vehicle.vehicle_id, "distance_m": round(distance, 1), "eta_s": round(eta, 1)})
+        exposures.sort(key=lambda item: (item["eta_s"], item["vehicle_id"]))
+        return exposures, sorted(by_edge)
+
+    def _refresh_exposure(self):
+        """Works out which shuttles each live incident will reach: when it is detected and every
+        HAZARD_REFRESH_TICKS after, as the traffic's hazards are. The incident service publishes it."""
+        refresh = self.current_tick % HAZARD_REFRESH_TICKS == 0
+        closed = None
+        for record in self.random_incidents:
+            if record.get("trigger_tick", 10**12) > self.current_tick or (not refresh and "exposures" in record):
+                continue
+            if closed is None:
+                closed = {edge for d in self.domain.disruptions
+                          if d.active_from_tick <= self.current_tick
+                          and (d.active_until_tick is None or self.current_tick < d.active_until_tick)
+                          for edge in d.affected_edge_ids}
+            if self.current_tick >= self._incident_window(record)[1]:
+                exposures, footprint = [], record.get("footprint_edge_ids", [])
+            else:
+                exposures, footprint = self._exposure(record, closed)
+            record["exposures"], record["footprint_edge_ids"] = exposures, footprint
 
     def tick(self):
         self.command_tick += 1
@@ -1436,6 +1614,7 @@ class IntegratedSessionActor(SessionActor):
         self.current_tick += 1
         self.timestamp_second = self.current_tick*self.STEP_S
         self.yard_claims = {}
+        self._schedule_timeline()
         self._schedule_incident()
         # Older checkpoints released a port while leaving its finished shuttle
         # in the bay. Clear that shuttle physically on resume, without releasing
@@ -1520,6 +1699,7 @@ class IntegratedSessionActor(SessionActor):
                 self._event(shuttle, "BATTERY_EXHAUSTED", released_charger_id=held.charger_id if held else None)
         self._run_bookings()
         self._safety_returns()
+        self._refresh_exposure()
         if self.traffic is not None:
             self._place_in_traffic(moved, blocked)
 
@@ -1535,6 +1715,7 @@ class IntegratedSessionActor(SessionActor):
             "paths": [{"route_ID": key, "waypoints": [p.model_dump() for p in path["waypoints"]]} for key, path in self._routes.items()],
             "stop_progress": self.stop_progress, "incident_due_tick": self.incident_due_tick,
             "random_incident": self.random_incident, "random_incidents": self.random_incidents,
+            "timeline_next": self.timeline_next,
             "stop_names": self.stop_names,
             "loop_started": {str(k): list(v) for k, v in self.loop_started.items()},
             "pending_events": [e.model_dump(mode="json") for e in self.pending_events],
@@ -1584,6 +1765,17 @@ class IntegratedSessionActor(SessionActor):
         self.incident_due_tick = state.get("incident_due_tick", self.incident_due_tick)
         self.random_incident = state.get("random_incident")
         self.random_incidents = state.get("random_incidents", [self.random_incident] if self.random_incident else [])
+        # Version 4 holds each incident's world event and the timeline's place (upgrade_v3_workflow); a
+        # record without its event is given the one it stands for
+        timeline_next = state.get("timeline_next")
+        if type(timeline_next) is not int or not 0 <= timeline_next <= len(self.incident_catalog.timeline):
+            raise TrainingStoreError("CORRUPT_CHECKPOINT", "Workflow timeline position is invalid")
+        try:
+            for record in self.random_incidents:
+                WorldEvent.from_record(record.setdefault("event", legacy_event(record, self.STEP_S)))
+        except (TypeError, ValueError, KeyError) as error:
+            raise TrainingStoreError("CORRUPT_CHECKPOINT", "Workflow world event is invalid") from error
+        self.timeline_next = timeline_next
         # The traffic checkpointed apart, as it is since that made publications cheaper: taken at saved_tick
         saved_tick = self.current_tick
         if state.get("traffic") == TRAFFIC_APART:

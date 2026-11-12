@@ -1,7 +1,8 @@
 {
   "schema_version": 1,
   "time_unit": "simulation_seconds",
-  "notes": "Synthetic templates only. Instance IDs, affected route edges, and trigger ticks are assigned by the running session. Each incident is placed about warning_s at cruise speed ahead of a shuttle chosen with the session RNG. tutorial_opening, when enabled, scripts a road block on an editable route's next road after_min_s to after_max_s into the session.",
+  "notes": "Synthetic templates only. Instance IDs, affected route edges, and trigger ticks are assigned by the running session. Each incident is placed about warning_s at cruise speed ahead of a shuttle chosen with the session RNG. tutorial_opening, when enabled, scripts a road block on an editable route's next road after_min_s to after_max_s into the session. timeline lists world events the scenario schedules beside the random ones: {event_id, event_type (BREAKDOWN, COLLISION or ROAD_CLOSURE), location {edge_id}, at_s, duration_s} and optionally warning_s, detection_delay_s and recovery_s, which otherwise come from the template of the event's kind.",
+  "timeline": [],
   "scenarios": [
     {
       "incident_id": "road-block",
@@ -22,7 +23,7 @@
     {
       "incident_id": "road-accident",
       "kind": "ROAD_ACCIDENT",
-      "duration_s": 30,
+      "duration_s": 150,
       "warning_s": 60,
       "detection_delay_s": 0,
       "recovery_s": 0,

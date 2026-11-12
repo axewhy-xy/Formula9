@@ -45,11 +45,16 @@ class IncidentPlan:
         self.kind = kind
         self.road = road
         self.lanes: list[tuple[list[tuple[float, float]], float, float]] = []
+        # Where each lane lies on its road: (edge id, from m, to m) along the road the way it runs
+        self.spans: list[tuple[str, float, float]] = []
 
-    def add_lane(self, points: list[tuple[float, float]], start_m: float) -> None:
+    def add_lane(self, points: list[tuple[float, float]], start_m: float,
+                 span: tuple[str, float, float] | None = None) -> None:
         length = line_length(points)
         if length > 0.01:
             self.lanes.append((points, start_m, length))
+            if span is not None:
+                self.spans.append(span)
 
 
 def plan(kind: str, edge_id: str, edges: dict[str, dict], closed: set[str],
@@ -63,7 +68,7 @@ def plan(kind: str, edge_id: str, edges: dict[str, dict], closed: set[str],
     # A closure stops traffic where the road begins; an accident part way along it
     head = 0.0 if kind == BLOCK else max(0.0, length / 2 - WRECK_CLEAR_M)
     if head > 0:
-        result.add_lane(between(points, 0.0, head)[::-1], 0.0)
+        result.add_lane(between(points, 0.0, head)[::-1], 0.0, (edge_id, 0.0, head) if edge else None)
     if edge is None:
         return result
     # Breadth first up the roads whose traffic flows into this one, until the queue's reach runs out
@@ -85,7 +90,8 @@ def plan(kind: str, edge_id: str, edges: dict[str, dict], closed: set[str],
             seen.add(feeder_id)
             path = [tuple(p) for p in feeder["path"]]
             feeder_length = line_length(path)
-            result.add_lane(between(path, max(0.0, feeder_length - (REACH_M - start_m)), feeder_length)[::-1], start_m)
+            tail = max(0.0, feeder_length - (REACH_M - start_m))
+            result.add_lane(between(path, tail, feeder_length)[::-1], start_m, (feeder_id, tail, feeder_length))
             if start_m + feeder_length < REACH_M:
                 pending.append((feeder_id, start_m + feeder_length))
     return result
@@ -104,6 +110,29 @@ def hazards(incident: IncidentPlan, elapsed_s: float) -> list[tuple[list[tuple[f
         if formed > 0:
             found.append((between(points, 0.0, formed)[::-1], False))
     return found
+
+
+def footprint(kind: str, edge_id: str, edges: dict[str, dict], closed: set[str]) -> tuple[tuple[str, float, float], ...]:
+    """Every stretch of road an incident on this edge holds up once its queue has fully formed: the
+    scene (a closed road whole; an accident's wrecks, both ways) and the queue's lanes, each as (edge id,
+    from m, to m) along that road the way it runs. A shuttle whose route crosses one of them meets it."""
+    edge = edges.get(edge_id)
+    if edge is None:
+        return ()
+    points = [tuple(p) for p in edge["path"]]
+    length = line_length(points)
+    found = list(plan(kind, edge_id, edges, closed, (points[0], points[-1])).spans)
+    if kind == BLOCK:
+        found.append((edge_id, 0.0, length))
+    else:
+        found.append((edge_id, max(0.0, length / 2 - SCENE_REACH_M), min(length, length / 2 + SCENE_REACH_M)))
+        # The wrecks reach across the road: its other direction passes the same scene
+        for other_id, other in edges.items():
+            if other["source"] == edge["target"] and other["target"] == edge["source"] and other_id != edge_id:
+                other_length = line_length([tuple(p) for p in other["path"]])
+                found.append((other_id, max(0.0, other_length / 2 - SCENE_REACH_M),
+                              min(other_length, other_length / 2 + SCENE_REACH_M)))
+    return tuple(found)
 
 
 def live_hazards(selections: list[dict], snapshot, edges: dict[str, dict], step_s: float, tick: int) -> list:

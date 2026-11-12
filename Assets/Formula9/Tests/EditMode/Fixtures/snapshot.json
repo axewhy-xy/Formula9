@@ -12,7 +12,8 @@
       "expires_at_tick": 300,
       "incident_id": "incident-1",
       "revision": 1,
-      "validation": "PASS"
+      "validation": "PASS",
+      "vehicle_id": "shuttle-01"
     }
   ],
   "chargers": [
@@ -132,7 +133,24 @@
         "candidate-wait-1"
       ],
       "detected_tick": 180,
+      "event_type": "ROAD_CLOSURE",
+      "exposed_vehicle_ids": [
+        "shuttle-01"
+      ],
+      "exposures": [
+        {
+          "distance_m": 40.0,
+          "eta_s": 8.0,
+          "is_estimate": true,
+          "vehicle_id": "shuttle-01"
+        }
+      ],
       "incident_id": "incident-1",
+      "location": {
+        "edge_id": "edge-2",
+        "node_id": null,
+        "road_name": "Lorong 6 Toa Payoh"
+      },
       "provenance": {
         "authored": true,
         "branch_tick": null,

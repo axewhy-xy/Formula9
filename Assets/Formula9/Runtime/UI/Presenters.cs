@@ -497,9 +497,9 @@ namespace Formula9.UI
         // Function: IncidentLine
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function writes a line for a shuttle's open incidents: the selected incident
-        //     when it is on this shuttle, otherwise the most recent one, with a count of the
-        //     others.
+        //     This function writes a line for a shuttle's open incidents, those that name it or
+        //     that it will reach: the selected incident when it is one of them, otherwise the
+        //     most recent one, with a count of the others. One it will reach says when.
         //
         // Args:
         //     snapshot (FullSnapshot): The accepted snapshot.
@@ -510,13 +510,66 @@ namespace Formula9.UI
         //     string: The line, or null when the shuttle has no open incident.
         private static string IncidentLine(FullSnapshot snapshot, string vehicleId, string selected)
         {
-            var open = snapshot.Incidents.Where(i => i.VehicleId == vehicleId && i.State != "RESOLVED").ToList();
+            var open = snapshot.Incidents.Where(i => i.Involves(vehicleId) && i.State != "RESOLVED").ToList();
             if (open.Count == 0) return null;
             var shown = open.FirstOrDefault(i => i.IncidentId == selected) ?? open.OrderByDescending(i => i.DetectedTick).First();
             var state = shown.State.ToLowerInvariant().Replace('_', ' ');
             var text = $"! Incident {shown.IncidentId} · {char.ToUpperInvariant(state[0])}{state.Substring(1)}";
+            var reach = shown.ExposureOf(vehicleId);
+            if (reach != null) text += reach.EtaS < 0.5 ? " · reaching it now" : $" · reaches it in ~{Math.Round(reach.EtaS)} s";
             if (open.Count > 1) text += $" (+{open.Count - 1} more)";
             return shown.IncidentId == selected ? text + " · selected" : text;
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: IncidentSummary
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function describes the selected incident on the Incident Monitor: what and
+        //     where it is, its state, which shuttles will reach it and when, and what is asked of
+        //     the operator.
+        //
+        // Args:
+        //     incident (Incident): The incident.
+        //     hasOptions (bool): Whether it offers options to decide on.
+        //
+        // Returns:
+        //     string: The text.
+        public static string IncidentSummary(Incident incident, bool hasOptions)
+        {
+            var name = World.IncidentRecord.Name(incident.EventType,
+                incident.IncidentId.Contains("road_accident") ? World.IncidentSimulation.Accident : World.IncidentSimulation.Block).ToUpperInvariant();
+            var road = incident.Location?.RoadName != null ? $" on {incident.Location.RoadName}" : "";
+            var reach = World.IncidentRecord.Reach(incident.Exposures, 5);
+            var exposure = reach == null ? "No shuttle reaches it before it clears." : $"Shuttles reaching it: {reach}.";
+            var owner = incident.VehicleId == null ? "It belongs to no shuttle. " : "";
+            var ask = hasOptions
+                ? $"This incident requires operator review for {incident.VehicleId}. Select an option and preview its consequences before approval, or re-route the shuttle on the map."
+                : "No operator decision is required for this incident; no shuttle is being held for guidance. Shuttles that reach it are slowed by the congestion.";
+            return $"{name}{road} | {incident.State}\n{owner}{exposure}\n{ask}";
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: IncidentHeadline
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function words the message shown when an incident a shuttle will reach is
+        //     detected, or when another shuttle comes to be exposed to it. The backend writes the
+        //     headline; other events, and an incident nobody reaches, show nothing.
+        //
+        // Args:
+        //     e (Event): A live training event.
+        //
+        // Returns:
+        //     string: The message, or null for none.
+        public static string IncidentHeadline(Event e)
+        {
+            if (e?.EntityType != "INCIDENT" || e.Data == null) return null;
+            var headline = e.Data.Value<string>("headline");
+            if (string.IsNullOrEmpty(headline)) return null;
+            if (e.EventType == "INCIDENT_DETECTED" && e.Data.Value<bool?>("alert") == true) return headline;
+            if (e.EventType == "INCIDENT_EXPOSURE_CHANGED" && (e.Data["added_vehicle_ids"] as Newtonsoft.Json.Linq.JArray)?.Count > 0) return headline;
+            return null;
         }
 
         // -----------------------------------------------------------------------------------

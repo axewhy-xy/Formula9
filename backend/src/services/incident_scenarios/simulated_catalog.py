@@ -8,6 +8,8 @@ import random
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.services.incident_scenarios.world_events import load_timeline
+
 DEFAULT_CATALOG = Path(__file__).resolve().parents[3] / 'fixtures' / 'incidents' / 'predefined_scenarios.json'
 
 @dataclass(frozen=True)
@@ -49,6 +51,17 @@ class SimulatedIncidentCatalog:
                 ('kind','duration_s','warning_s','detection_delay_s','recovery_s','max_multiplier')}))
         if not self.templates:
             raise ValueError('No incident templates')
+        # The scenario's scheduled events, beside the random generator. Their edges are checked against
+        # the operating network by the workflow definition that owns both.
+        self.timeline = load_timeline(data.get('timeline'))
+
+    def __deepcopy__(self, memo):
+        # Read-only and shared by every session: an actor staged each tick must not copy it
+        return self
+
+    def template(self, kind):
+        """The catalogue template of an incident kind, or None."""
+        return next((t for t in self.templates if t.kind == kind), None)
 
     def next_interval_ticks(self, rng, step_s=0.05):
         return max(1, round(rng.uniform(self.policy['min_interval_s'], self.policy['max_interval_s']) / step_s))

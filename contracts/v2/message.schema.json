@@ -62,6 +62,21 @@
           ],
           "title": "Validation",
           "type": "string"
+        },
+        "vehicle_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vehicle Id"
         }
       },
       "required": [
@@ -1378,12 +1393,58 @@
           "title": "Detected Tick",
           "type": "integer"
         },
+        "event_type": {
+          "anyOf": [
+            {
+              "enum": [
+                "BREAKDOWN",
+                "COLLISION",
+                "SIGNAL_FAULT",
+                "ROAD_CLOSURE"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Type"
+        },
+        "exposed_vehicle_ids": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          "title": "Exposed Vehicle Ids",
+          "type": "array"
+        },
+        "exposures": {
+          "items": {
+            "$ref": "#/$defs/IncidentExposure"
+          },
+          "title": "Exposures",
+          "type": "array"
+        },
         "incident_id": {
           "maxLength": 128,
           "minLength": 1,
           "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
           "title": "Incident Id",
           "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IncidentLocation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "provenance": {
           "$ref": "#/$defs/Provenance"
@@ -1404,6 +1465,53 @@
           "type": "string"
         },
         "vehicle_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vehicle Id"
+        }
+      },
+      "required": [
+        "incident_id",
+        "aggregate_revision",
+        "state",
+        "detected_tick",
+        "candidate_ids",
+        "provenance"
+      ],
+      "title": "Incident",
+      "type": "object"
+    },
+    "IncidentExposure": {
+      "additionalProperties": true,
+      "description": "A shuttle that will reach an incident while it lasts, how far away and about when.\n\nIts remaining route crosses the incident's footprint (the scene and the queue behind it). Refreshed\nas shuttles move.",
+      "properties": {
+        "distance_m": {
+          "minimum": 0,
+          "title": "Distance M",
+          "type": "number"
+        },
+        "eta_s": {
+          "minimum": 0,
+          "title": "Eta S",
+          "type": "number"
+        },
+        "is_estimate": {
+          "const": true,
+          "default": true,
+          "title": "Is Estimate",
+          "type": "boolean"
+        },
+        "vehicle_id": {
           "maxLength": 128,
           "minLength": 1,
           "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
@@ -1412,15 +1520,63 @@
         }
       },
       "required": [
-        "incident_id",
-        "aggregate_revision",
         "vehicle_id",
-        "state",
-        "detected_tick",
-        "candidate_ids",
-        "provenance"
+        "distance_m",
+        "eta_s"
       ],
-      "title": "Incident",
+      "title": "IncidentExposure",
+      "type": "object"
+    },
+    "IncidentLocation": {
+      "additionalProperties": true,
+      "description": "Where a world event is: one operating-network road (edge_id) or one junction (node_id).",
+      "properties": {
+        "edge_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Edge Id"
+        },
+        "node_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Node Id"
+        },
+        "road_name": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Road Name"
+        }
+      },
+      "title": "IncidentLocation",
       "type": "object"
     },
     "Position": {

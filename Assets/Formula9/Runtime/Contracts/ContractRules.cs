@@ -197,7 +197,17 @@ namespace Formula9.Contracts
                 if (r.StopsM.Any(stop => !r.RequiredStopIds.Contains(stop.StopId))) problems.Add("stops_m may only place required stops");
             }
             foreach (var d in s.Disruptions) CheckProvenance(d.Provenance, problems);
-            foreach (var i in s.Incidents) CheckProvenance(i.Provenance, problems);
+            foreach (var i in s.Incidents)
+            {
+                CheckProvenance(i.Provenance, problems);
+                // Incident.exposures_match and IncidentLocation.one_place
+                var exposed = (i.Exposures ?? new List<IncidentExposure>()).Select(e => e.VehicleId).ToList();
+                if (!exposed.SequenceEqual(i.ExposedVehicleIds ?? new List<string>()))
+                    problems.Add("incident exposures must list exactly its exposed vehicles, in order");
+                if (Duplicates(exposed)) problems.Add("duplicate exposed vehicle");
+                if (i.Location != null && (i.Location.EdgeId == null) == (i.Location.NodeId == null))
+                    problems.Add("an incident location is exactly one edge or one junction");
+            }
             foreach (var f in s.EnergyForecasts)
             {
                 if (f.NextDepotId == null && (f.NextDepotEtaS != null || f.ReachesDepotAboveReserve != null))
@@ -258,8 +268,10 @@ namespace Formula9.Contracts
                 if (v.ServiceState == "CHARGING" && !s.Chargers.Any(c => c.OccupiedVehicleIds.Contains(v.VehicleId)))
                 { Fail("charging vehicle has no occupied charger"); return; }
             }
-            if (s.Incidents.Any(i => !vehicles.Contains(i.VehicleId) || i.CandidateIds.Any(id => !candidates.Contains(id)))) { Fail("missing incident reference"); return; }
-            if (s.Candidates.Any(c => !incidents.Contains(c.IncidentId))) { Fail("missing candidate incident reference"); return; }
+            // A world event may belong to no shuttle; any shuttle it names or exposes must exist
+            if (s.Incidents.Any(i => (i.VehicleId != null && !vehicles.Contains(i.VehicleId)) || i.CandidateIds.Any(id => !candidates.Contains(id))
+                                     || (i.ExposedVehicleIds ?? new List<string>()).Any(id => !vehicles.Contains(id)))) { Fail("missing incident reference"); return; }
+            if (s.Candidates.Any(c => !incidents.Contains(c.IncidentId) || (c.VehicleId != null && !vehicles.Contains(c.VehicleId)))) { Fail("missing candidate incident reference"); return; }
             if (s.Chargers.Any(c => c.OccupiedVehicleIds.Count > c.PortCount || c.OccupiedVehicleIds.Any(id => !vehicles.Contains(id))))
             { Fail("invalid charger occupancy"); return; }
             if (Duplicates(s.Chargers.SelectMany(c => c.OccupiedVehicleIds))) { Fail("vehicle occupies multiple chargers"); return; }
@@ -332,5 +344,24 @@ namespace Formula9.Contracts
             var seen = new HashSet<string>();
             return ids.Any(id => !seen.Add(id));
         }
+    }
+
+    // -----------------------------------------------------------------------------------
+    // Class: Incident
+    // -----------------------------------------------------------------------------------
+    // Description:
+    //     What the client asks of an incident beyond its generated fields. A world event belongs
+    //     to no shuttle, so "this shuttle's incident" means one that names it or will reach it.
+    public sealed partial class Incident
+    {
+        // Whether the incident names this shuttle or the shuttle will reach it while it lasts.
+        public bool Involves(string vehicleId) =>
+            vehicleId != null && (VehicleId == vehicleId || (ExposedVehicleIds?.Contains(vehicleId) ?? false));
+
+        // This shuttle's exposure to the incident, or null when it will not reach it.
+        public IncidentExposure ExposureOf(string vehicleId) => Exposures?.FirstOrDefault(e => e.VehicleId == vehicleId);
+
+        // The shuttle to show for the incident: the one it names, else the first to reach it.
+        public string FocusVehicleId => VehicleId ?? ExposedVehicleIds?.FirstOrDefault();
     }
 }

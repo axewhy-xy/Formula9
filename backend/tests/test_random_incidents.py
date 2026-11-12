@@ -372,7 +372,9 @@ def test_settled_incidents_leave_the_checkpoint_but_keep_their_evidence(runtime)
     advance(runtime, 2)
     actor = service.sessions[session_id].actor
     assert actor.random_incident["incident_id"] != incident["incident_id"]
-    assert actor.random_incident["clear_after_ticks"] == round(30/actor.STEP_S)
+    # Its template's duration, not the scripted opener's
+    template = actor.incident_catalog.template(actor.random_incident["kind"])
+    assert actor.random_incident["clear_after_ticks"] == round(template.duration_s/actor.STEP_S)
 
 
 # ---------------------------------------------------------------- incidents as world events (redesign phase 1)

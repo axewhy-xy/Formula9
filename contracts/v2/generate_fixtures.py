@@ -82,11 +82,17 @@ snapshot["disruptions"].append({"disruption_id": "closure-1", "aggregate_revisio
                                 "provenance": simulation})
 snapshot["incidents"].append({"incident_id": "incident-1", "aggregate_revision": 2,
                               "vehicle_id": "shuttle-01", "state": "OPTIONS_READY", "detected_tick": 180,
-                              "candidate_ids": ["candidate-wait-1"], "provenance": simulation})
+                              "candidate_ids": ["candidate-wait-1"], "provenance": simulation,
+                              "event_type": "ROAD_CLOSURE",
+                              "location": {"edge_id": "edge-2", "node_id": None, "road_name": "Lorong 6 Toa Payoh"},
+                              "exposed_vehicle_ids": ["shuttle-01"],
+                              "exposures": [{"vehicle_id": "shuttle-01", "distance_m": 40.0, "eta_s": 8.0,
+                                             "is_estimate": True}]})
 snapshot["candidates"].append({"candidate_id": "candidate-wait-1", "incident_id": "incident-1",
                                "revision": 1, "action": "WAIT", "validation": "PASS",
                                "expires_at_tick": 300, "dependency_revisions": {"incident-1": 2},
-                               "assumptions": ["Obstruction clears within 5 simulated seconds"]})
+                               "assumptions": ["Obstruction clears within 5 simulated seconds"],
+                               "vehicle_id": "shuttle-01"})
 snapshot["chargers"].append({"charger_id": "charger-1", "aggregate_revision": 1,
                              "port_count": 1, "power_kw": 50.0, "occupied_vehicle_ids": []})
 snapshot["chargers"].append({"charger_id": "charger-2", "aggregate_revision": 1,
@@ -129,6 +135,19 @@ low_reserve["charge_options"] = [
 low_reserve["charge_option_revisions"] = {o["option_id"]: o["revision"] for o in low_reserve["charge_options"]}
 parse_message(low_reserve)
 save("low_reserve_snapshot.json", low_reserve)
+
+# A world event that belongs to no shuttle: a collision two shuttles will reach while it lasts
+world_event = copy.deepcopy(snapshot)
+world_event["snapshot_id"] = "snapshot-200-world-event"
+world_event["incidents"].append({
+    "incident_id": "scheduled-collision-1", "aggregate_revision": 1, "vehicle_id": None, "state": "DETECTED",
+    "detected_tick": 190, "candidate_ids": [], "provenance": simulation, "event_type": "COLLISION",
+    "location": {"edge_id": "edge-1", "node_id": None, "road_name": "Lorong 6 Toa Payoh"},
+    "exposed_vehicle_ids": ["shuttle-03", "shuttle-04"],
+    "exposures": [{"vehicle_id": "shuttle-03", "distance_m": 850.0, "eta_s": 85.0, "is_estimate": True},
+                  {"vehicle_id": "shuttle-04", "distance_m": 1100.0, "eta_s": 110.0, "is_estimate": True}]})
+parse_message(world_event)
+save("world_event_snapshot.json", world_event)
 
 event = {"event_id": "event-7", "event_sequence": 7, "tick": 200,
          "entity_type": "INCIDENT", "entity_id": "incident-1", "entity_revision": 2,

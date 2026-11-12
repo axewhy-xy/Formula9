@@ -40,6 +40,8 @@ namespace Formula9.Contracts
         public long Revision { get; set; }
         [JsonProperty("validation", Required = Required.Always)]
         public string Validation { get; set; }
+        [JsonProperty("vehicle_id", Required = Required.Default)]
+        public string VehicleId { get; set; }
         // Additive 2.x fields from a newer backend are kept, not rejected.
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
@@ -534,14 +536,50 @@ namespace Formula9.Contracts
         public List<string> CandidateIds { get; set; }
         [JsonProperty("detected_tick", Required = Required.Always)]
         public long DetectedTick { get; set; }
+        [JsonProperty("event_type", Required = Required.Default)]
+        public string EventType { get; set; }
+        [JsonProperty("exposed_vehicle_ids", Required = Required.Default)]
+        public List<string> ExposedVehicleIds { get; set; } = new List<string>();
+        [JsonProperty("exposures", Required = Required.Default)]
+        public List<IncidentExposure> Exposures { get; set; } = new List<IncidentExposure>();
         [JsonProperty("incident_id", Required = Required.Always)]
         public string IncidentId { get; set; }
+        [JsonProperty("location", Required = Required.Default)]
+        public IncidentLocation Location { get; set; }
         [JsonProperty("provenance", Required = Required.Always)]
         public Provenance Provenance { get; set; }
         [JsonProperty("state", Required = Required.Always)]
         public string State { get; set; }
+        [JsonProperty("vehicle_id", Required = Required.Default)]
+        public string VehicleId { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>A shuttle that will reach an incident while it lasts, how far away and about when.</summary>
+    public sealed partial class IncidentExposure
+    {
+        [JsonProperty("distance_m", Required = Required.Always)]
+        public double DistanceM { get; set; }
+        [JsonProperty("eta_s", Required = Required.Always)]
+        public double EtaS { get; set; }
+        [JsonProperty("is_estimate", Required = Required.Default)]
+        public bool IsEstimate { get; set; } = true;
         [JsonProperty("vehicle_id", Required = Required.Always)]
         public string VehicleId { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>Where a world event is: one operating-network road (edge_id) or one junction (node_id).</summary>
+    public sealed partial class IncidentLocation
+    {
+        [JsonProperty("edge_id", Required = Required.Default)]
+        public string EdgeId { get; set; }
+        [JsonProperty("node_id", Required = Required.Default)]
+        public string NodeId { get; set; }
+        [JsonProperty("road_name", Required = Required.Default)]
+        public string RoadName { get; set; }
         // Additive 2.x fields from a newer backend are kept, not rejected.
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }

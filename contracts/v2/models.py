@@ -167,16 +167,60 @@ class Candidate(WireModel):
     expires_at_tick: Tick
     dependency_revisions: dict[str, Revision]
     assumptions: list[str]
+    # The shuttle this option is for: an incident offers options per exposed shuttle. None in 2.x
+    # snapshots from before per-shuttle options, where it is the incident's own vehicle_id.
+    vehicle_id: Id | None = None
+
+
+class IncidentLocation(WireModel):
+    """Where a world event is: one operating-network road (edge_id) or one junction (node_id)."""
+    edge_id: Id | None = None
+    node_id: Id | None = None
+    road_name: Text | None = None
+
+    @model_validator(mode="after")
+    def one_place(self) -> "IncidentLocation":
+        if (self.edge_id is None) == (self.node_id is None):
+            raise ValueError("an incident location is exactly one edge or one junction")
+        return self
+
+
+class IncidentExposure(WireModel):
+    """A shuttle that will reach an incident while it lasts, how far away and about when.
+
+    Its remaining route crosses the incident's footprint (the scene and the queue behind it). Refreshed
+    as shuttles move."""
+    vehicle_id: Id
+    distance_m: Annotated[FiniteFloat, Field(ge=0)]
+    eta_s: Annotated[FiniteFloat, Field(ge=0)]
+    is_estimate: Literal[True] = True
 
 
 class Incident(WireModel):
     incident_id: Id
     aggregate_revision: Revision
-    vehicle_id: Id
+    # The shuttle held for a decision, or the one the incident was placed ahead of; None for a world
+    # event that belongs to no shuttle. exposed_vehicle_ids says which shuttles it affects.
+    vehicle_id: Id | None = None
     state: Literal["DETECTED", "AWAITING_REVIEW", "OPTIONS_READY", "ACTION_COMMITTED", "EXECUTING", "WAITING", "ESCALATED", "RESOLVED", "UNRESOLVED"]
     detected_tick: Tick
     candidate_ids: list[Id]
     provenance: Provenance
+    # The world event behind the incident. None in 2.x snapshots from before world events.
+    event_type: Literal["BREAKDOWN", "COLLISION", "SIGNAL_FAULT", "ROAD_CLOSURE"] | None = None
+    location: IncidentLocation | None = None
+    # Shuttles that will reach the incident while it lasts, nearest first, and each one's distance and
+    # ETA. Live data like a vehicle's position: it changes without a new aggregate_revision.
+    exposed_vehicle_ids: list[Id] = Field(default_factory=list)
+    exposures: list[IncidentExposure] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def exposures_match(self) -> "Incident":
+        if [e.vehicle_id for e in self.exposures] != self.exposed_vehicle_ids:
+            raise ValueError("incident exposures must list exactly its exposed vehicles, in order")
+        if len(self.exposed_vehicle_ids) != len(set(self.exposed_vehicle_ids)):
+            raise ValueError("duplicate exposed vehicle")
+        return self
 
 
 class Charger(WireModel):
@@ -414,10 +458,12 @@ class FullSnapshot(Envelope):
             if v.service_state == "CHARGING" and not any(v.vehicle_id in c.occupied_vehicle_ids for c in self.chargers):
                 raise ValueError("charging vehicle has no occupied charger")
         for i in self.incidents:
-            if i.vehicle_id not in vehicles or any(cid not in candidates for cid in i.candidate_ids):
+            if ((i.vehicle_id is not None and i.vehicle_id not in vehicles)
+                    or any(cid not in candidates for cid in i.candidate_ids)
+                    or any(v not in vehicles for v in i.exposed_vehicle_ids)):
                 raise ValueError("missing incident reference")
         for c in self.candidates:
-            if c.incident_id not in incidents:
+            if c.incident_id not in incidents or (c.vehicle_id is not None and c.vehicle_id not in vehicles):
                 raise ValueError("missing candidate incident reference")
         for c in self.chargers:
             if len(c.occupied_vehicle_ids) > c.port_count or any(v not in vehicles for v in c.occupied_vehicle_ids):

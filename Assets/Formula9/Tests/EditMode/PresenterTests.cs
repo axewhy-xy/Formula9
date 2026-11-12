@@ -13,6 +13,7 @@
  *     cleanup texts.
  */
 
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Formula9.Backend;
@@ -407,6 +408,49 @@ namespace Formula9.Tests
             Assert.AreEqual("Training database reduced from 3.0 MB to 1.0 MB.", TrainingPresenter.Reclaimed(result));
             result.WalTruncated = false;
             StringAssert.Contains("try again", TrainingPresenter.Reclaimed(result));
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: AShuttleShowsAnIncidentItWillReachAndWhen
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A world event that names no shuttle still shows on the cards of the shuttles it
+        //     will reach, with their ETAs, and on the Incident Monitor with who reaches it.
+        [Test]
+        public void AShuttleShowsAnIncidentItWillReachAndWhen()
+        {
+            var snapshot = (FullSnapshot)ContractParser.ParseMessage(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/world_event_snapshot.json")));
+            var rows = TrainingPresenter.Fleet(snapshot).ToDictionary(r => r.ShuttleId);
+            Assert.AreEqual("! Incident scheduled-collision-1 · Detected · reaches it in ~85 s", rows["shuttle-03"].Incident);
+            Assert.AreEqual("! Incident scheduled-collision-1 · Detected · reaches it in ~110 s", rows["shuttle-04"].Incident);
+            Assert.IsNull(rows["shuttle-05"].Incident);
+            var world = snapshot.Incidents.Single(i => i.IncidentId == "scheduled-collision-1");
+            var summary = TrainingPresenter.IncidentSummary(world, false);
+            StringAssert.StartsWith("COLLISION on Lorong 6 Toa Payoh | DETECTED", summary);
+            StringAssert.Contains("It belongs to no shuttle.", summary);
+            StringAssert.Contains("Shuttles reaching it: shuttle-03 in ~85 s, shuttle-04 in ~110 s.", summary);
+            StringAssert.Contains("No shuttle reaches it before it clears.", TrainingPresenter.IncidentSummary(new Incident
+            {
+                IncidentId = "random-road_block-9", State = "DETECTED", VehicleId = "shuttle-01", CandidateIds = new List<string>(),
+            }, false));
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: OnlyAnIncidentAShuttleWillReachIsAnnounced
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The backend's headline is shown when an incident a shuttle will reach is detected,
+        //     or another shuttle comes to be exposed; not for one nobody reaches.
+        [Test]
+        public void OnlyAnIncidentAShuttleWillReachIsAnnounced()
+        {
+            Contracts.Event Incident(string type, JObject data) => new Contracts.Event { EntityType = "INCIDENT", EventType = type, Data = data };
+            const string headline = "Shuttle 03 reaches a collision on Lorong 6 Toa Payoh in about 85 s";
+            Assert.AreEqual(headline, TrainingPresenter.IncidentHeadline(Incident("INCIDENT_DETECTED", new JObject { ["alert"] = true, ["headline"] = headline })));
+            Assert.IsNull(TrainingPresenter.IncidentHeadline(Incident("INCIDENT_DETECTED", new JObject { ["alert"] = false, ["headline"] = "A breakdown; no shuttle reaches it before it clears" })));
+            Assert.AreEqual(headline, TrainingPresenter.IncidentHeadline(Incident("INCIDENT_EXPOSURE_CHANGED", new JObject { ["added_vehicle_ids"] = new JArray("shuttle-03"), ["headline"] = headline })));
+            Assert.IsNull(TrainingPresenter.IncidentHeadline(Incident("INCIDENT_EXPOSURE_CHANGED", new JObject { ["added_vehicle_ids"] = new JArray(), ["headline"] = headline })));
+            Assert.IsNull(TrainingPresenter.IncidentHeadline(Incident("INCIDENT_RESOLVED", new JObject { ["headline"] = headline })));
         }
     }
 }

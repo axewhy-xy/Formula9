@@ -1,5 +1,6 @@
 {
   "INCIDENT/OPTIONS_READY": "incident_alert",
+  "INCIDENT/INCIDENT_DETECTED": "incident_alert",
   "COMMAND/COMMAND_REJECTED": "command_rejected",
   "COMMAND/COMMAND_NEEDS_RECONFIRMATION": "needs_reconfirmation",
   "SESSION/SESSION_RECOVERED": "session_recovered"

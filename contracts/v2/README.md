@@ -96,8 +96,10 @@ the Qt resource `:/contracts/v2/alert_cues.json` in both `App` and
 runtime. Edit this file and rebuild both clients when changing default cues;
 do not add separate client tables. The fixture generator does not overwrite it.
 
-The four defaults cover incident options ready, command rejection, command
-reconfirmation, and session recovery. Both clients test their exact keys and cue
+The defaults cover incident options ready, an incident detected that a shuttle
+will reach, command rejection, command reconfirmation, and session recovery. An
+event whose data says `"alert": false` stays silent even when its type has a
+cue: the backend sets it on an `INCIDENT_DETECTED` that no shuttle will reach. Both clients test their exact keys and cue
 names against fixed expectations to catch accidental semantic changes. Custom
 cue tables still replace the defaults. Live-event deduplication, bounded memory,
 mute handling, and silent history playback remain the gates' responsibility.
@@ -120,14 +122,39 @@ mute handling, and silent history playback remain the gates' responsibility.
 | `FleetVehicle` | `vehicle_id` | Route ID and revision must match a snapshot route; charging requires occupied port |
 | `RouteRevision` | `route_id` + `revision` | Directed edges, stops, scene revision and declared distance/duration |
 | `Disruption` | `disruption_id` | Affected directed edges, active tick interval, reason and provenance |
-| `Incident` | `incident_id` | References vehicle and candidate IDs; state is explicit |
-| `Candidate` | `candidate_id` | References incident; action, validation, expiry, dependency revisions, assumptions |
+| `Incident` | `incident_id` | References candidate IDs and, when set, a vehicle; exposed vehicle IDs must exist and match `exposures` in order; state is explicit |
+| `Candidate` | `candidate_id` | References incident and, when set, the vehicle the option is for; action, validation, expiry, dependency revisions, assumptions |
 | `Charger` | `charger_id` | Occupancy count cannot exceed port count; occupancy references vehicles |
 | `Depot` | `depot_id` | Position and charger IDs; every charger must exist and belongs to at most one depot |
 | `EnergyForecast` | `vehicle_id` | At most one per vehicle; energy model revision must match the scenario; next depot must exist |
 | `ChargeOption` | `option_id` | References vehicle and, when set, charger; action, validation, expiry, dependency revisions, assumptions |
 | `DispatcherCommand` | `command_id` + actor/session/idempotency key | Target type/ID/revision and epoch; decision commands require a reason. Authenticated actor is transport identity, never trusted from payload. |
 | `Event` | `event_id` + `event_sequence` | Ordered durable record; entity type/ID/revision, tick and provenance |
+
+## Incidents as world events (2.x)
+
+An incident stands for a world event at a place on the road network, not an
+effect attached to one shuttle. `Incident.event_type` (`BREAKDOWN`,
+`COLLISION`, `SIGNAL_FAULT`, `ROAD_CLOSURE`) and `location` (exactly one of
+`edge_id` or `node_id`, with an optional `road_name`) say what and where it is.
+`exposed_vehicle_ids` lists, nearest first, the shuttles whose remaining route
+crosses its footprint (the scene and the queue behind it) before it clears, and
+`exposures` gives each one's distance and ETA (`is_estimate: true`). Exposure is
+live data, like a vehicle's position: it is refreshed every half second without
+a new `aggregate_revision`, and a change to who is exposed is logged as an
+`INCIDENT_EXPOSURE_CHANGED` event with `added_vehicle_ids`, `removed_vehicle_ids`
+and a `headline`. The first event of an incident (`INCIDENT_DETECTED` or
+`OPTIONS_READY`) carries `event_type`, `location`, `footprint_edge_ids`,
+`exposures` and a `headline` such as "Shuttle 03 reaches a collision on
+Lorong 6 Toa Payoh in about 85 s".
+
+`Incident.vehicle_id` is now optional: it names the shuttle held for a decision,
+or the one a random incident was placed ahead of, and is null for a scheduled
+world event that belongs to no shuttle. This is the one loosening an older 2.x
+consumer can notice; the backend only sends null for events a scenario's
+timeline schedules, and the curated scenario's timeline is empty.
+`Candidate.vehicle_id` names the shuttle an option is for. All the new fields
+are optional, so older 2.x snapshots still parse.
 
 ## Battery and charging (optional 2.x additions)
 

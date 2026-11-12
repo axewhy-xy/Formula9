@@ -15,7 +15,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from contracts.v2.models import (
-    Candidate, DispatcherCommand, Disruption, Event, FullSnapshot, Incident,
+    Candidate, DispatcherCommand, Disruption, Event, FullSnapshot, Incident, IncidentExposure, IncidentLocation,
     Provenance, RouteRevision, validate_command_against_snapshot,
 )
 from contracts.v2.route_edit import RouteEditRequest
@@ -37,7 +37,14 @@ RECORD_FIELDS = frozenset({
     "incident_id", "disruption_id", "kind", "vehicle_id", "route_id", "road_name", "map_marker",
     "affected_edge_ids", "impact_edge_ids", "congested_edge_ids", "requires_guidance", "speed_factor",
     "block_current_route_entrance", "trigger_tick", "clear_after_ticks", "warning_m", "assumptions",
+    # The world event it stands for, the shuttles that will reach it (refreshed by the actor) and the roads
+    # its scene and queue cover
+    "event", "exposures", "footprint_edge_ids",
 })
+# How an alert names each world event type, and the type of a record from before world events
+EVENT_NAMES = {"BREAKDOWN": "a breakdown", "COLLISION": "a collision", "SIGNAL_FAULT": "a signal fault",
+               "ROAD_CLOSURE": "a road closure"}
+LEGACY_TYPES = {"ROAD_ACCIDENT": "COLLISION", "ROAD_BLOCK": "ROAD_CLOSURE"}
 # A record that never triggers: for an incident whose record has left the checkpoint
 NEVER = 10**12
 
@@ -59,6 +66,28 @@ def vehicle_label(vehicle_id: str | None) -> str:
     if not vehicle_id:
         return "the shuttle"
     return " ".join(part.capitalize() if part.isalpha() else part for part in vehicle_id.split("-"))
+
+
+def event_phrase(event_type: str | None, road_name: str | None) -> str:
+    """An event and where it is, as an alert says it: "a collision on Lorong 6 Toa Payoh"."""
+    name = EVENT_NAMES.get(event_type or "", "an incident")
+    return f"{name} on {road_name}" if road_name else name
+
+
+def exposure_headline(event_type: str | None, road_name: str | None, exposures) -> str:
+    """The alert for a world event: who reaches it first and when, not which shuttle it was placed for.
+
+    "Shuttle 03 reaches a collision on Lorong 6 Toa Payoh in about 85 s (and 1 more shuttle)".
+    """
+    phrase = event_phrase(event_type, road_name)
+    if not exposures:
+        return f"{phrase[0].upper()}{phrase[1:]}; no shuttle reaches it before it clears"
+    first = exposures[0]
+    eta = round(first["eta_s"])
+    when = "now" if eta <= 0 else f"in about {eta} s"
+    more = len(exposures) - 1
+    others = f" (and {more} more shuttle{'s' if more > 1 else ''})" if more else ""
+    return f"{vehicle_label(first['vehicle_id'])} reaches {phrase} {when}{others}"
 
 
 class IncidentService:
@@ -95,14 +124,83 @@ class IncidentService:
         return IncidentService(self.routes, fixture=incident_config(self.config, record))
 
     def _impact(self, guidance: bool) -> str:
-        """What an incident means for operations, naming the shuttle it is about and the road."""
-        label = vehicle_label(self.config.get("vehicle_id"))
+        """What an incident means for operations, naming the shuttle it is about and the road. A world
+        event that belongs to no shuttle names those that will reach it."""
         road = f" at {self.config['road_name']}" if self.config.get("road_name") else ""
+        if not self.config.get("vehicle_id"):
+            exposed = [vehicle_label(e["vehicle_id"]) for e in self._exposures()]
+            if exposed:
+                return f"Potential traffic delay for {', '.join(exposed)}{road}"
+            return "No effect on operations — no shuttle reaches it before it clears"
+        label = vehicle_label(self.config.get("vehicle_id"))
         if guidance:
             return f"Road closure on {label}'s route{road} — operator review required"
         if self.config.get("impact_edge_ids"):
             return f"Potential traffic delay on {label}'s route{road}"
         return "No effect on operations — no action required"
+
+    def _event_type(self) -> str | None:
+        """The world event's type; a record from before world events has its kind's."""
+        event = self.config.get("event") or {}
+        return event.get("event_type") or LEGACY_TYPES.get(self.config.get("kind") or "")
+
+    def _location(self) -> IncidentLocation | None:
+        event = self.config.get("event") or {}
+        edge = event.get("edge_id") or next(iter(self.config.get("affected_edge_ids") or ()), None)
+        node = event.get("node_id")
+        if edge is None and node is None:
+            return None
+        return IncidentLocation(edge_id=None if node is not None else edge, node_id=node,
+                                road_name=(self.config.get("road_name") or "")[:512] or None)
+
+    def _exposures(self) -> list[dict]:
+        return list(self.config.get("exposures") or ())
+
+    def _world(self) -> dict:
+        """What every first event of an incident says about the world event behind it."""
+        exposures = self._exposures()
+        location = self._location()
+        return {"event_type": self._event_type(),
+                "location": location.model_dump(mode="json") if location else None,
+                "footprint_edge_ids": list(self.config.get("footprint_edge_ids") or ()),
+                "exposures": exposures,
+                "headline": exposure_headline(self._event_type(), self.config.get("road_name"), exposures)}
+
+    def _sync_exposure(self, snapshot: FullSnapshot, incident: Incident) -> list[Event]:
+        """Publishes the shuttles the incident will reach, as the actor last worked them out. A settled
+        incident reaches no one. A change to who is exposed (not to their ETAs) is an event of its own."""
+        settled = incident.state in {"RESOLVED", "UNRESOLVED"}
+        before = list(incident.exposed_vehicle_ids)
+        self._publish_exposure(snapshot, incident)
+        ids = incident.exposed_vehicle_ids
+        if settled or set(ids) == set(before):
+            return []
+        exposures = incident.exposures
+        data = [e.model_dump(mode="json") for e in exposures]
+        return [self._event(snapshot, incident, "INCIDENT_EXPOSURE_CHANGED", {
+            "exposures": data, "added_vehicle_ids": [v for v in ids if v not in before],
+            "removed_vehicle_ids": [v for v in before if v not in ids],
+            "headline": exposure_headline(self._event_type(), self.config.get("road_name"), data),
+        })]
+
+    def _publish_exposure(self, snapshot: FullSnapshot, incident: Incident) -> None:
+        """Sets the incident's exposed shuttles from its record; none once it has settled."""
+        vehicles = {v.vehicle_id for v in snapshot.vehicles}
+        settled = incident.state in {"RESOLVED", "UNRESOLVED"}
+        exposures = [] if settled else [
+            IncidentExposure(vehicle_id=e["vehicle_id"], distance_m=float(e["distance_m"]), eta_s=float(e["eta_s"]))
+            for e in self._exposures() if e["vehicle_id"] in vehicles]
+        incident.exposures, incident.exposed_vehicle_ids = exposures, [e.vehicle_id for e in exposures]
+
+    def _new_incident(self, snapshot: FullSnapshot, *, revision: int, vehicle_id: str | None, state: str) -> Incident:
+        """A newly detected incident, with the world event behind it and who it reaches. Its first event
+        carries the exposure, so no change event follows."""
+        incident = Incident(incident_id=self.config["incident_id"], aggregate_revision=revision,
+                            vehicle_id=vehicle_id, state=state, detected_tick=snapshot.tick,
+                            candidate_ids=[], provenance=snapshot.source, event_type=self._event_type(),
+                            location=self._location())
+        self._publish_exposure(snapshot, incident)
+        return incident
 
     def _incident(self, snapshot: FullSnapshot, incident_id: str) -> Incident:
         if not self.owns(snapshot) or incident_id != self.config["incident_id"]:
@@ -190,6 +288,7 @@ class IncidentService:
                 dependency_revisions={incident.incident_id: incident.aggregate_revision},
                 assumptions=[*self.config["assumptions"],
                              "Invalidated by changed obstruction, route, scene, rules, session epoch or incident state."],
+                vehicle_id=incident.vehicle_id,
             )
             snapshot.candidates.append(candidate)
             incident.candidate_ids.append(candidate_id)
@@ -234,13 +333,15 @@ class IncidentService:
         events = []
         incident = next((i for i in snapshot.incidents if i.incident_id == self.config["incident_id"]), None)
         vehicle_id = incident.vehicle_id if incident is not None else self.config.get("vehicle_id")
-        vehicle = next((v for v in snapshot.vehicles if v.vehicle_id == vehicle_id), None)
-        if vehicle is None:
-            # A record that names no shuttle has nothing to stage (none is live, or it has settled)
-            return snapshot, ()
-        before_vehicle = next(v for v in previous.vehicles if v.vehicle_id == vehicle.vehicle_id)
+        vehicle = next((v for v in snapshot.vehicles if v.vehicle_id == vehicle_id), None) if vehicle_id else None
         # Defer until eligible so a dwell or different route cannot stall fleet publications.
         informational = not self.config.get("requires_guidance", True)
+        if vehicle is None and not informational:
+            # A decision needs its shuttle: a record that names none has nothing to stage (none is live, or
+            # it has settled). A world event that only informs belongs to no shuttle.
+            return snapshot, ()
+        before_vehicle = (next(v for v in previous.vehicles if v.vehicle_id == vehicle.vehicle_id)
+                          if vehicle is not None else None)
         if (incident is None and informational and snapshot.tick >= self.config["trigger_tick"]):
             snapshot.source = self._source(snapshot)
             # Disruptions are hard road closures. An accident's congestion is
@@ -252,9 +353,8 @@ class IncidentService:
                     active_until_tick=snapshot.tick + self.config["clear_after_ticks"],
                     reason="Synthetic road block: network impact assessment", provenance=snapshot.source,
                 ))
-            incident = Incident(incident_id=self.config["incident_id"], aggregate_revision=1,
-                                vehicle_id=vehicle.vehicle_id, state="DETECTED", detected_tick=snapshot.tick,
-                                candidate_ids=[], provenance=snapshot.source)
+            incident = self._new_incident(snapshot, revision=1, state="DETECTED",
+                                          vehicle_id=vehicle.vehicle_id if vehicle is not None else None)
             snapshot.incidents.append(incident)
             events.append(self._event(snapshot, incident, "INCIDENT_DETECTED", {
                 "incident_type": self.config.get("kind"),
@@ -265,6 +365,9 @@ class IncidentService:
                 "active_until_tick": snapshot.tick + self.config["clear_after_ticks"],
                 "operational_impact": self._impact(False),
                 "reason": "Informational network incident; no operator decision required",
+                # Only an event a shuttle will reach is worth an alert sound
+                "alert": bool(incident.exposed_vehicle_ids),
+                **self._world(),
             }))
         if (not informational and incident is None and snapshot.tick >= self.config["trigger_tick"] and
             vehicle.route_id == self.config["route_id"] and vehicle.service_state == "IN_SERVICE"):
@@ -282,9 +385,7 @@ class IncidentService:
                 provenance=snapshot.source,
             )
             snapshot.disruptions.append(disruption)
-            incident = Incident(incident_id=self.config["incident_id"], aggregate_revision=2,
-                                vehicle_id=vehicle.vehicle_id, state="OPTIONS_READY", detected_tick=snapshot.tick,
-                                candidate_ids=[], provenance=snapshot.source)
+            incident = self._new_incident(snapshot, revision=2, vehicle_id=vehicle.vehicle_id, state="OPTIONS_READY")
             snapshot.incidents.append(incident)
             vehicle.service_state = "AWAITING_GUIDANCE"
             vehicle.aggregate_revision += 1
@@ -298,6 +399,7 @@ class IncidentService:
                 "battery_at_detection_kwh": vehicle.battery_kwh,
                 "transitions": ["DETECTED", "AWAITING_REVIEW", "OPTIONS_READY"],
                 "vehicle_transitions": ["BLOCKED", "AWAITING_GUIDANCE"], "options": options,
+                **self._world(),
             }))
         if incident is not None and informational:
             disruption = next((d for d in snapshot.disruptions if d.disruption_id == self.config["disruption_id"]), None)
@@ -370,6 +472,8 @@ class IncidentService:
                                            "service_state": vehicle.service_state,
                                            "observed_battery_kwh": vehicle.battery_kwh,
                                            "observed_battery_change_kwh": vehicle.battery_kwh - self._evidence(store, previous, incident).data["battery_at_detection_kwh"]}))
+        if incident is not None:
+            events.extend(self._sync_exposure(snapshot, incident))
         return snapshot, tuple(events)
 
     def _evidence(self, store: TrainingStore, snapshot: FullSnapshot, incident: Incident) -> Event:
