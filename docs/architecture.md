@@ -1,460 +1,441 @@
-# Formula9 3D Shuttle Fleet Manager Training Simulator
+# Formula9 technical architecture
 
-## 1. Status and architectural intent
+Revision **3.0, 12 November 2026**. This revision describes the system as it is built today: one
+Unity client and the Python/FastAPI backend that was migrated into this repository. It replaces
+revision 2.1 (27 October 2026), which planned two separate clients, a React/three.js web app and a
+C++/Qt/OpenGL desktop app. Neither client exists in this repository any more. The Unity client took
+over their training workflows.
 
-Architecture revision: **2.1, 27 October 2026**. The 3D-first revision incorporates the user's clarification of 26-27 October. This is the implementation target for M2-M6, not a claim that these capabilities already exist. It supersedes the [earlier decision-policy evaluation plan](archive/architecture-decision.md). M1 remains the reusable data, routing, networking, rendering and audio foundation.
-
-The approved product trains an **AV shuttle fleet manager** to plan a shift around known disruptions, manage unexpected incidents, maintain service while charging vehicles, and review decision outcomes. Trainers author exercises and assess results; route planners consume exported incident patterns. See [requirements and source interpretation](product_direction.md).
-
-Both the React/TypeScript/three.js web application and C++20/Qt/OpenGL native application must complete the same training workflows independently in a mandatory 3D operational world from M2. They may also operate the same backend session. Fleet overview, route editing, incident inspection and vehicle execution use dimensioned 3D geometry and shared spatial state; forms, timelines and minimaps support that world. Neither client becomes a second simulation authority, and a flat map or optional viewer does not satisfy the requirement.
-
-The engineering challenge is coordinated deterministic fleet behaviour with responsive editing, correct concurrent decisions, bounded rendering and recoverable training records. Additional services or algorithms must earn their place through these requirements and measured workloads.
+Formula9 trains an **AV shuttle fleet manager**. The trainee plans a detour around a closed road,
+handles incidents as they come up, keeps shuttles in service while they charge, and reviews what
+happened afterwards. The exercise runs on real Toa Payoh (Singapore) streets, with a sample of
+background traffic and simulated traffic lights. See [product direction](product_direction.md) for
+the requirements this comes from.
 
 Read with:
 
-- [Integrated milestones and dependency gates](milestones.md)
-- [Performance and resilience specification](performance.md)
-- [Mandatory 3D scene, spatial and interaction contract](three_d_simulation.md)
-- [Backend deliverables](backend/README.md)
-- [Web app deliverables](web/README.md)
-- [Native deliverables](native/README.md)
+- [Repository README](../README.md): setup, running, building, data refresh and testing
+- [Session creation and recovery](session_creation.md): session lifecycle, HTTP contract, crash recovery
+- [Training contract v2](../contracts/v2/README.md): wire rules, entities and transition tables
+- [Backend migration record](backend-migration.md): what was moved from `Formula_9`, and how
+- [Third-party vehicle assets](third_party_assets.md): imported model packs and their licence status
 
-## 2. Scope decisions
+## 1. Principles
 
-| Decision | Architecture consequence |
+| Principle | What it means in the code |
 | --- | --- |
-| Pre-trip planning is the main task | Route revisions, disruptions, validation, comparison and approval form the first complete workflow |
-| Fleet-level training | A session owns many shuttles, service patterns, stops, chargers, incidents and a shared clock |
-| Human guidance | Dispatcher commands select constraints/actions; simulated controllers execute them |
-| M2 covers network detours | Segment closures and node detours first; local obstacle passing requires the M4 lane-model gate |
-| Both clients are required | Shared contracts, fixtures, workflow acceptance and latency budgets apply to both |
-| 3D is the core, not an optional viewer | Shared scene package, authoritative poses and spatial constraints; both clients demonstrate navigable 3D from M2 |
-| Simplified physics, real spatial semantics | Road-constrained 3D kinematics, support surfaces and swept volumes; tyre/suspension physics and photorealism are not prerequisites |
-| Durable output is core | Commands, decisions, results, scoring inputs and reports persist from early milestones |
-| Recordings have fixed provenance | Recorded footage is restricted to its captured time/location; generated motion is synthetic |
-| Training is the deployment boundary | No real vehicle control, live passenger dispatch or roadworthiness claims |
-| Perception is optional from M4 | Recorded-frame inspection cannot block the MVP or silently become world ground truth |
-| RL is not required | Interpretable controllers and a constrained planner support the approved product |
+| The backend is the only simulation authority | Shuttle motion, energy, incidents, charging, route checks and scores are computed in Python. Unity displays them and sends commands. It never moves a shuttle along its route, recalculates energy or approves a route itself. |
+| Durable before visible | A command result, event or snapshot is published only after its SQLite transaction has committed. |
+| One contract, validated on both sides | `contracts/v2` defines the wire format. Python validates it with pydantic. Unity validates incoming JSON against the same schemas, which are generated into C#. |
+| Deterministic, recoverable sessions | One actor per session advances in fixed 50 ms steps from a seeded RNG. Its private state is checkpointed with each publication, so a restarted backend resumes the same attempt. |
+| Presentation is separate from authority | Background traffic, traffic-light colours, building textures and camera views are presentation. They never decide whether a shuttle reached a stop or a decision was correct. |
+| Honest data provenance | Real data (OSM roads, LTA bus stops and road features, the vehicle population) is labelled separately from simulated data (light timings, incidents, energy model). |
 
-Milestone numbers describe delivery gates, not time estimates. The brief's full feature list is distributed across M2-M6; its own recommendation to limit M2 to segment closures and node detours is retained.
+## 2. Repository layout
 
-The 3D revision adds numbered tasks and exit criteria to every team milestone without removing or renumbering existing work. Earlier optional ECS/detail language now applies only to enhanced inspection; mandatory baseline 3D is delivered in M2. Existing implementation handoffs remain historical evidence for their named tasks, not evidence that the added work has passed.
+| Path | Contents |
+| --- | --- |
+| `Assets/Formula9/Runtime` | Unity client code, the `Formula9.Runtime` assembly (references glTFast and Newtonsoft.Json) |
+| `Assets/Formula9/UI` | UI Toolkit pages (`Pages/*.uxml`), styles (`Formula9App.uss`), theme and panel settings |
+| `Assets/Formula9/Resources/Formula9` | Audio clips, building textures, shaders/materials and the traffic vehicle catalogue |
+| `Assets/Formula9/Editor` | Scene builder, Pages window and batch player build |
+| `Assets/Formula9/Tests/EditMode` | EditMode, live-backend and end-to-end tests, plus copies of the shared contract fixtures |
+| `Assets/Scenes/Formula9.unity` | The only scene; rebuilt by **Formula 9 → Rebuild client scene** |
+| `Assets/<vendor packs>` | Imported vehicle and traffic-light packs (see [third-party assets](third_party_assets.md)) |
+| `backend/src` | FastAPI application and simulation services (section 4) |
+| `backend/fixtures` | Static map, Toa Payoh scenario, traffic, transit, buildings, incident catalogue and the M2 scene package |
+| `backend/tests` | pytest suite |
+| `contracts` | v2 pydantic models, generated JSON Schemas, fixtures and alert cues; the legacy v1 REST/WebSocket contracts |
+| `Tools` | Backend launcher, contract generator, isolated test backend, executable builder, bundled-backend supervisor |
+| `scripts` | Scene-package builder and optional KITTI/ML utilities |
+| `state` | Default location of the live session database (`training.sqlite`, ignored by Git) |
+| `run.bat`, `build.bat` | Windows entry points for setting up and running, and for building the bundled executable |
 
-## 3. Existing foundation and migration
-
-Source inspection on 20 October establishes reuse boundaries. Older test counts are not treated as current results.
-
-| Current implementation | Reuse | New work |
-| --- | --- | --- |
-| `backend/src/datasets/` | KITTI loading, coordinates, source-frame metadata | Clip manifests, branch provenance and scenario ingestion |
-| `services/trajectory_stream.py` | Immutable recorded/route playback | Separate fleet simulator; playback does not become a reactive controller |
-| `services/session_manager.py` | Lifecycle and subscribers | Session actor, durable state, commands, fleet clock and recovery |
-| `services/route_planner.py` | Preview boundary and bounded cache | Versioned drafts, alternatives, constraints and approval |
-| `routing/road_graph.py` | Cached directed OSM graph with direction/access/speed data | Turn relations, ODD/vehicle-fit checks and missing-data states |
-| `services/scene_repository.py` | Read-only map and spatial queries | Curated training overlays; separate writable training database |
-| `contracts/` | Renderer-independent coordinates and fixtures | Canonical v2 fleet/command/event/report schemas and adapters |
-| `frontend/src/app.jsx`, `api/`, `renderer/` | Route interaction, lifecycle, scene/camera | Feature modules, fleet store, bounded worker ingestion and five workflows |
-| `Native/App/BackendClient.*`, `GLViewport.*`, `Phase2_3/` | Networking, cancellation, map/3D | Typed fleet state, editor/incident/charging/debrief views and bounded history |
-| `Native/Engine/` and FMOD | ECS, GPU assets, cameras and audio | Fleet batching, resource lifecycle and semantic cues |
-| `backend/src/perception/` | Optional frame/projection/detection helpers | Separately accepted recorded-data extension only |
-
-Backend paths in this table are relative to `backend/src/` where abbreviated. Current single-trajectory code does not establish fleet simulation, runtime collision checks, charging optimization or decision explanations. Scripted sample reasons remain labelled fixtures until replaced by controller records.
-
-## 4. Runtime topology and ownership
-
-Use a **modular monolith** for beta: one FastAPI authority process per deployment, one sequential actor per active session, one serialized durable writer, and a bounded process pool for expensive pure calculations. One active session is the initial performance scope; additional simultaneous sessions require separate capacity measurements.
+## 3. Runtime topology
 
 ```mermaid
-flowchart TB
-    Web["Web operator and trainer client"]
-    Native["Native operator and trainer client"]
-    API["FastAPI v2 REST and WebSocket"]
-    Actor["Session actor: fleet, incidents, shift clock"]
-    Commands["Command validation and authorization"]
-    Workers["Bounded route, preview and report workers"]
-    DB[("Training SQLite WAL: commands, events, checkpoints")]
-    Map[("Immutable scene and rule revisions")]
-    Assets[("Versioned 3D render assets, clips and scenarios")]
-    Web <-->|"commands, events, snapshots"| API
-    Native <-->|"same contract"| API
-    API --> Commands
-    Commands --> Actor
-    Actor <-->|"immutable jobs and revision-tagged results"| Workers
-    Actor <-->|"committed transitions"| DB
-    Actor --> Map
-    Workers --> Map
-    API --> Assets
-    Web -->|"bounded asset fetch"| Assets
-    Native -->|"same scene manifest"| Assets
+flowchart LR
+    subgraph Player["Unity player (Formula9.exe or Editor Play mode)"]
+        UI["UI Toolkit pages<br/>Formula9App, TrainingWorkspace"]
+        Ctrl["SessionController + SessionStore"]
+        World["WorldView<br/>FleetMap (2D), CityView (3D city),<br/>WorldBuilder (scene-package 3D)"]
+        Http["Backend clients<br/>AuthClient, TrainingApi, CityClient, TransitClient"]
+        UI --> Ctrl
+        UI --> World
+        Ctrl --> Http
+        World --> Http
+    end
+
+    subgraph Server["FastAPI process, one authority worker"]
+        API["/api routes"]
+        Svc["TrainingSessionService<br/>one actor and asyncio task per live session"]
+        Store["TrainingStore<br/>single SQLite writer thread"]
+        Static["Static data services<br/>map, roads, buildings, road features, transit, scenes"]
+        API --> Svc
+        Svc --> Store
+        API --> Static
+    end
+
+    Http <-->|"HTTP/JSON, Bearer token<br/>127.0.0.1:8000"| API
+    Store --> DB[("state/training.sqlite<br/>WAL, synchronous=FULL")]
+    API --> Mongo[("MongoDB<br/>accounts and login sessions")]
+    Static --> Fix[("backend/fixtures<br/>map.db, transit.sqlite, toa-payoh.sqlite,<br/>traffic JSON, m2_scene")]
+    Player -.->|"OSM tile server<br/>(FORMULA9_TILE_URL)"| Tiles[("Map tiles")]
 ```
 
-| Boundary | Owns | Must not own |
-| --- | --- | --- |
-| Session actor | Ordering, world state, command application, deterministic controllers, incidents/charging | GPU resources or media decoding |
-| Routing/validation | Candidates and named constraints against immutable inputs | Live fleet mutation |
-| Storage writer | Transactions, durable commands/events/checkpoints, migrations | Vehicle decisions |
-| API | Identity, request bounds, jobs, subscriptions and errors | Independent session logic per request |
-| Clients | Draft interaction, presentation, interpolation and inspection | Safety acceptance, scores, charge reservations or authoritative motion |
-| Scenario authoring | Versioned definitions, rules, references and rubric | Mutating a published exercise used by an attempt |
-| Scene pipeline | Immutable render manifest, support surfaces, operational proxies and semantic bindings | Independent client-specific collision truth or unchecked asset substitution |
+- The client talks to the backend over plain HTTP. It does not use the WebSocket: snapshots are polled
+  once a second, and traffic frames are long-polled (section 6.5).
+- The backend binds to loopback by default. `FORMULA9_BACKEND_URL` points the client somewhere else.
+- **Development:** `run.bat` (or `python Tools/run_backend.py`) runs the backend from `backend/.venv`,
+  and the Unity Editor connects to it.
+- **Bundled build:** `build.bat` builds the Windows player and places a portable Python with the
+  backend, fixtures and contracts in `Builds/Formula9/Backend`. Each `Formula9.exe` starts
+  `Backend/serve.py` hidden (`BundledBackend.cs`). All open players share one backend process, which
+  shuts down cleanly once the last player has closed (`Tools/bundled_backend.py`). If a backend is
+  already listening on the port, the player uses it instead.
 
-FastAPI workers normally have separate memory. Increasing Uvicorn workers would duplicate in-memory session ownership; beta therefore uses one authority worker and bounded calculation processes. Multi-host deployment needs explicit session ownership/routing before replication. [FastAPI deployment concepts](https://fastapi.tiangolo.com/deployment/concepts/)
+Only one FastAPI worker may run against a database. Live sessions are held in that process's memory,
+so more Uvicorn workers would each claim the same sessions.
 
-Local deployment binds to loopback. Classroom LAN deployment adds HTTPS/WSS, server-assigned roles, access tokens, origin checks and authenticated session join. A native launcher may supervise the same backend executable; it cannot embed a competing simulator through nanobind.
+## 4. Backend
 
-## 5. Domain model
+### 4.1 Module map
 
-Durable records carry stable IDs, schema and source revisions. Units are explicit. Canonical positions remain metres, x=east/y=north/z=up; renderer transforms stay in adapters.
-
-The [3D contract](three_d_simulation.md#4-spatial-wire-contract-and-transforms) defines body origin/axes, unit XYZW orientation, dimensions, support/lane/deck IDs and exact asset/basis transforms. Freeze a compatible spatial-schema extension after auditing current v2 consumers; 3D-required sessions reject missing mandatory pose/scene fields rather than silently flattening them.
-
-| Record | Principal fields and invariants |
+| Package under `backend/src` | Responsibility |
 | --- | --- |
-| ScenarioRevision | Immutable map/recording/rule/vehicle/energy/rubric revisions, seed, fleet, triggers and references |
-| TrainingSceneRevision | Shared render-package checksum, operational geometry/proxy revision, origin/axes, asset profile, semantic bindings and supported 3D capabilities |
-| SpatialPose / SceneObject | Canonical position/orientation, body dimensions, support surface, collider/asset IDs, scene/object revision and source |
-| TrainingSession | Scenario revision, state, tick, epoch, backend authority owner, authorized participant identities, checkpoint cursor |
-| FleetVehicle | ID, dimensions, dynamic limits, assignment, progress, state of charge, service state |
-| ServicePattern / Stop | Ordered required stops, dwell, departure windows, minimum service, substitution policy |
-| RouteDraft / RouteRevision | Base revision, directed edge IDs, waypoints, constraints, stops, time assumptions, validation |
-| Disruption | Segment/polygon, active interval, source, reason and revision |
-| Incident | Vehicle, trigger, priority, lifecycle, evidence/history, reason, candidates and service impact |
-| Candidate | Action/path, trade-offs, required exceptions, dependencies, expiry and validation |
-| DispatcherCommand | Idempotency key, authenticated actor, target revisions, reason, payload hash, status, applied tick |
-| DecisionRecord | Observation facts, selection/rejections, rule evaluation, actor, provenance and outcome |
-| Charger / Reservation | Port, availability, power curve, compatibility and half-open reservation interval |
-| ChargePlan / Swap | Travel/charge intervals, reserve forecast, coverage and synchronized handover |
-| Event / Checkpoint | Ordered sequence, tick, epoch, state hash, versioned state and RNG state |
-| Assessment / Report | Immutable run IDs, rubric revision, component scores, evidence and export checksum |
+| `app.py`, `api/router.py`, `api/routes/` | Application assembly, middleware (auth, tracing, CORS), error handlers and route modules |
+| `auth/` | Sign-up, log-in and log-out. PBKDF2-SHA256 password hashes. Opaque bearer tokens valid for 12 hours, stored only as hashes. `MongoAccountStore` holds the data. |
+| `core/` | Settings (`config.py`, read from `backend/.env`), error envelope, per-request training trace telemetry |
+| `services/training_sessions.py` | `TrainingSessionService`: admission, lifecycle, ticking, commands, traffic frames, recovery |
+| `services/session_actor.py` | Base planar fleet actor: five shuttles on loops, separation and motion |
+| `services/integrated_actor.py` | `IntegratedSessionActor`: the Toa Payoh exercise (route detour, incidents, depots, charging, traffic, signals) |
+| `services/spatial_session_actor.py`, `spatial_motion.py`, `training_scene.py` | Road-constrained 3D actor bound to the hash-pinned M2 scene package |
+| `services/route_edit.py`, `route_outcome.py` | Route editor context, draft previews, mandatory checks, approval and post-run outcome |
+| `services/incidents.py`, `incident_scenarios/` | Incident lifecycle, candidates, history/debrief and the seeded random incident catalogue |
+| `services/battery_decision.py`, `charge_booking.py`, `energy/` | Energy model, forecasts, charge options, charger bookings and battery assessment |
+| `services/crash_recovery.py` | Process-crash recovery checks used by the session service |
+| `traffic/` | Road network, background traffic (`city_traffic.py`), signal cycle, incident hazards and the import scripts |
+| `routing/` | OSM road graph, operating network, map matcher, Singapore fixture and building importers |
+| `transit/` | LTA bus stop and service store, plus its OSM and DataMall importers |
+| `persistence/` | `TrainingStore` and its SQL migrations `0001`–`0004` |
+| `datasets/`, `perception/`, `services/trajectory_stream.py`, `session_manager.py` | Legacy KITTI trajectory playback and optional perception helpers (v1 API) |
 
-A vehicle cannot simultaneously be in service and occupying a charger. Charger reservations cannot overlap. Route approvals use revision conflicts. Required stops may only be skipped/substituted through explicit scenario policy and a logged acknowledgement.
+### 4.2 Scenarios
 
-## 6. State machines
+A session is created from a scenario revision. The Unity client offers only the first scenario in the
+table. The backend still runs the other two, and the client can join existing sessions of those kinds.
 
-Session: `DRAFT -> READY -> RUNNING <-> PAUSED -> COMPLETED -> ARCHIVED`.
+| Selector | Actor | World | Status |
+| --- | --- | --- | --- |
+| `scenario-m2-integrated-r1` | `IntegratedSessionActor` | Planar contract on real Toa Payoh roads. Shown as a 2D map and a 3D city. | **Default.** Unity labels it "Singapore, real streets (2D)". |
+| `scenario-m2-road-3d-r1` | `SpatialSessionActor` | Synthetic local frame from the hash-pinned GLB scene package | Supported. Not offered for creation. |
+| `scenario-m2-r1` | `SessionActor` | Planar five-shuttle loop | Legacy fixture. |
 
-After restart: `RUNNING/PAUSED -> RECOVERING -> PAUSED`. Incompatible data/version or unrecoverable state enters `FAILED` with a reason. Completed assessments are immutable; retry creates a linked new attempt.
+The integrated fixture (`backend/fixtures/m2_integrated.json`) is built by
+`python -m src.routing.build_singapore_fleet_fixture` from the committed OSM extract. It has:
 
-Vehicle service states include `STANDBY`, `IN_SERVICE`, `DWELLING`, `BLOCKED`, `AWAITING_GUIDANCE`, `DETOURING`, `RETURNING_TO_DEPOT`, `QUEUED_FOR_CHARGE`, `CHARGING` and `OUT_OF_SERVICE`. Transitions validate route, energy, reservation and service conditions together.
+- five shuttles on one editable route (`route-m2-detour`) and four peer routes, with LTA bus stops
+- two depots: Toa Payoh Interchange and Saint Michael's Bus Terminal
+- a permanent closure that must be routed around before Start
+- an obstruction on shuttle-01 at tick 240, then random incidents from `fixtures/incidents/predefined_scenarios.json`
+- shuttle-05 starting near its energy reserve, so it gets a charging decision early
 
-Incident: `DETECTED -> AWAITING_REVIEW -> OPTIONS_READY -> ACTION_COMMITTED -> EXECUTING -> RESOLVED`.
+### 4.3 Session service and ticking
 
-Alternatives include `WAITING` with a review deadline, `ESCALATED` with a scripted on-site response, and `UNRESOLVED` at shift end. Expired options return to review. An accepted command is not evidence of successful execution.
+`TrainingSessionService` owns every live attempt:
 
-Hold the affected shuttle at a validated stop if no action is feasible. Other shuttles continue unless globally paused or affected by the same restriction. Closing a UI card cannot resolve domain state.
+- **Admission:** up to 16 live sessions, of which up to 6 can run background traffic. Past that, the
+  service answers `QUEUE_FULL`. `POST /api/v2/sessions` needs an `Idempotency-Key`, so a retried
+  create returns the same attempt. Session IDs are readable, for example `toa-payoh-007-10nov-1340`.
+- **Clock:** a running actor advances in fixed **50 ms ticks (20 Hz)**. Ticks are scheduled against
+  high-resolution deadlines. A late tick does not delay the ones after it, and a backlog of up to
+  0.25 s is caught up. READY and PAUSED sessions do not advance.
+- **Publication:** each tick is staged on a copy of the actor in a worker thread. A presentation
+  snapshot is committed every two ticks (10 Hz). The staged actor is installed only after its
+  transaction commits.
+- **Ordering:** one lock per session orders ticks, lifecycle commands and decisions. All route,
+  incident and battery decisions take that lock.
+- **Traffic frames:** the integrated actor steps its background traffic every two ticks. The service
+  keeps the latest 30 frames in memory, and `GET …/traffic` returns up to one second of them
+  (section 6.5).
+- **Lifecycle:** the commands are `START`, `PAUSE`, `RESUME` and `ARCHIVE`. `ARCHIVE` ends an attempt,
+  frees its slot and keeps its final snapshot, events and command receipts. `DELETE`, `purge` and
+  `compact` remove old attempts and reclaim disk space (see
+  [session creation](session_creation.md#permanent-deletion-and-disk-cleanup)).
 
-## 7. Deterministic fleet simulation and clocks
+### 4.4 Integrated actor
 
-- Fixed timestep **50 ms / 20 Hz**; initial state publication **10 Hz**; rendering is independent.
-- One simulation clock governs movement, events, closures, boarding/dwell, charging and service schedules.
-- Each tick processes due scenario events, ordered commands/reservations, controller decisions, motion/energy, conflicts, metrics and committed publication in a documented order.
-- Stable entity iteration, subsystem RNG seeds, canonical serialization and pinned model/engine revisions support repeatability.
-- Bound controller work with local spatial queries. Route/preview/report jobs use immutable inputs and return revision-tagged results through the actor.
-- CPU-heavy searches, decoding, export and ML never execute on the API event loop.
-- Bound catch-up. If real time cannot be maintained, pause or advertise lag/slow simulation; never silently skip authoritative ticks.
+Each tick, `IntegratedSessionActor` does the following:
 
-Persist command order, external events, selected worker outputs and their effective ticks. Replay consumes committed worker outputs rather than rerunning asynchronous searches with nondeterministic completion order. Exact state-hash reproducibility is scoped to the pinned runtime/model build; cross-platform comparisons use specified tolerances.
+- **Shuttle motion:** moves shuttles along their admitted route geometry at the scenario speed. It
+  includes stop dwell, held stops, incident holds and the depot trips: drive to the bay, charge, then
+  park in a standby space.
+- **Signals:** stops shuttles at red lights. Each junction runs the same simulated 70 s two-phase cycle
+  (`traffic/signal_cycle.py`). Stop lines come from the LTA road-feature fixtures.
+- **Traffic:** drives the background traffic sample through `CityTraffic`, using the Krauss
+  car-following model. Shuttles share the kerb lane with that traffic. `plan_shuttle` limits a
+  shuttle's speed for the vehicles ahead of it, and `place_shuttle` records where its body went. The
+  traffic keeps clear of incident scenes and their growing queues (`traffic/incident_hazards.py`).
+  It is deterministic and checkpointed (about once a second; the traffic state is 65–100 KB).
+- **Energy:** charges travel and auxiliary energy with energy model `ENERGY_R1`. It also issues
+  `CONTINUE` and `CHARGE_NOW` offers, runs scheduled charger bookings, and sends a shuttle back to a
+  depot when its reserve requires it.
+- **Incidents:** schedules the first incident, then random ones. It offers WAIT, ESCALATE or
+  ROAD_DETOUR candidates and holds the affected shuttle until a decision clears it.
 
-Three clocks have different purposes:
+Domain consequences go through the existing services (`RouteEditService`, `IncidentService`, the
+energy package). The actor adds its private execution state to the same commit.
 
-1. Simulation time determines shift and physical outcomes.
-2. Monotonic elapsed time measures latency and trainee response.
-3. UTC timestamps support audit/export; the shift timezone is scenario metadata.
+### 4.5 Commands and decisions
 
-The 30-second design aspiration is a human decision target, not an HTTP timeout or forced approval. Record incident-raised, alert-rendered, opened, submitted, applied, paused and disconnected times separately. Distinguish server-authoritative operational delay from client-observed presentation delay. Record pauses and assistance so accelerated playback and network faults cannot silently improve scores.
-
-Persist accumulated active assessment durations and interval records at the durable boundaries. Process-local monotonic clock origins cannot be compared across a restart; resume a new interval after recovery, with downtime recorded separately.
-
-### Vehicle/controller model
-
-M2-M3 use a deterministic route-following kinematic model with distance along the approved 3D path, speed, bounded acceleration/deceleration, support-surface height/normal, body orientation from path tangent and surface frame, and stop/dwell states. State updates integrate acceleration over the fixed timestep and preserve nonnegative speed without jumping across a stop or route endpoint. The backend publishes the dimensioned body-centre pose; clients do not infer a separate terrain height or independently drive vehicles.
-
-The controller evaluates speed limits, next service stop, preceding shuttle, active obstruction and incident hold before selecting `PROCEED`, `SLOW`, `STOP`, `WAIT_FOR_GUIDANCE` or `FOLLOW_APPROVED_DETOUR`. Each selection records the actual limiting predicate and observations. A weighted rule/tree implementation can supply this interface, but comparing ML policies is not the training product.
-
-Use vehicle body volumes, route progress and indexed 3D occupancy to enforce separation on the curated scene. A model stopping-distance bound includes reaction allowance, configured braking capability and a margin; test boundary speeds, timestep crossing and emergency holds. Check conservative swept movement between ticks against versioned operational proxies so a fast vehicle cannot tunnel through an obstacle merely because endpoint samples are clear. M2 includes a ramp/support fixture and solid obstruction; M3 adds stacked roads and vertical clearance, avoiding both planar false collisions and missed overhangs. Query limits fail closed with a reason. Queue and junction priority in M2 are explicit scenario rules, not an unimplemented claim of arbitrary traffic intelligence.
-
-Validate energy conservation and dimensional units: travel energy depends on integrated distance, auxiliary energy on elapsed simulation time, and charging adds accepted power times duration and efficiency up to capacity. Version these parameters with each scenario. Tests cover zero distance, prolonged waiting, interrupted charge, empty battery and a detour longer than the nominal loop.
-
-The M4 local-manoeuvre model adds lane-relative lateral motion, swept volume and opposing traffic only within accepted curated micro-scenes. High-frequency physical vehicle dynamics, realistic sensors and city-scale traffic remain outside the core model.
-
-### 3D scene and operational geometry
-
-The [scene pipeline](three_d_simulation.md#3-scene-package-and-content-pipeline) packages a shared constrained GLB render profile, dimensioned semantic entities, support surfaces and simplified collision/visibility proxies. Render meshes and operational geometry share IDs/transforms and validated bounds but may differ in tessellation. LOD and shadows never change collision, visibility or scoring outcomes. Missing mandatory geometry blocks readiness; optional visual detail may use its declared low-detail representation.
-
-The backend stays CPU-only/headless; no GPU renderer or client raycast is required to accept decisions. M4 visibility evidence is computed from authored observation origins and proxy coverage, not the operator's orbit camera. Being visible on screen is not evidence of visibility to a shuttle.
-
-## 8. Recorded data, branch points and replay
-
-Each scenario identifies its source drive, including when adapted for training. Each displayed observation still carries its actual source: dataset-derived does not mean every entity/event was recorded.
-
-| Source mode | Meaning | Permitted behaviour |
+| Action | Endpoint | Notes |
 | --- | --- | --- |
-| `RECORDED_REPLAY` | Original sensor/pose observations at their original geography/time | Inspect, annotate, scrub; immutable trajectory |
-| `TRAINING_SIMULATION` | Fleet/events generated from a scenario, possibly inspired by a drive | Route edits, guidance, energy and scoring |
-| `RECORDED_SEEDED_TRAINING` | Compatible recorded clip initializes a synthetic world at a declared branch | Original lead-up then synthetic continuation |
-| `COUNTERFACTUAL_PREVIEW` | Temporary copy of a current checkpoint | Compare only; no mutation of live fleet/timer/assessment |
+| Lifecycle, incident option, charger reservation, continue service, schedule or cancel charge | `POST /api/v2/sessions/{id}/commands` | Returns `202` with a `CommandStatus`: `QUEUED`, then `APPLIED` or `REJECTED`. Each command has an idempotency key per actor and session. Decision commands need a reason. |
+| Check a route draft | `POST …/route-previews` | No side effects. Returns the directed path, the polyline, the mandatory checks (`PASS/WARN/FAIL/UNKNOWN`) and original against edited metrics. |
+| Approve a route | `POST …/route-approvals` | Checks the draft again, then commits the route revision for the named shuttles. |
+| Preview an incident option | `POST …/incident-previews` | Reads a committed branch without advancing live time. |
+| Preview a charge booking | `POST …/charge-schedule-previews` | Reserves nothing. The commit runs the same check. |
+| Confirm an unclear outcome | `GET …/commands/{key}` | Used after a lost reply or a recovery. |
 
-Store source mode, recording/sequence/frame IDs where applicable, source timestamps, branch tick, parent snapshot/branch, map/transform revisions and authored-object flags. Provenance belongs to each trajectory/evidence item, not one global flag falsely marking a fleet as recorded.
+The shared validator in `contracts/v2/models.py` rejects stale revisions, expired or withdrawn offers,
+and transitions not allowed by the state tables. Error codes include `STALE_REVISION`,
+`OPTION_EXPIRED`, `CHARGER_CONFLICT`, `INVALID_TRANSITION`, `QUEUE_FULL` and `SESSION_RECOVERING`.
 
-Branch at the **earliest change to the recorded world**, including a pre-trip detour or inserted obstacle. A subsequent incident uses the last ten seconds of **simulation history**. Never show unrelated KITTI footage as its current camera. A genuine recorded incident can show its synchronized lead-up, followed by a simulated camera or explicit unavailable state.
+### 4.6 Persistence and recovery
 
-An authored obstacle over a recorded scene is a labelled training overlay, not something the original camera observed. Missing assets show "Recorded clip unavailable" and manifest identity; no silent substitution.
+`TrainingStore` is a single SQLite database with one writer thread. It runs with WAL,
+`synchronous=FULL` and foreign keys on.
 
-From M3, a synthetic onboard camera renders the 3D training world and remains persistently labelled `SIMULATED VIEW`. History and preview cameras bind the correct immutable scene revision, poses and branch; they do not manufacture recorded sensor frames or calibrated perception evidence.
-
-KITTI was captured around Karlsruhe. A one-north-style exercise may use a synthetic map and separately identified reference clip; relabelling coordinates does not turn KITTI footage into Singapore footage. [Official KITTI description](https://www.cvlibs.net/datasets/kitti/)
-
-Seeking history in a client is local inspection, not global rewind. A trainer explicitly restarts an attempt or creates a sandbox branch. Counterfactual previews copy all interacting fleet, event, energy and reservation state from the same checkpoint and have independent cancellation/resource budgets.
-
-## 9. Route authoring, validation and approval
-
-### Draft to committed route
-
-1. Select service/vehicles and load route, map and constraint revisions.
-2. Draft segment closures and ordered waypoints; M3 adds time windows and avoid polygons.
-3. Request validation and bounded alternatives against the same immutable revisions.
-4. Show failures at their map feature; compare distance, travel/dwell time, stops, energy and rule implications.
-5. Submit approval with reason, targets, candidate/draft ID and dependencies.
-6. Recheck freshness/current feasibility; commit route revision and assignments together.
-7. Apply pre-trip immediately or in-trip at a declared safe splice point; publish and record outcome.
-
-Preview has no side effects. Undo/redo changes local drafts. Initial approval is all-or-nothing for the requested vehicle set, with per-vehicle rejection reasons.
-
-Both clients pick/edit stable features on the 3D road surface with an explicit deck/surface identity and keyboard/list equivalents. Inverse-transform hit points into canonical coordinates; the backend validates placement, dimensions and geometry revisions. Overlapping XY surfaces are not interchangeable. M3 trainer obstacle placement creates a validated scenario draft or audited intervention, never an authoritative mutation by moving a client mesh.
-
-| Check | Evidence | Failure behaviour |
-| --- | --- | --- |
-| Connectivity/direction | Directed edges continuous through ordered waypoints | Reject disconnected/wrong-way route |
-| Turns/access | Restriction relations or curated overlay; vehicle permissions | Reject forbidden access; missing critical rules are `UNKNOWN` |
-| Time window | Edge traversal interval including dwell and closure interval | Reject overlap; recheck changed assumptions |
-| Vehicle fit | Width/height, turning envelope and required clearance | Reject insufficient fit; unknown cannot pass |
-| Stops | Required order and permitted substitutes/skips | Reject loss or request explicit allowed substitution |
-| Operational design domain (ODD) | Approved area, road classes and scenario conditions | Reject out-of-domain route |
-| Energy/service | Route plus depot energy, reserve and coverage forecasts | Explain affected vehicle and interval |
-| Dynamic execution | Occupancy, conflicts and incident constraints | Stop/replan when the route becomes infeasible |
-
-Map centrelines cannot establish lane width, passing clearance or allowed marking crossings. Curate/version the bounded training network where metadata is missing. Return `PASS/WARN/FAIL/UNKNOWN`; approve only if mandatory checks are known and satisfied.
-
-Use edge-based search to enforce turn restrictions, bounded diverse alternatives and versioned cost functions for time/distance/service/energy. Do not claim global optimality for a bounded heuristic. Cache keys include map, rule, disruption, vehicle, departure-time and service constraints.
-
-### Exceptions and local manoeuvres
-
-The mockup's double-line option is a training concept. M2 offers wait, escalation and network detours. M4 may enable local passing only after curated lane geometry, vehicle swept volume, visibility and oncoming-conflict acceptance tests.
-
-An exercise-authorized exception records rule ID, road extent, vehicle, expiry, approver and reason. It can relax only that named training rule. It cannot bypass collision, unknown clearance, occlusion or physical-fit checks. Insufficient visibility makes the option unavailable with an explanation. Exercise policy is not real-world legal authorization.
-
-## 10. Incidents and guidance
-
-Incident definitions contain cause, affected road/vehicle, priority, facts available to the trainee, expected guidance trigger, difficulty and permitted actions. The controller requests guidance when allowed actions are exhausted, scenario approval is needed or evidence is insufficient.
-
-Explanations derive from evaluated predicates and constraints. "Low confidence" is a traceable qualitative availability/ambiguity state unless a probability model is separately validated.
-
-Actions include a validated suggested detour, manual draft through the same validator, wait until review, simulated on-site escalation, and a named permitted exception after its capability gate.
-
-Candidates carry map/rule/route/world dependencies, expiry, assumptions, estimated trade-offs and visibility limits. Recheck at commit and during execution. A moved obstacle, changed occupancy or resolution by another operator invalidates stale options.
-
-Prioritize concurrent incidents by urgency, service impact and age, not popup order. Deduplicate alerts by durable event ID. Escalation stays inside the training scenario.
-
-## 11. Battery, charging and service continuity
-
-Version the energy model: capacity in kWh, distance and idle/accessory consumption, optional acceleration/load terms, charging efficiency, acceptance power and taper. Start with an explicit simple model. Mockup values such as 15% reserve or 40 minutes to charge are configurable fixtures.
-
-Forecast remaining loop, detour, wait and depot energy. Show uncertain inputs/estimates; present reserve margin, not just current percentage. Charging plans jointly check:
-
-- Vehicle/port compatibility and maintenance windows.
-- Non-overlapping reservations, travel/arrival and charge duration.
-- Reserve through the timeline and reachability of the next charge.
-- Minimum in-service fleet, stop coverage and scenario headway targets.
-- Swap location, transfer/dwell, replacement readiness and assignment revision.
-
-Reserve resources and assignments atomically. Reforecast after disruption, missed arrival, outage or rejected swap. Start with deterministic greedy scheduling and bounded repair; extensions retain the common validator and explain their trade-offs.
-
-Exercises may allow poor choices that cause service gaps or reserve breaches and score the consequences. Label them as noncompliant outcomes. Do not hide a breach by clamping the display to reserve; physical state of charge is bounded by 0-100%, not the training reserve.
-
-## 12. Trainer workflow, assessment and reports
-
-Author drafts from recording manifests, map/rule overlays, fleet/chargers, disruptions, difficulty, triggers, acceptable outcomes and rubric. Validate references, geometry, reachability, feasibility, event order and reference solutions before publishing an immutable revision.
-
-M2 ships one authored fixture and deterministic debrief. M3 adds minimal in-app author/publish. M4 adds advanced composition and shift variation. Both clients use the same revision; trainee endpoints withhold reference answers until debrief.
-
-Record distinct rubric components: safety/compliance, correct-decision time, attempts, detour efficiency, service coverage and energy management. The 0-100 composite is proposed, configurable and versioned. A critical unsafe outcome fails the attempt regardless of speed. Accept multiple feasible solutions and compare references under identical conditions.
-
-Preserve raw timing, denied attempts, exceptions, missed stops, time/distance delta, minimum separation, reserve breaches, charger conflicts, coverage and unresolved incidents. Absence of detected collisions in a simplified model is not a real-world safety guarantee.
-
-M3 exports:
-
-- JSON: scenario/run/version manifest, decisions, outcomes and provenance for replay/analysis.
-- CSV: structured incidents/decisions, stable IDs, units and formula-safe text.
-- HTML report: score components, incident reasons, route changes, energy/service effects and reference explanation.
-
-PDF rendering is an optional adapter, not required for export. Reports read immutable committed records and apply access/redaction rules. M4 aggregates by road/category/scenario revision, labelling small samples as training exercises rather than operational statistics or AV training datasets.
-
-## 13. Contract v2 and transport
-
-Create `contracts/v2/` schemas, units, positive/negative fixtures and compatibility policy at M2. These proposed endpoints are not implemented by this documentation change; freeze exact routes at the contract gate.
-
-| Proposed API | Purpose |
+| Migration | Tables |
 | --- | --- |
-| `GET /api/v2/capabilities` | Schema/features/modes, resource limits and builds |
-| `GET /api/v2/scenes/{id}/revisions/{revision}/manifest` | Versioned spatial/render profile, content hashes, geometry bindings and readiness requirements |
-| `GET /api/v2/assets/{content_hash}` | Authorised immutable bounded asset download; geometry/media never rides in tick snapshots |
-| `GET/POST /api/v2/scenarios` | Catalogue/authorized draft creation |
-| `POST /api/v2/scenarios/{id}/publish` | Validate and publish immutable revision |
-| `POST /api/v2/sessions` | Create attempt from scenario revision/seed |
-| `GET /api/v2/sessions/{id}/snapshot` | Consistent fleet/incident/service baseline |
-| `POST /api/v2/sessions/{id}/route-previews` | Draft validation/candidate job |
-| `POST /api/v2/sessions/{id}/charge-previews` | Charge/swap validation |
-| `POST /api/v2/sessions/{id}/commands` | All mutating lifecycle/route/incident/charge actions |
-| `GET /api/v2/sessions/{id}/commands/{key}` | Reconcile ambiguous outcome |
-| `GET /api/v2/sessions/{id}/events?after=...` | Paginated durable replay |
-| `GET /api/v2/sessions/{id}/history?from_tick=...` | Bounded history with provenance |
-| `GET /api/v2/sessions/{id}/assessment` | Role/phase-appropriate assessment |
-| `POST /api/v2/sessions/{id}/exports` | Immutable export job |
-| `GET /api/v2/jobs/{id}` | Progress/failure/artifact reference |
-| `WS /ws/v2/sessions/{id}` | Events, snapshots, cursors and health |
+| `0001_training.sql` | `sessions`, `commands`, `events`, `checkpoints` |
+| `0002_live_sessions.sql` | `session_runtimes` (private actor checkpoints), `session_creations` (idempotent creation keys) |
+| `0003_session_numbers.sql` | `session_numbers` (the running number in readable IDs) |
+| `0004_session_traffic.sql` | `session_traffic` (traffic checkpoints, kept apart from the per-publication checkpoint) |
 
-Illustrative command; identity comes from authentication, not this body:
+Public snapshots, events, command outcomes and private actor state commit in one transaction. Private
+checkpoints are versioned: v1 planar, v2 spatial, v3 integrated. They hold shuttle progress, dwell,
+battery, the RNG, holds, charge timers, depot journeys and traffic. They never appear in HTTP replies.
 
-```json
-{
-  "contract_version": "2.0",
-  "command_id": "cmd-003-0142",
-  "command_type": "APPROVE_INCIDENT_OPTION",
-  "expected_epoch": 3,
-  "expected_revision": 12,
-  "target": {"incident_id": "inc-0142"},
-  "payload": {"candidate_id": "option-B-r4"},
-  "reason": "Use the validated side-road detour and approved temporary stop."
-}
-```
+On startup the service does the following:
 
-Use target aggregate revisions; do not require equality with a constantly advancing global tick for every click. Revalidate relevant candidate/world dependencies at application.
+- restores every live attempt and increments its epoch
+- marks queued decisions `NEEDS_RECONFIRMATION`
+- returns unstarted attempts to READY and started ones to PAUSED, so Resume is always explicit
+- marks only the affected attempt `FAILED` (`CORRUPT_CHECKPOINT`) when its checkpoint is corrupt or
+  incompatible
 
-### Durable commands
+Downtime does not advance simulation time. See
+[session creation](session_creation.md#runtime-and-recovery) for the full rules.
 
-1. Authenticate/authorize; bound input and validate target/dependencies.
-2. Serialize a transaction persisting the actor/session-scoped idempotency key, payload hash and `QUEUED` command. Identical retries return the prior result; different payload/same key conflicts.
-3. Return durable acceptance, not application success.
-4. Actor orders queued commands at a tick boundary, rechecks state and constructs next state.
-5. Atomically commit result, domain changes, event sequence and recovery information before publishing `APPLIED`/`REJECTED`.
-6. On timeout/reconnect, clients query the same command ID; never invent a new command or show approval from `QUEUED`.
+### 4.7 HTTP API
 
-After recovery, applied commands remain applied once at the domain level. Old queued commands become `NEEDS_RECONFIRMATION`/expired unless explicitly safe and revalidated. A reconnect cannot cause surprise delayed approvals. Network delivery itself may duplicate.
+All routes are under `/api`. `/api/v2/sessions/*` requires a bearer token.
 
-Errors include `STALE_REVISION`, `OPTION_EXPIRED`, `UNKNOWN_CONSTRAINT`, `NO_FEASIBLE_ROUTE`, `CHARGER_CONFLICT`, `ROLE_DENIED`, `QUEUE_FULL` and `SESSION_RECOVERING`, with retryability and usable current revisions.
+| Group | Routes |
+| --- | --- |
+| Accounts | `POST /auth/signup`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` |
+| Health | `GET /health` |
+| Training sessions | `GET/POST /v2/sessions`, `POST /v2/sessions/purge`, `POST /v2/sessions/compact`, `DELETE /v2/sessions/{id}` |
+| Session state | `GET …/{id}/snapshot`, `GET …/{id}/events?after=`, `GET …/{id}/traffic?after_tick=&wait_ms=` |
+| Routes | `GET …/{id}/routes/{route}/editor`, `GET …/{id}/routes/{route}/outcome`, `POST …/{id}/route-previews`, `POST …/{id}/route-approvals` |
+| Decisions | `POST …/{id}/commands`, `GET …/{id}/commands/{key}`, `POST …/{id}/incident-previews`, `POST …/{id}/charge-schedule-previews` |
+| Incident review | `GET …/{id}/incidents/{incident}/history`, `GET …/{id}/incidents/{incident}/debrief` |
+| 3D scene package | `GET /v2/scenes/capabilities`, `GET /v2/scenes/{rev}/manifest`, `GET /v2/scenes/{rev}/assets/{asset}`, `POST /v2/scenes/{rev}/readiness` |
+| City data | `GET /buildings/{area}`, `GET /roads/{area}`, `GET /traffic/{area}`, `GET /road-features/{area}/signals`, `…/signals/state`, `…/crossings`, `…/markings` |
+| Transit | `GET /transit/bus-stops`, `GET /transit/bus-services`, `GET /transit/bus-services/{no}/stops` |
+| Legacy v1 | `POST /routes`, `GET /scenes/{id}`, `GET /scenes/{id}/chunks`, `/simulations`, `WS /ws/simulations/{id}` |
 
-### Snapshots and events
+The legacy v1 trajectory playback API is kept and tested, but the Unity client does not use it.
 
-Every envelope carries session, epoch, schema and revision. Snapshots add snapshot ID, tick, simulated time and included event cursor; events add monotonic event sequence and entity revision.
+## 5. Shared contracts
 
-- Durable incident/command/score events are ordered, cursor-acknowledged, deduplicated and replayable; never evict them as vehicle telemetry.
-- Fleet snapshots may coalesce to the newest complete state. Start full; deltas require baseline IDs and gap/resync tests.
-- Join/reconnect obtains a consistent snapshot at cursor N then events after N, without a gap between read and subscription.
-- Disconnect a subscriber that cannot drain reliable events with a resumable cursor; database history supplies catch-up.
-- New epochs reset interpolation/transient work. Already consumed event IDs prevent historical audio replay.
-- Scene/video/point-cloud assets use bounded HTTP paths/caches, not tick payloads.
+- `contracts/v2/models.py` (with `sessions.py`, `route_edit.py` and `spatial.py`) is the source of
+  truth. `python -m contracts.v2.generate_fixtures` writes the JSON Schemas and fixtures.
+  `scripts/build_m2_scene.py` writes the spatial schemas and the scene package.
+- `python Tools/generate_contracts.py` generates the Unity side. It writes
+  `Runtime/Contracts/Generated/ContractModels.g.cs` (C# classes),
+  `ContractSchemas.g.cs` (the schemas, embedded) and `AlertCues.g.cs`, and copies the shared fixtures
+  into `Tests/EditMode/Fixtures`. Do not edit the generated files by hand.
+- `ContractParser` parses every incoming message, and `SchemaValidator` checks it against the embedded
+  schema. `ContractRules` repeats the cross-field checks of the pydantic validators (references,
+  cursors, revisions). A message that fails is refused; the client does not try to repair it.
+- Version rules: `contract_version` is `2.x`. Unknown fields are accepted. Unknown enum values, other
+  major versions and invalid references are rejected. Battery, booking and spatial fields are optional
+  2.x additions.
 
-Browser WebSocket does not provide automatic receive backpressure, so bounded decode, coalescing and producer rate control are application responsibilities. [MDN WebSocket](https://developer.mozilla.org/en-US/docs/Web/API/WebSocket)
+### Units and coordinates
 
-## 14. Persistence, audit and recovery
+| Quantity | Convention |
+| --- | --- |
+| Position | Local metres, x east, y north, z up, from the scenario's geographic origin |
+| Heading | Degrees anticlockwise from east (+x) |
+| Speed, energy, power, time | m/s, kWh, kW, seconds; one logical tick is 50 ms |
+| Unity mapping (`WorldMath`) | Contract (x, y, z) becomes Unity (x, z, y), from right-handed Z-up to left-handed Y-up. GLB assets are taken into the body frame by `asset_to_body` after undoing glTFast's X flip. |
+| Traffic frame vehicles | 14 bytes each in base64: index, x cm, y cm, heading in 0.1°, speed cm/s |
 
-Keep immutable scene SQLite separate. Add local `training.sqlite` with migrations, foreign keys, unique command/event keys and explicit transactions. Use WAL, one serialized writer, and FULL synchronization for acknowledged durable decisions; measure its cost.
+## 6. Unity client
 
-SQLite WAL permits concurrent readers and one writer and requires same-host storage. Avoid network shares. Reports use short reads or immutable exports so they do not indefinitely stall checkpoints. [SQLite WAL](https://www.sqlite.org/wal.html)
+Unity **6000.1.12f1**, built-in render pipeline, Linear colour space, UI Toolkit. Packages used:
+glTFast, Newtonsoft.Json and the Test Framework.
 
-Schema groups: scenario revisions/assets; sessions/attempts; route/constraint revisions; commands/results; events; checkpoints; incidents/decisions; charge reservations; assessment components; export manifests.
+### 6.1 Layers
 
-Persist recovery information through the last published tick: deterministic inputs, external-result effective ticks, RNG/checkpoint references and state hashes. Commit batches at publication boundaries and flush a command's effective transition before its applied event. Stage next state while writing; failure pauses at the last committed state.
-
-After crash: obtain exclusive authority ownership, validate schema/assets, restore checkpoint, replay journal to last committed tick, verify hash, increment epoch, reconcile commands and expose `PAUSED`. Resume is explicit; downtime does not run assessment timers. Uncommitted progress is not claimed as recovered.
-
-Use periodic checkpoints, bounded in-memory history and indexed pagination. Set retention quotas before classroom use. Expired previews/caches may be cleaned automatically; completed attempts/reports follow explicit retention policy. Backup/restore includes the database and referenced immutable assets. Copying only a live SQLite main file is not a supported backup.
-
-## 15. Web architecture
-
-Split `app.jsx` into fleet/routes/incidents/energy/trainer/debrief features with a shared connection shell.
-
-A mandatory three.js 3D workspace loads the shared scene profile from M2, with overview/orbit/follow/incident cameras, raycast selection and explicit editing modes. M3 adds surface-aware trainer placement, synthetic onboard view and isolated 3D history/preview. The same entity store drives 3D geometry, 2D panels and minimap; React UI status never competes with mesh state.
-
-Pipeline: transport worker -> schema validation -> immutable normalized entity store -> UI selectors and bounded renderer adapter. Small selectors update affected UI; three.js updates stable meshes without rerendering the React tree every tick.
-
-Draft previews use debounce, cancellation and latest-request generations. Durable commands survive navigation through reconciliation. Cache scene chunks by revision, assets by source ID and history by session/epoch/tick with byte limits.
-
-Instance/batch geometry, cull/LOD, cap pixel ratio and dispose GPU assets on scene changes. Under load, prioritize operator controls, incidents and validation over decorative detail.
-
-Preserve road-constrained pose interpolation and depth-aware routes/selection; do not interpolate through corners, obstacles or discontinuities. Asset decode/upload jobs are bounded and revision-cancelled. Context loss retains command reconciliation and a labelled accessible fallback; it does not count as passing normal 3D operation. [3D interaction and recovery rules](three_d_simulation.md#6-client-interaction-replay-and-rendering)
-
-UI states distinguish loading, validation pending, command pending/applied/rejected, stale, reconnecting and unsupported. Reconnect never submits a draft. Historical inspection retains live alerts and "Return to live".
-
-Light/dark themes, >=14 CSS-pixel body text, keyboard operation, non-colour labels, scalable layouts and reduced motion are baseline. Audio uses meaningful event IDs, mute/volume and user-gesture handling; no alerts repeated from historical playback.
-
-## 16. Native architecture
-
-Separate network/contracts, immutable store, Qt view models, command coordinator, history/assets and renderer adapters. Replace raw `QJsonObject` propagation with typed values validated at ingress.
-
-The OpenGL/ECS operational viewport is mandatory from M2 and integrates with the Qt fleet/editor/incident panels. Add the shared render-profile importer, tested canonical-to-render/asset transforms, stable semantic picking and camera modes; the existing map widget is a supporting view, not the only complete training path. M4 improves environment/inspection depth rather than introducing 3D for the first time.
-
-Workers publish bounded immutable data. Qt models mutate on their UI owner; GL upload/draw/destruction require the current owner context. Extend existing `QPointer` and generation checks across callbacks and context recreation. [Qt context/thread and cleanup requirements](https://doc.qt.io/qt-6/qopenglwidget.html)
-
-Stable backend entity IDs drive ECS, reserved buffers, batching and LOD. Bound asset upload work per frame. Primary 3D, supporting map and text views use the same snapshot. Replace indefinitely growing trajectory maps with display windows plus backend history. Test semantic/spatial parity with web; lighting need not be pixel-identical. Graphics-loss fallback is visibly degraded and must restore the pinned scene before spatial actions needing that evidence re-enable.
-
-Qt exposes fleet, editor/validation, incidents, charging, trainer and debrief workflows. Desktop layout can differ, but capabilities/outcomes match web. FMOD has event deduplication and explicit teardown. Missing optional audio/high-detail assets cannot block operation.
-
-Separate native release targets from Python/nanobind when those dependencies only serve offline dataset tools. The packaged client connects to the API; installing an ML runtime is not a native prerequisite.
-
-## 17. Reliability and observability
-
-[performance.md](performance.md) owns all numerical budgets and workload definitions. Instrument command receive/queue/commit/apply/render, workers, tick compute/lag, database write/checkpoint, state age, reconnect and asset load.
-
-Trace by session/command/job/event ID while keeping metric labels bounded. Observe queue count/bytes, superseded snapshots, replay gaps, worker timeouts, stale results, history bytes, memory/VRAM and frame times. Health distinguishes liveness/readiness/session lag.
-
-Bound clients, commands, previews, assets, exports and sessions. Prioritize committed events over speculative previews. Reject overload explicitly. Slow subscribers and reports cannot block other clients or mutate simulation.
-
-M5 injects restart, disk failure, timeout, congestion, malformed messages, role violations, duplicates, stale approvals, clock changes, GPU context loss and long-session churn. M6 repeats acceptance on frozen packages and measured hardware.
-
-## 18. Migration and module layout
-
-1. M2 freezes v2 fixtures and identity, keeping legacy replay isolated.
-2. Add fleet/session/storage behind existing scene/routing adapters; one scenario proves the five main screens.
-   Add the shared 3D scene/spatial extension, authoritative surface-following poses and mandatory operational 3D in both clients during this M2 slice.
-3. Move both clients to v2 training; retain labelled v1 replay until v2 replay parity.
-4. M3 completes editor/charging/trainer, durable reports and concurrent-client tests.
-5. M4 deepens training and gated local manoeuvres; optional perception stays independent.
-6. M5 finishes parity and removes unsupported debug/legacy paths from release.
-7. M6 freezes schema/assets/models/packages and publishes acceptance/recovery evidence.
-
-Each run has one implementation/schema authority; no indefinite dual writes. Old replay adapters cannot manufacture fleet/incident semantics.
-
-```text
-backend/src/
-  training/       # fleet, sessions, clocks, scenarios
-  dispatch/       # incidents, commands, guidance
-  planning/       # drafts, constraints, candidates, revisions
-  energy/         # charging, swaps, coverage
-  assessment/     # rubric, reports, patterns
-  persistence/    # repositories, migrations, journal/checkpoints
-  transport/      # v2 events, snapshots, cursors
-contracts/v2/     # schemas and positive/negative fixtures
-frontend/src/features/
-  fleet/ routes/ incidents/ energy/ trainer/ debrief/
-Native/App/
-  Contracts/ State/ Commands/ ViewModels/ Features/
-```
-
-These are proposed boundaries, not instructions to move useful files without a functional reason.
-
-## 19. Open validation items
-
-| Item | Working decision | Evidence / owner |
+| Folder (`Runtime/`) | Main types | Responsibility |
 | --- | --- | --- |
-| M2 local passing | Network detours now; local manoeuvre gate M4 | Geometry/conflict fixtures / backend + native |
-| Two clients | Full parity; web default classroom entry, native equivalent desktop | Same task scripts / UX + clients |
-| Source city | Preserve KITTI; label adapted maps synthetic | Manifest review / data owner |
-| Live disruption feed | Manual versioned fixtures | Terms, quality and access / product + backend |
-| Legal approval claims | Exercise policy only | Authoritative research / product |
-| Confidence/occlusion | Traceable qualitative states | Validation before probabilities / backend |
-| Energy/rubric realism | Configurable training assumptions | Instructor/domain review / product + backend |
-| Hardware budgets | Proposed targets; lock profile M2 | CPU/GPU/RAM/driver/browser measurements / integration |
-| 3D content and importer profile | Shared versioned low-poly GLB package plus operational proxies; full 3D required, photorealism optional | Content inventory, transform/fit fixtures and 3D P1 / backend + both clients |
+| `Backend` | `HttpTransport`, `BackendClientBase`, `AuthClient`, `AuthSession`, `TrainingApi` (with `WorkflowApi` and `TrafficApi`), `CityClient`, `TransitClient`, `BackendEndpoint`, `BundledBackend` | HTTP access. Each failure is one of three exceptions: `BackendErrorException` (a full error reply), `NoReplyException` (the outcome is unknown, so the command must be confirmed, never re-created) or `NotLoggedInException`. The token is kept in memory only. |
+| `Contracts` | Generated models, `ContractParser`, `SchemaValidator`, `ContractRules` | Typed, validated contract objects |
+| `Session` | `SessionController`, `SessionStore`, `DecisionRules` | Creating, joining and polling a session; event replay; the command lifecycle; read-side checks on offers |
+| `UI` | `Formula9App`, `TrainingWorkspace`, `ChargingPage`, `ReportsPage`, presenters, `ReportFilter`, `LoginBackdrop` | Pages and their bindings. Presenters are plain static classes so they can be tested without a scene. |
+| `World` | `WorldView`, `FleetMap`, `CityView`, `WorldBuilder`, `SceneLoader`, `CityTrafficRenderer`, `CityIncidents`, `ShuttleMotion`, `ShuttleCameraRig`, `TrafficPlaybackClock`, `RoadMesh`, `CityMesh`, `LtaMappedRoadPaint`, `BusStopShelterFactory`, `Traffic/` | The 2D map, the 3D city, the scene-package world, interaction and cameras |
+| `Audio` | `AlertGate`, `TrainingAlerts`, `AlertPlayer`, `BatteryWatch`, `UiSounds`, `Preferences` | Training alerts, deduplicated by event ID; interface sounds; the Mute alerts preference |
+| `Editor/` | `SceneBuilder`, `PagesWindow`, `PlayerBuild` | Rebuilding the scene and panel settings, previewing and editing pages, batch player builds |
 
-Pending research and mockup numbers do not become established facts through inclusion in the technical plan.
+### 6.2 Application flow and pages
+
+`Formula9App` is the scene's `MonoBehaviour`. It holds a `UIDocument` and switches between the pages
+in `Assets/Formula9/UI/Pages`:
+
+1. **Login** (`LoginPage.uxml`): log in or create an account.
+2. **Main shell** (`MainShell.uxml`): the session list and the training workspace. From the session
+   list you can create, join or archive a session. Admin actions archive every live session, delete
+   a finished one, delete all but the 20 newest finished ones, and reclaim disk space. `TrainingWorkspace` binds the workspace pages by control `name`:
+   - **Fleet Overview:** fleet cards, the map or 3D view, follow and overview cameras.
+   - **Route Planning:** the detour exercise, in five steps: Problem, Detour, Check, Approve, Outcome.
+   - **Charging:** battery forecasts, charger occupancy, offers, bookings and the reserve-or-continue
+     decision.
+   - **Incident Monitor:** incident options, hypothetical previews, history and debrief.
+   - **Reports:** the latest 1,000 events and 200 commands this client has seen, with search and
+     filters.
+   - **Scenarios:** a placeholder. A scenario is chosen when a session is created, and configuring
+     scenarios is not built yet.
+
+Fleet Overview and Route Planning show the world view beside them. The other pages take the full
+width. Controls are found by `name`, so a page's layout can change in UI Builder without changing code.
+
+### 6.3 Session controller and store
+
+`SessionController` keeps one joined session in step with the backend:
+
+- **Create:** keeps the creation key and its owner until the attempt is confirmed, so a lost reply
+  never creates a second session.
+- **Poll:** asks for the snapshot every **1 s**, and replays events from the last committed cursor.
+- **Epoch change:** fetches the events a recovery appended. If an event batch has a gap, it takes a
+  fresh snapshot instead.
+- **Commands:** keeps at most one command open. A lost reply is confirmed by resending the same
+  command, or by asking for its status after a recovery, backing off up to 5 s. A command stays with
+  the account that sent it, across logins. Outcomes the backend can no longer confirm become
+  `NEEDS_RECONFIRMATION`.
+
+`SessionStore` accepts only valid updates. It refuses older epochs, stale or reused snapshots and
+event gaps, and keeps the latest 1,000 events. The UI reads only from the store's accepted state.
+
+### 6.4 World views
+
+`WorldView` owns the world panel and picks what it shows from the snapshot:
+
+| View | When | What it draws |
+| --- | --- | --- |
+| `FleetMap` (2D) | Every planar session, and the fallback whenever 3D is unavailable | Routes, closures, shuttles, depots, chargers, incident markers. OSM tiles (`MapTiles`) and LTA bus stops on the real-streets scenario. Route editing (`FleetMap.RouteEditing`): click roads to build the draft. |
+| `CityView` (3D city) | Planar sessions on real streets, when the user switches to 3D | Extruded OSM buildings with textured walls (`CityMesh`, `CityBuilding.shader`), asphalt roads and kerbs (`RoadMesh`), LTA road paint, bus shelters, traffic lights, depots, routes, shuttles (Kozak bus model), background traffic and incident scenes |
+| `WorldBuilder` (scene package) | Spatial sessions (`FULL_SNAPSHOT.spatial` present) | GLB entities from the hash-pinned M2 package |
+
+For scene-package sessions, `SceneLoader` downloads the manifest and checks it against the snapshot's
+pinned hash. It checks each mandatory GLB's size and SHA-256 before decoding. `WorldBuilder` places
+each entity and checks its drawn size against the declared `dimensions_m`. The client then posts
+`/readiness`, and Start stays disabled until that succeeds.
+
+Other parts of the world view:
+
+- **Shuttle motion:** `ShuttleMotion` glides each shuttle along its road between the 1 Hz snapshots,
+  instead of letting it jump. In the 3D city, while traffic frames are arriving, a shuttle's body is
+  drawn from those frames instead.
+- **Shuttle cameras:** `ShuttleCameraRig` mounts four 90° cameras (front, rear, left, right) on the
+  selected shuttle, about 2 m above the road. They can take the place of the 3D view: one large, the
+  rest as thumbnails (click one to enlarge it). They leave out the planning overlay layer, and their render textures exist only while
+  the cameras are on.
+- **Incidents:** `CityIncidents` builds each live incident's scene: barriers or a wreck and a response
+  van, a beacon, and the queue backing up. `IncidentSimulation` decides what goes where, from the
+  incident's first events. The backend's `incident_hazards.py` uses the same rules, so the traffic it
+  drives stops behind the queue the client draws.
+- **Culling:** traffic is culled against every active camera, so the shuttle cameras and the main view
+  each draw only what they can see.
+
+### 6.5 Background traffic
+
+The backend drives the traffic (section 4.4). The client only draws it:
+
+1. `CityClient` loads `/api/traffic/{area}` once: the vehicle sample, models, sizes and road network.
+2. `SessionController` long-polls `GET /api/v2/sessions/{id}/traffic?after_tick=…&wait_ms=1000`. Each
+   reply carries the new frames, about ten per simulated second.
+3. `TrafficPlaybackClock` keeps the drawn time a little behind the newest frame and adapts to how
+   quickly frames really arrive, so uneven delivery does not stutter.
+4. `CityTrafficFollow` interpolates vehicles and shuttle bodies between frames.
+   `CityTrafficRenderer` draws them with GPU instancing.
+
+`CityTrafficDriving` and `CityTrafficShuttles` are a client-side fallback for a backend that sends no
+frames. Any change to how traffic drives is made in `backend/src/traffic/city_traffic.py` first. The
+snapshot, not the traffic frame, stays the authority on where a shuttle is along its route.
+
+### 6.6 Alerts and sounds
+
+`AlertGate` plays a sound only for the event keys listed in `contracts/v2/alert_cues.json`. Each event
+ID plays at most once, history never plays, and muting still marks events as seen. **Mute alerts** is
+saved in `PlayerPrefs`. `UiSounds` adds hover, start, map-point and dropdown sounds. These are separate
+from training alerts and are not affected by Mute alerts.
+
+## 7. Update cadences
+
+| Data | Producer → consumer | Rate |
+| --- | --- | --- |
+| Simulation tick | Actor | 20 Hz (50 ms) |
+| Committed presentation snapshot | Actor → `TrainingStore` | 10 Hz (every 2 ticks) |
+| Snapshot and event poll | `SessionController` → `/snapshot`, `/events` | 1 Hz |
+| Traffic frame | Actor → memory ring of 30 frames → long-poll | 10 Hz, at most 1 s per reply |
+| Traffic checkpoint | Actor → `session_traffic` | About 1 Hz |
+| Rendering | Unity | Every frame; motion interpolated |
+| Map tiles, buildings, roads, bus stops | Static services and tile server → client caches | On demand, cached in memory and on disk (tiles) |
+
+## 8. Data sources and provenance
+
+| Data | Source | Real or simulated |
+| --- | --- | --- |
+| Roads and operating network | OpenStreetMap extract (`fixtures/osm`, `fixtures/map`) | Real geometry, simplified to ≤64 waypoints per loop |
+| Buildings | OSM, in `fixtures/buildings/toa-payoh.sqlite` | Real footprints and heights; textures are illustrative (CC0) |
+| Bus stops and services | OSM with LTA stop codes; optional LTA DataMall import | Real |
+| Signal heads, crossings, markings | LTA DataMall road-feature files | Positions are real. Colours and timings are **simulated** (70 s, two phases). Junction grouping and approaches are worked out locally. |
+| Background traffic | LTA annual vehicle population, sampled by percentage | Counts are real. Placement, sizes, colours and behaviour are illustrative. |
+| Shuttles, energy, incidents, charging | Scenario fixture, `ENERGY_R1`, incident catalogue | Simulated training data |
+| KITTI trajectories | Optional download (`scripts/download_kitti.py`) | Recorded; used only by the legacy v1 playback |
+
+Screens that show LTA or OSM data must credit them. `FleetMap` draws these credits.
+
+## 9. Testing
+
+| Suite | Command | Covers |
+| --- | --- | --- |
+| Backend | `run.bat --test` (temporary storage, MongoDB off) | Contracts, actors, traffic, signals, energy, incidents, route editing, persistence, real process crash and recovery, API |
+| Unity EditMode | Test Runner, or `Unity.exe -batchmode -runTests -testPlatform EditMode` | Contract parsing and fixtures, presenters, session controller and store rules, world maths, traffic playback, camera rig, alerts |
+| Live backend | `LiveBackend` category; skipped without a backend | The client against a running server |
+| End to end | `EndToEnd` category with `FORMULA9_E2E_BACKEND_URL` set to `Tools/isolated_backend.py` | Sign up, create, start, approve detour, reserve charger, incident preview and approve, history and debrief, 3D load. `RouteWalkthrough` plays the route exercise through the real UI. |
+
+The end-to-end tests sign up throwaway users. Never point them at the shared team backend.
+
+## 10. Known limitations
+
+- **Single authority process.** Live sessions are in memory, so the backend runs one worker on one
+  host. Scaling out would need session ownership and routing first.
+- **Polling transport.** Snapshots are polled at 1 Hz, so a decision can take up to a second to show.
+  The v2 WebSocket transport is not implemented, and the old v1 WebSocket is not used.
+- **Local deployment only.** No TLS. Roles are not enforced beyond being logged in. CORS defaults to
+  a development origin. Classroom LAN use would need HTTPS, roles and origin checks.
+- **Simulated signals and incidents.** Light timings, turning phases and incident behaviour are made
+  up, and must be shown as simulation.
+- **No turn restrictions.** The map data has none, so the route checks refuse only U-turns. Width and
+  headroom are checked only where the curated overlay records them, and unknown values block approval.
+- **Assessment is provisional.** Debrief rubric scores are uncalibrated. Scenario completion,
+  trainer authoring and exports (JSON, CSV, HTML) are not implemented.
+- **Asset licences.** Several imported vehicle packs have no recorded licence (see
+  [third-party assets](third_party_assets.md)).
+- **Spatial scenario.** The scene-package 3D scenario still works but is no longer offered for
+  creation. The real-streets city is the main 3D experience.
