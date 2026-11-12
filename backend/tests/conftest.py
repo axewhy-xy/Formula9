@@ -53,6 +53,23 @@ graph_loader.configure_network_settings()
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "real_charge_rate: use the scenario's charge-to-full timing")
+    config.addinivalue_line("markers", "traffic: integrated sessions drive their shuttles through the background traffic")
+
+
+@pytest.fixture(autouse=True)
+def without_traffic(request):
+    """New integrated sessions drive through the area's background traffic, a thousand vehicles stepped
+    every tick, which makes the many tests that run them for minutes of ticks several times slower and
+    puts each shuttle's timing at the mercy of the traffic. Tests of everything else run without it;
+    test_city_traffic and the tests marked traffic run with it."""
+    if request.node.get_closest_marker("traffic"):
+        yield
+        return
+    from src.services.integrated_actor import IntegratedSessionActor
+    saved = IntegratedSessionActor.TRAFFIC
+    IntegratedSessionActor.TRAFFIC = False
+    yield
+    IntegratedSessionActor.TRAFFIC = saved
 
 
 @pytest.fixture(autouse=True)

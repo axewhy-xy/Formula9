@@ -102,6 +102,7 @@ namespace Formula9.UI
                 Render();
                 Run(RefreshSessionListIfChanged());
             };
+            session.TrafficFramesAccepted += frames => world.ShowTraffic(frames);
             session.AvailabilityChanged += available => Render();
             session.CommandFinished += outcome =>
             {
@@ -178,6 +179,7 @@ namespace Formula9.UI
 
             ShowLogin(null);
             StartCoroutine(Poll());
+            StartCoroutine(PollTraffic());
         }
 
         // -----------------------------------------------------------------------------------
@@ -220,6 +222,42 @@ namespace Formula9.UI
             {
                 yield return wait;
                 if (auth.IsLoggedIn) Run(session.RefreshAsync());
+            }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: PollTraffic
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function fetches the backend's traffic for the 3D city while it is shown: the
+        //     backend drives the traffic and the shuttles through it, and the city draws them where
+        //     it says. One request is open at a time, and the next goes as soon as it answers; the
+        //     backend holds each until its next frame (SessionController.TrafficWait), so every frame
+        //     reaches the city as it is made. A failed request, or nothing to ask, waits a little.
+        //
+        // Returns:
+        //     IEnumerator: The coroutine.
+        private IEnumerator PollTraffic()
+        {
+            var retry = new WaitForSecondsRealtime((float)SessionController.TrafficRetryInterval.TotalSeconds);
+            // A backend that answers at once with nothing new is not asked more than this often
+            var idle = new WaitForSecondsRealtime(0.05f);
+            while (true)
+            {
+                if (!auth.IsLoggedIn || world == null || !world.WantsTraffic)
+                {
+                    yield return retry;
+                    continue;
+                }
+                var request = session.RefreshTrafficAsync(SessionController.TrafficWait);
+                while (!request.IsCompleted) yield return null;
+                if (request.IsFaulted)
+                {
+                    Debug.LogException(request.Exception?.GetBaseException());
+                    yield return retry;
+                }
+                else if (request.IsCanceled || request.Result < 0) yield return retry;
+                else if (request.Result == 0) yield return idle;
             }
         }
 

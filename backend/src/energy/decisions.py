@@ -382,9 +382,11 @@ Args:
     depot_distances_m, depot_speed_mps, parking_distances_m, depot_choices,
     return_distances_m: Optional actor estimates, passed on to
         energy_forecasts and charge_options (see charge_options).
+    in_place (bool): Fill the snapshot itself rather than a copy, for a
+        caller that owns a fresh snapshot (the session actor's own).
 
 Returns:
-    FullSnapshot: The filled copy; the input is unchanged.
+    FullSnapshot: The filled copy; the input is unchanged unless in_place.
 """
 def with_battery_decisions(model: EnergyModel, snapshot: FullSnapshot, charge_s: float = 1200.0,
                            *, depot_distances_m: dict[str, float] | None = None,
@@ -392,20 +394,23 @@ def with_battery_decisions(model: EnergyModel, snapshot: FullSnapshot, charge_s:
                            parking_distances_m: dict[tuple[str, str], float] | None = None,
                            depot_choices: dict[str, str] | None = None,
                            return_distances_m: dict[str, float] | None = None,
-                           charge_time_scale: float | None = None) -> FullSnapshot:
-    result = snapshot.model_copy(deep=True)
-    result.energy_forecasts = energy_forecasts(model, snapshot, depot_distances_m=depot_distances_m, depot_speed_mps=depot_speed_mps,
-                                               depot_choices=depot_choices)
-    result.charge_options = charge_options(model, snapshot, charge_s, depot_distances_m=depot_distances_m,
-                                          depot_speed_mps=depot_speed_mps, parking_distances_m=parking_distances_m,
-                                          depot_choices=depot_choices, return_distances_m=return_distances_m,
-                                          charge_time_scale=charge_time_scale)
-    result.charge_option_revisions = {**snapshot.charge_option_revisions,
-                                      **{o.option_id: o.revision for o in result.charge_options}}
-    loops = {f.vehicle_id: f.loops_remaining for f in result.energy_forecasts}
+                           charge_time_scale: float | None = None,
+                           in_place: bool = False) -> FullSnapshot:
+    forecasts = energy_forecasts(model, snapshot, depot_distances_m=depot_distances_m, depot_speed_mps=depot_speed_mps,
+                                 depot_choices=depot_choices)
+    options = charge_options(model, snapshot, charge_s, depot_distances_m=depot_distances_m,
+                             depot_speed_mps=depot_speed_mps, parking_distances_m=parking_distances_m,
+                             depot_choices=depot_choices, return_distances_m=return_distances_m,
+                             charge_time_scale=charge_time_scale)
+    revisions = {**snapshot.charge_option_revisions, **{o.option_id: o.revision for o in options}}
+    loops = {f.vehicle_id: f.loops_remaining for f in forecasts}
     on_charger = {vehicle_id for c in snapshot.chargers for vehicle_id in c.occupied_vehicle_ids}
-    result.charge_decision_deferrals = {
+    deferrals = {
         vehicle_id: deferred for vehicle_id, deferred in snapshot.charge_decision_deferrals.items()
         if vehicle_id not in on_charger and loops.get(vehicle_id) is not None
         and deferred <= loops[vehicle_id] <= LOW_LOOPS}
+    # Everything above reads the snapshot as it came, so filling it in place gives the same result
+    result = snapshot if in_place else snapshot.model_copy(deep=True)
+    result.energy_forecasts, result.charge_options = forecasts, options
+    result.charge_option_revisions, result.charge_decision_deferrals = revisions, deferrals
     return result

@@ -156,23 +156,27 @@ class IncidentService:
             }
         return options
 
-    def publish(self, store: TrainingStore, proposed: FullSnapshot) -> FullSnapshot:
+    def publish(self, store: TrainingStore, proposed: FullSnapshot, *, owned: bool = False) -> FullSnapshot:
         """Actor hook: hold only the affected vehicle; leave peer movement/energy intact.
 
         Call at each presentation boundary instead of ``store.commit_snapshot``.
         A concurrent decision makes the publication stale and must be restaged.
+        owned: as for stage.
         """
         previous = store.snapshot(proposed.session_id)
-        snapshot, events = self.stage(store, proposed)
+        snapshot, events = self.stage(store, proposed, owned=owned)
         return store.commit_snapshot(snapshot, events, expected_snapshot_id=previous.snapshot_id)
 
-    def stage(self, store: TrainingStore, proposed: FullSnapshot) -> tuple[FullSnapshot, tuple[Event, ...]]:
+    def stage(self, store: TrainingStore, proposed: FullSnapshot, *,
+              owned: bool = False) -> tuple[FullSnapshot, tuple[Event, ...]]:
         """This incident's effect on a publication, uncommitted.
 
         A boundary commits once, so coexisting incidents chain their stages into one commit.
+        A caller that owns proposed and no longer uses it (owned) has it changed in place rather
+        than copied; otherwise it is left as it was.
         """
         previous = store.snapshot(proposed.session_id)
-        snapshot = proposed.model_copy(deep=True)
+        snapshot = proposed if owned else proposed.model_copy(deep=True)
         if not self.owns(snapshot):
             return snapshot, ()
         if snapshot.session.status != "RUNNING" or previous.session.status != "RUNNING":

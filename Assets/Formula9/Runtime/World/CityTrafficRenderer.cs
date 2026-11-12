@@ -8,6 +8,12 @@ using UnityEngine.Rendering;
 namespace Formula9.World
 {
     // Draws and moves the background traffic sample from /api/traffic/{area}.
+    //
+    // The backend's traffic (backend/src/traffic/city_traffic.py) is the source of truth for how the
+    // traffic and the shuttles in it drive: a session whose backend drives the traffic sends its frames,
+    // which are only drawn here (CityTrafficFollow). The driving in CityTrafficDriving and
+    // CityTrafficShuttles is a fallback for a session whose backend sends none; a change to how traffic
+    // drives is made in the backend first, and ported here only if the fallback should match.
     public sealed partial class CityTrafficRenderer : IDisposable
     {
         private const float LaneWidthM = 3.2f;
@@ -61,11 +67,18 @@ namespace Formula9.World
             hazardRoads.Clear();
             claimsByNode.Clear();
             redLightRuns = 0;
+            // A shuttle's stop lines and lane come from these roads and lights, so it starts over on them
+            shuttles.Clear();
+            shuttleRoutes.Clear();
+            shuttleRedLightRuns = 0;
             exitsByNode.Clear();
             entryRoads.Clear();
             largeEntryRoads.Clear();
             ClearModels();
             vehicles.Clear();
+            // The backend's frames name these vehicles, so they start over with them
+            ForgetBackend();
+            vehiclesBySeed = Array.Empty<VehicleState>();
 
             BuildDirectedRoads(roadsData);
             PlaceSignals(signals);
@@ -78,22 +91,38 @@ namespace Formula9.World
             foreach (var pair in trafficData.Models)
                 modelRenderers[pair.Key] = ModelsFor(catalog, pair.Key, pair.Value);
 
-            foreach (var seed in trafficData.Vehicles)
-                AddVehicle(seed, trafficData);
+            vehiclesBySeed = new VehicleState[trafficData.Vehicles.Count];
+            for (var i = 0; i < trafficData.Vehicles.Count; i++)
+                vehiclesBySeed[i] = AddVehicle(trafficData.Vehicles[i], trafficData);
         }
 
-        // A delta of zero holds the traffic still, and still draws it. A camera culls what it cannot see.
+        // Advance, then Draw. A delta of zero holds the traffic still, and still draws it.
         public void Tick(float deltaTime, IReadOnlyList<Camera> cameras = null)
         {
-            if (vehicles.Count == 0) return;
+            Advance(deltaTime);
+            Draw(cameras);
+        }
+
+        // Moves the traffic on by a frame. While the backend's frames come, they move it, on their own
+        // clock (CityTrafficFollow); otherwise it drives itself, and the shuttles it drives with it, even
+        // with no other traffic. A delta of zero holds it still.
+        public void Advance(float deltaTime)
+        {
+            if (FollowsBackend)
+            {
+                Follow(Mathf.Max(0, deltaTime));
+                return;
+            }
+            if (vehicles.Count == 0 && shuttles.Count == 0) return;
 
             var step = Mathf.Min(deltaTime, MaxStepSeconds);
             if (step > 0) Drive(step);
             for (var i = 0; i < vehicles.Count; i++)
                 UpdatePose(vehicles[i], step);
-
-            RenderVehicles(cameras);
         }
+
+        // Draws the traffic where Advance left it. Given cameras, each culls what it cannot see.
+        public void Draw(IReadOnlyList<Camera> cameras = null) => RenderVehicles(cameras);
 
         public bool TryGetPose(string vehicleId, out Vector3 position, out Vector3 forward)
         {
@@ -217,15 +246,15 @@ namespace Formula9.World
             }
         }
 
-        private void AddVehicle(CityTrafficVehicle seed, CityTrafficData trafficData)
+        private VehicleState AddVehicle(CityTrafficVehicle seed, CityTrafficData trafficData)
         {
-            if (seed == null || string.IsNullOrEmpty(seed.Model)) return;
-            if (!modelRenderers.TryGetValue(seed.Model, out var options) || options.Count == 0) return;
+            if (seed == null || string.IsNullOrEmpty(seed.Model)) return null;
+            if (!modelRenderers.TryGetValue(seed.Model, out var options) || options.Count == 0) return null;
             var render = options[(int)(Hash(seed.Id ?? seed.Model) % (uint)options.Count)];
 
             if (!roads.TryGetValue($"{seed.Road}|{seed.Direction}", out var road))
                 road = roads.Values.FirstOrDefault(r => r.RoadId == seed.Road);
-            if (road == null) return;
+            if (road == null) return null;
 
             var lane = Mathf.Clamp(seed.Lane, 0, Mathf.Max(0, road.Lanes - 1));
             var paint = ParseColor(seed.Color);
@@ -246,6 +275,7 @@ namespace Formula9.World
                 Render = render
             };
             vehicles.Add(state);
+            return state;
         }
 
         // The vehicle's place on the road jumps at a bend or a junction. What is drawn closes on it, so
@@ -639,6 +669,10 @@ namespace Formula9.World
             // What is drawn: it follows the vehicle's place on the road, and is unset until first placed.
             public bool Placed;
             public Vector3 Position, Forward;
+            // Following the backend: where the frames put it last frame drawn, and how far what is drawn
+            // still is from there after they moved it somewhere near in one step; that shrinks to nothing
+            // (CityTrafficFollow)
+            public Vector3 FollowTarget, FollowOffset;
 
             public bool HasClaim(DirectedRoad to)
             {

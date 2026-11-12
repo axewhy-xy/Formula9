@@ -63,11 +63,15 @@ class ActorCommit:
     Reads/history/receipts delegate to the real store. The two write methods
     inject the actor checkpoint into the same SQLite transaction as the domain
     operation, preserving the services' existing validation and retry semantics.
+
+    baseline is the session's last committed snapshot when the caller holds it
+    (a publication does); otherwise it is read from the store. A stale one is
+    refused by the commit's expected_snapshot_id, as a stale read would be.
     """
 
-    def __init__(self, store, actor, checkpoint, *, current=True):
+    def __init__(self, store, actor, checkpoint, *, current=True, baseline=None):
         self.store, self.actor, self.checkpoint = store, actor, checkpoint
-        self.baseline = store.snapshot(actor.session_id)
+        self.baseline = baseline if baseline is not None else store.snapshot(actor.session_id)
         self.current = current
 
     def __getattr__(self, name):
@@ -77,7 +81,9 @@ class ActorCommit:
         if session_id != self.actor.session_id:
             return self.store.snapshot(session_id)
         if not self.current:
-            return self.baseline.model_copy(deep=True)
+            # Only a publication reads the committed boundary (IncidentService.publish and stage), and
+            # only reads it: no copy
+            return self.baseline
         result = self.actor.generate_snapshot()
         result.snapshot_id = self.baseline.snapshot_id
         result.event_sequence = self.baseline.event_sequence
@@ -85,17 +91,24 @@ class ActorCommit:
         result.session.aggregate_revision = self.baseline.session.aggregate_revision
         return result
 
-    def _prepare(self, proposed, events):
-        self.actor.synchronize(proposed)
+    def _prepare(self, proposed, events, *, copy_domain=True):
+        # proposed is the caller's to give: the actor adopts it as its domain. Without copy_domain the
+        # domain is filled in and published as it is; otherwise the publication is a fresh copy and
+        # the caller's snapshot is not changed by the store
+        self.actor.synchronize(proposed, adopt=True)
         self.actor.note_decisions(events)
-        result = self.actor.generate_snapshot()
+        result = self.actor.generate_snapshot(in_place=not copy_domain)
         result.snapshot_id = self.baseline.snapshot_id
         events = [*self.actor.pending_events, *events]
         ordered = tuple(event.model_copy(update={"event_sequence": self.baseline.event_sequence+index+1,
             "tick": result.tick}) for index, event in enumerate(events))
         result.event_sequence = self.baseline.event_sequence+len(ordered)
         self.actor.pending_events = []
-        self.actor.domain = result.model_copy(deep=True)
+        # The checkpoint taken next carries the domain. store.apply changes the snapshot it is given, so
+        # there the domain is a copy; commit_snapshot leaves its snapshot alone (result is the domain
+        # already) and replaces the domain with the committed one once it is durable
+        if copy_domain:
+            self.actor.domain = result.model_copy(deep=True)
         return result, ordered
 
     def apply(self, command_id, proposed=None, domain_events=(), **kwargs):
@@ -111,11 +124,14 @@ class ActorCommit:
         return result
 
     def commit_snapshot(self, proposed, domain_events=(), **kwargs):
-        proposed, domain_events = self._prepare(proposed, domain_events)
+        proposed, domain_events = self._prepare(proposed, domain_events, copy_domain=False)
         kwargs.setdefault("expected_snapshot_id", self.baseline.snapshot_id)
         result = self.store.commit_snapshot(proposed, domain_events,
             runtime_state=self.checkpoint(self.actor), **kwargs)
-        self.actor.domain = result.model_copy(deep=True)
+        # The committed snapshot is both the actor's domain and the session's baseline: neither is
+        # changed in place once installed (a tick, command or publication stages a deep copy of the
+        # actor and only reads the baseline)
+        self.actor.domain = result
         return result
 
 
@@ -177,15 +193,18 @@ def approve_workflow_route(store, actor, actor_id, request, checkpoint):
     return result, staged if result.status == "APPLIED" else None
 
 
-def publish_workflow(store, actor, snapshot, checkpoint):
-    """Publish incident updates with per-incident diagnostics and durable checkpoints."""
+def publish_workflow(store, actor, snapshot, checkpoint, baseline=None):
+    """Publish incident updates with per-incident diagnostics and durable checkpoints.
+
+    The caller gives up snapshot, which becomes the publication. baseline, when given, is the
+    session's last committed snapshot, as the caller holds it; it is only read."""
     selections = getattr(actor, "random_incidents", [])
     if not selections and getattr(actor, "random_incident", None):
         selections = [actor.random_incident]
 
     if not selections:
         return session_incidents(actor).publish(
-            ActorCommit(store, actor, checkpoint, current=False), snapshot
+            ActorCommit(store, actor, checkpoint, current=False, baseline=baseline), snapshot, owned=True
         )
 
     # Keep only live selections in every checkpoint and actor copy. The durable
@@ -193,7 +212,7 @@ def publish_workflow(store, actor, snapshot, checkpoint):
     actor.random_incidents = [item for item in selections if not _settled(item, snapshot)]
     result = snapshot
     events = []
-    unit = ActorCommit(store, actor, checkpoint, current=False)
+    unit = ActorCommit(store, actor, checkpoint, current=False, baseline=baseline)
     for item in actor.random_incidents:
         incident_id = item["incident_id"]
         existing = next((i for i in result.incidents if i.incident_id == incident_id), None)
@@ -203,7 +222,8 @@ def publish_workflow(store, actor, snapshot, checkpoint):
             ):
                 logger.debug("[INCIDENT FLOW] BEGIN tick=%s id=%s state=%s guidance=%s", result.tick, incident_id,
                              getattr(existing, "state", None), item.get("requires_guidance"))
-            result, staged = session_incidents(actor, incident_id).stage(unit, result)
+            # result is this publication's own: the snapshot the caller gave up, or an earlier stage's
+            result, staged = session_incidents(actor, incident_id).stage(unit, result, owned=True)
             events.extend(staged)
             if result.tick >= item.get("trigger_tick", 10**12) and (
                 existing is None or result.tick % 100 == 0

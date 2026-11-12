@@ -2,17 +2,18 @@
  * Unit tests for the session layer (SessionController.cs, SessionStore.cs).
  *
  * Author: Choo Jian Wei
- * Contributors: Lau Xiang Yang (leaving a deleted session)
+ * Contributors: Lau Xiang Yang (leaving a deleted session, polling traffic)
  * Date Created: 30/10/2026
- * Last Modified: 30/10/2026
+ * Last Modified: 11/11/2026
  *
  * Description:
  *     Uses a scripted fake backend serving the shared fixtures and an instant retry delay, so the
  *     whole join, poll, event, command and creation flow runs without a backend. Covers event
  *     cursors, gaps and recovery, the one open command and its confirmation with the same key,
- *     retries and final refusals, logins expiring mid-command, and leaving or switching sessions.
- *     And Archive all: it carries on past a session that fails, counts a queued archive only once
- *     the session is no longer live, and archives the joined session through its own command.
+ *     retries and final refusals, logins expiring mid-command, leaving or switching sessions, and
+ *     polling the traffic. And Archive all: it carries on past a session that fails, counts a
+ *     queued archive only once the session is no longer live, and archives the joined session
+ *     through its own command.
  */
 
 using System;
@@ -91,7 +92,7 @@ namespace Formula9.Tests
         //
         //     Attributes: Sent lists the requests; Snapshot is served for snapshot requests unless
         //     SnapshotReply is set; LastCommand is the last command submitted; OnEvents, OnCommand,
-        //     OnStatus and OnCreate answer those requests.
+        //     OnStatus, OnCreate and OnTraffic answer those requests.
         private sealed class FakeBackend : IHttpTransport
         {
             public readonly List<HttpRequest> Sent = new List<HttpRequest>();
@@ -102,6 +103,7 @@ namespace Formula9.Tests
             public Func<HttpRequest, HttpResponse> OnCommand;
             public Func<HttpRequest, HttpResponse> OnStatus;
             public Func<HttpRequest, HttpResponse> OnCreate;
+            public Func<HttpRequest, HttpResponse> OnTraffic;
             // The session list and, when set, each session's own snapshot (Archive all asks for several)
             public Func<HttpRequest, HttpResponse> OnList = _ => Error(404, "INVALID_REFERENCE");
             public Func<HttpRequest, HttpResponse> OnSnapshot;
@@ -110,12 +112,14 @@ namespace Formula9.Tests
             // Function: FakeBackend (constructor)
             // -----------------------------------------------------------------------------------
             // Description:
-            //     This function sets default handlers: no new events, and commands applied at once.
+            //     This function sets default handlers: no new events, commands applied at once, and
+            //     no traffic, as a backend that drives none answers.
             public FakeBackend()
             {
                 OnEvents = request => Json(Replay(After(request)));
                 OnCommand = _ => Json(Status("APPLIED"), 202);
                 OnStatus = _ => Json(Status("APPLIED"));
+                OnTraffic = _ => Error(404, "INVALID_REFERENCE");
             }
 
             // -----------------------------------------------------------------------------------
@@ -154,6 +158,7 @@ namespace Formula9.Tests
                 if (path.EndsWith("/snapshot") && OnSnapshot != null) return Task.FromResult(OnSnapshot(request));
                 if (path.EndsWith("/snapshot")) return Task.FromResult(SnapshotReply ?? Json(Snapshot));
                 if (path.EndsWith("/events")) return Task.FromResult(OnEvents(request));
+                if (path.EndsWith("/traffic")) return Task.FromResult(OnTraffic(request));
                 if (request.Method == "POST" && path.EndsWith("/commands"))
                 {
                     LastCommand = JObject.Parse(request.Body);
@@ -176,6 +181,48 @@ namespace Formula9.Tests
             //     long: The cursor.
             public static long After(HttpRequest request) =>
                 long.Parse(request.Url.Query.TrimStart('?').Split('&').First(p => p.StartsWith("after=")).Substring(6));
+
+            // -----------------------------------------------------------------------------------
+            // Function: AfterTick
+            // -----------------------------------------------------------------------------------
+            // Description:
+            //     This function reads the after_tick cursor of a traffic request.
+            //
+            // Args:
+            //     request (HttpRequest): The traffic request.
+            //
+            // Returns:
+            //     long: The cursor.
+            public static long AfterTick(HttpRequest request) =>
+                long.Parse(request.Url.Query.TrimStart('?').Split('&').First(p => p.StartsWith("after_tick=")).Substring(11));
+
+            // -----------------------------------------------------------------------------------
+            // Function: Traffic
+            // -----------------------------------------------------------------------------------
+            // Description:
+            //     This function makes a traffic reply for the snapshot's session with one frame a
+            //     tick, each with one vehicle and one shuttle.
+            //
+            // Args:
+            //     ticks (long[]): The frames' ticks, oldest first.
+            //
+            // Returns:
+            //     JObject: The reply.
+            public JObject Traffic(params long[] ticks) => new JObject
+            {
+                ["session_id"] = Snapshot["session_id"],
+                ["frames"] = new JArray(ticks.Select(tick => new JObject
+                {
+                    ["tick"] = tick,
+                    ["simulation_time_s"] = tick * 0.05,
+                    ["vehicle_count"] = 1,
+                    ["vehicles"] = TrafficFrame.PackVehicles(3, 1200, -450, 900, 1000),
+                    ["shuttles"] = new JArray(new JObject
+                    {
+                        ["vehicle_id"] = "shuttle-01", ["x_m"] = 1.5, ["y_m"] = -2.0, ["heading_deg"] = 90.0, ["speed_mps"] = 4.2,
+                    }),
+                })),
+            };
 
             // -----------------------------------------------------------------------------------
             // Function: Replay
@@ -245,6 +292,8 @@ namespace Formula9.Tests
         private List<string> errors;
         private List<CommandOutcome> outcomes;
         private List<(FullSnapshot snapshot, bool reset)> snapshots;
+        // The controller's clock, which a test moves on itself
+        private DateTime clock;
         private const string SessionId = "session-001";
 
         // -----------------------------------------------------------------------------------
@@ -252,7 +301,8 @@ namespace Formula9.Tests
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function gives each test a fresh fake backend, a login, a controller with an
-        //     instant retry delay, and lists of the errors, outcomes and snapshots it reports.
+        //     instant retry delay and a clock of its own, and lists of the errors, outcomes and
+        //     snapshots it reports.
         [SetUp]
         public void SetUp()
         {
@@ -260,8 +310,9 @@ namespace Formula9.Tests
             auth = new AuthSession();
             auth.Begin("trainee", "token-1", 3600);
             waits = new List<TimeSpan>();
+            clock = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             controller = new SessionController(new TrainingApi(backend, auth, new Uri("http://backend.test")), auth,
-                delay: (wait, _) => { waits.Add(wait); return Task.CompletedTask; });
+                delay: (wait, _) => { waits.Add(wait); return Task.CompletedTask; }, now: () => clock);
             errors = new List<string>();
             outcomes = new List<CommandOutcome>();
             snapshots = new List<(FullSnapshot, bool)>();
@@ -728,6 +779,61 @@ namespace Formula9.Tests
             await controller.CreateAsync();
             StringAssert.Contains("Log in as trainee", errors.Last());
             Assert.AreEqual(1, backend.To("/api/v2/sessions", "POST").Count());
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: TrafficIsPolledFromTheNewestFrameAndAskedAgainLaterWhenThereIsNone
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The first traffic poll of a session asks for every frame the backend keeps, and each
+        //     later one only for frames after the newest taken, which are reported in order, with
+        //     how long the backend may wait for one. A session the backend has no traffic for is
+        //     not asked again for a while, then is, and picks up where it left off once the
+        //     backend has traffic for it again.
+        [Test]
+        public async Task TrafficIsPolledFromTheNewestFrameAndAskedAgainLaterWhenThereIsNone()
+        {
+            var accepted = new List<IReadOnlyList<TrafficFrame>>();
+            controller.TrafficFramesAccepted += accepted.Add;
+            await controller.JoinAsync(SessionId);
+            backend.OnTraffic = _ => Json(backend.Traffic(10, 12));
+            Assert.AreEqual(2, await controller.RefreshTrafficAsync());
+            backend.OnTraffic = _ => Json(backend.Traffic(14));
+            Assert.AreEqual(1, await controller.RefreshTrafficAsync(SessionController.TrafficWait));
+            CollectionAssert.AreEqual(new long[] { -1, 12 }, backend.To("/traffic").Select(FakeBackend.AfterTick).ToList());
+            var waiting = backend.To("/traffic").Last();
+            StringAssert.Contains("wait_ms=1000", waiting.Url.Query);
+            Assert.Greater(waiting.TimeoutSeconds, 10, "the request outlasts the backend's wait");
+            backend.OnTraffic = _ => Json(backend.Traffic());
+            Assert.AreEqual(0, await controller.RefreshTrafficAsync(SessionController.TrafficWait), "the wait ran out with nothing new");
+            Assert.AreEqual(14L, FakeBackend.AfterTick(backend.To("/traffic").Last()));
+            Assert.AreEqual(2, accepted.Count);
+            CollectionAssert.AreEqual(new long[] { 10, 12 }, accepted[0].Select(f => f.Tick).ToList());
+            CollectionAssert.AreEqual(new long[] { 14 }, accepted[1].Select(f => f.Tick).ToList());
+            var shuttle = accepted[1][0].Shuttles.Single();
+            Assert.AreEqual("shuttle-01", shuttle.VehicleId);
+            Assert.AreEqual(4.2, shuttle.SpeedMps, 1e-9);
+            CollectionAssert.AreEqual(new[] { 3, 1200, -450, 900, 1000 }, accepted[1][0].Vehicles);
+
+            backend.OnTraffic = _ => Error(404, "INVALID_REFERENCE");
+            Assert.AreEqual(-1, await controller.RefreshTrafficAsync());
+            Assert.AreEqual(14L, FakeBackend.AfterTick(backend.To("/traffic").Last()));
+            var asked = backend.To("/traffic").Count();
+            Assert.AreEqual(-1, await controller.RefreshTrafficAsync(), "nothing asked");
+            await controller.RefreshTrafficAsync();
+            clock += SessionController.NoTrafficRetryInterval - TimeSpan.FromSeconds(0.1);
+            await controller.RefreshTrafficAsync();
+            Assert.AreEqual(asked, backend.To("/traffic").Count(), "a session without traffic is not asked again for a while");
+            Assert.AreEqual(2, accepted.Count);
+            Assert.IsEmpty(errors, "no traffic is not an error");
+
+            // Having none may have been passing, as while the backend recovered: it is asked again later
+            clock += TimeSpan.FromSeconds(0.1);
+            backend.OnTraffic = _ => Json(backend.Traffic(16));
+            Assert.AreEqual(1, await controller.RefreshTrafficAsync());
+            Assert.AreEqual(asked + 1, backend.To("/traffic").Count());
+            Assert.AreEqual(14L, FakeBackend.AfterTick(backend.To("/traffic").Last()), "from the newest frame taken");
+            CollectionAssert.AreEqual(new long[] { 16 }, accepted[2].Select(f => f.Tick).ToList());
         }
 
         // -----------------------------------------------------------------------------------
