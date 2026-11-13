@@ -94,6 +94,14 @@ class RouteEditService:
         shared = {key: value for key, value in self._fixture.items() if key not in ROUTE_KEYS}
         self._configs = {self._fixture["route_id"]: self._fixture,
                          **{route_id: {**shared, **config, "route_id": route_id} for route_id, config in peers.items()}}
+        # A detour is traced back to its route by its stops (base_route_id), so no two routes may share them
+        by_stops: dict[frozenset, str] = {}
+        for route_id, config in self._configs.items():
+            stops = frozenset(config["required_stops"])
+            if stops in by_stops:
+                raise ValueError(f"Routes {by_stops[stops]} and {route_id} serve the same stops, so a detour "
+                                 "taken from either could not be traced back to it")
+            by_stops[stops] = route_id
         self._previews: OrderedDict[str, tuple[RouteEditRequest, RouteEditPreview]] = OrderedDict()
         self._lock = RLock()
         # Routes with no operating network keep to their curated paths and curated metadata.
@@ -107,7 +115,8 @@ class RouteEditService:
 
     def base_route_id(self, snapshot: FullSnapshot, route_id: str | None) -> str | None:
         """The route whose editor data a route is edited with: its own, or for an incident's detour the
-        route it was taken from, which is the one whose stops it keeps. None when there is none."""
+        route it was taken from, which is the one whose stops it keeps (no two routes share them; see
+        __init__). None when there is none."""
         if route_id in self._configs:
             return route_id
         if not route_id or not any(route_id == i.incident_id + "-detour" or route_id.startswith(i.incident_id + "-detour-")
