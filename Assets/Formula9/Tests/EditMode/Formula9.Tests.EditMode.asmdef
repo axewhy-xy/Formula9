@@ -3,6 +3,7 @@
     "rootNamespace": "Formula9.Tests",
     "references": [
         "Formula9.Runtime",
+        "Formula9.Editor",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],

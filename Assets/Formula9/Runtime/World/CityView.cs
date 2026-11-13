@@ -133,6 +133,7 @@ namespace Formula9.World
                 Debug.LogWarning("ShuttleBus prefab missing; using cubes.");
 
             buildingMaterial = Own(new Material(Shader.Find("Formula9/CityBuilding")));
+            buildingMaterial.SetFloat("_SelfLight", WorldLook.Default.BuildingSelfLight);
             ApplyBuildingTextures(buildingMaterial);
             lineMaterial = Own(new Material(Shader.Find("Sprites/Default")));
             incidents = new CityIncidents(root, buildingMaterial, lineMaterial);
@@ -142,27 +143,40 @@ namespace Formula9.World
             if (tiles != null) tiles.TileLoaded += RefreshTiles;
         }
 
-        // Wall and window textures in Resources/Formula9/Textures, by shader property, one pair for each of
-        // CityMesh's texture sets. Without all of them the buildings keep their plain colours rather than
-        // showing white where a texture is missing.
+        // The texture arrays in Resources/Formula9/Textures, by shader property: one slice per building style,
+        // painted by Formula9 > Generate Building Textures from Resources/Formula9/building_styles.json.
+        // Without all of them the buildings keep their plain colours rather than showing white.
         public static readonly (string Property, string File)[] BuildingTextures =
         {
-            ("_WallHome", "building_wall_home"), ("_WallOther", "building_wall_other"),
-            ("_WallHdb", "building_wall_hdb"), ("_WallLowRise", "building_wall_lowrise"), ("_WallOffice", "building_wall_office"),
-            ("_WindowHome", "building_window_home"), ("_WindowOther", "building_window_other"),
-            ("_WindowHdb", "building_window_hdb"), ("_WindowLowRise", "building_window_lowrise"), ("_WindowOffice", "building_window_office"),
+            ("_Walls", "building_walls"), ("_WallNormals", "building_wall_normals"),
+            ("_Facades", "building_facades"), ("_FacadeNormals", "building_facade_normals"),
         };
 
         private static void ApplyBuildingTextures(Material material)
         {
-            var textures = BuildingTextures.Select(t => (t.Property, Texture: Resources.Load<Texture2D>("Formula9/Textures/" + t.File))).ToList();
-            if (textures.Any(t => t.Texture == null))
+            var styles = BuildingStyles.Default;
+            var textures = BuildingTextures.Select(t => (t.Property, Texture: Resources.Load<Texture2DArray>("Formula9/Textures/" + t.File))).ToList();
+            if (textures.Any(t => t.Texture == null || t.Texture.depth < styles.Styles.Count))
             {
-                Debug.LogWarning("Building textures are missing from Resources/Formula9/Textures, so buildings are plain colour");
+                Debug.LogWarning("Building textures are missing or out of date in Resources/Formula9/Textures, so buildings are plain colour. " +
+                    "Run Formula9 > Generate Building Textures.");
                 material.SetFloat("_Plain", 1);
                 return;
             }
             foreach (var (property, texture) in textures) material.SetTexture(property, texture);
+            // The shader's arrays are a fixed length; styles past the end of the file stay zero
+            var tiles = new Vector4[BuildingStyles.MaxStyles];
+            var settings = new Vector4[BuildingStyles.MaxStyles];
+            for (var i = 0; i < styles.Styles.Count; i++)
+            {
+                var style = styles.Styles[i];
+                var (wallW, wallH) = style.WallTileM;
+                var (facadeW, facadeH) = style.FacadeTileM;
+                tiles[i] = new Vector4(wallW, wallH, facadeW, facadeH);
+                settings[i] = new Vector4(style.GroundFloorM, styles.NormalStrength, 0, 0);
+            }
+            material.SetVectorArray("_Tiles", tiles);
+            material.SetVectorArray("_StyleSettings", settings);
         }
 
         private T Own<T>(T item) where T : UnityEngine.Object { owned.Add(item); return item; }
@@ -171,7 +185,7 @@ namespace Formula9.World
         {
             buildings = await client.GetBuildingsAsync(area, cancellation);
             cancellation.ThrowIfCancellationRequested();
-            buildingMesh = Own(CityMesh.Build(buildings));
+            buildingMesh = Own(CityMesh.Build(buildings, details: true));
             BuildingCount = buildings.Count;
             Bounds = buildingMesh.bounds;
             var city = new GameObject("Buildings", typeof(MeshFilter), typeof(MeshRenderer));
@@ -967,7 +981,7 @@ namespace Formula9.World
         {
             if (buildingMesh == null) return;
             var paths = snapshot.Routes.Select(r => (IReadOnlyList<Vector2>)r.EdgePathsM.SelectMany(p => p).Select(p => new Vector2((float)p.XM, (float)p.YM)).ToList());
-            CityMesh.Fill(buildingMesh, buildings, CityMesh.Corridors(paths, RouteCutHalfWidthM));
+            CityMesh.Fill(buildingMesh, buildings, CityMesh.Corridors(paths, RouteCutHalfWidthM), details: true);
         }
 
         private Transform Marker(PrimitiveType shape, Vector3 size, Color color, string name)
