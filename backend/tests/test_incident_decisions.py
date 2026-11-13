@@ -23,14 +23,17 @@ INCIDENT = "scheduled-e1"
 QUEUE_CLEAR_M = 400.0
 
 
-def detourable(actor, edge):
-    """Whether shuttle-01 has a way round the edge from where it is and can still finish its loop."""
+def detourable(actor, edge, index=0):
+    """Whether a shuttle (shuttle-01 unless index says otherwise) has a way round the edge from where it is and
+    can still finish its loop."""
     hypothetical = actor.generate_snapshot()
     hypothetical.disruptions.append(Disruption(
         disruption_id="test-closure", aggregate_revision=1, affected_edge_ids=[edge],
         active_from_tick=actor.current_tick, active_until_tick=actor.current_tick + 1,
         reason="Find a road with a detour round it", provenance=hypothetical.source))
-    return actor.definition.routes.continuation_preview(hypothetical, "shuttle-01").approvable
+    vehicle = hypothetical.vehicles[index]
+    routes = actor.definition.routes.for_route(hypothetical, vehicle.route_id)
+    return routes.continuation_preview(hypothetical, vehicle.vehicle_id).approvable
 
 
 def schedule(runtime, monkeypatch, event_type="COLLISION", *, duration_s=200.0):
@@ -163,3 +166,43 @@ def test_a_shuttle_that_drives_into_a_collision_undecided_has_made_its_decision(
     assert decide(runtime, "KEEP_ROUTE", key="late")["status"] == "APPLIED"
     late = next(r for r in incident(read(runtime))["responses"] if r["vehicle_id"] == "shuttle-01")
     assert late["action"] == "KEEP_ROUTE" and late["before_arrival"] is False
+
+
+@pytest.mark.parametrize("index", [1, 2])
+def test_a_peer_shuttle_is_offered_a_detour_and_drives_it_serving_its_own_stops(runtime, monkeypatch, index):
+    """Every shuttle's route is drawn on the road network, so the route editor takes a peer round an incident on
+    its route as it does shuttle-01: one shuttle of each peer loop."""
+    client, store, service, session_id = runtime
+    approve(runtime)
+    send(runtime, "START")
+    advance(runtime, 20)
+    actor = service.sessions[session_id].actor
+    shuttle = actor.shuttles[index]
+    vehicle_id = actor.domain.vehicles[index].vehicle_id
+    home = actor.domain.vehicles[index].route_id
+    target = actor._incident_target(shuttle, set())
+    assert target["editable"]
+    # A collision on a road of its route well ahead, with a way round it
+    edge = next(e for e, ahead in target["ahead"] if ahead > 100 and detourable(actor, e, index))
+    at = (actor.current_tick + 4) * actor.STEP_S
+    monkeypatch.setattr(actor.incident_catalog, "timeline", [ScheduledEvent("e1", "COLLISION", edge, at, 200.0)])
+    stage_boundary(runtime, lambda a: setattr(a, "incident_due_tick", 10**9))
+    advance(runtime, 6)
+    snapshot = read(runtime)
+    offered = [c["action"] for c in snapshot["candidates"] if c["vehicle_id"] == vehicle_id and c["incident_id"] == INCIDENT]
+    assert "ROAD_DETOUR" in offered
+    stops = next(r for r in snapshot["routes"] if r["route_id"] == home)["required_stop_ids"]
+    assert decide(runtime, "ROAD_DETOUR", vehicle_id)["status"] == "APPLIED"
+    snapshot = read(runtime)
+    vehicle = snapshot["vehicles"][index]
+    assert vehicle["service_state"] == "DETOURING" and vehicle["route_id"] == detour_route_id(INCIDENT, vehicle_id)
+    route = next(r for r in snapshot["routes"] if r["route_id"] == vehicle["route_id"])
+    assert edge not in route["directed_edge_ids"] and route["required_stop_ids"] == stops
+    # The actor drives the detour and pulls in at the peer's own stops, not shuttle-01's
+    actor = service.sessions[session_id].actor
+    assert is_detour_of(actor.shuttles[index].route_ID, INCIDENT)
+    names = dict(actor.stop_names[vehicle["route_id"]])
+    assert names.pop("end") == stops[-1] and set(names.values()) <= set(stops)
+    advance_until(runtime, lambda s: s.vehicles[index].service_state == "DWELLING", limit=4000)
+    advance_until(runtime, lambda s: s.vehicles[index].service_state != "DWELLING", limit=4000)
+    assert read(runtime)["vehicles"][index]["service_state"] == "DETOURING"

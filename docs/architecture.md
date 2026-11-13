@@ -136,7 +136,10 @@ table. The backend still runs the other two, and the client can join existing se
 The integrated fixture (`backend/fixtures/m2_integrated.json`) is built by
 `python -m src.routing.build_singapore_fleet_fixture` from the committed OSM extract. It has:
 
-- five shuttles on one editable route (`route-m2-detour`) and four peer routes, with LTA bus stops
+- five shuttles, each on its own route with LTA bus stops: `route-m2-detour` (shuttle-01) and four peer
+  routes on two peer loops, two shuttles a loop. Every route is a list of operating-network roads with
+  its own route editor data (`route_edit` and `route_edit.peer_routes`), so any of them can be edited
+  and taken round an incident
 - two depots: Toa Payoh Interchange and Saint Michael's Bus Terminal
 - a permanent closure that must be routed around before Start
 - incidents from `fixtures/incidents/predefined_scenarios.json`: a `timeline` of scheduled world events
@@ -205,7 +208,7 @@ Each tick, `IntegratedSessionActor` does the following:
   stop it could hold at short of the footprint.
 - **Decisions per exposed shuttle:** `IncidentService` offers each exposed shuttle its own options:
   `KEEP_ROUTE` (drive on and absorb the delay), `ROAD_DETOUR` (when its route is one the route editor can
-  take round the event: shuttle-01's route or a detour from it; not for signal faults), `ESCALATE`
+  take round the event: any shuttle's route or a detour from it; not for signal faults), `ESCALATE`
   (request assistance, once per event, which brings `Incident.clears_at_tick` forward) and `HOLD_AT_STOP`
   (when it has a stop before the footprint). A decision is recorded as that shuttle's
   `Incident.responses` entry; the others' options are then reissued. The actor carries each one out: a

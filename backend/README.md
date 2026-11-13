@@ -44,7 +44,11 @@ The same scenario is exercised by the BE-M2-06 benchmark; see
 for collection commands, generated artifacts and the separate client acceptance gate.
 
 Its routes are edited on the operating network in `fixtures/m2_operating_network.json`, built from
-the OpenStreetMap extract by `src/routing/build_operating_network.py`. One physical road is one
+the OpenStreetMap extract by `src/routing/build_operating_network.py`. Every shuttle's route is a list
+of its roads with its own start, stops (each a node at its kerb) and approach roads: shuttle-01's in
+`route_edit` of `fixtures/m2_integrated.json`, the peers' in `route_edit.peer_routes`.
+`RouteEditService.for_route` picks a route's data by its ID, and a detour keeps that of the route it
+was taken from. One physical road is one
 edge per direction, with its width, headroom and access and where each came from. A preview with
 `waypoint_edge_ids` plans over the whole network (`src/routing/operating_network.py`: no U-turns,
 stops served at the kerb); empty and `via_node_ids` requests stay on the curated paths, as do the

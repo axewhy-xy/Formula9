@@ -78,7 +78,7 @@ TRAFFIC_ASSUMPTION = ("Background traffic is a 0.1% sample of Singapore's regist
                       "stop at simulated traffic lights with made-up timings.")
 # The longest a light can hold a shuttle: a whole yellow and red, arriving just as its green ends
 SIGNAL_WAIT_S = signal_cycle.PHASE_S * (signal_cycle.PHASES - 1) + signal_cycle.YELLOW_S + signal_cycle.ALL_RED_S
-# A road of the operating network lies on a path not drawn on it (a peer shuttle's loop) within this
+# A road of the operating network lies on a path not drawn on it (a depot path) within this
 MATCH_M = 6.0
 # The modes in which a shuttle is driving its service route, and so can meet an incident on it
 ON_ROUTE = {"IN_SERVICE", "DETOURING"}
@@ -166,8 +166,12 @@ class WorkflowDefinition:
                     raise ValueError(f"Scheduled event {event.event_id} is at unknown junction {event.node_id!r}")
             elif event.edge_id not in self.network["edges"]:
                 raise ValueError(f"Scheduled event {event.event_id} is on unknown edge {event.edge_id!r}")
-        original = self.compile_route(self.data["route_edit"]["original_directed_edge_ids"])[0]
-        self.actor_routes = [original, *self.data["peer_patterns"]]
+        # Every shuttle's route is drawn on the operating network by its own roads: shuttle-01's first,
+        # then the peers', in the fixture's order
+        self.route_ids = [self.data["route_edit"]["route_id"], *self.data["route_edit"].get("peer_routes", {})]
+        self.actor_routes = [{**self.compile_route(self.routes.route_config(route_id)["original_directed_edge_ids"],
+                                                   route_id)[0], "route_ID": route_id}
+                             for route_id in self.route_ids]
         # Every depot and its charger bays; each charger belongs to exactly one depot.
         self.depots = self.data["depots"]
         self.bay_positions = {charger_id: bay for depot in self.depots for charger_id, bay in depot["bays"].items()}
@@ -192,9 +196,9 @@ class WorkflowDefinition:
         return self.graph
 
     @lru_cache(maxsize=64)
-    def _compiled(self, ids: tuple[str, ...]):
+    def _compiled(self, ids: tuple[str, ...], route_id: str):
         edges = self.network["edges"]
-        config = self.data["route_edit"]
+        config = self.routes.route_config(route_id)
         approaches = config["stop_approach_edge_ids"]
         pending = list(config["required_stops"].items())
         points = [tuple(edges[ids[0]]["path"][0])]
@@ -212,9 +216,10 @@ class WorkflowDefinition:
                 stops.append((pending.pop(0)[0], travelled))
         return geometry(config["route_id"], points), tuple(stops)
 
-    def compile_route(self, ids: list[str]):
-        """The exact geometry the shuttle drives for a route, and how far along it each stop is."""
-        path, stops = self._compiled(tuple(ids))
+    def compile_route(self, ids: list[str], route_id: str):
+        """The exact geometry the shuttle drives for a route, and how far along it each stop is. route_id is
+        the route whose stops it serves: the route itself, or the one a detour was taken from."""
+        path, stops = self._compiled(tuple(ids), route_id)
         return path, [stop for stop in stops]
 
     @cached_property
@@ -244,7 +249,7 @@ class WorkflowDefinition:
 
     @lru_cache(maxsize=64)
     def matched_spans(self, points: tuple[tuple[float, float], ...]) -> tuple[tuple[str, float, float], ...]:
-        """The operating-network roads a path that is not drawn on the network (a peer shuttle's loop)
+        """The operating-network roads a path that is not drawn on the network (a depot path)
         follows, in order along it: each road lying within MATCH_M of the path the way it runs, with where
         it starts and ends along the path. A stretch no road follows has none."""
         if len(points) < 2:
@@ -371,25 +376,20 @@ class IntegratedSessionActor(SessionActor):
         self.domain.session.status = "READY"
         self.is_paused = True
         primary = self.domain.routes[0]
-        primary.directed_edge_ids = data["route_edit"]["original_directed_edge_ids"]
-        # The primary route now runs on road-graph edges, so its drawable paths come from the graph's
-        # node positions: edge i runs from node i to node i + 1 of the walked path
-        primary.edge_paths_m = [[Position(x_m=x, y_m=y, z_m=0) for x, y in self.definition.network["edges"][identifier]["path"]]
-                                for identifier in primary.directed_edge_ids]
-        primary.required_stop_ids = list(data["route_edit"]["required_stops"])
-        primary.stops_m = [RouteStop(stop_id=stop, position=Position(x_m=float(data["nodes"][str(node)][0]),
-                                                                     y_m=float(data["nodes"][str(node)][1]), z_m=0))
-                           for stop, node in data["route_edit"]["required_stops"].items()]
-        # Each peer shuttle has its own route and stops. Its loop starts and ends at the first stop,
-        # where the loop's end already pulls in; the rest are places to stop along the way.
+        # Every route runs on road-graph edges, so its drawable paths come from the roads' own geometry, one
+        # path a road, and its stops are the network's nodes at their kerbs. A peer's loop starts and ends
+        # at its last stop, where the loop's end pulls in.
+        nodes = self.definition.network["nodes"]
         for route in self.domain.routes:
-            stops = data["peer_route_stops"].get(route.route_id)
-            if stops is not None:
-                route.required_stop_ids = [stop["stop_id"] for stop in stops]
-                route.stops_m = [RouteStop(stop_id=stop["stop_id"], position=Position(x_m=stop["x"], y_m=stop["y"], z_m=0)) for stop in stops]
-                self.stop_progress[route.route_id] = [stop["progress_m"] for stop in stops[1:]]
-                self.stop_names[route.route_id] = {str(stop["progress_m"]): stop["stop_id"] for stop in stops[1:]}
-                self.stop_names[route.route_id]["end"] = stops[0]["stop_id"]
+            config = self.definition.routes.route_config(route.route_id)
+            route.directed_edge_ids = list(config["original_directed_edge_ids"])
+            route.edge_paths_m = [[Position(x_m=x, y_m=y, z_m=0) for x, y in self.definition.network["edges"][identifier]["path"]]
+                                  for identifier in route.directed_edge_ids]
+            route.required_stop_ids = list(config["required_stops"])
+            route.stops_m = [RouteStop(stop_id=stop, position=Position(x_m=float(nodes[str(node)][0]),
+                                                                       y_m=float(nodes[str(node)][1]), z_m=0))
+                             for stop, node in config["required_stops"].items()]
+            self._adopt_route(route.route_id, route.directed_edge_ids, route.route_id)
         for route in self.domain.routes:
             route.estimated_duration_s = route.distance_m / data["speed_mps"] + self.DWELL_S
         primary.estimated_duration_s += data["route_edit"]["loop_end_dwell_s"]
@@ -402,7 +402,6 @@ class IntegratedSessionActor(SessionActor):
         self.domain.depots = [Depot(depot_id=depot["depot_id"],
             position=Position(x_m=depot["position_m"][0], y_m=depot["position_m"][1], z_m=0),
             charger_ids=list(depot["bays"])) for depot in self.definition.depots]
-        self._adopt_route(primary.route_id, primary.directed_edge_ids)
         self.domain = self.generate_snapshot()
         # How each shuttle was held this step, for the traffic around it; never outlives the step
         self.traffic_holds = {}
@@ -431,15 +430,78 @@ class IntegratedSessionActor(SessionActor):
             copy.__dict__[name] = deepcopy(value, memo)
         return copy
 
+    def _gap_ahead(self, shuttle, other):
+        """A shuttle keeps its headway to any shuttle just ahead of it on its own road, not only to one on its
+        route: the two sharing a peer loop (each has its own route, for its own stops), and one on a detour
+        that still runs on its route's roads. Without it they only keep apart pairwise, and where the one
+        ahead turns, both are held for good. A charging trip passes as if in the other lane (_conflicts)."""
+        gap = super()._gap_ahead(shuttle, other)
+        if gap is not None or "depot-path-" in shuttle.route_ID + other.route_ID:
+            return gap
+        if self._same_path(shuttle, other):
+            return (other.progress - shuttle.progress) % self._routes[shuttle.route_ID]["total_length"]
+        return self._following_gap(shuttle, other)
+
+    def _following_gap(self, shuttle, other):
+        """How far ahead along this shuttle's path, within its release distance, the other stands on it heading
+        the same way; None when it does not."""
+        reach = self.RELEASE_M + shuttle.cruise_vel*self.STEP_S
+        if math.hypot(other.position.x - shuttle.position.x, other.position.y - shuttle.position.y) > reach:
+            return None
+        ahead = self._route_evaluation(other.route_ID, other.progress + 0.01)
+        behind = self._route_evaluation(other.route_ID, max(0.0, other.progress - 0.01))
+        heading = (ahead.x - behind.x, ahead.y - behind.y)
+        travelled = 0.0
+        points = self._routes[shuttle.route_ID]["waypoints"]
+        for a, b in zip(points, points[1:]):
+            if travelled > shuttle.progress + reach:
+                break
+            dx, dy = b.x - a.x, b.y - a.y
+            length = math.hypot(dx, dy)
+            if length and travelled + length >= shuttle.progress:
+                share = max(0.0, min(1.0, ((other.position.x - a.x)*dx + (other.position.y - a.y)*dy) / (length*length)))
+                off = math.hypot(a.x + dx*share - other.position.x, a.y + dy*share - other.position.y)
+                along = travelled + share*length - shuttle.progress
+                aligned = heading[0]*dx + heading[1]*dy > 0.7*length*math.hypot(*heading)
+                if off <= 0.01 and aligned and 0 <= along <= reach:
+                    return along
+            travelled += length
+        return None
+
+    def _same_path(self, shuttle, other):
+        """Whether two shuttles on different routes drive the same path from the same start, as the two
+        sharing a peer loop do."""
+        first, second = self._routes.get(shuttle.route_ID), self._routes.get(other.route_ID)
+        if first is None or second is None or first["total_length"] != second["total_length"]:
+            return False
+        # Paths are replaced, never changed in place (see __deepcopy__); the cache keeps the lists it compared
+        cache = self.__dict__.setdefault("_same_path_cache", {})
+        key = (id(first["waypoints"]), id(second["waypoints"]))
+        known = cache.get(key)
+        if known is None or known[0] is not first["waypoints"] or known[1] is not second["waypoints"]:
+            if len(cache) > 64:
+                cache.clear()
+            known = cache[key] = (first["waypoints"], second["waypoints"], first["waypoints"] == second["waypoints"])
+        return known[2]
+
     def _validated_routes(self, route):
         return validate_routes(route, MAX_ROUTE_WAYPOINTS)
 
-    def _adopt_route(self, route_id: str, ids: list[str]) -> None:
-        """Drive a route exactly as approved, and pull in at each of its stops."""
-        path, stops = self.definition.compile_route(ids)
+    def _adopt_route(self, route_id: str, ids: list[str], base_id: str) -> None:
+        """Drive a route exactly as approved, and pull in at each of the stops of base_id, the route it is
+        (or a detour was taken from). A stop at the loop's end is where the loop's end pulls in."""
+        path, stops = self.definition.compile_route(ids, base_id)
         self._routes[route_id] = {**path, "route_ID": route_id}
-        self.stop_progress[route_id] = [progress for _, progress in stops]
-        self.stop_names[route_id] = {str(progress): stop for stop, progress in stops}
+        total = path["total_length"]
+        self.stop_progress[route_id] = [progress for _, progress in stops if progress < total - EPSILON]
+        self.stop_names[route_id] = {str(progress): stop for stop, progress in stops if progress < total - EPSILON}
+        end = next((stop for stop, progress in stops if progress >= total - EPSILON), None)
+        if end is not None:
+            self.stop_names[route_id]["end"] = end
+
+    def _home_route(self, shuttle) -> str:
+        """The route a shuttle is assigned to serve, whichever detour it is driving now."""
+        return self.definition.data["vehicle_assignments"][shuttle.ID]
 
     def _note_stop(self, shuttle) -> None:
         """A shuttle has pulled in: record what it served, for the outcome of the operator's decision."""
@@ -556,7 +618,7 @@ class IntegratedSessionActor(SessionActor):
         """The road from the start of this shuttle's route to the charger's depot, or with "exits" the road back."""
         route_id = self.domain.vehicles[shuttle.ID].route_id
         roads = self.definition.charger_depot[charger_id][kind]
-        return roads[route_id if route_id in roads else self.definition.data["route_edit"]["route_id"]]
+        return roads[route_id if route_id in roads else self._home_route(shuttle)]
 
     def _leaving_points(self, shuttle, charger_id):
         """From the bay out to the road, where the way back to the route begins."""
@@ -632,7 +694,7 @@ class IntegratedSessionActor(SessionActor):
         """
         end = self._routes[shuttle.route_ID]["waypoints"][-1]
         route_id = self.domain.vehicles[shuttle.ID].route_id
-        root = route_id if route_id in depot["connectors"] else self.definition.data["route_edit"]["route_id"]
+        root = route_id if route_id in depot["connectors"] else self._home_route(shuttle)
         key = (end.x, end.y, root, depot["depot_id"])
         if key not in self.tails:
             lengths = []
@@ -1002,7 +1064,9 @@ class IntegratedSessionActor(SessionActor):
         known = {route.route_id: route.revision for route in self.domain.routes}
         for route in snapshot.routes:
             if known.get(route.route_id) != route.revision:
-                self._adopt_route(route.route_id, route.directed_edge_ids)
+                # A detour serves the stops of the route it was taken from
+                base = self.definition.routes.base_route_id(snapshot, route.route_id) or self.definition.route_ids[0]
+                self._adopt_route(route.route_id, route.directed_edge_ids, base)
         for shuttle, vehicle in zip(self.shuttles, snapshot.vehicles):
             prior = old[vehicle.vehicle_id]
             if ((vehicle.route_id, vehicle.route_revision) != (prior.route_id, prior.route_revision)
@@ -1141,7 +1205,7 @@ class IntegratedSessionActor(SessionActor):
 
     def _route_roads(self, route_id):
         """The operating-network roads along a path the actor drives, as (edge id, start m, end m): a route
-        drawn on the network by its own roads, any other path (a peer loop, a depot path) by the roads it
+        drawn on the network by its own roads, any other path (a depot path) by the roads it
         follows."""
         route = next((r for r in self.domain.routes if r.route_id == route_id), None)
         edges = self.definition.network["edges"]
@@ -1382,7 +1446,7 @@ class IntegratedSessionActor(SessionActor):
                     if line.progress_m - SHUTTLE_FRONT_M - route_signals.STOP_MARGIN_M >= shuttle.progress - EPSILON)
         end = self._routes[shuttle.route_ID]["waypoints"][-1]
         route_id = self.domain.vehicles[shuttle.ID].route_id
-        root = route_id if route_id in depot["connectors"] else self.definition.data["route_edit"]["route_id"]
+        root = route_id if route_id in depot["connectors"] else self._home_route(shuttle)
         key = (end.x, end.y, root, depot["depot_id"])
         tails = self.__dict__.setdefault("_tail_lines", {})
         if key not in tails:
@@ -1418,7 +1482,8 @@ class IntegratedSessionActor(SessionActor):
             return None
         edges = self.definition.network["edges"]
         return {"shuttle": shuttle, "vehicle": vehicle, "remaining": remaining, "ahead": ahead,
-                "editable": all(edge in edges for edge in route.directed_edge_ids),
+                "editable": (self.definition.routes.base_route_id(self.domain, vehicle.route_id) is not None
+                             and all(edge in edges for edge in route.directed_edge_ids)),
                 # A closure that must be decided for is never placed for a shuttle already being decided for
                 "busy": any(c.vehicle_id == vehicle.vehicle_id for c in self.domain.candidates)
                         or any(i.vehicle_id == vehicle.vehicle_id and i.candidate_ids and c.vehicle_id is None
@@ -1464,9 +1529,7 @@ class IntegratedSessionActor(SessionActor):
             vehicle = target["vehicle"]
             eligible = [edge for edge, _ in target["ahead"]]
             edge = eligible[0]
-            routes = self.definition.routes
-            if vehicle.route_id != routes._fixture["route_id"]:
-                routes = RouteEditService(self.definition, fixture={**routes._fixture, "route_id": vehicle.route_id})
+            routes = self.definition.routes.for_route(self.domain, vehicle.route_id)
             for candidate in eligible:
                 hypothetical = self.generate_snapshot()
                 hypothetical.disruptions.append(Disruption(

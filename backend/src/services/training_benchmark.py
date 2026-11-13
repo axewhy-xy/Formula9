@@ -241,7 +241,9 @@ def run(output: Path, *, ticks=None, validation_samples=None, reconnect_samples=
     if output.exists() and any(output.iterdir()):
         raise ValueError("Output directory must be new or empty; existing evidence is never overwritten")
     output.mkdir(parents=True, exist_ok=True)
-    trace = TrainingTrace(capacity=65536)
+    # Room for every span of the run: about 90 000 records, most of them per tick, while the low-battery
+    # shuttle's trip in to its charger is the longest phase
+    trace = TrainingTrace(capacity=131072)
     checks, integration = [], []
     database = output / "runtime.sqlite"
     previous_overrides = dict(app.dependency_overrides)

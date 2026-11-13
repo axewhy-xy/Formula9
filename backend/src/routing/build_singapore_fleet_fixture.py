@@ -21,6 +21,7 @@ the existing fixture.
 from __future__ import annotations
 
 import argparse
+from collections import defaultdict
 import json
 import math
 import re
@@ -31,7 +32,8 @@ from urllib.request import Request, urlopen
 
 import networkx as nx
 
-from src.routing.build_operating_network import OperatingRoads, MAX_TURN_DEG, build_network, heading_change_deg, strongly_connected
+from src.routing.build_operating_network import OperatingRoads, MAX_TURN_DEG, build_network, heading_change_deg, road_metadata, strongly_connected
+from src.routing.operating_network import FITS, road_fit
 
 FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "m2_integrated.json"
 NETWORK_FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "m2_operating_network.json"
@@ -84,6 +86,11 @@ STOP_SNAP_M = 20.0
 # shuttles by their centres (10 m) and has no lanes, so loops must not share or hug a road
 CLEARANCE_M = 35.0
 MIN_PEER_AREA_M2 = 8_000.0
+# Nor may a peer loop come back past itself: two shuttles share it, and where it runs back down the
+# other side of a road it has just driven up they would hold each other. Points of the loop further
+# apart along it than PEER_SELF_APART_M keep PEER_SELF_CLEARANCE_M apart.
+PEER_SELF_CLEARANCE_M = 25.0
+PEER_SELF_APART_M = 60.0
 
 
 def project(latitude: float, longitude: float) -> tuple[float, float]:
@@ -249,6 +256,23 @@ def clear_of(points, others, clearance):
     return True
 
 
+def clear_of_itself(ring, clearance, apart):
+    """Whether a closed loop keeps clearance from itself, except between points within apart of each other
+    along it (either way round)."""
+    points = densify(ring, 5.0)
+    along = [0.0]
+    for a, b in zip(points, points[1:]):
+        along.append(along[-1] + math.dist(a, b))
+    total = along[-1]
+    for i, p in enumerate(points):
+        for j in range(i + 1, len(points)):
+            q = points[j]
+            if (abs(p[0] - q[0]) < clearance and abs(p[1] - q[1]) < clearance and math.dist(p, q) < clearance
+                    and min(along[j] - along[i], total - along[j] + along[i]) > apart):
+                return False
+    return True
+
+
 def road_edges(path: list[int]) -> list[tuple[int, int]]:
     """The path's segments in both directions, so a blocked road is blocked both ways."""
     return [edge for a, b in zip(path, path[1:]) for edge in ((a, b), (b, a))]
@@ -308,7 +332,20 @@ def find_main_loop(net: Network):
     return best[1:]
 
 
-def find_peer_loops(net: Network, avoid_points, used, count=2):
+def segment_fits(net: Network, a: int, b: int, vehicle: dict) -> bool:
+    """Whether the route editor clears the shuttle to drive the road from node a to node b: the road's
+    metadata as the operating network will record it (build_network), against the shuttle's size."""
+    way = net.loop[a][b]["way"]
+    metadata = road_metadata(net.tags[way], not net.loop.has_edge(b, a),
+                             net.way_runs_forward(way, net.position[a], net.position[b]), curated=False, curated_width_m=0.0)
+    return road_fit(metadata, "the road", vehicle)[0] == FITS
+
+
+def find_peer_loops(net: Network, avoid_points, used, vehicle: dict, count=2):
+    """Loops round a real block from a stop near the depot, each clear of the main loop and of the others,
+    on roads the shuttle is cleared to drive. Each is {"stop", "ring" (its simplified outline), "start_node",
+    "length", "between" (the nodes of the road the stop is on), "foot" (the stop's kerbside point on that
+    road), "around" (the nodes from that road's end back round to its start)}."""
     loops = []
     candidates = sorted(net.stops, key=lambda s: math.dist(s["at"], net.depot))
     for stop in candidates:
@@ -342,7 +379,16 @@ def find_peer_loops(net: Network, avoid_points, used, count=2):
                 # on the same loop would pass 10 to 15 m apart and hold each other
                 if length < 450 or enclosed_area(candidate) < MIN_PEER_AREA_M2:
                     continue
+                if not clear_of_itself(candidate, PEER_SELF_CLEARANCE_M, PEER_SELF_APART_M):
+                    continue
+                # Both shuttles on it have a stop of their own (place_peer_stops)
+                if len(stops_along(candidate, net.stops, used | {stop["ref"]})) < 2:
+                    continue
+                # Its own route is one the route editor can take it round an incident on
+                if not all(segment_fits(net, u, v, vehicle) for u, v in zip([a, *around], [*around, b])):
+                    continue
                 if clear_of(candidate, avoid_points, CLEARANCE_M):
+                    path = list(around)
                     ring = candidate
                     break
         except nx.NetworkXNoPath:
@@ -354,7 +400,8 @@ def find_peer_loops(net: Network, avoid_points, used, count=2):
         while len(simple) > MAX_LOOP_POINTS:
             tolerance *= 1.5
             simple = simplify(ring, tolerance)
-        loops.append({"stop": stop, "ring": simple, "start_node": b, "length": length})
+        loops.append({"stop": stop, "ring": simple, "start_node": b, "length": length,
+                      "between": (a, b), "foot": foot, "around": path})
         used.add(stop["ref"])
         avoid_points = avoid_points + densify(ring)
         if len(loops) == count:
@@ -364,41 +411,80 @@ def find_peer_loops(net: Network, avoid_points, used, count=2):
 
 PEER_STOP_SPACING_M = 120.0
 MAX_STOPS_PER_SHUTTLE = 4
+# The two routes on each peer loop: shuttle-02 and -04 share the first loop, shuttle-03 and -05 the second
+PEER_ROUTES = (("route-peer-b", "route-peer-d"), ("route-peer-c", "route-peer-e"))
 
 
-def split_peer_routes(data: dict, net: Network, used: set[str]) -> None:
-    """Give each shuttle on a shared loop its own route and its own real stops.
+def place_peer_stops(roads: OperatingRoads, net: Network, peers: list[dict], used: set[str]) -> list[dict]:
+    """Put each peer loop's stops on the road network as nodes, as the return leg's are, and give each
+    shuttle on a shared loop its own route and its own real stops.
 
-    Two shuttles run each peer loop. They keep the same roads, and take turns at the stops on its
-    left kerb, so each has dedicated stops. Both still pull in at the loop's start, where it closes.
-    """
-    second_routes = {"route-peer-b": "route-peer-d", "route-peer-c": "route-peer-e"}
-    patterns, stops_by_route, anchors = [], {}, {}
-    for pattern in data["peer_patterns"]:
-        route_id = pattern["route_ID"]
-        points = [(p["x"], p["y"]) for p in pattern["waypoints"]]
+    Two shuttles run each peer loop. They keep the same roads, and take turns at the stops on its left
+    kerb, so each has dedicated stops. Both still pull in at the loop's stop, where it starts and ends.
+    Returns, for each loop, its nodes in driving order ("nodes", starting and ending at that stop) and
+    each of its routes with its stops in the order it serves them, the loop's own last ("routes")."""
+    placed = []
+    for route_ids, loop in zip(PEER_ROUTES, peers):
+        anchor = f"{loop['stop']['ref']}-{slug(loop['stop']['name'])}"
+        terminal = roads.insert_stop(*loop["between"], loop["foot"])
+        nodes = [terminal, *loop["around"], terminal]
+        points = [roads.position[n] for n in nodes]
         lengths = [math.dist(a, b) for a, b in zip(points, points[1:])]
-        anchor = data["peer_stops"][route_id]
         chosen, last = [], 0.0
-        for index, along, stop in stops_along(points, net.stops, used | {anchor.split("-")[0]}):
+        for index, along, stop in stops_along(points, net.stops, used | {loop["stop"]["ref"]}):
             progress = sum(lengths[:index]) + along
             if progress - last < PEER_STOP_SPACING_M or sum(lengths) - progress < PEER_STOP_SPACING_M:
                 continue
+            chosen.append((index, along, f"{stop['ref']}-{slug(stop['name'])}"))
+            last = progress
+        # A stop splits the road it is on, so the stops furthest along go in first: the nodes before each
+        # stop still to go in keep their places
+        stop_nodes = {}
+        for index, along, stop_id in reversed(chosen):
             a, b = points[index], points[index + 1]
             share = along / max(lengths[index], 1e-9)
-            chosen.append({"stop_id": f"{stop['ref']}-{slug(stop['name'])}", "progress_m": round(progress, 3),
-                           "x": round(a[0] + (b[0] - a[0]) * share, 3), "y": round(a[1] + (b[1] - a[1]) * share, 3)})
-            last = progress
-        start = {"stop_id": anchor, "progress_m": 0.0, "x": points[0][0], "y": points[0][1]}
-        for route, own in ((route_id, chosen[0::2]), (second_routes[route_id], chosen[1::2])):
-            patterns.append({"route_ID": route, "waypoints": pattern["waypoints"]})
-            stops_by_route[route] = [start, *own[:MAX_STOPS_PER_SHUTTLE]]
-            anchors[route] = anchor
-    data["peer_patterns"] = patterns
-    data["peer_route_stops"] = stops_by_route
-    data["peer_stops"] = anchors
-    # shuttle-02 and -04 share the first loop, shuttle-03 and -05 the second
-    data["vehicle_assignments"] = [data["vehicle_assignments"][0], "route-peer-b", "route-peer-c", "route-peer-d", "route-peer-e"]
+            foot = (a[0] + (b[0] - a[0]) * share, a[1] + (b[1] - a[1]) * share)
+            stop_nodes[stop_id] = roads.insert_stop(nodes[index], nodes[index + 1], foot)
+            nodes.insert(index + 1, stop_nodes[stop_id])
+        stops = [(stop_id, stop_nodes[stop_id]) for _, _, stop_id in chosen]
+        placed.append({"nodes": nodes, "routes": [
+            (route_id, [*own[:MAX_STOPS_PER_SHUTTLE], (anchor, terminal)])
+            for route_id, own in zip(route_ids, (stops[0::2], stops[1::2]))]})
+    return placed
+
+
+def peer_route_edit(network: dict, placed: list[dict]) -> dict:
+    """Each peer route's route editor data, by route ID, as route_edit's own route has (ROUTE_KEYS of
+    src.services.route_edit): its loop's roads, from and back to its loop's stop, and each stop served
+    arriving along the road it is on."""
+    node_id = network["node_ids"]
+    runs = defaultdict(list)
+    for run, identifier in network["runs"].items():
+        runs[run[0]].append((run, identifier))
+    result = {}
+    for loop in placed:
+        nodes, ids, index = loop["nodes"], [], 0
+        while index < len(nodes) - 1:
+            run, identifier = next((run, identifier) for run, identifier in runs[nodes[index]]
+                                   if tuple(nodes[index:index + len(run)]) == run)
+            ids.append(identifier)
+            index += len(run) - 1
+        # The loop goes round: its last road leads onto its first
+        for first, second in zip(ids, [*ids[1:], ids[0]]):
+            turn = heading_change_deg(network["edges"][first]["path"], network["edges"][second]["path"])
+            if turn > MAX_TURN_DEG:
+                raise ValueError(f"A peer loop turns {turn:.0f} degrees from {first} to {second}")
+        arrivals = {network["edges"][identifier]["target"]: identifier for identifier in ids}
+        for route_id, stops in loop["routes"]:
+            terminal = node_id[stops[-1][1]]
+            result[route_id] = {
+                "start_node_id": terminal, "destination_node_id": terminal,
+                "default_via_node_ids": [node_id[stops[0][1]]],
+                "required_stops": {stop_id: node_id[node] for stop_id, node in stops},
+                "stop_approach_edge_ids": {stop_id: [arrivals[node_id[node]]] for stop_id, node in stops},
+                "original_directed_edge_ids": ids}
+    # In the order of the shuttles they are assigned to, shuttle-02 to -05
+    return {route_id: result[route_id] for route_id in ("route-peer-b", "route-peer-c", "route-peer-d", "route-peer-e")}
 
 
 def connector(net: Network, start_point, start_node, depot):
@@ -438,6 +524,15 @@ def build(osm: dict, base: dict, area: dict) -> dict:
         stop_nodes.append(stop_node)
         cut_point = foot
 
+    # The streets of the main loop, which the peers must keep clear of
+    main_line, b_line, c_line = net.points(main), net.points(bypass_b), net.points(bypass_c)
+    back_line = [roads.position[n] for n in back_nodes]
+
+    used = {stop["ref"] for stop, _ in stop_points}
+    avoid = densify(main_line) + densify(b_line) + densify(c_line) + densify(back_line)
+    peers = find_peer_loops(net, avoid, used, base["route_edit"])
+    placed = place_peer_stops(roads, net, peers, used)
+
     network = build_network(roads, [("main", main), ("bypass-b", bypass_b), ("bypass-c", bypass_c), ("return", back_nodes)],
                             simplify, curated_width_m=base["route_edit"]["road_width_m"])
     if not strongly_connected(network):
@@ -457,14 +552,6 @@ def build(osm: dict, base: dict, area: dict) -> dict:
             turn = heading_change_deg(network["edges"][first]["path"], network["edges"][second]["path"])
             if turn > MAX_TURN_DEG:
                 raise ValueError(f"The scenario's own route turns {turn:.0f} degrees from {first} to {second}")
-    # The streets of the main loop, which the peers must keep clear of
-    main_line, b_line, c_line = net.points(main), net.points(bypass_b), net.points(bypass_c)
-    back_line = [roads.position[n] for n in back_nodes]
-
-    used = {stop["ref"] for stop, _ in stop_points}
-    avoid = densify(main_line) + densify(b_line) + densify(c_line) + densify(back_line)
-    peers = find_peer_loops(net, avoid, used)
-
     data = json.loads(json.dumps(base))
     data["metadata"]["description"] = (
         f"Integrated BE-M2-02 through BE-M2-05 fixture on real {area['name']} streets (OpenStreetMap) with real "
@@ -488,14 +575,15 @@ def build(osm: dict, base: dict, area: dict) -> dict:
     route_edit["closed_directed_edge_ids"] = main_ids + [identifier for identifier in closed_back if identifier in network["edges"]]
     route_edit["detour_directed_edge_ids"] = b_ids + return_ids
     route_edit["alternative_directed_edge_paths"] = [c_ids + return_ids]
+    # Every shuttle drives its loop on the operating network, so the route editor can take any of them round
+    # an incident
+    route_edit["peer_routes"] = peer_route_edit(network, placed)
     data["operating_network"] = {key: network[key] for key in ("nodes", "edges", "chains", "rules")}
-    data["peer_patterns"] = [
-        {"route_ID": route_id, "waypoints": [{"x": p[0], "y": p[1]} for p in loop["ring"]]}
-        for route_id, loop in zip(("route-peer-b", "route-peer-c"), peers)
-    ]
-    data["peer_stops"] = {route_id: f"{loop['stop']['ref']}-{slug(loop['stop']['name'])}"
-                          for route_id, loop in zip(("route-peer-b", "route-peer-c"), peers)}
-    split_peer_routes(data, net, used)
+    # The waypoint loops and stop lists of older fixtures; route_edit's peer_routes replaces them
+    for key in ("peer_patterns", "peer_stops", "peer_route_stops"):
+        data.pop(key, None)
+    # shuttle-02 and -04 share the first loop, shuttle-03 and -05 the second
+    data["vehicle_assignments"] = [route_edit["route_id"], "route-peer-b", "route-peer-c", "route-peer-d", "route-peer-e"]
     # The single-depot keys of older fixtures; "depots" below replaces them
     for key in ("depot_id", "depot_position_m", "bay_positions_m", "depot_connectors"):
         data.pop(key, None)
@@ -521,8 +609,10 @@ def build(osm: dict, base: dict, area: dict) -> dict:
                                "bays": {first: [round(at[0] - 15, 2), at[1]], second: [round(at[0] + 15, 2), at[1]]},
                                "connectors": {route: way_in for route, (way_in, _) in trips.items()},
                                "exits": {route: way_out for route, (_, way_out) in trips.items()}})
-    data["assumptions"][0] = (f"Real {area['name']} road geometry and LTA bus stop positions from OpenStreetMap, simplified "
-                              "to at most 64 waypoints a loop; energy-r1 estimates. Lanes, signals and traffic are not modelled.")
+    data["assumptions"][0] = (f"Real {area['name']} road geometry and LTA bus stop positions from OpenStreetMap; every "
+                              "shuttle drives its loop on the operating road network. energy-r1 estimates. Shuttles keep "
+                              "to the kerb lane among a sample of background traffic and stop at simulated traffic lights "
+                              "with made-up timings.")
     data["assumptions"][1] = ("Shuttle-01 dwells at its loop entrance junction for 12 seconds; an obstruction on the first "
                               "segment of its main road then admits KEEP_ROUTE, ESCALATE, HOLD_AT_STOP or either real street around it.")
     return data
@@ -611,7 +701,8 @@ def main(argv: list[str] | None = None) -> int:
     route = data["route_edit"]
     print(f"{len(network['nodes'])} network nodes, {len(network['edges'])} network edges; "
           f"{len(data['nodes'])} scenario nodes, {len(data['edges'])} scenario edges; stops {list(route['required_stops'])};"
-          f" peers {data['peer_stops']}; depots {[d['position_m'] for d in data['depots']]}")
+          f" peers {({route_id: list(peer['required_stops']) for route_id, peer in route['peer_routes'].items()})};"
+          f" depots {[d['position_m'] for d in data['depots']]}")
     return 0
 
 

@@ -444,8 +444,16 @@ def test_incidents_are_placed_for_any_shuttle_and_only_editable_routes_are_held(
                     assert 0.5*warning - 0.1 <= selection["warning_m"] <= 1.5*warning + 0.1
     vehicles = {s["vehicle_id"] for s in placed}
     assert len(vehicles) >= 3 and vehicles - {"shuttle-01"}
-    # The peer loops are not drawn on the network, so the route editor cannot take them round a closure
-    assert all(s["vehicle_id"] == "shuttle-01" for s in placed if s["requires_guidance"])
+    # Every shuttle's loop is drawn on the network, so the route editor can take any of them round a
+    # closure: the peers are asked about road blocks on their own routes too
+    assert {s["vehicle_id"] for s in placed if s["requires_guidance"]} - {"shuttle-01"}
+
+
+def test_every_route_is_editable_so_any_shuttle_can_be_asked_about_a_closure():
+    actor = running_actor(3)
+    targets = [actor._incident_target(shuttle, set()) for shuttle in actor.shuttles]
+    assert all(target is not None and target["editable"] and target["ahead"] for target in targets)
+    assert {target["vehicle"].route_id for target in targets} == set(actor.definition.route_ids)
 
 
 def test_peer_loops_follow_roads_of_the_operating_network():

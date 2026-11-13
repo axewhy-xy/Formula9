@@ -420,20 +420,16 @@ class IncidentService:
         return known
 
     def _detour_capable(self, snapshot: FullSnapshot, vehicle_id: str) -> bool:
-        """Whether the route editor can take a shuttle round the incident: it drives the scenario's editable
-        route, or a detour already taken from it."""
+        """Whether the route editor can take a shuttle round the incident: it drives a route the editor has
+        operating metadata for, or a detour already taken from one."""
         vehicle = next(v for v in snapshot.vehicles if v.vehicle_id == vehicle_id)
-        if vehicle.route_id == self.routes._fixture["route_id"]:
-            return True
-        return any(is_detour_of(vehicle.route_id, i.incident_id) for i in snapshot.incidents)
+        return self.routes.base_route_id(snapshot, vehicle.route_id) is not None
 
-    def _route_service(self, snapshot: FullSnapshot, vehicle_id: str):
-        """Incident detours retain the operating metadata of their original route."""
+    def _route_service(self, snapshot: FullSnapshot, vehicle_id: str) -> RouteEditService:
+        """The route editor for a shuttle's route; incident detours retain the operating metadata of their
+        original route."""
         vehicle = next(v for v in snapshot.vehicles if v.vehicle_id == vehicle_id)
-        if vehicle.route_id == self.routes._fixture["route_id"]:
-            return self.routes
-        return RouteEditService(self.routes._graph_repository,
-                                fixture={**self.routes._fixture, "route_id": vehicle.route_id})
+        return self.routes.for_route(snapshot, vehicle.route_id)
 
     def _avoiding(self, snapshot: FullSnapshot, vehicle_id: str) -> FullSnapshot:
         """The snapshot a detour round the incident is planned in: a breakdown's or a collision's road closed,
@@ -710,7 +706,7 @@ class IncidentService:
         clears = snapshot.tick + self.config["clear_after_ticks"]
         affected = self.config.get("affected_edge_ids", self.routes._fixture.get("closed_directed_edge_ids"))
         if guided and self.config.get("block_current_route_entrance", False):
-            affected = [self.routes.first_avoidable_edge(snapshot, vehicle.route_id)]
+            affected = [self.routes.for_route(snapshot, vehicle.route_id).first_avoidable_edge(snapshot, vehicle.route_id)]
         # Disruptions are hard road closures. An accident's congestion is applied by the actor and must not
         # make its road impassable.
         if guided or self.config.get("kind") == "ROAD_BLOCK":

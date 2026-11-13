@@ -7,7 +7,7 @@ hands a staged revision to the durable single-writer command store.
 from __future__ import annotations
 
 from collections import OrderedDict
-from copy import deepcopy
+from copy import copy, deepcopy
 from functools import lru_cache
 import json
 import math
@@ -30,6 +30,12 @@ from src.routing.road_graph import RoadGraphRepository, get_road_graph_repositor
 
 
 FIXTURE_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "m2_route_detour.json"
+# The fixture's keys that describe one route. Everything else (the shuttle's size, energy, the road
+# network) is the same for every route. A fixture describes its own route at the top level and any
+# other route it can edit under "peer_routes", by route ID, with these keys.
+ROUTE_KEYS = ("route_id", "start_node_id", "destination_node_id", "default_via_node_ids", "required_stops",
+              "stop_approach_edge_ids", "original_directed_edge_ids", "closed_directed_edge_ids",
+              "detour_directed_edge_ids", "alternative_directed_edge_paths")
 
 
 def edge_id(key: tuple[int | str, int, str]) -> str:
@@ -82,14 +88,39 @@ class RouteEditService:
                  *, fixture: dict | None = None) -> None:
         self._graph_repository = graph_repository
         self._fixture = deepcopy(fixture) if fixture is not None else json.loads(fixture_path.read_text(encoding="utf-8"))
+        # Every route's editor data by route ID: this fixture's own route and its peer routes, each with
+        # the shared settings
+        peers = self._fixture.pop("peer_routes", {})
+        shared = {key: value for key, value in self._fixture.items() if key not in ROUTE_KEYS}
+        self._configs = {self._fixture["route_id"]: self._fixture,
+                         **{route_id: {**shared, **config, "route_id": route_id} for route_id, config in peers.items()}}
         self._previews: OrderedDict[str, tuple[RouteEditRequest, RouteEditPreview]] = OrderedDict()
         self._lock = RLock()
         # Routes with no operating network keep to their curated paths and curated metadata.
         network = self._fixture.get("network")
         self._network = OperatingNetwork(network) if network is not None else None
 
+    def route_config(self, route_id: str) -> dict | None:
+        """A route's own editor data (start, destination, stops and original roads, with the shared
+        settings), or None for a route the editor has none for. A detour has none of its own."""
+        return self._configs.get(route_id)
+
+    def base_route_id(self, snapshot: FullSnapshot, route_id: str | None) -> str | None:
+        """The route whose editor data a route is edited with: its own, or for an incident's detour the
+        route it was taken from, which is the one whose stops it keeps. None when there is none."""
+        if route_id in self._configs:
+            return route_id
+        if not route_id or not any(route_id == i.incident_id + "-detour" or route_id.startswith(i.incident_id + "-detour-")
+                                   for i in snapshot.incidents):
+            return None
+        route = next((r for r in snapshot.routes if r.route_id == route_id), None)
+        if route is None:
+            return None
+        stops = set(route.required_stop_ids)
+        return next((base for base, config in self._configs.items() if set(config["required_stops"]) == stops), None)
+
     def _curated_paths(self) -> list[list[str]]:
-        return [self._fixture["original_directed_edge_ids"], self._fixture["detour_directed_edge_ids"],
+        return [self._fixture["original_directed_edge_ids"], self._fixture.get("detour_directed_edge_ids", []),
                 *self._fixture.get("alternative_directed_edge_paths", [])]
 
     def _edges(self) -> dict[str, tuple[int, int, dict]]:
@@ -236,12 +267,21 @@ class RouteEditService:
         return route.directed_edge_ids[0]
 
     def for_route(self, snapshot: FullSnapshot, route_id: str) -> "RouteEditService":
-        """An incident's detour keeps the operating metadata of the route it replaced."""
-        detours = any(route_id == i.incident_id + "-detour" or route_id.startswith(i.incident_id + "-detour-")
-                      for i in snapshot.incidents)
-        if route_id == self._fixture["route_id"] or not detours:
+        """The service that edits a route, with its own operating metadata; an incident's detour keeps that
+        of the route it replaced. Itself for a route with none, whose previews it then refuses.
+
+        It shares this service's road network and its retained previews, so any of them approves a preview."""
+        base = self.base_route_id(snapshot, route_id)
+        if base is None:
             return self
-        return RouteEditService(self._graph_repository, fixture={**self._fixture, "route_id": route_id})
+        config = self._configs[base]
+        if base != route_id:
+            config = {**config, "route_id": route_id}
+        if config is self._fixture:
+            return self
+        service = copy(self)
+        service._fixture = config
+        return service
 
     def draft_preview(self, snapshot: FullSnapshot, request: RouteEditRequest) -> RouteEditPreview:
         """What an operator's draft does. A shuttle being decided for at an incident carries on from where it
@@ -492,7 +532,7 @@ class RouteEditService:
             draft = RouteEditRequest(route_id=command.target_id, expected_route_revision=command.expected_revision,
                                      draft_revision=payload["preview_revision"],
                                      directed_edge_ids=payload["directed_edge_ids"])
-            refreshed = self.preview(snapshot, draft, retain=False)
+            refreshed = self.for_route(snapshot, draft.route_id).preview(snapshot, draft, retain=False)
             if not refreshed.approvable or refreshed.directed_edge_ids != payload["directed_edge_ids"]:
                 raise TrainingStoreError("NO_FEASIBLE_ROUTE", "Route feasibility changed; request a new preview")
             targets = payload["target_vehicle_ids"]
@@ -572,7 +612,7 @@ class RouteEditService:
             raise TrainingStoreError("INVALID_TRANSITION", "Pre-trip approval requires a READY session")
         if snapshot.scene_revision != preview.scene_revision or {d.disruption_id: d.aggregate_revision for d in snapshot.disruptions} != preview.closure_revisions:
             raise TrainingStoreError("STALE_REVISION", "Scene or closure revision changed")
-        refreshed = self.preview(snapshot, draft, retain=False)
+        refreshed = self.for_route(snapshot, draft.route_id).preview(snapshot, draft, retain=False)
         if not refreshed.approvable or refreshed.directed_edge_ids != preview.directed_edge_ids:
             raise TrainingStoreError("STALE_REVISION", "Route feasibility changed; request a new preview")
         assigned = {v.vehicle_id for v in snapshot.vehicles if v.route_id == preview.route_id and v.route_revision == preview.route_revision}
