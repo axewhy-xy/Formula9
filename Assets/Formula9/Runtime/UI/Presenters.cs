@@ -544,9 +544,54 @@ namespace Formula9.UI
             var exposure = reach == null ? "No shuttle reaches it before it clears." : $"Shuttles reaching it: {reach}.";
             var owner = incident.VehicleId == null ? "It belongs to no shuttle. " : "";
             var ask = hasOptions
-                ? $"This incident requires operator review for {incident.VehicleId}. Select an option and preview its consequences before approval, or re-route the shuttle on the map."
-                : "No operator decision is required for this incident; no shuttle is being held for guidance. Shuttles that reach it are slowed by the congestion.";
-            return $"{name}{road} | {incident.State}\n{owner}{exposure}\n{ask}";
+                ? "Decide for each shuttle that will reach it: keep its route, re-route it on the map, hold it at a stop before it, or request assistance (once, for every shuttle). Preview an option's consequences before approval; deciding before the shuttle gets there scores best."
+                : "No operator decision is required for this incident now. Shuttles that reach it meet its queue.";
+            var decided = Responses(incident);
+            return $"{name}{road} | {incident.State}\n{owner}{exposure}\n{(decided == null ? "" : $"Decided: {decided}.\n")}{ask}";
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: ActionLabel
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function names an incident option or decision for people.
+        //
+        // Args:
+        //     action (string): The contract's action.
+        //
+        // Returns:
+        //     string: Its name.
+        public static string ActionLabel(string action)
+        {
+            switch (action)
+            {
+                case "KEEP_ROUTE": case "WAIT": return "Keep route";
+                case "ROAD_DETOUR": return "Road detour";
+                case "ESCALATE": return "Request assistance";
+                case "HOLD_AT_STOP": return "Hold at stop";
+                case "NO_DECISION": return "No decision";
+                default: return action;
+            }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: Responses
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function lists what was decided for each shuttle about an incident: "shuttle-03
+        //     request assistance, shuttle-01 no decision (late)".
+        //
+        // Args:
+        //     incident (Incident): The incident.
+        //
+        // Returns:
+        //     string: The list, or null when nothing has been decided.
+        public static string Responses(Incident incident)
+        {
+            var responses = incident?.Responses ?? new List<IncidentResponse>();
+            if (responses.Count == 0) return null;
+            return string.Join(", ", responses.Select(r =>
+                $"{r.VehicleId} {ActionLabel(r.Action).ToLowerInvariant()}{(r.BeforeArrival || r.Action == "NO_DECISION" ? "" : " (late)")}"));
         }
 
         // -----------------------------------------------------------------------------------

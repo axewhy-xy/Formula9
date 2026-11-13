@@ -436,6 +436,28 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
+        // Function: TheIncidentMonitorSaysWhatWasDecidedForEachShuttle
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Each shuttle's decision is listed, a late one marked, and the options are named
+        //     for people.
+        [Test]
+        public void TheIncidentMonitorSaysWhatWasDecidedForEachShuttle()
+        {
+            var snapshot = (FullSnapshot)ContractParser.ParseMessage(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/incident_decisions_snapshot.json")));
+            var incident = snapshot.Incidents.Single(i => i.IncidentId == "scheduled-collision-1");
+            Assert.AreEqual("shuttle-03 request assistance", TrainingPresenter.Responses(incident));
+            var summary = TrainingPresenter.IncidentSummary(incident, true);
+            StringAssert.Contains("Decided: shuttle-03 request assistance.", summary);
+            StringAssert.Contains("Decide for each shuttle that will reach it", summary);
+            incident.Responses.Add(new IncidentResponse { VehicleId = "shuttle-04", Action = "KEEP_ROUTE", DecidedTick = 230, BeforeArrival = false });
+            Assert.AreEqual("shuttle-03 request assistance, shuttle-04 keep route (late)", TrainingPresenter.Responses(incident));
+            Assert.IsNull(TrainingPresenter.Responses(new Incident { IncidentId = "none" }));
+            Assert.AreEqual("Hold at stop", TrainingPresenter.ActionLabel("HOLD_AT_STOP"));
+            Assert.AreEqual("Keep route", TrainingPresenter.ActionLabel("WAIT"));
+        }
+
+        // -----------------------------------------------------------------------------------
         // Function: OnlyAnIncidentAShuttleWillReachIsAnnounced
         // -----------------------------------------------------------------------------------
         // Description:

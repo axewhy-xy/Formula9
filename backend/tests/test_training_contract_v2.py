@@ -119,6 +119,8 @@ def test_stale_target_revision_and_expired_option_fail_with_codes():
     ("vehicle", "CHARGING", "STANDBY", True),
     ("incident", "OPTIONS_READY", "ACTION_COMMITTED", True),
     ("incident", "RESOLVED", "OPTIONS_READY", False),
+    ("incident", "WAITING", "OPTIONS_READY", True),
+    ("incident", "ESCALATED", "DETECTED", False),
 ])
 def test_transition_table(machine, before, after, allowed):
     assert transition_allowed(machine, before, after) is allowed

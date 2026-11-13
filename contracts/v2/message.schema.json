@@ -5,9 +5,11 @@
       "properties": {
         "action": {
           "enum": [
-            "WAIT",
+            "KEEP_ROUTE",
             "ESCALATE",
             "ROAD_DETOUR",
+            "HOLD_AT_STOP",
+            "WAIT",
             "RETURN_TO_DEPOT",
             "CHARGE"
           ],
@@ -1388,6 +1390,19 @@
           "title": "Candidate Ids",
           "type": "array"
         },
+        "clears_at_tick": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Clears At Tick"
+        },
         "detected_tick": {
           "minimum": 0,
           "title": "Detected Tick",
@@ -1448,6 +1463,13 @@
         },
         "provenance": {
           "$ref": "#/$defs/Provenance"
+        },
+        "responses": {
+          "items": {
+            "$ref": "#/$defs/IncidentResponse"
+          },
+          "title": "Responses",
+          "type": "array"
         },
         "state": {
           "enum": [
@@ -1510,6 +1532,19 @@
           "default": true,
           "title": "Is Estimate",
           "type": "boolean"
+        },
+        "keep_route_delay_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keep Route Delay S"
         },
         "vehicle_id": {
           "maxLength": 128,
@@ -1577,6 +1612,76 @@
         }
       },
       "title": "IncidentLocation",
+      "type": "object"
+    },
+    "IncidentResponse": {
+      "additionalProperties": true,
+      "description": "What the operator decided for one exposed shuttle, or that it reached the incident undecided.\n\nNO_DECISION is recorded when a shuttle drives into the incident's footprint, or is still held at it\nwhen it clears, without a decision; it is scored as an unresolved incident is.",
+      "properties": {
+        "action": {
+          "enum": [
+            "KEEP_ROUTE",
+            "ROAD_DETOUR",
+            "ESCALATE",
+            "HOLD_AT_STOP",
+            "WAIT",
+            "NO_DECISION"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "before_arrival": {
+          "title": "Before Arrival",
+          "type": "boolean"
+        },
+        "completed_tick": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed Tick"
+        },
+        "decided_tick": {
+          "minimum": 0,
+          "title": "Decided Tick",
+          "type": "integer"
+        },
+        "hold_stop_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hold Stop Id"
+        },
+        "vehicle_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Vehicle Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "vehicle_id",
+        "action",
+        "decided_tick",
+        "before_arrival"
+      ],
+      "title": "IncidentResponse",
       "type": "object"
     },
     "Position": {

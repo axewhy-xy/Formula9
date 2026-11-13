@@ -63,6 +63,7 @@ namespace Formula9.Tests
         [TestCase("snapshot", "FULL_SNAPSHOT")]
         [TestCase("low_reserve_snapshot", "FULL_SNAPSHOT")]
         [TestCase("world_event_snapshot", "FULL_SNAPSHOT")]
+        [TestCase("incident_decisions_snapshot", "FULL_SNAPSHOT")]
         [TestCase("spatial_snapshot", "FULL_SNAPSHOT")]
         [TestCase("event_replay", "EVENT_REPLAY")]
         [TestCase("command_status", "COMMAND_STATUS")]
@@ -103,6 +104,38 @@ namespace Formula9.Tests
             Assert.AreEqual(2, vehicle.RouteRevision);
             Assert.AreEqual("TRAINING_SIMULATION", vehicle.Provenance.Kind);
             Assert.IsNotNull(snapshot.ChargeOptions, "absent optional lists read as empty");
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: EachShuttleHasItsOwnOptionsAndAtMostOneResponse
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     An incident offers options per exposed shuttle and records one response per shuttle,
+        //     each naming a shuttle of the snapshot, as models.py requires.
+        [Test]
+        public void EachShuttleHasItsOwnOptionsAndAtMostOneResponse()
+        {
+            var snapshot = (FullSnapshot)ContractParser.ParseMessage(Fixture("incident_decisions_snapshot"));
+            var incident = snapshot.Incidents.Single(i => i.IncidentId == "scheduled-collision-1");
+            Assert.AreEqual("OPTIONS_READY", incident.State);
+            Assert.AreEqual(290, incident.ClearsAtTick);
+            Assert.AreEqual("ESCALATE", incident.ResponseOf("shuttle-03").Action);
+            Assert.IsTrue(incident.ResponseOf("shuttle-03").BeforeArrival);
+            Assert.IsNull(incident.ResponseOf("shuttle-04"));
+            Assert.AreEqual(40.0, incident.ExposureOf("shuttle-03").KeepRouteDelayS);
+            CollectionAssert.AreEquivalent(new[] { "KEEP_ROUTE", "HOLD_AT_STOP" },
+                snapshot.Candidates.Where(c => c.IncidentId == incident.IncidentId).Select(c => c.Action));
+            Assert.IsTrue(snapshot.Candidates.Where(c => c.IncidentId == incident.IncidentId).All(c => c.VehicleId == "shuttle-04"));
+
+            var twice = FixtureObject("incident_decisions_snapshot");
+            ((JArray)twice["incidents"].Last["responses"]).Add(twice["incidents"].Last["responses"][0].DeepClone());
+            StringAssert.Contains("an incident has at most one response per vehicle",
+                Assert.Throws<ContractException>(() => ContractParser.ParseMessage(twice.ToString())).Message);
+
+            var stranger = FixtureObject("incident_decisions_snapshot");
+            stranger["incidents"].Last["responses"][0]["vehicle_id"] = "shuttle-09";
+            StringAssert.Contains("missing incident reference",
+                Assert.Throws<ContractException>(() => ContractParser.ParseMessage(stranger.ToString())).Message);
         }
 
         // -----------------------------------------------------------------------------------

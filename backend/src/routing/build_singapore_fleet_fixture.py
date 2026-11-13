@@ -524,7 +524,7 @@ def build(osm: dict, base: dict, area: dict) -> dict:
     data["assumptions"][0] = (f"Real {area['name']} road geometry and LTA bus stop positions from OpenStreetMap, simplified "
                               "to at most 64 waypoints a loop; energy-r1 estimates. Lanes, signals and traffic are not modelled.")
     data["assumptions"][1] = ("Shuttle-01 dwells at its loop entrance junction for 12 seconds; an obstruction on the first "
-                              "segment of its main road then admits WAIT, ESCALATE, or either real street around it.")
+                              "segment of its main road then admits KEEP_ROUTE, ESCALATE, HOLD_AT_STOP or either real street around it.")
     return data
 
 

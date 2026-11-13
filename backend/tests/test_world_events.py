@@ -163,9 +163,13 @@ def test_a_scheduled_collision_belongs_to_no_shuttle_and_names_who_reaches_it(ru
     edge = scheduled(runtime, monkeypatch, "COLLISION")
     snapshot = read(runtime)
     incident = next(i for i in snapshot["incidents"] if i["incident_id"] == "scheduled-e1")
-    assert incident["vehicle_id"] is None and incident["state"] == "DETECTED"
+    # It belongs to no shuttle, but every shuttle that will reach it is offered its own options
+    assert incident["vehicle_id"] is None and incident["state"] == "OPTIONS_READY"
     assert incident["event_type"] == "COLLISION" and incident["location"]["edge_id"] == edge
     assert "shuttle-01" in incident["exposed_vehicle_ids"]
+    offered = {c["vehicle_id"] for c in snapshot["candidates"] if c["incident_id"] == "scheduled-e1"}
+    assert offered == set(incident["exposed_vehicle_ids"])
+    assert all(e["keep_route_delay_s"] is not None for e in incident["exposures"])
     assert [e["vehicle_id"] for e in incident["exposures"]] == incident["exposed_vehicle_ids"]
     event = next(e for e in store.entity_events(session_id, "scheduled-e1", snapshot["event_sequence"])
                  if e.event_type == "INCIDENT_DETECTED")
@@ -191,6 +195,9 @@ def test_a_scheduled_collision_belongs_to_no_shuttle_and_names_who_reaches_it(ru
     changed = [e for e in store.entity_events(session_id, "scheduled-e1", snapshot["event_sequence"])
                if e.event_type == "INCIDENT_EXPOSURE_CHANGED"]
     assert changed and "shuttle-01" in changed[-1].data["removed_vehicle_ids"]
+    # Nobody is left to decide for: their options are withdrawn
+    assert cleared["state"] == "DETECTED" and cleared["candidate_ids"] == []
+    assert not [c for c in snapshot["candidates"] if c["incident_id"] == "scheduled-e1"]
 
 
 def test_a_scheduled_closure_ahead_of_an_editable_route_asks_that_shuttle(runtime, monkeypatch):
@@ -268,5 +275,28 @@ def test_the_world_event_fixture_has_an_incident_that_names_no_shuttle():
 def test_world_event_fields_are_validated(change):
     value = snapshot_fixture()
     change(value)
+    with pytest.raises(ValidationError):
+        parse_message(value)
+
+
+def test_the_decisions_fixture_has_one_shuttle_decided_for_and_one_with_its_own_options():
+    message = parse_message(snapshot_fixture("incident_decisions_snapshot"))
+    incident = next(i for i in message.incidents if i.incident_id == "scheduled-collision-1")
+    assert incident.state == "OPTIONS_READY" and incident.clears_at_tick == 290
+    assert [(r.vehicle_id, r.action, r.before_arrival) for r in incident.responses] == [("shuttle-03", "ESCALATE", True)]
+    assert incident.exposures[0].keep_route_delay_s == 40.0
+    options = [c for c in message.candidates if c.incident_id == incident.incident_id]
+    assert {(c.vehicle_id, c.action) for c in options} == {("shuttle-04", "KEEP_ROUTE"), ("shuttle-04", "HOLD_AT_STOP")}
+
+
+@pytest.mark.parametrize("change", [
+    lambda i: i["responses"].append(dict(i["responses"][0])),
+    lambda i: i["responses"][0].update(vehicle_id="shuttle-09"),
+    lambda i: i["responses"][0].update(action="SHRUG"),
+    lambda i: i["exposures"][0].update(keep_route_delay_s=-1.0),
+])
+def test_responses_are_validated(change):
+    value = snapshot_fixture("incident_decisions_snapshot")
+    change(value["incidents"][-1])
     with pytest.raises(ValidationError):
         parse_message(value)

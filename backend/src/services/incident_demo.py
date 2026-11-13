@@ -1,7 +1,7 @@
 """Headless incident integration example; this is not the fleet driving actor.
 
 Run from the repo root with PYTHONPATH=backend;. and an explicit database path:
-python -m src.services.incident_demo --database build/incident-demo.sqlite --action WAIT
+python -m src.services.incident_demo --database build/incident-demo.sqlite --action KEEP_ROUTE
 """
 
 import argparse
@@ -60,7 +60,7 @@ def initial_snapshot(service: IncidentService, session_id: str, *, tick: int = 0
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database", type=Path, required=True)
-    parser.add_argument("--action", choices=["WAIT", "ESCALATE", "ROAD_DETOUR"], default="WAIT")
+    parser.add_argument("--action", choices=["KEEP_ROUTE", "ESCALATE", "ROAD_DETOUR"], default="KEEP_ROUTE")
     arguments = parser.parse_args()
     service = get_incident_service()
     session_id = "incident-demo-" + str(uuid4())

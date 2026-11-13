@@ -17,7 +17,7 @@ from uuid import uuid4
 
 import networkx as nx
 
-from contracts.v2.models import DispatcherCommand, Event, FullSnapshot
+from contracts.v2.models import DispatcherCommand, Disruption, Event, FullSnapshot
 from contracts.v2.route_edit import (
     RouteApprovalRequest, RouteCheck, RouteEditPreview, RouteEditRequest, RouteMetrics, RouteEditorContext,
     RouteServiceImpact,
@@ -34,6 +34,40 @@ FIXTURE_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "m2_route_deto
 
 def edge_id(key: tuple[int | str, int, str]) -> str:
     return f"{key[0]}:{key[1]}:{key[2]}"
+
+
+# World events a detour is taken round by keeping off their scene's road; a closure's road is closed already
+SCENE_EVENTS = ("BREAKDOWN", "COLLISION")
+
+
+def detour_target(snapshot: FullSnapshot, riders: set[str]):
+    """The incident and shuttle a detour drafted for a route answers: the latest incident still to be
+    decided for that offers one of the route's shuttles a road detour. (None, None) when there is none."""
+    for incident in sorted(snapshot.incidents, key=lambda i: i.detected_tick, reverse=True):
+        if incident.state != "OPTIONS_READY":
+            continue
+        for candidate in snapshot.candidates:
+            vehicle_id = candidate.vehicle_id or incident.vehicle_id
+            if candidate.incident_id == incident.incident_id and candidate.action == "ROAD_DETOUR" and vehicle_id in riders:
+                return incident, vehicle_id
+    return None, None
+
+
+def scene_closed(snapshot: FullSnapshot, incident, driven) -> FullSnapshot:
+    """The snapshot a detour round a breakdown or a collision is planned and checked in: its scene's road
+    closed for the moment, as a closure's already is, unless the shuttle has already driven onto it."""
+    location = getattr(incident, "location", None)
+    edge = location.edge_id if location is not None and incident.event_type in SCENE_EVENTS else None
+    closed = {e for d in snapshot.disruptions if d.active_from_tick <= snapshot.tick
+              and (d.active_until_tick is None or snapshot.tick < d.active_until_tick) for e in d.affected_edge_ids}
+    if edge is None or edge in closed or edge in set(driven):
+        return snapshot
+    hypothetical = snapshot.model_copy(deep=True)
+    hypothetical.disruptions.append(Disruption(
+        disruption_id=f"{incident.incident_id}-scene", aggregate_revision=1, affected_edge_ids=[edge],
+        active_from_tick=snapshot.tick, active_until_tick=snapshot.tick + 1,
+        reason="Plan a detour round the incident's scene", provenance=snapshot.source))
+    return hypothetical
 
 
 def stop_label(stop_id: str) -> str:
@@ -203,18 +237,24 @@ class RouteEditService:
 
     def for_route(self, snapshot: FullSnapshot, route_id: str) -> "RouteEditService":
         """An incident's detour keeps the operating metadata of the route it replaced."""
-        if route_id == self._fixture["route_id"] or route_id not in {i.incident_id + "-detour" for i in snapshot.incidents}:
+        detours = any(route_id == i.incident_id + "-detour" or route_id.startswith(i.incident_id + "-detour-")
+                      for i in snapshot.incidents)
+        if route_id == self._fixture["route_id"] or not detours:
             return self
         return RouteEditService(self._graph_repository, fixture={**self._fixture, "route_id": route_id})
 
     def draft_preview(self, snapshot: FullSnapshot, request: RouteEditRequest) -> RouteEditPreview:
-        """What an operator's draft does. A shuttle held at an incident carries on from where it stands."""
+        """What an operator's draft does. A shuttle being decided for at an incident carries on from where it
+        stands, round the incident's scene."""
         riders = {v.vehicle_id for v in snapshot.vehicles if v.route_id == request.route_id}
-        held = next((i for i in snapshot.incidents if i.state == "OPTIONS_READY" and i.vehicle_id in riders), None)
-        if held is None or self._network is None:
+        incident, vehicle_id = detour_target(snapshot, riders)
+        if incident is None or self._network is None:
             return self.preview(snapshot, request)
         self._check_waypoints(request)
-        return self.continuation_preview(snapshot, held.vehicle_id, request)
+        vehicle = next(v for v in snapshot.vehicles if v.vehicle_id == vehicle_id)
+        route = next(r for r in snapshot.routes if r.route_id == vehicle.route_id)
+        planning = scene_closed(snapshot, incident, self._driven_prefix(vehicle, route))
+        return self.continuation_preview(planning, vehicle_id, request)
 
     def _driven_prefix(self, vehicle, route) -> list[str]:
         """The roads of a route already driven, through the one the shuttle is on; empty when it is off the route."""

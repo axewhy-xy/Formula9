@@ -151,16 +151,20 @@ def event_type(record: dict) -> str:
     return event.get("event_type") or ("ROAD_CLOSURE" if record.get("kind") == BLOCK else "COLLISION")
 
 
-def event_window(record: dict, disruptions) -> tuple[int, int]:
+def event_window(record: dict, disruptions, incidents=()) -> tuple[int, int]:
     """The ticks a world event is on the road: from when it starts, which may be before it is detected,
     until it clears. A closure clears when its disruption ends, which an escalation may have brought
-    forward; anything else when its record says."""
+    forward; anything else when its record says, or sooner when an escalation brought its incident's
+    clears_at_tick forward (incidents, the snapshot's)."""
     trigger = record.get("trigger_tick", NEVER)
     start = min((record.get("event") or {}).get("start_tick", trigger), trigger)
     until = trigger + record.get("clear_after_ticks", 0)
     closure = next((d for d in disruptions if d.disruption_id == record.get("disruption_id")), None)
     if closure is not None and closure.active_until_tick is not None:
         until = closure.active_until_tick
+    incident = next((i for i in incidents if i.incident_id == record.get("incident_id")), None)
+    if incident is not None and incident.clears_at_tick is not None:
+        until = min(until, incident.clears_at_tick)
     return start, until
 
 
@@ -179,7 +183,7 @@ def live_hazards(records: list[dict], snapshot, edges: dict[str, dict], tick: in
     its own behind the scene."""
     found = []
     for record in records:
-        start, until = event_window(record, snapshot.disruptions)
+        start, until = event_window(record, snapshot.disruptions, getattr(snapshot, "incidents", ()))
         kind = record.get("kind")
         if not start <= tick < until or kind not in (BLOCK, ACCIDENT) or event_type(record) == "BREAKDOWN":
             continue

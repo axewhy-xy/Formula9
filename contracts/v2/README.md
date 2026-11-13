@@ -156,6 +156,25 @@ timeline schedules, and the curated scenario's timeline is empty.
 `Candidate.vehicle_id` names the shuttle an option is for. All the new fields
 are optional, so older 2.x snapshots still parse.
 
+## Decisions per exposed shuttle (2.x)
+
+Every shuttle an incident exposes is offered its own candidates, each with its
+`vehicle_id`: `KEEP_ROUTE` (drive on; `WAIT` is its name in older journals),
+`ROAD_DETOUR`, `ESCALATE` (once per incident) and `HOLD_AT_STOP`. A decision is
+recorded in `Incident.responses` as an `IncidentResponse`: the shuttle, its
+`action`, `decided_tick`, whether it came `before_arrival` (before the shuttle
+entered the footprint), when what it set going ended (`completed_tick`) and, for
+a hold, the stop (`hold_stop_id`). A shuttle that drives into the incident with no
+decision gets the action `NO_DECISION`; a later decision replaces it. An incident
+has at most one response per shuttle, and each must name a shuttle of the
+snapshot. `Incident.clears_at_tick` is when the event is expected to clear; an
+`ESCALATE` brings it forward. `IncidentExposure.keep_route_delay_s` estimates how
+long keeping its route would hold the shuttle up. Each decision's
+`INCIDENT_DECISION_RECORDED` event carries the shuttle's own assessment, with
+`delay_avoided` in place of `route_efficiency`. Every field is optional, so older
+2.x snapshots still parse; `incident_decisions_snapshot.json` is the golden
+fixture.
+
 ## Battery and charging (optional 2.x additions)
 
 `FullSnapshot.depots`, `energy_forecasts` and `charge_options` are optional and default to empty lists, so older 2.x snapshots still parse and the contract stays at version 2. The values are computed by the backend energy model (`backend/src/energy`); clients display them and never recompute energy. Every forecast and option has `is_estimate: true`.
@@ -210,14 +229,20 @@ The transition tables in `models.py` are the executable source for Python. Other
 | Vehicle | QUEUED_FOR_CHARGE | CHARGING, STANDBY, OUT_OF_SERVICE |
 | Vehicle | CHARGING | RETURNING_TO_DEPOT (move to depot parking), STANDBY, OUT_OF_SERVICE |
 | Vehicle | OUT_OF_SERVICE | STANDBY |
-| Incident | DETECTED | AWAITING_REVIEW |
+| Incident | DETECTED | AWAITING_REVIEW, OPTIONS_READY, RESOLVED |
 | Incident | AWAITING_REVIEW | OPTIONS_READY, ESCALATED, UNRESOLVED |
-| Incident | OPTIONS_READY | ACTION_COMMITTED, WAITING, ESCALATED, UNRESOLVED |
+| Incident | OPTIONS_READY | ACTION_COMMITTED, WAITING, ESCALATED, EXECUTING, DETECTED, RESOLVED, UNRESOLVED |
 | Incident | ACTION_COMMITTED | EXECUTING, AWAITING_REVIEW |
-| Incident | EXECUTING | RESOLVED, AWAITING_REVIEW, ESCALATED |
-| Incident | WAITING | AWAITING_REVIEW, RESOLVED, UNRESOLVED |
-| Incident | ESCALATED | RESOLVED, UNRESOLVED |
+| Incident | EXECUTING | RESOLVED, UNRESOLVED, AWAITING_REVIEW, OPTIONS_READY, ESCALATED, WAITING |
+| Incident | WAITING | AWAITING_REVIEW, OPTIONS_READY, EXECUTING, ESCALATED, RESOLVED, UNRESOLVED |
+| Incident | ESCALATED | OPTIONS_READY, EXECUTING, RESOLVED, UNRESOLVED |
 | Incident | RESOLVED, UNRESOLVED | none |
+
+An incident's state sums up its shuttles' responses: `OPTIONS_READY` while one
+is still to be decided for (and again when another becomes exposed), then
+`EXECUTING` while a detour round it is driven, `ESCALATED` once assistance is
+requested, `WAITING` while every decided shuttle keeps its route or holds, and
+`DETECTED` when nobody has had to decide. It settles when the event clears.
 
 Transitions also require domain guards, such as route feasibility, available energy, and charger reservation. The table alone never approves a command.
 

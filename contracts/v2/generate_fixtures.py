@@ -149,6 +149,27 @@ world_event["incidents"].append({
 parse_message(world_event)
 save("world_event_snapshot.json", world_event)
 
+# Decisions per exposed shuttle: shuttle-03 was escalated for before it got there, so assistance shortened
+# the collision; shuttle-04 has still to be decided for, and may keep its route or hold at its next stop.
+decisions = copy.deepcopy(world_event)
+decisions["snapshot_id"] = "snapshot-200-incident-decisions"
+collision = decisions["incidents"][-1]
+collision.update(aggregate_revision=3, state="OPTIONS_READY", clears_at_tick=290,
+                 candidate_ids=["scheduled-collision-1-r3-shuttle-04-keep_route",
+                                "scheduled-collision-1-r3-shuttle-04-hold_at_stop"],
+                 responses=[{"vehicle_id": "shuttle-03", "action": "ESCALATE", "decided_tick": 195,
+                             "before_arrival": True, "completed_tick": None}])
+collision["exposures"][0]["keep_route_delay_s"] = 40.0
+collision["exposures"][1]["keep_route_delay_s"] = 25.0
+for action in ("keep_route", "hold_at_stop"):
+    decisions["candidates"].append({
+        "candidate_id": f"scheduled-collision-1-r3-shuttle-04-{action}", "incident_id": "scheduled-collision-1",
+        "revision": 1, "action": action.upper(), "validation": "PASS", "expires_at_tick": 1400,
+        "dependency_revisions": {"scheduled-collision-1": 3}, "vehicle_id": "shuttle-04",
+        "assumptions": ["Delay is estimated from the queue length and the speed in the queue."]})
+parse_message(decisions)
+save("incident_decisions_snapshot.json", decisions)
+
 event = {"event_id": "event-7", "event_sequence": 7, "tick": 200,
          "entity_type": "INCIDENT", "entity_id": "incident-1", "entity_revision": 2,
          "event_type": "OPTIONS_READY", "source": simulation,

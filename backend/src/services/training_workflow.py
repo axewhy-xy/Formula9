@@ -43,8 +43,10 @@ def session_incidents(actor, incident_id=None):
 def _settled(item, snapshot):
     """A settled incident with an expired closure has no remaining state transitions."""
     incident = next((i for i in snapshot.incidents if i.incident_id == item["incident_id"]), None)
-    if incident is None or not (incident.state == "RESOLVED" or
-            (incident.state == "UNRESOLVED" and item.get("requires_guidance", True))):
+    # An informational incident from before per-shuttle decisions was UNRESOLVED while it lasted, and still
+    # resolves once when it clears (IncidentService._upgrade_legacy)
+    if incident is None or not (incident.state == "RESOLVED" or (incident.state == "UNRESOLVED" and (
+            item.get("requires_guidance", True) or incident.responses))):
         return False
     disruption = next((d for d in snapshot.disruptions
                        if d.disruption_id == item.get("disruption_id")), None)

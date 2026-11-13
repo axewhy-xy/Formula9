@@ -13,7 +13,7 @@ from src.services.integrated_actor import IntegratedSessionActor, get_workflow_d
 from src.services.training_sessions import TrainingSessionService
 
 
-@pytest.mark.parametrize("action", ["WAIT", "ESCALATE", "ROAD_DETOUR"])
+@pytest.mark.parametrize("action", ["KEEP_ROUTE", "ESCALATE", "ROAD_DETOUR"])
 def test_random_incident_preview_and_approval_share_the_checkpointed_instance(runtime, action):
     client, store, service, session_id = runtime
     approve(runtime)
@@ -338,7 +338,7 @@ def test_settled_incidents_leave_the_checkpoint_but_keep_their_evidence(runtime)
     advance(runtime, 240)
     before = read(runtime)
     incident = before["incidents"][0]
-    candidate = next(c for c in before["candidates"] if c["action"] == "WAIT")
+    candidate = next(c for c in before["candidates"] if c["action"] == "KEEP_ROUTE")
     command = dict(contract_version="2.0", command_id=uuid4().hex, idempotency_key=uuid4().hex,
                    session_id=session_id, command_type="APPROVE_INCIDENT_OPTION",
                    expected_epoch=before["session_epoch"], expected_revision=incident["aggregate_revision"],

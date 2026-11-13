@@ -83,6 +83,34 @@ namespace Formula9.Tests
         }
 
         [Test]
+        public void AnExposedShuttlesOwnDetourOptionOpensItsRouteForEditing()
+        {
+            var s = Snapshot(); s.Session.Status = "RUNNING"; s.Candidates.Clear(); s.Incidents.Clear();
+            var exposed = s.Vehicles[2];
+            s.Incidents.Add(new Incident { IncidentId = "collision", VehicleId = null, State = "OPTIONS_READY", AggregateRevision = 2,
+                CandidateIds = new List<string> { "keep", "detour" } });
+            s.Candidates.Add(new Candidate { CandidateId = "keep", IncidentId = "collision", Action = "KEEP_ROUTE", Validation = "PASS", ExpiresAtTick = s.Tick + 10, VehicleId = s.Vehicles[0].VehicleId });
+            s.Candidates.Add(new Candidate { CandidateId = "detour", IncidentId = "collision", Action = "ROAD_DETOUR", Validation = "PASS", ExpiresAtTick = s.Tick + 10, VehicleId = exposed.VehicleId });
+            Assert.AreEqual("collision", DecisionRules.HeldIncident(s).IncidentId);
+            Assert.AreEqual(exposed.VehicleId, DecisionRules.DetourVehicle(s));
+            Assert.AreEqual(exposed.RouteId, DecisionRules.ReroutableRoute(s));
+            Assert.AreEqual("detour", DecisionRules.DetourCandidate(s).CandidateId);
+        }
+
+        [Test]
+        public void EachShuttlesDetourLeavesTheRouteListOnceNobodyDrivesIt()
+        {
+            var s = Snapshot();
+            s.Incidents.Clear();
+            s.Incidents.Add(new Incident { IncidentId = "closure" });
+            s.Routes[0].RouteId = "closure-detour-shuttle-01";
+            s.Vehicles[0].RouteId = "closure-detour-shuttle-01";
+            Assert.Contains("closure-detour-shuttle-01", DecisionRules.SelectableRoutes(s).ToList());
+            foreach (var vehicle in s.Vehicles) vehicle.RouteId = "elsewhere";
+            CollectionAssert.DoesNotContain(DecisionRules.SelectableRoutes(s).ToList(), "closure-detour-shuttle-01");
+        }
+
+        [Test]
         public void AReplacedDetourLeavesTheRouteList()
         {
             var s = Snapshot();

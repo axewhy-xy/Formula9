@@ -205,6 +205,9 @@ namespace Formula9.Contracts
                 if (!exposed.SequenceEqual(i.ExposedVehicleIds ?? new List<string>()))
                     problems.Add("incident exposures must list exactly its exposed vehicles, in order");
                 if (Duplicates(exposed)) problems.Add("duplicate exposed vehicle");
+                // Incident.exposures_match: at most one response per shuttle
+                if (Duplicates((i.Responses ?? new List<IncidentResponse>()).Select(r => r.VehicleId)))
+                    problems.Add("an incident has at most one response per vehicle");
                 if (i.Location != null && (i.Location.EdgeId == null) == (i.Location.NodeId == null))
                     problems.Add("an incident location is exactly one edge or one junction");
             }
@@ -270,7 +273,8 @@ namespace Formula9.Contracts
             }
             // A world event may belong to no shuttle; any shuttle it names or exposes must exist
             if (s.Incidents.Any(i => (i.VehicleId != null && !vehicles.Contains(i.VehicleId)) || i.CandidateIds.Any(id => !candidates.Contains(id))
-                                     || (i.ExposedVehicleIds ?? new List<string>()).Any(id => !vehicles.Contains(id)))) { Fail("missing incident reference"); return; }
+                                     || (i.ExposedVehicleIds ?? new List<string>()).Any(id => !vehicles.Contains(id))
+                                     || (i.Responses ?? new List<IncidentResponse>()).Any(r => !vehicles.Contains(r.VehicleId)))) { Fail("missing incident reference"); return; }
             if (s.Candidates.Any(c => !incidents.Contains(c.IncidentId) || (c.VehicleId != null && !vehicles.Contains(c.VehicleId)))) { Fail("missing candidate incident reference"); return; }
             if (s.Chargers.Any(c => c.OccupiedVehicleIds.Count > c.PortCount || c.OccupiedVehicleIds.Any(id => !vehicles.Contains(id))))
             { Fail("invalid charger occupancy"); return; }
@@ -363,5 +367,13 @@ namespace Formula9.Contracts
 
         // The shuttle to show for the incident: the one it names, else the first to reach it.
         public string FocusVehicleId => VehicleId ?? ExposedVehicleIds?.FirstOrDefault();
+
+        // What was decided for this shuttle (NO_DECISION when it reached the incident undecided), or null.
+        public IncidentResponse ResponseOf(string vehicleId) => Responses?.FirstOrDefault(r => r.VehicleId == vehicleId);
+
+        // Whether this shuttle's route is a detour round the incident: its own, or the one detour of a
+        // snapshot from before each shuttle had its own.
+        public bool IsDetour(string routeId) =>
+            routeId != null && (routeId == IncidentId + "-detour" || routeId.StartsWith(IncidentId + "-detour-", System.StringComparison.Ordinal));
     }
 }

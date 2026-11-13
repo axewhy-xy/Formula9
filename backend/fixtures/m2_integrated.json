@@ -1494,7 +1494,7 @@
   },
   "assumptions": [
     "Real Toa Payoh road geometry and LTA bus stop positions from OpenStreetMap, simplified to at most 64 waypoints a loop; energy-r1 estimates. Shuttles keep to the kerb lane among a sample of background traffic and stop at simulated traffic lights with made-up timings.",
-    "Shuttle-01 dwells at its loop entrance junction for 12 seconds; an obstruction on the first segment of its main road then admits WAIT, ESCALATE, or either real street around it.",
+    "Shuttle-01 dwells at its loop entrance junction for 12 seconds; an obstruction on the first segment of its main road then admits KEEP_ROUTE, ESCALATE, HOLD_AT_STOP or either real street around it.",
     "Depot return follows the remainder of the current loop plus declared access geometry to the reserved bay; charging lasts 60 simulated seconds and ends in standby.",
     "Point-centre separation and swept polyline checks inherit the bounded BE-M2-02 controller; this is not a general vehicle-body collision model.",
     "Return ETA uses admitted remaining path length and the declared cruise speed. Before allocation it conservatively uses the longer bay approach. Dwell, traffic holds and incident delays are excluded from ETA; actual arrival time and energy are recorded separately."

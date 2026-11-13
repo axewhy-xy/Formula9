@@ -255,8 +255,9 @@ namespace Formula9.World
         private static Disruption Closure(IncidentRecord record, FullSnapshot snapshot, Incident incident) =>
             snapshot.Disruptions.FirstOrDefault(d => d.AffectedEdgeIds.Contains(record.EdgeId) && d.ActiveFromTick >= incident.DetectedTick);
 
+        // When it clears: an escalation brings the incident's clears_at_tick (and a closure's end) forward
         private static long? ClearsAt(IncidentRecord record, FullSnapshot snapshot, Incident incident) =>
-            Closure(record, snapshot, incident)?.ActiveUntilTick ?? record.ActiveUntilTick;
+            Closure(record, snapshot, incident)?.ActiveUntilTick ?? incident.ClearsAtTick ?? record.ActiveUntilTick;
 
         public static float SecondsPerTick(FullSnapshot snapshot) => snapshot.Tick > 0 ? (float)(snapshot.SimulationTimeS / snapshot.Tick) : 0.05f;
 
@@ -285,7 +286,8 @@ namespace Formula9.World
             var road = string.IsNullOrEmpty(roadName) ? "" : " · " + roadName;
             var incident = snapshot.Incidents.First(i => i.IncidentId == record.IncidentId);
             // The event's words were true when it was detected; a decision has been made since
-            var impact = record.RequiresGuidance && incident.State != "OPTIONS_READY" ? "Road closed — operator has decided" : record.Impact;
+            var impact = record.RequiresGuidance && incident.State != "OPTIONS_READY" ? "Road closed — operator has decided"
+                : incident.Responses?.Count > 0 && incident.State != "OPTIONS_READY" ? "Every shuttle reaching it has been decided for" : record.Impact;
             var clears = ClearsAt(record, snapshot, incident) is long until ? $" · clears in {Mathf.CeilToInt(Mathf.Max(0, until - snapshot.Tick) * SecondsPerTick(snapshot))} s" : "";
             var slowed = snapshot.Vehicles.FirstOrDefault(v => IsSlowing(plan, v, snapshot));
             var crawl = slowed == null ? "" : $" · {slowed.VehicleId} slowed to {slowed.SpeedMps:0.#} m/s";

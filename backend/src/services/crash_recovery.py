@@ -178,7 +178,7 @@ def prepare(output, phases):
                 client.portal.call(advance_until, lambda s: bool(s["incidents"]))
                 current = snapshot()
                 incident = current["incidents"][0]
-                candidate = next(c for c in current["candidates"] if c["action"] == "WAIT")
+                candidate = next(c for c in current["candidates"] if c["action"] == "KEEP_ROUTE" and c["incident_id"] == incident["incident_id"])
                 wait = command(current, "APPROVE_INCIDENT_OPTION")
                 wait.update(target_type="INCIDENT", target_id=incident["incident_id"],
                     expected_revision=incident["aggregate_revision"], payload={"candidate_id": candidate["candidate_id"]})

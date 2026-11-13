@@ -416,7 +416,7 @@ def run(output: Path, *, ticks=None, validation_samples=None, reconnect_samples=
                     current = store.snapshot(session_id)
                     incident = current.incidents[0]
                     # WAIT would hold for the first random closure's full 300 s.
-                    option = next(c for c in current.candidates if c.action == "ESCALATE")
+                    option = next(c for c in current.candidates if c.action == "ESCALATE" and c.incident_id == incident.incident_id)
                     decision = command(current, "APPROVE_INCIDENT_OPTION", target_type="INCIDENT",
                         target_id=incident.incident_id, revision=incident.aggregate_revision,
                         payload={"candidate_id": option.candidate_id})
