@@ -54,6 +54,24 @@ graph_loader.configure_network_settings()
 def pytest_configure(config):
     config.addinivalue_line("markers", "real_charge_rate: use the scenario's charge-to-full timing")
     config.addinivalue_line("markers", "traffic: integrated sessions drive their shuttles through the background traffic")
+    config.addinivalue_line("markers", "random_opening: integrated sessions open without the scripted tutorial road block")
+
+
+@pytest.fixture(autouse=True)
+def tutorial_opening(request):
+    """New integrated sessions no longer open with a scripted road block on Shuttle 01's next road; it is a
+    tutorial setting of the scenario (predefined_scenarios.json, tutorial_opening). The incident tests were
+    written against that opener, a guidance incident 10-11 s in, so they keep it on until the incident
+    model replaces them; tests marked random_opening run as a new session does."""
+    if request.node.get_closest_marker("random_opening"):
+        yield
+        return
+    from src.services.integrated_actor import get_workflow_definition
+    opening = get_workflow_definition().incidents.simulated_catalog.policy["tutorial_opening"]
+    saved = opening["enabled"]
+    opening["enabled"] = True
+    yield
+    opening["enabled"] = saved
 
 
 @pytest.fixture(autouse=True)

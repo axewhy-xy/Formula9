@@ -149,6 +149,8 @@ namespace Formula9.UI
             var player = new GameObject("Alerts").AddComponent<AlertPlayer>();
             player.transform.SetParent(transform, false);
             var alerts = new TrainingAlerts(player.Play);
+            // An incident a shuttle will reach says who reaches it and when, once, as it is detected
+            alerts.Fresh = e => { var headline = TrainingPresenter.IncidentHeadline(e); if (headline != null) ShowMessage(headline); };
             var mute = new MuteSetting(new PlayerPreferences(), alerts);
             var muteToggle = GetComponent<UIDocument>().rootVisualElement.Q<Toggle>("mute");
             muteToggle.SetValueWithoutNotify(mute.Muted);

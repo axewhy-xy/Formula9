@@ -42,7 +42,7 @@ def seed(store):
     staged.simulation_time_s = 12
     current = service.publish(store, staged)
     incident = current.incidents[0]
-    candidate = next(c for c in current.candidates if c.action == "WAIT")
+    candidate = next(c for c in current.candidates if c.action == "KEEP_ROUTE")
     service.decide(store, "web-test", DispatcherCommand(
         contract_version="2.0", command_id="web-incident-decision", idempotency_key="web-incident-key",
         session_id=current.session_id, command_type="APPROVE_INCIDENT_OPTION",

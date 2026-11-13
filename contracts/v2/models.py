@@ -30,14 +30,23 @@ VEHICLE_TRANSITIONS = {
     "QUEUED_FOR_CHARGE": {"CHARGING", "STANDBY", "OUT_OF_SERVICE"},
     "CHARGING": {"RETURNING_TO_DEPOT", "STANDBY", "OUT_OF_SERVICE"}, "OUT_OF_SERVICE": {"STANDBY"},
 }
+# An incident's state sums up its shuttles' decisions (Incident.responses): OPTIONS_READY while an exposed
+# shuttle has still to be decided for, and back to it when another shuttle becomes exposed; then EXECUTING
+# while a shuttle drives a detour round it, ESCALATED once assistance is on its way, WAITING while every
+# decided shuttle keeps its route or holds, and DETECTED when nobody has had to decide. It settles when the
+# event clears: UNRESOLVED when a shuttle reached it with no decision, else RESOLVED.
 INCIDENT_TRANSITIONS = {
-    "DETECTED": {"AWAITING_REVIEW"}, "AWAITING_REVIEW": {"OPTIONS_READY", "ESCALATED", "UNRESOLVED"},
-    "OPTIONS_READY": {"ACTION_COMMITTED", "WAITING", "ESCALATED", "UNRESOLVED"},
+    "DETECTED": {"AWAITING_REVIEW", "OPTIONS_READY", "RESOLVED"},
+    "AWAITING_REVIEW": {"OPTIONS_READY", "ESCALATED", "UNRESOLVED"},
+    "OPTIONS_READY": {"ACTION_COMMITTED", "WAITING", "ESCALATED", "EXECUTING", "DETECTED", "RESOLVED", "UNRESOLVED"},
     "ACTION_COMMITTED": {"EXECUTING", "AWAITING_REVIEW"},
-    "EXECUTING": {"RESOLVED", "AWAITING_REVIEW", "ESCALATED"},
-    "WAITING": {"AWAITING_REVIEW", "RESOLVED", "UNRESOLVED"},
-    "ESCALATED": {"RESOLVED", "UNRESOLVED"}, "RESOLVED": set(), "UNRESOLVED": set(),
+    "EXECUTING": {"RESOLVED", "UNRESOLVED", "AWAITING_REVIEW", "OPTIONS_READY", "ESCALATED", "WAITING"},
+    "WAITING": {"AWAITING_REVIEW", "OPTIONS_READY", "EXECUTING", "ESCALATED", "RESOLVED", "UNRESOLVED"},
+    "ESCALATED": {"OPTIONS_READY", "EXECUTING", "RESOLVED", "UNRESOLVED"}, "RESOLVED": set(), "UNRESOLVED": set(),
 }
+# What an operator can tell one exposed shuttle to do about an incident. WAIT is KEEP_ROUTE's name in
+# journals from before per-shuttle decisions; RETURN_TO_DEPOT and CHARGE are not offered for incidents.
+INCIDENT_ACTIONS = ("KEEP_ROUTE", "ROAD_DETOUR", "ESCALATE", "HOLD_AT_STOP")
 
 
 def transition_allowed(machine: Literal["session", "vehicle", "incident"], before: str, after: str) -> bool:
@@ -162,21 +171,92 @@ class Candidate(WireModel):
     candidate_id: Id
     incident_id: Id
     revision: Revision
-    action: Literal["WAIT", "ESCALATE", "ROAD_DETOUR", "RETURN_TO_DEPOT", "CHARGE"]
+    action: Literal["KEEP_ROUTE", "ESCALATE", "ROAD_DETOUR", "HOLD_AT_STOP", "WAIT", "RETURN_TO_DEPOT", "CHARGE"]
     validation: Literal["PASS", "WARN", "FAIL", "UNKNOWN"]
     expires_at_tick: Tick
     dependency_revisions: dict[str, Revision]
     assumptions: list[str]
+    # The shuttle this option is for: an incident offers options per exposed shuttle. None in 2.x
+    # snapshots from before per-shuttle options, where it is the incident's own vehicle_id.
+    vehicle_id: Id | None = None
+
+
+class IncidentLocation(WireModel):
+    """Where a world event is: one operating-network road (edge_id) or one junction (node_id)."""
+    edge_id: Id | None = None
+    node_id: Id | None = None
+    road_name: Text | None = None
+
+    @model_validator(mode="after")
+    def one_place(self) -> "IncidentLocation":
+        if (self.edge_id is None) == (self.node_id is None):
+            raise ValueError("an incident location is exactly one edge or one junction")
+        return self
+
+
+class IncidentExposure(WireModel):
+    """A shuttle that will reach an incident while it lasts, how far away and about when.
+
+    Its remaining route crosses the incident's footprint (the scene and the queue behind it). Refreshed
+    as shuttles move."""
+    vehicle_id: Id
+    distance_m: Annotated[FiniteFloat, Field(ge=0)]
+    eta_s: Annotated[FiniteFloat, Field(ge=0)]
+    is_estimate: Literal[True] = True
+    # About how long keeping its route would hold it up: in the queue, or waiting for a closure or a stuck
+    # light to clear. None in 2.x snapshots from before decisions were scored by the delay they avoid.
+    keep_route_delay_s: Annotated[FiniteFloat, Field(ge=0)] | None = None
+
+
+class IncidentResponse(WireModel):
+    """What the operator decided for one exposed shuttle, or that it reached the incident undecided.
+
+    NO_DECISION is recorded when a shuttle drives into the incident's footprint, or is still held at it
+    when it clears, without a decision; it is scored as an unresolved incident is."""
+    vehicle_id: Id
+    action: Literal["KEEP_ROUTE", "ROAD_DETOUR", "ESCALATE", "HOLD_AT_STOP", "WAIT", "NO_DECISION"]
+    decided_tick: Tick
+    # Whether it was decided before the shuttle entered the footprint, which full response credit needs
+    before_arrival: bool
+    # When what it set going ended: a detour's loop driven, a hold at a stop released. None while it lasts.
+    completed_tick: Tick | None = None
+    # The stop a HOLD_AT_STOP holds its shuttle at; None for any other action
+    hold_stop_id: Id | None = None
 
 
 class Incident(WireModel):
     incident_id: Id
     aggregate_revision: Revision
-    vehicle_id: Id
+    # The shuttle held for a decision, or the one the incident was placed ahead of; None for a world
+    # event that belongs to no shuttle. exposed_vehicle_ids says which shuttles it affects.
+    vehicle_id: Id | None = None
     state: Literal["DETECTED", "AWAITING_REVIEW", "OPTIONS_READY", "ACTION_COMMITTED", "EXECUTING", "WAITING", "ESCALATED", "RESOLVED", "UNRESOLVED"]
     detected_tick: Tick
     candidate_ids: list[Id]
     provenance: Provenance
+    # The world event behind the incident. None in 2.x snapshots from before world events.
+    event_type: Literal["BREAKDOWN", "COLLISION", "SIGNAL_FAULT", "ROAD_CLOSURE"] | None = None
+    location: IncidentLocation | None = None
+    # Shuttles that will reach the incident while it lasts, nearest first, and each one's distance and
+    # ETA. Live data like a vehicle's position: it changes without a new aggregate_revision.
+    exposed_vehicle_ids: list[Id] = Field(default_factory=list)
+    exposures: list[IncidentExposure] = Field(default_factory=list)
+    # One per shuttle decided for (or that reached it undecided), in the order they were recorded. Empty in
+    # 2.x snapshots from before per-shuttle decisions.
+    responses: list[IncidentResponse] = Field(default_factory=list)
+    # The tick the world event is expected to clear; an ESCALATE brings it forward. None in older 2.x snapshots.
+    clears_at_tick: Tick | None = None
+
+    @model_validator(mode="after")
+    def exposures_match(self) -> "Incident":
+        if [e.vehicle_id for e in self.exposures] != self.exposed_vehicle_ids:
+            raise ValueError("incident exposures must list exactly its exposed vehicles, in order")
+        if len(self.exposed_vehicle_ids) != len(set(self.exposed_vehicle_ids)):
+            raise ValueError("duplicate exposed vehicle")
+        decided = [r.vehicle_id for r in self.responses]
+        if len(decided) != len(set(decided)):
+            raise ValueError("an incident has at most one response per vehicle")
+        return self
 
 
 class Charger(WireModel):
@@ -414,10 +494,13 @@ class FullSnapshot(Envelope):
             if v.service_state == "CHARGING" and not any(v.vehicle_id in c.occupied_vehicle_ids for c in self.chargers):
                 raise ValueError("charging vehicle has no occupied charger")
         for i in self.incidents:
-            if i.vehicle_id not in vehicles or any(cid not in candidates for cid in i.candidate_ids):
+            if ((i.vehicle_id is not None and i.vehicle_id not in vehicles)
+                    or any(cid not in candidates for cid in i.candidate_ids)
+                    or any(v not in vehicles for v in i.exposed_vehicle_ids)
+                    or any(r.vehicle_id not in vehicles for r in i.responses)):
                 raise ValueError("missing incident reference")
         for c in self.candidates:
-            if c.incident_id not in incidents:
+            if c.incident_id not in incidents or (c.vehicle_id is not None and c.vehicle_id not in vehicles):
                 raise ValueError("missing candidate incident reference")
         for c in self.chargers:
             if len(c.occupied_vehicle_ids) > c.port_count or any(v not in vehicles for v in c.occupied_vehicle_ids):

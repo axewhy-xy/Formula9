@@ -35,6 +35,8 @@ class StopLine:
     progress_m: float
     offset_s: int
     phase: int
+    # The junction whose light it is, so a fault there (signal_cycle) holds it
+    junction_id: str = ""
 
 
 @lru_cache(maxsize=4)
@@ -64,16 +66,19 @@ def stop_lines(points: list[tuple[float, float]], signal_junctions: tuple[dict, 
                     at = travelled + share
                     if (math.dist(stop, near) <= MATCH_M and run[0] * travel[0] + run[1] * travel[1] >= ALIGN
                             and all(abs(line.progress_m - at) >= APART_M for line in lines)):
-                        lines.append(StopLine(at, int(junction["offset_s"]), int(approach["phase"])))
+                        lines.append(StopLine(at, int(junction["offset_s"]), int(approach["phase"]), str(junction["id"])))
                 travelled += length
     return sorted(lines, key=lambda line: line.progress_m)
 
 
-def must_stop(line: StopLine, time_s: float, front_to_line_m: float, speed_mps: float) -> bool:
-    """Whether the light tells a vehicle with its front this far short of the line to stop."""
+def must_stop(line: StopLine, time_s: float, front_to_line_m: float, speed_mps: float,
+              faults: dict[str, float] | None = None) -> bool:
+    """Whether the light tells a vehicle with its front this far short of the line to stop. A faulted
+    junction (faults, as signal_cycle takes them) shows red until its fault clears."""
     if front_to_line_m < 0:
         return False
-    color = signal_cycle.phase_state(time_s, line.offset_s, line.phase)["color"]
+    until = signal_cycle.fault_until(faults, line.junction_id, time_s)
+    color = signal_cycle.phase_state(time_s, line.offset_s, line.phase, until)["color"]
     if color == "green":
         return False
     # Too close to stop for a yellow: carry on through it
@@ -81,13 +86,13 @@ def must_stop(line: StopLine, time_s: float, front_to_line_m: float, speed_mps: 
 
 
 def hold_point(lines: list[StopLine], time_s: float, progress_m: float, front_m: float, speed_mps: float,
-               closed_length_m: float | None = None) -> float | None:
+               closed_length_m: float | None = None, faults: dict[str, float] | None = None) -> float | None:
     """The furthest a shuttle at progress_m may go before a light holds it, or None if none does.
 
-    On a closed route the lines of its next lap count too.
+    On a closed route the lines of its next lap count too. A faulted junction holds it until it clears.
     """
     laps = (0.0, closed_length_m) if closed_length_m else (0.0,)
     holds = [line.progress_m + lap - front_m - STOP_MARGIN_M
              for lap in laps for line in lines
-             if must_stop(line, time_s, line.progress_m + lap - progress_m - front_m, speed_mps)]
+             if must_stop(line, time_s, line.progress_m + lap - progress_m - front_m, speed_mps, faults)]
     return max(progress_m, min(holds)) if holds else None

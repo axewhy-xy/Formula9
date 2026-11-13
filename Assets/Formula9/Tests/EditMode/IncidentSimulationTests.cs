@@ -120,6 +120,54 @@ namespace Formula9.Tests
         }
 
         [Test]
+        public void AWorldEventSaysWhatItIsWhereAndWhoReachesIt()
+        {
+            var exposures = new JArray(
+                new JObject { ["vehicle_id"] = "shuttle-03", ["distance_m"] = 850.0, ["eta_s"] = 84.6, ["is_estimate"] = true },
+                new JObject { ["vehicle_id"] = "shuttle-04", ["distance_m"] = 1100.0, ["eta_s"] = 110.0, ["is_estimate"] = true },
+                new JObject { ["eta_s"] = 1.0 });
+            Assert.IsTrue(IncidentRecord.TryRead(MarkerEvent("INCIDENT_DETECTED", new JObject
+            {
+                ["requires_guidance"] = false, ["event_type"] = "COLLISION", ["exposures"] = exposures,
+                ["location"] = new JObject { ["edge_id"] = "here:forward", ["road_name"] = "Lorong 6 Toa Payoh" },
+                ["headline"] = "Shuttle 03 reaches a collision on Lorong 6 Toa Payoh in about 85 s (and 1 more shuttle)",
+            }), out var record));
+            Assert.AreEqual("COLLISION", record.EventType);
+            Assert.AreEqual("Lorong 6 Toa Payoh", record.RoadName);
+            StringAssert.StartsWith("Shuttle 03 reaches", record.Headline);
+            CollectionAssert.AreEqual(new[] { "shuttle-03", "shuttle-04" }, record.Exposures.Select(e => e.VehicleId), "an exposure without a shuttle is skipped");
+            Assert.AreEqual("shuttle-03 in ~85 s, shuttle-04 in ~110 s", IncidentRecord.Reach(record.Exposures));
+            Assert.AreEqual("shuttle-03 in ~85 s (+1 more)", IncidentRecord.Reach(record.Exposures, 1));
+            Assert.IsNull(IncidentRecord.Reach(new List<IncidentExposure>()));
+            Assert.AreEqual("Collision", IncidentRecord.Name(record.EventType, record.Kind));
+            Assert.AreEqual("Road accident", IncidentRecord.Name(null, IncidentSimulation.Accident), "a backend without world events");
+            // An older backend's event says none of it
+            Assert.IsTrue(IncidentRecord.TryRead(MarkerEvent("INCIDENT_DETECTED", new JObject()), out var old));
+            Assert.IsNull(old.EventType);
+            Assert.IsEmpty(old.Exposures);
+        }
+
+        [Test]
+        public void TheStatusLineSaysWhoReachesTheIncidentAndAnyShuttleIsReportedSlow()
+        {
+            var snapshot = Snapshot();
+            snapshot.Incidents[0].VehicleId = null;
+            snapshot.Incidents[0].ExposedVehicleIds = new List<string> { "shuttle-02" };
+            snapshot.Incidents[0].Exposures = new List<IncidentExposure> { new IncidentExposure { VehicleId = "shuttle-02", DistanceM = 300, EtaS = 30 } };
+            var vehicle = snapshot.Vehicles[3];
+            vehicle.SpeedMps = 5;
+            vehicle.Position.XM = 0; vehicle.Position.YM = 30;
+            var record = Record(IncidentSimulation.Accident, impact: "here:forward");
+            record.EventType = "BREAKDOWN";
+            var plan = IncidentSimulation.Plan(record, Network(), snapshot);
+            // A world event slows every shuttle on the roads it congests, not only the one it names
+            Assert.IsTrue(IncidentSimulation.IsSlowing(plan, vehicle, snapshot));
+            var line = IncidentSimulation.Line(plan, snapshot);
+            StringAssert.StartsWith("Breakdown · Lorong here:forward", line);
+            StringAssert.Contains("reaches it: shuttle-02 in ~30 s", line);
+        }
+
+        [Test]
         public void TheQueueBacksUpTheRoadsLeadingInAndNotTheOnesLeaving()
         {
             var plan = IncidentSimulation.Plan(Record(IncidentSimulation.Block), Network(), Snapshot());

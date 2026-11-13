@@ -8,6 +8,8 @@ import random
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.services.incident_scenarios.world_events import load_timeline
+
 DEFAULT_CATALOG = Path(__file__).resolve().parents[3] / 'fixtures' / 'incidents' / 'predefined_scenarios.json'
 
 @dataclass(frozen=True)
@@ -29,6 +31,14 @@ class SimulatedIncidentCatalog:
             raise ValueError('Invalid random incident interval')
         if self.policy['max_active_incidents'] < 1:
             raise ValueError('max_active_incidents must be positive')
+        # The scripted opener (a road block on an editable route's next road, seconds into the session) is
+        # a tutorial setting, off unless a scenario turns it on
+        opening = self.policy.get('tutorial_opening')
+        if opening is not None:
+            if opening.get('kind') not in ('ROAD_BLOCK', 'ROAD_ACCIDENT'):
+                raise ValueError('Unsupported tutorial opening kind')
+            if not 0 <= opening['after_min_s'] <= opening['after_max_s'] or opening['duration_s'] <= 0:
+                raise ValueError('Invalid tutorial opening timing')
         self.templates = []
         for row in data['scenarios']:
             if row.get('kind') not in ('ROAD_BLOCK', 'ROAD_ACCIDENT'):
@@ -41,9 +51,34 @@ class SimulatedIncidentCatalog:
                 ('kind','duration_s','warning_s','detection_delay_s','recovery_s','max_multiplier')}))
         if not self.templates:
             raise ValueError('No incident templates')
+        # The scenario's scheduled events, beside the random generator. Their edges are checked against
+        # the operating network by the workflow definition that owns both.
+        self.timeline = load_timeline(data.get('timeline'))
+
+    def __deepcopy__(self, memo):
+        # Read-only and shared by every session: an actor staged each tick must not copy it
+        return self
+
+    def template(self, kind):
+        """The catalogue template of an incident kind, or None."""
+        return next((t for t in self.templates if t.kind == kind), None)
 
     def next_interval_ticks(self, rng, step_s=0.05):
         return max(1, round(rng.uniform(self.policy['min_interval_s'], self.policy['max_interval_s']) / step_s))
+
+    @property
+    def opening(self):
+        """The tutorial opener's settings when the scenario turns it on, else None."""
+        opening = self.policy.get('tutorial_opening')
+        return opening if opening and opening.get('enabled') else None
+
+    def first_due_ticks(self, rng, step_s=0.05):
+        """When a new session's first incident is due: the tutorial opener's time when it is on, else an
+        ordinary interval. Either way one draw of the session's random numbers."""
+        opening = self.opening
+        if opening is None:
+            return self.next_interval_ticks(rng, step_s)
+        return max(1, round(rng.uniform(opening['after_min_s'], opening['after_max_s']) / step_s))
 
     def choose(self, snapshot, rng, occupied_edges=()):
         """Return template, vehicle ID, directed edge ID; None if no eligible route.

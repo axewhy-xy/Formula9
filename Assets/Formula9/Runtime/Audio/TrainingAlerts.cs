@@ -15,6 +15,7 @@
 using System;
 using System.Collections.Generic;
 using Formula9.Contracts;
+using Newtonsoft.Json.Linq;
 
 namespace Formula9.Audio
 {
@@ -62,7 +63,8 @@ namespace Formula9.Audio
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function decides whether one event alerts. A live event is remembered as seen
-        //     even when it has no cue or alerts are muted.
+        //     even when it has no cue or alerts are muted. An event whose data says "alert": false
+        //     (an incident no shuttle will reach) stays silent though its type has a cue.
         //
         // Args:
         //     e (Event): The training event.
@@ -70,12 +72,33 @@ namespace Formula9.Audio
         //
         // Returns:
         //     string: The cue to play, or null for no sound.
-        public string OnEvent(Event e, bool live)
+        public string OnEvent(Event e, bool live) => Admit(e, live) ? CueFor(e) : null;
+
+        // -----------------------------------------------------------------------------------
+        // Function: Admit
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function remembers a live event as seen, and says whether this is the first time.
+        //
+        // Args:
+        //     e (Event): The training event.
+        //     live (bool): False for history playback, which is never remembered.
+        //
+        // Returns:
+        //     bool: True for a live event not seen before.
+        public bool Admit(Event e, bool live)
         {
-            if (!live || !seen.Add(e.EventId)) return null;
+            if (!live || !seen.Add(e.EventId)) return false;
             order.Enqueue(e.EventId);
             while (order.Count > memoryLimit) seen.Remove(order.Dequeue());
+            return true;
+        }
+
+        // The cue an admitted event plays, or null: none for its type, "alert": false, or muted.
+        public string CueFor(Event e)
+        {
             if (!cues.TryGetValue($"{e.EntityType}/{e.EventType}", out var cue)) return null;
+            if (e.Data != null && e.Data.Value<bool?>("alert") == false) return null;
             return Muted ? null : cue;
         }
     }
@@ -129,9 +152,16 @@ namespace Formula9.Audio
         {
             foreach (var e in events)
             {
-                var cue = gate.OnEvent(e, live);
+                if (!gate.Admit(e, live)) continue;
+                // Even muted: a muted operator still reads what happened
+                Fresh?.Invoke(e);
+                var cue = gate.CueFor(e);
                 if (cue != null) play?.Invoke(cue);
             }
         }
+
+        // Called once for each live event the first time it arrives, muted or not, so the screen can
+        // say what an alert is about (TrainingPresenter.IncidentHeadline).
+        public Action<Event> Fresh { get; set; }
     }
 }

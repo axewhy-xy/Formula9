@@ -134,7 +134,8 @@ class OperatingRoads:
 
 
 def build_network(roads: OperatingRoads, chains: list[tuple[str, list[int]]], simplify, *, curated_width_m: float) -> dict:
-    """Name every directed run; a chain's own road keeps the chain's name, as the scenario refers to it."""
+    """Name every directed run; a chain's own road keeps the chain's name, as the scenario refers to it.
+    "runs" maps each run, as its nodes of the road graph, to its edge ID."""
     net = roads.net
     breaks = roads.breaks() | {node for _, nodes in chains for node in (nodes[0], nodes[-1])}
     node_ids: dict[int, int] = {}
@@ -193,7 +194,7 @@ def build_network(roads: OperatingRoads, chains: list[tuple[str, list[int]]], si
             claimed[back] = f"road-{way}:{index}:reverse"
             add(claimed[back], back, curated=False)
     return {"nodes": {str(identifier): [*roads.position[node]] for node, identifier in sorted(node_ids.items(), key=lambda p: p[1])},
-            "edges": edges, "chains": chain_ids, "node_ids": node_ids,
+            "edges": edges, "chains": chain_ids, "node_ids": node_ids, "runs": claimed,
             "rules": {"max_turn_deg": MAX_TURN_DEG, "default_lane_width_m": DEFAULT_LANE_WIDTH_M,
                       "open_road_headroom_m": OPEN_ROAD_HEADROOM_M}}
 

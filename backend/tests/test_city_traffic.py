@@ -85,7 +85,7 @@ def test_the_area_network_has_both_ways_of_two_way_roads_and_the_lights_stop_lin
         for approach in junction["approaches"]:
             for direction in (1, -1):
                 r = network.by_key.get(f"{approach['road']}|{direction}")
-                for at, offset, phase in (r.stops if r else ()):
+                for at, offset, phase, _ in (r.stops if r else ()):
                     x, y, tx, ty = r.sample(at, 0.0)
                     heading = math.radians(approach["heading_deg"])
                     assert tx * math.cos(heading) + ty * math.sin(heading) >= 0.5
@@ -272,6 +272,9 @@ def test_shuttles_queue_behind_the_traffic_and_never_run_a_red_or_touch_a_vehicl
     actor = IntegratedSessionActor(0, session_id="traffic-test")
     actor.is_paused = False
     actor.modes = {s.ID: "IN_SERVICE" for s in actor.shuttles}
+    # Only the lights and the traffic: an incident's closure or wreck stops a shuttle as long as it lasts
+    # (test_traffic_events)
+    actor.incident_due_tick = 10**12
     junctions = route_signals.junctions("toa-payoh")
     known, stalled, queued = {}, {s.ID: 0 for s in actor.shuttles}, 0
     distance = {s.ID: 0.0 for s in actor.shuttles}
@@ -291,7 +294,7 @@ def test_shuttles_queue_behind_the_traffic_and_never_run_a_red_or_touch_a_vehicl
             # Standing behind a car that is itself waiting at a red light: the queue the 3D view draws
             if moved == 0 and record.in_traffic and any(
                     any(signal_cycle.phase_state(actor.timestamp_second, o, p)["color"] != "green"
-                        and 0 <= at - (v.distance + v.half) < 30 for at, o, p in v.road.stops)
+                        and 0 <= at - (v.distance + v.half) < 30 for at, o, p, _ in v.road.stops)
                     for v in waiting_for):
                 queued += 1
     report = actor.traffic.report()

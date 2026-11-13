@@ -55,12 +55,12 @@ def preview(runtime, **changes) -> dict:
     return response.json()
 
 
-def approve(runtime, draft: dict) -> dict:
+def approve(runtime, draft: dict, vehicle_ids: tuple[str, ...] = ("shuttle-01",)) -> dict:
     client, _, _, session_id = runtime
     response = client.post(f"/api/v2/sessions/{session_id}/route-approvals", json={
         "preview_id": draft["preview_id"], "preview_revision": draft["preview_revision"],
         "command_id": uuid4().hex, "idempotency_key": uuid4().hex,
-        "target_vehicle_ids": ["shuttle-01"], "reason": "Round the closure by the roads I chose"})
+        "target_vehicle_ids": list(vehicle_ids), "reason": "Round the closure by the roads I chose"})
     assert response.status_code == 200, response.text
     return response.json()
 
@@ -197,6 +197,58 @@ def test_operating_metadata_prefers_what_is_recorded_and_admits_what_is_not():
     enclosed = road_metadata({"highway": "residential", "covered": "yes"}, False, True, curated=False, curated_width_m=3.5)
     assert enclosed["height_m"] is None
     assert road_metadata({"highway": "secondary", "bus": "no"}, True, True, curated=False, curated_width_m=3.5)["access"] == "closed_to_buses"
+
+
+# Each peer route and the shuttle assigned to it
+PEERS = {"route-peer-b": "shuttle-02", "route-peer-c": "shuttle-03", "route-peer-d": "shuttle-04", "route-peer-e": "shuttle-05"}
+
+
+def test_every_peer_route_has_its_own_editor_data_and_its_roads_pass(runtime):
+    client, _, _, session_id = runtime
+    definition = get_workflow_definition()
+    assert definition.data["vehicle_assignments"][1:] == list(PEERS)
+    for route_id in PEERS:
+        config = definition.routes.route_config(route_id)
+        context = client.get(f"/api/v2/sessions/{session_id}/routes/{route_id}/editor").json()
+        assert context["route_id"] == route_id
+        # A peer's loop starts and ends at its own stop, which it serves last
+        assert context["start_node_id"] == context["destination_node_id"] == config["start_node_id"]
+        assert [stop["stop_id"] for stop in context["stops"]] == list(config["required_stops"])
+        assert config["required_stops"][context["stops"][-1]["stop_id"]] == config["start_node_id"]
+        assert context["original_directed_edge_ids"] == config["original_directed_edge_ids"]
+        draft = preview(runtime, route_id=route_id, directed_edge_ids=config["original_directed_edge_ids"])
+        assert draft["validation"] == "PASS", (route_id, [c for c in draft["checks"] if c["status"] != "PASS"])
+        assert all(draft["edited"]["stop_coverage"].values())
+
+
+def test_a_peer_route_is_edited_approved_and_driven_as_shuttle_01s_is(runtime):
+    client, store, service, session_id = runtime
+    route_id, vehicle_id = "route-peer-b", PEERS["route-peer-b"]
+    definition = get_workflow_definition()
+    config = definition.routes.route_config(route_id)
+    edges = network().edges
+    # The nearest road off its loop, near where the loop starts, that the shuttle may use and can drive
+    # round its loop by
+    start = definition.network["nodes"][str(config["start_node_id"])]
+    loop = set(config["original_directed_edge_ids"])
+    roads = sorted((key for key in edges if key not in loop and twin_id(key) not in loop and edges[key]["road"]
+                    and twin_id(key) in edges and network().fit_status(key, config) == "PASS"),
+                   key=lambda key: math.dist(edges[key]["path"][0], start))
+    drafts = (preview(runtime, route_id=route_id, waypoint_edge_ids=[road]) for road in roads[:40])
+    road, draft = next((road, draft) for road, draft in zip(roads, drafts) if draft["approvable"])
+    assert road in draft["directed_edge_ids"] or twin_id(road) in draft["directed_edge_ids"]
+    assert all(draft["edited"]["stop_coverage"].values())
+    assert [impact["vehicle_id"] for impact in draft["service_impact"]] == [vehicle_id]
+    assert approve(runtime, draft, (vehicle_id,))["status"] == "APPLIED"
+    snapshot = client.get(f"/api/v2/sessions/{session_id}/snapshot").json()
+    route = next(r for r in snapshot["routes"] if r["route_id"] == route_id)
+    assert route["revision"] == 2 and route["directed_edge_ids"] == draft["directed_edge_ids"]
+    # The actor drives it, and pulls in at the peer's own stops: its loop's stop at the loop's end
+    actor = service.sessions[session_id].actor
+    assert actor._routes[route_id]["total_length"] == pytest.approx(draft["edited"]["distance_m"], abs=0.01)
+    stops = list(config["required_stops"])
+    assert actor.stop_names[route_id].pop("end") == stops[-1]
+    assert sorted(actor.stop_names[route_id].values()) == sorted(stops[:-1])
 
 
 def test_every_scripted_route_stays_valid_on_the_network(runtime):

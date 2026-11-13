@@ -100,7 +100,9 @@ namespace Formula9.World
             foreach (var path in plan.Slowed) Ribbon(scene, "Slowed road", path, SlowedColor, SlowedColor, SlowedWidthM, SlowedHeightM);
             foreach (var lane in plan.Lanes)
                 scene.Ribbons.Add(new LaneRibbon { Lane = lane, Line = Ribbon(scene, "Backed up " + lane.EdgeId, new Vector2[0], QueueNear, QueueFar, RibbonWidthM, RibbonHeightM) });
-            if (plan.Record.Kind == IncidentSimulation.Block) BuildClosure(scene); else BuildAccident(scene);
+            // A signal fault has no wreck or barrier: its junction's lights show it, and the beacon marks it
+            if (plan.Record.Kind == IncidentSimulation.Block) BuildClosure(scene);
+            else if (plan.Record.Kind != IncidentSimulation.SignalFault) BuildAccident(scene);
             var post = Part(scene, PrimitiveType.Cylinder, new Vector3(1.6f, BeaconHeightM / 2, 1.6f), scene.Beacon, "Incident beacon post");
             post.position = Ground(plan.Site, BeaconHeightM / 2);
             var head = Part(scene, PrimitiveType.Sphere, Vector3.one * BeaconRadiusM, scene.Beacon, "Incident beacon");
@@ -197,6 +199,10 @@ namespace Formula9.World
 
         private float Clock(Scene scene) => IncidentSimulation.ElapsedS(scene.Plan.Record, snapshot);
 
+        // Whether the queue behind each incident is drawn. With the backend's traffic it is not: its vehicles
+        // queue behind the scene of their own accord, and a drawn queue would stand on top of them.
+        public bool DrawQueues { get; set; } = true;
+
         // Every scene and queue the background traffic must keep off, as they stand now.
         public List<TrafficHazard> TrafficHazards()
         {
@@ -223,11 +229,11 @@ namespace Formula9.World
 
         private void Animate(Scene scene, float elapsed)
         {
-            var queue = IncidentSimulation.QueueM(elapsed);
+            var queue = DrawQueues ? IncidentSimulation.QueueM(elapsed) : 0;
             foreach (var view in scene.Cars)
             {
                 var lane = scene.Plan.Lanes[view.Car.Lane];
-                var seen = IncidentSimulation.CarPose(view.Car, lane, elapsed, out var at, out var travel);
+                var seen = IncidentSimulation.CarPose(view.Car, lane, elapsed, out var at, out var travel) && DrawQueues;
                 if (view.Body.gameObject.activeSelf != seen) view.Body.gameObject.SetActive(seen);
                 if (seen) view.Body.SetPositionAndRotation(Ground(at, CarHeightM / 2), Quaternion.LookRotation(new Vector3(travel.x, 0, travel.y)));
             }

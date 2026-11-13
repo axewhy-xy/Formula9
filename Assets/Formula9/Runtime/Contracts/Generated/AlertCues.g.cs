@@ -13,6 +13,7 @@ namespace Formula9.Contracts
         {
             ["COMMAND/COMMAND_NEEDS_RECONFIRMATION"] = "needs_reconfirmation",
             ["COMMAND/COMMAND_REJECTED"] = "command_rejected",
+            ["INCIDENT/INCIDENT_DETECTED"] = "incident_alert",
             ["INCIDENT/OPTIONS_READY"] = "incident_alert",
             ["SESSION/SESSION_RECOVERED"] = "session_recovered",
         };

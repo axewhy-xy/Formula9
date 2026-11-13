@@ -1,10 +1,11 @@
 # Formula9 technical architecture
 
-Revision **3.0, 12 November 2026**. This revision describes the system as it is built today: one
-Unity client and the Python/FastAPI backend that was migrated into this repository. It replaces
-revision 2.1 (27 October 2026), which planned two separate clients, a React/three.js web app and a
-C++/Qt/OpenGL desktop app. Neither client exists in this repository any more. The Unity client took
-over their training workflows.
+Revision **3.1, 13 November 2026**. This revision describes the system as it is built today: one
+Unity client and the Python/FastAPI backend that was migrated into this repository. Revision 3.1
+describes incidents as world events that the background traffic plays out, decided for per exposed
+shuttle. Revision 3.0 (12 November 2026) replaced revision 2.1 (27 October 2026), which planned two
+separate clients, a React/three.js web app and a C++/Qt/OpenGL desktop app. Neither client exists in
+this repository any more. The Unity client took over their training workflows.
 
 Formula9 trains an **AV shuttle fleet manager**. The trainee plans a detour around a closed road,
 handles incidents as they come up, keeps shuttles in service while they charge, and reviews what
@@ -28,7 +29,8 @@ Read with:
 | Durable before visible | A command result, event or snapshot is published only after its SQLite transaction has committed. |
 | One contract, validated on both sides | `contracts/v2` defines the wire format. Python validates it with pydantic. Unity validates incoming JSON against the same schemas, which are generated into C#. |
 | Deterministic, recoverable sessions | One actor per session advances in fixed 50 ms steps from a seeded RNG. Its private state is checkpointed with each publication, so a restarted backend resumes the same attempt. |
-| Presentation is separate from authority | Background traffic, traffic-light colours, building textures and camera views are presentation. They never decide whether a shuttle reached a stop or a decision was correct. |
+| Presentation is separate from authority | Traffic-light colours, building textures and camera views are presentation. They never decide whether a shuttle reached a stop or a decision was correct. |
+| Incidents are simulated, not scripted | This replaces "traffic is presentation" for incidents. An incident is a world event that the background traffic plays out: a breakdown pins a vehicle in its lane, a collision two, a signal fault sticks a junction on red. The queue, and so a shuttle's delay, comes from the traffic, which is therefore deterministic and checkpointed with the session. Sessions without traffic fall back to a speed factor on the event's roads. |
 | Honest data provenance | Real data (OSM roads, LTA bus stops and road features, the vehicle population) is labelled separately from simulated data (light timings, incidents, energy model). |
 
 ## 2. Repository layout
@@ -134,10 +136,21 @@ table. The backend still runs the other two, and the client can join existing se
 The integrated fixture (`backend/fixtures/m2_integrated.json`) is built by
 `python -m src.routing.build_singapore_fleet_fixture` from the committed OSM extract. It has:
 
-- five shuttles on one editable route (`route-m2-detour`) and four peer routes, with LTA bus stops
+- five shuttles, each on its own route with LTA bus stops: `route-m2-detour` (shuttle-01) and four peer
+  routes on two peer loops, two shuttles a loop. Every route is a list of operating-network roads with
+  its own route editor data (`route_edit` and `route_edit.peer_routes`), so any of them can be edited
+  and taken round an incident
 - two depots: Toa Payoh Interchange and Saint Michael's Bus Terminal
 - a permanent closure that must be routed around before Start
-- an obstruction on shuttle-01 at tick 240, then random incidents from `fixtures/incidents/predefined_scenarios.json`
+- incidents from `fixtures/incidents/predefined_scenarios.json`: a `timeline` of scheduled world events
+  (`BREAKDOWN`, `COLLISION`, `ROAD_CLOSURE` on an edge, `SIGNAL_FAULT` at a signalled junction) beside the
+  random generator. A random event is placed for an in-service shuttle chosen with the session RNG, about
+  `warning_s` at cruising speed ahead of it, so it is detected 60–120 s before that shuttle gets there.
+  Each template's `warning_s`, `detection_delay_s`, `duration_s` and `recovery_s` are used. The scripted
+  road block on shuttle-01's next road 10–11 s in is the optional `tutorial_opening` setting, off by default
+- the incident rules in `fixtures/m2_incident.json`: the options offered (`reference_acceptable_actions`:
+  `KEEP_ROUTE`, `ROAD_DETOUR`, `ESCALATE`, `HOLD_AT_STOP`), option lifetimes, how far assistance shortens
+  an event (`escalation_after_ticks`) and the provisional rubric (`m2-incident-provisional-r2`)
 - shuttle-05 starting near its energy reserve, so it gets a charging decision early
 
 ### 4.3 Session service and ticking
@@ -174,14 +187,41 @@ Each tick, `IntegratedSessionActor` does the following:
   (`traffic/signal_cycle.py`). Stop lines come from the LTA road-feature fixtures.
 - **Traffic:** drives the background traffic sample through `CityTraffic`, using the Krauss
   car-following model. Shuttles share the kerb lane with that traffic. `plan_shuttle` limits a
-  shuttle's speed for the vehicles ahead of it, and `place_shuttle` records where its body went. The
-  traffic keeps clear of incident scenes and their growing queues (`traffic/incident_hazards.py`).
-  It is deterministic and checkpointed (about once a second; the traffic state is 65–100 KB).
+  shuttle's speed for the vehicles ahead of it, and `place_shuttle` records where its body went. Live
+  world events are played out in it (`_apply_events`): `pin_vehicle` stops a breakdown's vehicle (a
+  collision's two) in its lane, a collision's or a closure's scene is kept clear both ways
+  (`traffic/incident_hazards.py`), and a signal fault overrides its junction to stuck red, which the
+  shuttles, the traffic and `…/signals/state` all obey. The queue behind forms of its own accord; nothing
+  is drawn or scripted. It is deterministic and checkpointed (about once a second; the traffic state is
+  65–100 KB), and a recovered session drives it on from its checkpoint to the session tick, replaying the
+  same events.
 - **Energy:** charges travel and auxiliary energy with energy model `ENERGY_R1`. It also issues
   `CONTINUE` and `CHARGE_NOW` offers, runs scheduled charger bookings, and sends a shuttle back to a
   depot when its reserve requires it.
-- **Incidents:** schedules the first incident, then random ones. It offers WAIT, ESCALATE or
-  ROAD_DETOUR candidates and holds the affected shuttle until a decision clears it.
+- **Incidents:** places the timeline's world events when they are due, and random ones for any
+  shuttle on its route (and the tutorial opener when a scenario turns it on). Each event is a
+  checkpointed record; the incident's config is the scenario's shared rules plus that record. On
+  detection, and every 10 ticks after, it works out the event's **exposure**: every shuttle whose
+  remaining route crosses the footprint (the scene and the queue feeding it) before it clears, with its
+  distance and ETA, about how long keeping its route would hold it up (the footprint it still has to
+  creep through at the speed in the queue, or the wait for a closure or a stuck light to clear) and the
+  stop it could hold at short of the footprint.
+- **Decisions per exposed shuttle:** `IncidentService` offers each exposed shuttle its own options:
+  `KEEP_ROUTE` (drive on and absorb the delay), `ROAD_DETOUR` (when its route is one the route editor can
+  take round the event: any shuttle's route or a detour from it; not for signal faults), `ESCALATE`
+  (request assistance, once per event, which brings `Incident.clears_at_tick` forward) and `HOLD_AT_STOP`
+  (when it has a stop before the footprint). A decision is recorded as that shuttle's
+  `Incident.responses` entry; the others' options are then reissued. The actor carries each one out: a
+  detour is the shuttle's own route (`{incident}-detour-{shuttle}`), and a hold keeps it dwelling at its
+  stop until the event clears. Nobody is frozen in traffic sessions: a shuttle meets the queue as any
+  vehicle does, and only a road closure is a `Disruption` (which route validation sees). Without
+  traffic, a road block on a shuttle's route still holds that shuttle where it was detected until it
+  is decided for and the road reopens.
+- **No decision is still a decision:** an exposed shuttle that was offered options and drives into the
+  footprint undecided gets a `NO_DECISION` response, scored zero; it can still be decided for, late. The
+  incident's state sums up its shuttles: `OPTIONS_READY` while one is to be decided for, then `EXECUTING`
+  (a detour being driven), `ESCALATED` or `WAITING`. When the event clears it settles as `UNRESOLVED` if
+  a `NO_DECISION` remains, else `RESOLVED`.
 
 Domain consequences go through the existing services (`RouteEditService`, `IncidentService`, the
 energy package). The actor adds its private execution state to the same commit.
@@ -196,6 +236,15 @@ energy package). The actor adds its private execution state to the same commit.
 | Preview an incident option | `POST …/incident-previews` | Reads a committed branch without advancing live time. |
 | Preview a charge booking | `POST …/charge-schedule-previews` | Reserves nothing. The commit runs the same check. |
 | Confirm an unclear outcome | `GET …/commands/{key}` | Used after a lost reply or a recovery. |
+
+An incident option is for one shuttle (`Candidate.vehicle_id`), and each shuttle is decided for once.
+Its assessment (`INCIDENT_DECISION_RECORDED`) is per shuttle: safety, response time from detection
+(full credit also needs the decision before the shuttle reaches the incident; a late one earns half),
+attempts at that shuttle's options, stops still served, and **delay avoided**: the chosen option's
+estimated delay against keeping the route, scaled to the best option on offer. The estimate comes from
+the queue's length and the speed in it, not from a simulated branch, so every score is provisional.
+`GET …/incidents/{id}/debrief` returns each shuttle's latest assessment (`assessments`) and its
+`responses`.
 
 The shared validator in `contracts/v2/models.py` rejects stale revisions, expired or withdrawn offers,
 and transitions not allowed by the state tables. Error codes include `STALE_REVISION`,
@@ -433,8 +482,10 @@ The end-to-end tests sign up throwaway users. Never point them at the shared tea
   up, and must be shown as simulation.
 - **No turn restrictions.** The map data has none, so the route checks refuse only U-turns. Width and
   headroom are checked only where the curated overlay records them, and unknown values block approval.
-- **Assessment is provisional.** Debrief rubric scores are uncalibrated. Scenario completion,
-  trainer authoring and exports (JSON, CSV, HTML) are not implemented.
+- **Assessment is provisional.** Debrief rubric scores are uncalibrated. An incident's delay avoided
+  is estimated from the queue length and the speed in it, and ETAs leave out traffic lights; branching
+  the traffic to simulate each option ahead is not implemented. Scenario completion, trainer authoring
+  and exports (JSON, CSV, HTML) are not implemented.
 - **Asset licences.** Several imported vehicle packs have no recorded licence (see
   [third-party assets](third_party_assets.md)).
 - **Spatial scenario.** The scene-package 3D scenario still works but is no longer offered for

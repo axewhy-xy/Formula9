@@ -28,7 +28,7 @@ import pytest
 from contracts.v2.models import DispatcherCommand
 from src.api.routes.training_v2 import get_actor_id, get_training_store
 from src.energy.forecast import reserve_kwh
-from src.energy.model import ENERGY_R1
+from src.energy.model import ENERGY_R1, auxiliary_energy_kwh
 from src.app import app
 from src.persistence.training_store import TrainingStore, TrainingStoreError
 from src.routing.build_singapore_fleet_fixture import low_battery_kwh
@@ -190,7 +190,10 @@ def test_one_live_session_runs_route_incident_depot_and_charging(runtime):
     assert reserve(runtime)["status"] == "APPLIED"
     advance(runtime, 240)
     detected = read(runtime)
-    assert detected["vehicles"][0]["service_state"] == "AWAITING_GUIDANCE"
+    # With background traffic the incident does not hold its shuttle where it was detected: it drives on
+    # until the closure stops it (test_traffic_events)
+    assert detected["incidents"][0]["state"] == "OPTIONS_READY" and detected["incidents"][0]["vehicle_id"] == "shuttle-01"
+    assert detected["vehicles"][0]["service_state"] != "AWAITING_GUIDANCE"
     assert detected["vehicles"][0]["position"] != initial["vehicles"][0]["position"]
     assert detected["vehicles"][1]["position"] != initial["vehicles"][1]["position"]
     incident_id = detected["incidents"][0]["incident_id"]
@@ -342,7 +345,7 @@ def test_decision_after_obstruction_clearance_is_durably_rejected(runtime):
     send(runtime, "START")
     advance(runtime, 240)
     before = read(runtime)
-    option = next(c for c in before["candidates"] if c["action"] == "WAIT")
+    option = next(c for c in before["candidates"] if c["action"] == "KEEP_ROUTE")
     incident = before["incidents"][0]
     def expire(actor):
         closure = next(d for d in actor.domain.disruptions
@@ -452,7 +455,7 @@ def test_identical_seed_and_inputs_replay_identical_workflow_state(tmp_path, mon
                     await service.step(service.sessions[actor.session_id])
                 snapshot = store.snapshot(actor.session_id)
                 incident = snapshot.incidents[0]
-                option = next(c for c in snapshot.candidates if c.action == "WAIT")
+                option = next(c for c in snapshot.candidates if c.action == "KEEP_ROUTE")
                 result = await service.submit("operator", DispatcherCommand(contract_version="2.0", command_id="wait", idempotency_key="wait",
                     session_id=actor.session_id, command_type="APPROVE_INCIDENT_OPTION", expected_epoch=1,
                     expected_revision=incident.aggregate_revision, target_type="INCIDENT", target_id=incident.incident_id,
@@ -822,7 +825,7 @@ def at_safe_point(index):
     return change
 
 
-def test_a_safety_return_during_a_detour_resolves_its_incident(runtime):
+def test_a_safety_return_during_a_detour_ends_that_shuttles_response(runtime):
     client, store, service, session_id = runtime
     approve(runtime)
     send(runtime, "START")
@@ -830,13 +833,17 @@ def test_a_safety_return_during_a_detour_resolves_its_incident(runtime):
     assert incident_decision(runtime, "ROAD_DETOUR")["status"] == "APPLIED"
     advance_until(runtime, lambda s: s.vehicles[0].service_state == "DETOURING", limit=400)
     stage_boundary(runtime, at_safe_point(0))
-    advance_until(runtime, lambda s: s.incidents[0].state == "RESOLVED", limit=400)
+    # Its detour ends there; the closure is still on the road, so the incident waits for it to clear
+    advance_until(runtime, lambda s: s.incidents[0].responses[0].completed_tick is not None, limit=400)
     events = all_events(store, session_id)
     turned = next(e for e in events if e.event_type == "SAFETY_RETURN")
     assert turned.entity_id == "shuttle-01" and turned.data["left_detour"]
-    resolved = next(e for e in events if e.event_type == "INCIDENT_RESOLVED")
-    assert resolved.data["reason"] == "The shuttle left the approved detour for a charger"
-    assert read(runtime)["vehicles"][0]["service_state"] == "RETURNING_TO_DEPOT"
+    completed = next(e for e in events if e.event_type == "INCIDENT_RESPONSE_COMPLETED")
+    assert completed.data["reason"] == "The shuttle left the approved detour for a charger"
+    assert completed.data["vehicle_id"] == "shuttle-01"
+    snapshot = read(runtime)
+    assert snapshot["incidents"][0]["state"] != "EXECUTING"
+    assert snapshot["vehicles"][0]["service_state"] == "RETURNING_TO_DEPOT"
 
 
 def test_continue_then_a_safety_return_is_committed_and_survives_recovery(runtime, tmp_path):
@@ -850,6 +857,11 @@ def test_continue_then_a_safety_return_is_committed_and_survives_recovery(runtim
         revision=vehicle["aggregate_revision"], key="continue",
         payload={"option_id": option["option_id"], "option_revision": option["revision"]})["status"] == "APPLIED"
     stage_boundary(runtime, at_safe_point(4))
+    # The safety return does not allow for the lights on the way in (_signal_wait_s): standing at every one
+    # of them, it may arrive that much under its reserve
+    actor = service.sessions[session_id].actor
+    lights_kwh = max(auxiliary_energy_kwh(ENERGY_R1, actor._signal_wait_s(actor.shuttles[4], depot))
+                     for depot in actor.definition.depots)
     advance_until(runtime, lambda s: s.vehicles[4].service_state == "RETURNING_TO_DEPOT", limit=400)
     turned = next(e for e in all_events(store, session_id) if e.event_type == "SAFETY_RETURN")
     reserve = reserve_kwh(ENERGY_R1, 40.0)
@@ -879,7 +891,7 @@ def test_continue_then_a_safety_return_is_committed_and_survives_recovery(runtim
                     await recovered_service.step(session)
                 charging = recovered_store.snapshot(session_id)
                 assert charging.vehicles[4].service_state == "CHARGING"
-                assert charging.vehicles[4].battery_kwh >= reserve
+                assert charging.vehicles[4].battery_kwh >= reserve - lights_kwh
                 assert held in {c.charger_id for c in charging.chargers if "shuttle-05" in c.occupied_vehicle_ids}
             finally:
                 await recovered_service.close()

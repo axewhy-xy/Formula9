@@ -13,6 +13,7 @@
  */
 
 using System.IO;
+using System.Linq;
 using Formula9.Contracts;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
@@ -61,6 +62,8 @@ namespace Formula9.Tests
         //     Every valid shared fixture parses as its message type.
         [TestCase("snapshot", "FULL_SNAPSHOT")]
         [TestCase("low_reserve_snapshot", "FULL_SNAPSHOT")]
+        [TestCase("world_event_snapshot", "FULL_SNAPSHOT")]
+        [TestCase("incident_decisions_snapshot", "FULL_SNAPSHOT")]
         [TestCase("spatial_snapshot", "FULL_SNAPSHOT")]
         [TestCase("event_replay", "EVENT_REPLAY")]
         [TestCase("command_status", "COMMAND_STATUS")]
@@ -101,6 +104,70 @@ namespace Formula9.Tests
             Assert.AreEqual(2, vehicle.RouteRevision);
             Assert.AreEqual("TRAINING_SIMULATION", vehicle.Provenance.Kind);
             Assert.IsNotNull(snapshot.ChargeOptions, "absent optional lists read as empty");
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: EachShuttleHasItsOwnOptionsAndAtMostOneResponse
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     An incident offers options per exposed shuttle and records one response per shuttle,
+        //     each naming a shuttle of the snapshot, as models.py requires.
+        [Test]
+        public void EachShuttleHasItsOwnOptionsAndAtMostOneResponse()
+        {
+            var snapshot = (FullSnapshot)ContractParser.ParseMessage(Fixture("incident_decisions_snapshot"));
+            var incident = snapshot.Incidents.Single(i => i.IncidentId == "scheduled-collision-1");
+            Assert.AreEqual("OPTIONS_READY", incident.State);
+            Assert.AreEqual(290, incident.ClearsAtTick);
+            Assert.AreEqual("ESCALATE", incident.ResponseOf("shuttle-03").Action);
+            Assert.IsTrue(incident.ResponseOf("shuttle-03").BeforeArrival);
+            Assert.IsNull(incident.ResponseOf("shuttle-04"));
+            Assert.AreEqual(40.0, incident.ExposureOf("shuttle-03").KeepRouteDelayS);
+            CollectionAssert.AreEquivalent(new[] { "KEEP_ROUTE", "HOLD_AT_STOP" },
+                snapshot.Candidates.Where(c => c.IncidentId == incident.IncidentId).Select(c => c.Action));
+            Assert.IsTrue(snapshot.Candidates.Where(c => c.IncidentId == incident.IncidentId).All(c => c.VehicleId == "shuttle-04"));
+
+            var twice = FixtureObject("incident_decisions_snapshot");
+            ((JArray)twice["incidents"].Last["responses"]).Add(twice["incidents"].Last["responses"][0].DeepClone());
+            StringAssert.Contains("an incident has at most one response per vehicle",
+                Assert.Throws<ContractException>(() => ContractParser.ParseMessage(twice.ToString())).Message);
+
+            var stranger = FixtureObject("incident_decisions_snapshot");
+            stranger["incidents"].Last["responses"][0]["vehicle_id"] = "shuttle-09";
+            StringAssert.Contains("missing incident reference",
+                Assert.Throws<ContractException>(() => ContractParser.ParseMessage(stranger.ToString())).Message);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: AWorldEventMayNameNoShuttleButEveryShuttleItReachesMustExist
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     An incident's vehicle is optional; its exposures must match its exposed shuttles, in
+        //     order, and name shuttles of the snapshot, as models.py requires.
+        [Test]
+        public void AWorldEventMayNameNoShuttleButEveryShuttleItReachesMustExist()
+        {
+            var world = (FullSnapshot)ContractParser.ParseMessage(Fixture("world_event_snapshot"));
+            var incident = world.Incidents.Single(i => i.IncidentId == "scheduled-collision-1");
+            Assert.IsNull(incident.VehicleId);
+            Assert.AreEqual("COLLISION", incident.EventType);
+            Assert.AreEqual("Lorong 6 Toa Payoh", incident.Location.RoadName);
+            Assert.AreEqual(85.0, incident.Exposures[0].EtaS);
+            Assert.IsTrue(incident.Involves("shuttle-04"));
+            Assert.IsFalse(incident.Involves("shuttle-01"));
+            Assert.AreEqual("shuttle-03", incident.FocusVehicleId);
+            Assert.AreEqual("shuttle-01", world.Candidates[0].VehicleId);
+
+            var reordered = FixtureObject("world_event_snapshot");
+            reordered["incidents"].Last["exposed_vehicle_ids"] = new JArray("shuttle-04", "shuttle-03");
+            StringAssert.Contains("incident exposures must list exactly its exposed vehicles",
+                Assert.Throws<ContractException>(() => ContractParser.ParseMessage(reordered.ToString())).Message);
+
+            var stranger = FixtureObject("world_event_snapshot");
+            stranger["incidents"].Last["exposed_vehicle_ids"] = new JArray("shuttle-09");
+            stranger["incidents"].Last["exposures"] = new JArray(new JObject { ["vehicle_id"] = "shuttle-09", ["distance_m"] = 1.0, ["eta_s"] = 1.0, ["is_estimate"] = true });
+            StringAssert.Contains("missing incident reference",
+                Assert.Throws<ContractException>(() => ContractParser.ParseMessage(stranger.ToString())).Message);
         }
 
         // -----------------------------------------------------------------------------------

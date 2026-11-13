@@ -1121,350 +1121,244 @@
       "52209-blk-101c-carpark": [
         "return:15:forward"
       ]
+    },
+    "peer_routes": {
+      "route-peer-b": {
+        "start_node_id": 113,
+        "destination_node_id": 113,
+        "default_via_node_ids": [
+          107
+        ],
+        "required_stops": {
+          "52191-blk-138b": 107,
+          "52139-oleander-towers": 111,
+          "52181-opposite-toa-payoh-station": 113
+        },
+        "stop_approach_edge_ids": {
+          "52191-blk-138b": [
+            "road-639549802:1:forward"
+          ],
+          "52139-oleander-towers": [
+            "road-481676841:1:forward"
+          ],
+          "52181-opposite-toa-payoh-station": [
+            "road-258894425:1:forward"
+          ]
+        },
+        "original_directed_edge_ids": [
+          "road-258894425:0:forward",
+          "road-639879649:0:forward",
+          "road-657694097:0:forward",
+          "road-258894424:0:forward",
+          "road-750074491:0:forward",
+          "road-639886318:0:forward",
+          "road-750075096:0:forward",
+          "road-750075097:0:forward",
+          "road-750074960:0:forward",
+          "road-639549802:1:forward",
+          "road-639549802:0:forward",
+          "road-864872994:0:forward",
+          "road-639596267:0:forward",
+          "road-748680127:0:forward",
+          "road-748681161:0:forward",
+          "road-122673166:0:forward",
+          "road-826866609:0:forward",
+          "road-865215708:0:forward",
+          "road-865215710:0:forward",
+          "road-537045036:1:forward",
+          "road-537045036:0:forward",
+          "road-481674940:0:forward",
+          "road-827671974:0:forward",
+          "road-481674941:0:forward",
+          "road-481676840:0:forward",
+          "road-481646419:0:forward",
+          "road-740593158:0:forward",
+          "road-481646420:2:forward",
+          "road-481646420:0:forward",
+          "road-481646420:1:forward",
+          "road-481676841:1:forward",
+          "road-481676841:0:forward",
+          "road-481676842:0:forward",
+          "road-640235758:0:forward",
+          "road-481676843:0:forward",
+          "road-650083748:0:forward",
+          "road-481676844:0:forward",
+          "road-464150152:0:forward",
+          "road-464307254:0:forward",
+          "road-750072308:0:forward",
+          "road-258894425:1:forward"
+        ]
+      },
+      "route-peer-c": {
+        "start_node_id": 105,
+        "destination_node_id": 105,
+        "default_via_node_ids": [
+          99
+        ],
+        "required_stops": {
+          "52259-opposite-chung-hwa-free-clinic": 99,
+          "52339-opposite-blk-26": 103,
+          "52309-opposite-blk-35": 105
+        },
+        "stop_approach_edge_ids": {
+          "52259-opposite-chung-hwa-free-clinic": [
+            "road-658140807:2:forward"
+          ],
+          "52339-opposite-blk-26": [
+            "road-481679772:1:forward"
+          ],
+          "52309-opposite-blk-35": [
+            "road-657593090:1:forward"
+          ]
+        },
+        "original_directed_edge_ids": [
+          "road-657593090:0:forward",
+          "road-749508939:0:forward",
+          "road-173909446:0:forward",
+          "road-173909446:1:forward",
+          "road-749510713:0:forward",
+          "road-22308644:0:forward",
+          "road-658171026:0:forward",
+          "road-645158732:0:forward",
+          "road-644953744:0:forward",
+          "road-644953747:0:forward",
+          "road-658140807:2:forward",
+          "road-658140807:0:forward",
+          "road-658140807:1:forward",
+          "road-658140818:0:forward",
+          "road-122727336:0:forward",
+          "road-656790729:1:forward",
+          "road-656790729:0:forward",
+          "road-259686650:0:forward",
+          "road-630433697:0:forward",
+          "road-481679771:0:forward",
+          "road-259686641:0:forward",
+          "road-481679772:1:forward",
+          "road-481679772:0:forward",
+          "road-481679773:0:forward",
+          "road-481679774:0:forward",
+          "road-738159557:0:forward",
+          "road-479382236:0:forward",
+          "road-690628449:0:forward",
+          "road-688816215:0:forward",
+          "road-657593090:1:forward"
+        ]
+      },
+      "route-peer-d": {
+        "start_node_id": 113,
+        "destination_node_id": 113,
+        "default_via_node_ids": [
+          109
+        ],
+        "required_stops": {
+          "52149-blk-139a": 109,
+          "52181-opposite-toa-payoh-station": 113
+        },
+        "stop_approach_edge_ids": {
+          "52149-blk-139a": [
+            "road-537045036:1:forward"
+          ],
+          "52181-opposite-toa-payoh-station": [
+            "road-258894425:1:forward"
+          ]
+        },
+        "original_directed_edge_ids": [
+          "road-258894425:0:forward",
+          "road-639879649:0:forward",
+          "road-657694097:0:forward",
+          "road-258894424:0:forward",
+          "road-750074491:0:forward",
+          "road-639886318:0:forward",
+          "road-750075096:0:forward",
+          "road-750075097:0:forward",
+          "road-750074960:0:forward",
+          "road-639549802:1:forward",
+          "road-639549802:0:forward",
+          "road-864872994:0:forward",
+          "road-639596267:0:forward",
+          "road-748680127:0:forward",
+          "road-748681161:0:forward",
+          "road-122673166:0:forward",
+          "road-826866609:0:forward",
+          "road-865215708:0:forward",
+          "road-865215710:0:forward",
+          "road-537045036:1:forward",
+          "road-537045036:0:forward",
+          "road-481674940:0:forward",
+          "road-827671974:0:forward",
+          "road-481674941:0:forward",
+          "road-481676840:0:forward",
+          "road-481646419:0:forward",
+          "road-740593158:0:forward",
+          "road-481646420:2:forward",
+          "road-481646420:0:forward",
+          "road-481646420:1:forward",
+          "road-481676841:1:forward",
+          "road-481676841:0:forward",
+          "road-481676842:0:forward",
+          "road-640235758:0:forward",
+          "road-481676843:0:forward",
+          "road-650083748:0:forward",
+          "road-481676844:0:forward",
+          "road-464150152:0:forward",
+          "road-464307254:0:forward",
+          "road-750072308:0:forward",
+          "road-258894425:1:forward"
+        ]
+      },
+      "route-peer-e": {
+        "start_node_id": 105,
+        "destination_node_id": 105,
+        "default_via_node_ids": [
+          101
+        ],
+        "required_stops": {
+          "52329-after-lorong-4-toa-payoh": 101,
+          "52309-opposite-blk-35": 105
+        },
+        "stop_approach_edge_ids": {
+          "52329-after-lorong-4-toa-payoh": [
+            "road-656790729:1:forward"
+          ],
+          "52309-opposite-blk-35": [
+            "road-657593090:1:forward"
+          ]
+        },
+        "original_directed_edge_ids": [
+          "road-657593090:0:forward",
+          "road-749508939:0:forward",
+          "road-173909446:0:forward",
+          "road-173909446:1:forward",
+          "road-749510713:0:forward",
+          "road-22308644:0:forward",
+          "road-658171026:0:forward",
+          "road-645158732:0:forward",
+          "road-644953744:0:forward",
+          "road-644953747:0:forward",
+          "road-658140807:2:forward",
+          "road-658140807:0:forward",
+          "road-658140807:1:forward",
+          "road-658140818:0:forward",
+          "road-122727336:0:forward",
+          "road-656790729:1:forward",
+          "road-656790729:0:forward",
+          "road-259686650:0:forward",
+          "road-630433697:0:forward",
+          "road-481679771:0:forward",
+          "road-259686641:0:forward",
+          "road-481679772:1:forward",
+          "road-481679772:0:forward",
+          "road-481679773:0:forward",
+          "road-481679774:0:forward",
+          "road-738159557:0:forward",
+          "road-479382236:0:forward",
+          "road-690628449:0:forward",
+          "road-688816215:0:forward",
+          "road-657593090:1:forward"
+        ]
+      }
     }
   },
-  "peer_patterns": [
-    {
-      "route_ID": "route-peer-b",
-      "waypoints": [
-        {
-          "x": 2979.12,
-          "y": -2122.99
-        },
-        {
-          "x": 3016.35,
-          "y": -1982.32
-        },
-        {
-          "x": 3015.28,
-          "y": -1937.54
-        },
-        {
-          "x": 3002.54,
-          "y": -1897.65
-        },
-        {
-          "x": 2966.26,
-          "y": -1833.14
-        },
-        {
-          "x": 2936.25,
-          "y": -1762.3
-        },
-        {
-          "x": 2924.64,
-          "y": -1709.73
-        },
-        {
-          "x": 2921.14,
-          "y": -1668.34
-        },
-        {
-          "x": 2648.99,
-          "y": -1668.48
-        },
-        {
-          "x": 2611.76,
-          "y": -1881.8
-        },
-        {
-          "x": 2608.93,
-          "y": -1904.78
-        },
-        {
-          "x": 2609.53,
-          "y": -1963.56
-        },
-        {
-          "x": 2614.89,
-          "y": -2003.01
-        },
-        {
-          "x": 2627.73,
-          "y": -2047.55
-        },
-        {
-          "x": 2647.19,
-          "y": -2091.08
-        },
-        {
-          "x": 2666.9,
-          "y": -2121.84
-        },
-        {
-          "x": 2705.58,
-          "y": -2166.11
-        },
-        {
-          "x": 2752.23,
-          "y": -2204.4
-        },
-        {
-          "x": 2800.1,
-          "y": -2230.13
-        },
-        {
-          "x": 2864.33,
-          "y": -2250.65
-        },
-        {
-          "x": 2891.96,
-          "y": -2249.61
-        },
-        {
-          "x": 2912.96,
-          "y": -2244.54
-        },
-        {
-          "x": 2922.14,
-          "y": -2240.47
-        },
-        {
-          "x": 2951.64,
-          "y": -2212.86
-        },
-        {
-          "x": 2979.12,
-          "y": -2122.99
-        }
-      ]
-    },
-    {
-      "route_ID": "route-peer-d",
-      "waypoints": [
-        {
-          "x": 2979.12,
-          "y": -2122.99
-        },
-        {
-          "x": 3016.35,
-          "y": -1982.32
-        },
-        {
-          "x": 3015.28,
-          "y": -1937.54
-        },
-        {
-          "x": 3002.54,
-          "y": -1897.65
-        },
-        {
-          "x": 2966.26,
-          "y": -1833.14
-        },
-        {
-          "x": 2936.25,
-          "y": -1762.3
-        },
-        {
-          "x": 2924.64,
-          "y": -1709.73
-        },
-        {
-          "x": 2921.14,
-          "y": -1668.34
-        },
-        {
-          "x": 2648.99,
-          "y": -1668.48
-        },
-        {
-          "x": 2611.76,
-          "y": -1881.8
-        },
-        {
-          "x": 2608.93,
-          "y": -1904.78
-        },
-        {
-          "x": 2609.53,
-          "y": -1963.56
-        },
-        {
-          "x": 2614.89,
-          "y": -2003.01
-        },
-        {
-          "x": 2627.73,
-          "y": -2047.55
-        },
-        {
-          "x": 2647.19,
-          "y": -2091.08
-        },
-        {
-          "x": 2666.9,
-          "y": -2121.84
-        },
-        {
-          "x": 2705.58,
-          "y": -2166.11
-        },
-        {
-          "x": 2752.23,
-          "y": -2204.4
-        },
-        {
-          "x": 2800.1,
-          "y": -2230.13
-        },
-        {
-          "x": 2864.33,
-          "y": -2250.65
-        },
-        {
-          "x": 2891.96,
-          "y": -2249.61
-        },
-        {
-          "x": 2912.96,
-          "y": -2244.54
-        },
-        {
-          "x": 2922.14,
-          "y": -2240.47
-        },
-        {
-          "x": 2951.64,
-          "y": -2212.86
-        },
-        {
-          "x": 2979.12,
-          "y": -2122.99
-        }
-      ]
-    },
-    {
-      "route_ID": "route-peer-c",
-      "waypoints": [
-        {
-          "x": 3384.01,
-          "y": -2324.64
-        },
-        {
-          "x": 3419.08,
-          "y": -2323.54
-        },
-        {
-          "x": 3510.98,
-          "y": -2311.15
-        },
-        {
-          "x": 3538.31,
-          "y": -2291.99
-        },
-        {
-          "x": 3549.74,
-          "y": -2267.5
-        },
-        {
-          "x": 3507.12,
-          "y": -1982.04
-        },
-        {
-          "x": 3498.27,
-          "y": -1947.46
-        },
-        {
-          "x": 3373.01,
-          "y": -1980.99
-        },
-        {
-          "x": 3100.24,
-          "y": -1982.06
-        },
-        {
-          "x": 3101.0,
-          "y": -2050.06
-        },
-        {
-          "x": 3094.09,
-          "y": -2078.14
-        },
-        {
-          "x": 3097.76,
-          "y": -2089.03
-        },
-        {
-          "x": 3259.27,
-          "y": -2086.97
-        },
-        {
-          "x": 3260.91,
-          "y": -2309.35
-        },
-        {
-          "x": 3384.01,
-          "y": -2324.64
-        }
-      ]
-    },
-    {
-      "route_ID": "route-peer-e",
-      "waypoints": [
-        {
-          "x": 3384.01,
-          "y": -2324.64
-        },
-        {
-          "x": 3419.08,
-          "y": -2323.54
-        },
-        {
-          "x": 3510.98,
-          "y": -2311.15
-        },
-        {
-          "x": 3538.31,
-          "y": -2291.99
-        },
-        {
-          "x": 3549.74,
-          "y": -2267.5
-        },
-        {
-          "x": 3507.12,
-          "y": -1982.04
-        },
-        {
-          "x": 3498.27,
-          "y": -1947.46
-        },
-        {
-          "x": 3373.01,
-          "y": -1980.99
-        },
-        {
-          "x": 3100.24,
-          "y": -1982.06
-        },
-        {
-          "x": 3101.0,
-          "y": -2050.06
-        },
-        {
-          "x": 3094.09,
-          "y": -2078.14
-        },
-        {
-          "x": 3097.76,
-          "y": -2089.03
-        },
-        {
-          "x": 3259.27,
-          "y": -2086.97
-        },
-        {
-          "x": 3260.91,
-          "y": -2309.35
-        },
-        {
-          "x": 3384.01,
-          "y": -2324.64
-        }
-      ]
-    }
-  ],
   "vehicle_assignments": [
     "route-m2-detour",
     "route-peer-b",
@@ -1484,7 +1378,7 @@
     28,
     8.32,
     28,
-    7.0
+    7.1
   ],
   "incident_overrides": {
     "fixture_id": "m2-integrated-obstruction-r1",
@@ -1493,8 +1387,8 @@
     "trigger_tick": 240
   },
   "assumptions": [
-    "Real Toa Payoh road geometry and LTA bus stop positions from OpenStreetMap, simplified to at most 64 waypoints a loop; energy-r1 estimates. Shuttles keep to the kerb lane among a sample of background traffic and stop at simulated traffic lights with made-up timings.",
-    "Shuttle-01 dwells at its loop entrance junction for 12 seconds; an obstruction on the first segment of its main road then admits WAIT, ESCALATE, or either real street around it.",
+    "Real Toa Payoh road geometry and LTA bus stop positions from OpenStreetMap; every shuttle drives its loop on the operating road network. energy-r1 estimates. Shuttles keep to the kerb lane among a sample of background traffic and stop at simulated traffic lights with made-up timings.",
+    "Shuttle-01 dwells at its loop entrance junction for 12 seconds; an obstruction on the first segment of its main road then admits KEEP_ROUTE, ESCALATE, HOLD_AT_STOP or either real street around it.",
     "Depot return follows the remainder of the current loop plus declared access geometry to the reserved bay; charging lasts 60 simulated seconds and ends in standby.",
     "Point-centre separation and swept polyline checks inherit the bounded BE-M2-02 controller; this is not a general vehicle-body collision model.",
     "Return ETA uses admitted remaining path length and the declared cruise speed. Before allocation it conservatively uses the longer bay approach. Dwell, traffic holds and incident delays are excluded from ETA; actual arrival time and energy are recorded separately."
@@ -1504,83 +1398,7 @@
     103.8198
   ],
   "source_geography": "Toa Payoh, Singapore; roads and bus stops \u00a9 OpenStreetMap contributors (ODbL)",
-  "peer_stops": {
-    "route-peer-b": "52181-opposite-toa-payoh-station",
-    "route-peer-d": "52181-opposite-toa-payoh-station",
-    "route-peer-c": "52509-after-hdb-hub",
-    "route-peer-e": "52509-after-hdb-hub"
-  },
   "service_area": "Toa Payoh",
-  "peer_route_stops": {
-    "route-peer-b": [
-      {
-        "stop_id": "52181-opposite-toa-payoh-station",
-        "progress_m": 0.0,
-        "x": 2979.12,
-        "y": -2122.99
-      },
-      {
-        "stop_id": "52191-blk-138b",
-        "progress_m": 406.546,
-        "x": 2931.2,
-        "y": -1739.433
-      },
-      {
-        "stop_id": "52139-oleander-towers",
-        "progress_m": 1251.678,
-        "x": 2688.062,
-        "y": -2146.061
-      }
-    ],
-    "route-peer-d": [
-      {
-        "stop_id": "52181-opposite-toa-payoh-station",
-        "progress_m": 0.0,
-        "x": 2979.12,
-        "y": -2122.99
-      },
-      {
-        "stop_id": "52149-blk-139a",
-        "progress_m": 815.946,
-        "x": 2637.764,
-        "y": -1732.802
-      }
-    ],
-    "route-peer-c": [
-      {
-        "stop_id": "52509-after-hdb-hub",
-        "progress_m": 0.0,
-        "x": 3384.01,
-        "y": -2324.64
-      },
-      {
-        "stop_id": "52251-chung-hwa-free-clinic",
-        "progress_m": 333.514,
-        "x": 3528.285,
-        "y": -2123.8
-      },
-      {
-        "stop_id": "52239-blk-177",
-        "progress_m": 773.117,
-        "x": 3242.105,
-        "y": -1981.504
-      }
-    ],
-    "route-peer-e": [
-      {
-        "stop_id": "52509-after-hdb-hub",
-        "progress_m": 0.0,
-        "x": 3384.01,
-        "y": -2324.64
-      },
-      {
-        "stop_id": "52261-opposite-blk-73",
-        "progress_m": 458.698,
-        "x": 3509.8,
-        "y": -1999.989
-      }
-    ]
-  },
   "depots": [
     {
       "depot_id": "depot-toa-payoh-interchange",
@@ -1729,16 +1547,16 @@
         ],
         "route-peer-c": [
           [
-            3384.01,
-            -2324.64
+            3913.89,
+            -1997.11
           ],
           [
-            3435.07,
-            -2321.77
+            3662.0,
+            -2045.1
           ],
           [
-            3563.16,
-            -2303.19
+            3528.43,
+            -2063.13
           ],
           [
             3564.73,
@@ -1821,16 +1639,16 @@
         ],
         "route-peer-e": [
           [
-            3384.01,
-            -2324.64
+            3913.89,
+            -1997.11
           ],
           [
-            3435.07,
-            -2321.77
+            3662.0,
+            -2045.1
           ],
           [
-            3563.16,
-            -2303.19
+            3528.43,
+            -2063.13
           ],
           [
             3564.73,
@@ -2065,12 +1883,72 @@
             -2283.18
           ],
           [
-            3387.74,
-            -2324.75
+            3366.14,
+            -2323.57
           ],
           [
-            3384.01,
-            -2324.64
+            3402.75,
+            -2324.48
+          ],
+          [
+            3450.42,
+            -2319.9
+          ],
+          [
+            3795.65,
+            -2268.78
+          ],
+          [
+            3843.86,
+            -2259.19
+          ],
+          [
+            3888.23,
+            -2245.51
+          ],
+          [
+            3905.91,
+            -2236.69
+          ],
+          [
+            3955.75,
+            -2198.59
+          ],
+          [
+            3991.96,
+            -2158.67
+          ],
+          [
+            4015.11,
+            -2124.8
+          ],
+          [
+            4053.13,
+            -2050.55
+          ],
+          [
+            4058.62,
+            -2008.42
+          ],
+          [
+            4049.34,
+            -1986.92
+          ],
+          [
+            4032.43,
+            -1978.83
+          ],
+          [
+            3959.69,
+            -1987.71
+          ],
+          [
+            3910.82,
+            -1997.67
+          ],
+          [
+            3913.89,
+            -1997.11
           ]
         ],
         "route-peer-d": [
@@ -2165,12 +2043,72 @@
             -2283.18
           ],
           [
-            3387.74,
-            -2324.75
+            3366.14,
+            -2323.57
           ],
           [
-            3384.01,
-            -2324.64
+            3402.75,
+            -2324.48
+          ],
+          [
+            3450.42,
+            -2319.9
+          ],
+          [
+            3795.65,
+            -2268.78
+          ],
+          [
+            3843.86,
+            -2259.19
+          ],
+          [
+            3888.23,
+            -2245.51
+          ],
+          [
+            3905.91,
+            -2236.69
+          ],
+          [
+            3955.75,
+            -2198.59
+          ],
+          [
+            3991.96,
+            -2158.67
+          ],
+          [
+            4015.11,
+            -2124.8
+          ],
+          [
+            4053.13,
+            -2050.55
+          ],
+          [
+            4058.62,
+            -2008.42
+          ],
+          [
+            4049.34,
+            -1986.92
+          ],
+          [
+            4032.43,
+            -1978.83
+          ],
+          [
+            3959.69,
+            -1987.71
+          ],
+          [
+            3910.82,
+            -1997.67
+          ],
+          [
+            3913.89,
+            -1997.11
           ]
         ]
       }
@@ -2622,16 +2560,16 @@
         ],
         "route-peer-c": [
           [
-            3384.01,
-            -2324.64
+            3913.89,
+            -1997.11
           ],
           [
-            3435.07,
-            -2321.77
+            3662.0,
+            -2045.1
           ],
           [
-            3563.16,
-            -2303.19
+            3528.43,
+            -2063.13
           ],
           [
             3564.73,
@@ -2650,32 +2588,32 @@
             -2285.9
           ],
           [
-            2965.26,
-            -2294.22
+            2971.08,
+            -2291.44
+          ],
+          [
+            2959.93,
+            -2297.63
           ],
           [
             2935.95,
             -2318.86
           ],
           [
-            2915.6,
-            -2386.78
+            2912.92,
+            -2400.15
           ],
           [
             2909.57,
             -2439.99
           ],
           [
-            2913.31,
-            -2532.12
+            2915.0,
+            -2544.23
           ],
           [
-            2921.6,
-            -2565.39
-          ],
-          [
-            2930.94,
-            -2581.11
+            2926.39,
+            -2574.74
           ],
           [
             2942.43,
@@ -2686,28 +2624,32 @@
             -2604.21
           ],
           [
-            2997.25,
-            -2603.32
+            2988.52,
+            -2604.8
           ],
           [
-            3019.34,
-            -2592.64
+            3004.48,
+            -2600.63
           ],
           [
-            3033.07,
-            -2580.19
+            3025.56,
+            -2587.55
           ],
           [
-            3040.83,
-            -2567.14
-          ],
-          [
-            3045.01,
-            -2546.39
+            3037.8,
+            -2572.96
           ],
           [
             3043.81,
-            -2528.63
+            -2556.47
+          ],
+          [
+            3045.01,
+            -2537.5
+          ],
+          [
+            3039.64,
+            -2518.54
           ],
           [
             3033.63,
@@ -2746,16 +2688,16 @@
             -2547.11
           ],
           [
-            2586.22,
-            -2820.53
+            2584.31,
+            -2814.61
           ],
           [
             2589.76,
             -2824.51
           ],
           [
-            2747.93,
-            -2812.75
+            2735.19,
+            -2812.8
           ],
           [
             2850.51,
@@ -3034,16 +2976,16 @@
         ],
         "route-peer-e": [
           [
-            3384.01,
-            -2324.64
+            3913.89,
+            -1997.11
           ],
           [
-            3435.07,
-            -2321.77
+            3662.0,
+            -2045.1
           ],
           [
-            3563.16,
-            -2303.19
+            3528.43,
+            -2063.13
           ],
           [
             3564.73,
@@ -3062,32 +3004,32 @@
             -2285.9
           ],
           [
-            2965.26,
-            -2294.22
+            2971.08,
+            -2291.44
+          ],
+          [
+            2959.93,
+            -2297.63
           ],
           [
             2935.95,
             -2318.86
           ],
           [
-            2915.6,
-            -2386.78
+            2912.92,
+            -2400.15
           ],
           [
             2909.57,
             -2439.99
           ],
           [
-            2913.31,
-            -2532.12
+            2915.0,
+            -2544.23
           ],
           [
-            2921.6,
-            -2565.39
-          ],
-          [
-            2930.94,
-            -2581.11
+            2926.39,
+            -2574.74
           ],
           [
             2942.43,
@@ -3098,28 +3040,32 @@
             -2604.21
           ],
           [
-            2997.25,
-            -2603.32
+            2988.52,
+            -2604.8
           ],
           [
-            3019.34,
-            -2592.64
+            3004.48,
+            -2600.63
           ],
           [
-            3033.07,
-            -2580.19
+            3025.56,
+            -2587.55
           ],
           [
-            3040.83,
-            -2567.14
-          ],
-          [
-            3045.01,
-            -2546.39
+            3037.8,
+            -2572.96
           ],
           [
             3043.81,
-            -2528.63
+            -2556.47
+          ],
+          [
+            3045.01,
+            -2537.5
+          ],
+          [
+            3039.64,
+            -2518.54
           ],
           [
             3033.63,
@@ -3158,16 +3104,16 @@
             -2547.11
           ],
           [
-            2586.22,
-            -2820.53
+            2584.31,
+            -2814.61
           ],
           [
             2589.76,
             -2824.51
           ],
           [
-            2747.93,
-            -2812.75
+            2735.19,
+            -2812.8
           ],
           [
             2850.51,
@@ -4070,12 +4016,8 @@
             -2506.04
           ],
           [
-            2174.61,
-            -2525.96
-          ],
-          [
-            2175.36,
-            -2542.27
+            2174.31,
+            -2534.26
           ],
           [
             2179.08,
@@ -4150,8 +4092,72 @@
             -2324.75
           ],
           [
-            3384.01,
-            -2324.64
+            3450.42,
+            -2319.9
+          ],
+          [
+            3805.63,
+            -2267.2
+          ],
+          [
+            3888.23,
+            -2245.51
+          ],
+          [
+            3905.91,
+            -2236.69
+          ],
+          [
+            3955.75,
+            -2198.59
+          ],
+          [
+            3991.96,
+            -2158.67
+          ],
+          [
+            4015.11,
+            -2124.8
+          ],
+          [
+            4038.53,
+            -2082.05
+          ],
+          [
+            4053.13,
+            -2050.55
+          ],
+          [
+            4057.63,
+            -2026.71
+          ],
+          [
+            4058.62,
+            -2008.42
+          ],
+          [
+            4052.18,
+            -1990.32
+          ],
+          [
+            4046.5,
+            -1984.25
+          ],
+          [
+            4032.43,
+            -1978.83
+          ],
+          [
+            3959.69,
+            -1987.71
+          ],
+          [
+            3910.82,
+            -1997.67
+          ],
+          [
+            3913.89,
+            -1997.11
           ]
         ],
         "route-peer-d": [
@@ -4630,12 +4636,8 @@
             -2506.04
           ],
           [
-            2174.61,
-            -2525.96
-          ],
-          [
-            2175.36,
-            -2542.27
+            2174.31,
+            -2534.26
           ],
           [
             2179.08,
@@ -4710,8 +4712,72 @@
             -2324.75
           ],
           [
-            3384.01,
-            -2324.64
+            3450.42,
+            -2319.9
+          ],
+          [
+            3805.63,
+            -2267.2
+          ],
+          [
+            3888.23,
+            -2245.51
+          ],
+          [
+            3905.91,
+            -2236.69
+          ],
+          [
+            3955.75,
+            -2198.59
+          ],
+          [
+            3991.96,
+            -2158.67
+          ],
+          [
+            4015.11,
+            -2124.8
+          ],
+          [
+            4038.53,
+            -2082.05
+          ],
+          [
+            4053.13,
+            -2050.55
+          ],
+          [
+            4057.63,
+            -2026.71
+          ],
+          [
+            4058.62,
+            -2008.42
+          ],
+          [
+            4052.18,
+            -1990.32
+          ],
+          [
+            4046.5,
+            -1984.25
+          ],
+          [
+            4032.43,
+            -1978.83
+          ],
+          [
+            3959.69,
+            -1987.71
+          ],
+          [
+            3910.82,
+            -1997.67
+          ],
+          [
+            3913.89,
+            -1997.11
           ]
         ]
       }

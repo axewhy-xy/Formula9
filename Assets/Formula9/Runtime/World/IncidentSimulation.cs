@@ -9,12 +9,17 @@ using Event = Formula9.Contracts.Event;
 namespace Formula9.World
 {
     // Where an incident happened and what it does, as its first events say. The snapshot supplies its
-    // current state.
+    // current state, and who will reach it now (Incident.Exposures).
     public sealed class IncidentRecord
     {
         public string IncidentId, EdgeId, Kind, Impact;
+        // The world event behind it (BREAKDOWN, COLLISION, SIGNAL_FAULT or ROAD_CLOSURE), the road it is on
+        // and the alert's words when it was detected; null from a backend without world events.
+        public string EventType, RoadName, Headline;
         public Vector2 Position, Start, End;
         public List<string> ImpactEdgeIds = new List<string>();
+        // The shuttles it would reach, with their ETAs, when it was detected
+        public List<IncidentExposure> Exposures = new List<IncidentExposure>();
         public bool RequiresGuidance;
         public long? ActiveUntilTick;
 
@@ -50,8 +55,49 @@ namespace Formula9.World
                 ImpactEdgeIds = impacted,
                 RequiresGuidance = evt.Data.Value<bool?>("requires_guidance") ?? evt.EventType == "OPTIONS_READY",
                 ActiveUntilTick = evt.Data.Value<long?>("active_until_tick"),
+                EventType = evt.Data.Value<string>("event_type"),
+                RoadName = (evt.Data["location"] as JObject)?.Value<string>("road_name"),
+                Headline = evt.Data.Value<string>("headline"),
+                Exposures = ReadExposures(evt.Data["exposures"]),
             };
             return true;
+        }
+
+        private static List<IncidentExposure> ReadExposures(JToken value)
+        {
+            var found = new List<IncidentExposure>();
+            if (!(value is JArray items)) return found;
+            foreach (var item in items.OfType<JObject>())
+            {
+                var vehicle = item.Value<string>("vehicle_id");
+                var eta = item.Value<double?>("eta_s");
+                if (string.IsNullOrEmpty(vehicle) || !eta.HasValue) continue;
+                found.Add(new IncidentExposure { VehicleId = vehicle, EtaS = eta.Value, DistanceM = item.Value<double?>("distance_m") ?? 0 });
+            }
+            return found;
+        }
+
+        // What an alert or a status line calls the event: its world type, else its kind.
+        public static string Name(string eventType, string kind)
+        {
+            switch (eventType)
+            {
+                case "BREAKDOWN": return "Breakdown";
+                case "COLLISION": return "Collision";
+                case "SIGNAL_FAULT": return "Signal fault";
+                case "ROAD_CLOSURE": return "Road closure";
+            }
+            return kind == IncidentSimulation.Block ? "Road block" : kind == IncidentSimulation.Accident ? "Road accident" : "Incident";
+        }
+
+        // Who reaches an incident and when, nearest first: "shuttle-03 in ~85 s, shuttle-04 in ~110 s".
+        public static string Reach(IEnumerable<IncidentExposure> exposures, int most = 3)
+        {
+            var list = exposures?.ToList() ?? new List<IncidentExposure>();
+            if (list.Count == 0) return null;
+            var shown = list.Take(most).Select(e => e.EtaS < 0.5 ? $"{e.VehicleId} now" : $"{e.VehicleId} in ~{Math.Round(e.EtaS)} s");
+            var text = string.Join(", ", shown);
+            return list.Count > most ? $"{text} (+{list.Count - most} more)" : text;
         }
     }
 
@@ -91,7 +137,7 @@ namespace Formula9.World
     // drives (src/traffic/incident_hazards.py), and this traffic uses them when it drives itself.
     public static class IncidentSimulation
     {
-        public const string Block = "ROAD_BLOCK", Accident = "ROAD_ACCIDENT";
+        public const string Block = "ROAD_BLOCK", Accident = "ROAD_ACCIDENT", SignalFault = "SIGNAL_FAULT";
         public const float ReachM = 140, GrowthMps = 5, LaneOffsetM = 3.5f;
         private const float WreckClearM = 12, FirstCarM = 6, CarSpacingM = 9, CarJitterM = 3;
         private const float RollInS = 3, RollInMps = 8, CreepM = 0.8f, CreepRate = 0.9f, CreepWaveM = 0.06f;
@@ -209,8 +255,9 @@ namespace Formula9.World
         private static Disruption Closure(IncidentRecord record, FullSnapshot snapshot, Incident incident) =>
             snapshot.Disruptions.FirstOrDefault(d => d.AffectedEdgeIds.Contains(record.EdgeId) && d.ActiveFromTick >= incident.DetectedTick);
 
+        // When it clears: an escalation brings the incident's clears_at_tick (and a closure's end) forward
         private static long? ClearsAt(IncidentRecord record, FullSnapshot snapshot, Incident incident) =>
-            Closure(record, snapshot, incident)?.ActiveUntilTick ?? record.ActiveUntilTick;
+            Closure(record, snapshot, incident)?.ActiveUntilTick ?? incident.ClearsAtTick ?? record.ActiveUntilTick;
 
         public static float SecondsPerTick(FullSnapshot snapshot) => snapshot.Tick > 0 ? (float)(snapshot.SimulationTimeS / snapshot.Tick) : 0.05f;
 
@@ -220,11 +267,12 @@ namespace Formula9.World
             return incident == null ? 0 : Mathf.Max(0, (snapshot.Tick - incident.DetectedTick) * SecondsPerTick(snapshot));
         }
 
-        // Is this shuttle crawling because of this incident? Only true on a road the backend slows.
+        // Is this shuttle crawling because of this incident? Only true on a road the backend slows, which
+        // slows every shuttle on it, whichever one the incident was placed for.
         public static bool IsSlowing(IncidentPlan plan, FleetVehicle vehicle, FullSnapshot snapshot)
         {
             var incident = snapshot.Incidents.FirstOrDefault(i => i.IncidentId == plan.Record.IncidentId);
-            if (incident?.VehicleId != vehicle.VehicleId || vehicle.SpeedMps <= 0) return false;
+            if (incident == null || vehicle.SpeedMps <= 0) return false;
             var at = new Vector2((float)vehicle.Position.XM, (float)vehicle.Position.YM);
             return plan.Slowed.Any(path => Distance(path, at) <= ShuttleOnRoadM);
         }
@@ -233,15 +281,19 @@ namespace Formula9.World
         public static string Line(IncidentPlan plan, FullSnapshot snapshot)
         {
             var record = plan.Record;
-            var kind = record.Kind == Block ? "Road block" : record.Kind == Accident ? "Road accident" : "Incident";
-            var road = string.IsNullOrEmpty(plan.RoadName) ? "" : " · " + plan.RoadName;
+            var kind = IncidentRecord.Name(record.EventType, record.Kind);
+            var roadName = string.IsNullOrEmpty(plan.RoadName) ? record.RoadName : plan.RoadName;
+            var road = string.IsNullOrEmpty(roadName) ? "" : " · " + roadName;
             var incident = snapshot.Incidents.First(i => i.IncidentId == record.IncidentId);
             // The event's words were true when it was detected; a decision has been made since
-            var impact = record.RequiresGuidance && incident.State != "OPTIONS_READY" ? "Road closed — operator has decided" : record.Impact;
+            var impact = record.RequiresGuidance && incident.State != "OPTIONS_READY" ? "Road closed — operator has decided"
+                : incident.Responses?.Count > 0 && incident.State != "OPTIONS_READY" ? "Every shuttle reaching it has been decided for" : record.Impact;
             var clears = ClearsAt(record, snapshot, incident) is long until ? $" · clears in {Mathf.CeilToInt(Mathf.Max(0, until - snapshot.Tick) * SecondsPerTick(snapshot))} s" : "";
             var slowed = snapshot.Vehicles.FirstOrDefault(v => IsSlowing(plan, v, snapshot));
             var crawl = slowed == null ? "" : $" · {slowed.VehicleId} slowed to {slowed.SpeedMps:0.#} m/s";
-            return $"{kind}{road} · {impact}{clears}{crawl}";
+            var reach = IncidentRecord.Reach(incident.Exposures, 2);
+            var exposed = reach == null ? "" : " · reaches it: " + reach;
+            return $"{kind}{road} · {impact}{clears}{crawl}{exposed}";
         }
 
         private static Vector2[] RoutePath(FullSnapshot snapshot, string edgeId)

@@ -139,8 +139,8 @@ namespace Formula9.UI
             incidents = root.Q<DropdownField>("incidents");
             incidents.RegisterValueChangedCallback(_ => { ClearIncidentPreview(); Render(); IncidentSelected?.Invoke(); });
             incidentData = root.Q<Label>("incident-data");
-            incidentTable = Table(root.Q("incident-table-host"), "", "Incident ID", "Shuttle ID", "State", "Detected tick", "Options");
-            candidateTable = Table(root.Q("candidate-table-host"), "", "Candidate", "Action", "Validation", "Expires tick", "Assumptions");
+            incidentTable = Table(root.Q("incident-table-host"), "", "Incident ID", "Shuttle ID", "Reaches it", "State", "Decided", "Detected tick", "Options");
+            candidateTable = Table(root.Q("candidate-table-host"), "", "Candidate", "Shuttle", "Action", "Validation", "Expires tick", "Assumptions");
             Bind(root, "incident-focus", FocusIncident);
             rerouteIncident = Bind(root, "incident-reroute", ShowRoutePlanning);
             candidates = root.Q<DropdownField>("candidates");
@@ -233,25 +233,16 @@ namespace Formula9.UI
             if (incidentBoundary != newIncidentBoundary) { incidentBoundary = newIncidentBoundary; ClearIncidentPreview(); ClearEvidence(); incidentReport.text = ""; }
             Choices(candidates, selectedIncident?.CandidateIds ?? Enumerable.Empty<string>());
             var hasOptions = selectedIncident != null && selectedIncident.CandidateIds.Count > 0;
-            if (selectedIncident == null)
-                incidentData.text = "No incident selected.";
-            else if (!hasOptions)
-                incidentData.text = $"{(selectedIncident.IncidentId.Contains("road_accident") ? "ROAD ACCIDENT" : "ROAD BLOCK")} | {selectedIncident.State}\n" +
-                    "No operator decision is required for this incident. The shuttle is not being held for guidance. " +
-                    "Check the map for its location; any indirect traffic impact depends on the assessed route edges. " +
-                    "If there are no affected route edges, there is no effect on operations.";
-            else
-                incidentData.text = $"{(selectedIncident.IncidentId.Contains("road_accident") ? "ROAD ACCIDENT" : "ROAD BLOCK")} | {selectedIncident.State}\n" +
-                    "This incident requires operator review. Select an option and preview its consequences before approval, or re-route the shuttle on the map.";
+            incidentData.text = selectedIncident == null ? "No incident selected." : TrainingPresenter.IncidentSummary(selectedIncident, hasOptions);
             incidentDecisions.style.display = s.Incidents.Count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
             rerouteIncident.style.display = selectedIncident != null && selectedIncident.IncidentId == heldIncident ? DisplayStyle.Flex : DisplayStyle.None;
             candidates.style.display = hasOptions ? DisplayStyle.Flex : DisplayStyle.None;
             incidentReason.style.display = hasOptions ? DisplayStyle.Flex : DisplayStyle.None;
             previewIncident.style.display = hasOptions ? DisplayStyle.Flex : DisplayStyle.None;
             approveIncident.style.display = hasOptions ? DisplayStyle.Flex : DisplayStyle.None;
-            Rows(incidentTable, s.Incidents.OrderBy(i => i.IncidentId, StringComparer.Ordinal).Select(i => new[] { i.IncidentId, i.VehicleId, i.State, i.DetectedTick.ToString(), string.Join(", ", i.CandidateIds) }));
+            Rows(incidentTable, s.Incidents.OrderBy(i => i.IncidentId, StringComparer.Ordinal).Select(i => new[] { i.IncidentId, i.VehicleId ?? "—", IncidentRecord.Reach(i.Exposures, 2) ?? "—", i.State, TrainingPresenter.Responses(i) ?? "—", i.DetectedTick.ToString(), string.Join(", ", i.CandidateIds) }));
             foreach (var row in incidentTable.Children()) { var id = ((Label)row[0]).text; row.RegisterCallback<ClickEvent>(_ => incidents.value = id); }
-            Rows(candidateTable, s.Candidates.Where(c => c.IncidentId == incidents.value).Select(c => new[] { c.CandidateId, c.Action, c.Validation, c.ExpiresAtTick.ToString(), string.Join("; ", c.Assumptions) }));
+            Rows(candidateTable, s.Candidates.Where(c => c.IncidentId == incidents.value).Select(c => new[] { c.CandidateId, c.VehicleId ?? selectedIncident?.VehicleId ?? "—", TrainingPresenter.ActionLabel(c.Action), c.Validation, c.ExpiresAtTick.ToString(), string.Join("; ", c.Assumptions) }));
             RenderReports(); UpdateActions();
         }
 
@@ -320,7 +311,7 @@ namespace Formula9.UI
             var held = DecisionRules.HeldIncident(s);
             if (held?.IncidentId == heldIncident) return;
             heldIncident = held?.IncidentId;
-            heldVehicle = held?.VehicleId ?? heldVehicle;
+            heldVehicle = DecisionRules.DetourVehicle(s) ?? heldVehicle;
             var route = s.Vehicles.FirstOrDefault(v => v.VehicleId == heldVehicle)?.RouteId;
             if (route != null) routes.SetValueWithoutNotify(route);
             ResetDraft();
@@ -334,8 +325,11 @@ namespace Formula9.UI
             }
             Choices(incidents, s.Incidents.Select(i => i.IncidentId));
             incidents.SetValueWithoutNotify(held.IncidentId);
-            if (!world.CamerasShown) SelectVehicle(held.VehicleId);
-            notify($"{held.VehicleId} is held at a road closure. Route it round the closure, or choose another option in the Incident Monitor.");
+            if (!world.CamerasShown) SelectVehicle(heldVehicle);
+            var standing = s.Vehicles.FirstOrDefault(v => v.VehicleId == heldVehicle)?.ServiceState == "AWAITING_GUIDANCE";
+            notify(standing
+                ? $"{heldVehicle} is held at a road closure. Route it round the closure, or choose another option in the Incident Monitor."
+                : $"{heldVehicle} will reach an incident ahead. Route it round, or choose another option in the Incident Monitor.");
             ShowPage(RoutePage);
             if (!world.CamerasShown) world.ShowMap(true);
         }
@@ -508,8 +502,8 @@ namespace Formula9.UI
         {
             world.CloseCameras();
             // A closure that came up while watching is waiting on the map
-            var held = DecisionRules.HeldIncident(session.Store.Snapshot);
-            if (held != null) { SelectVehicle(held.VehicleId); world.ShowMap(true); }
+            var held = DecisionRules.DetourVehicle(session.Store.Snapshot);
+            if (held != null) { SelectVehicle(held); world.ShowMap(true); }
         }
 
         private void WatchRoute()
@@ -767,7 +761,8 @@ namespace Formula9.UI
         {
             var incident = session.Store.Snapshot?.Incidents.FirstOrDefault(i => i.IncidentId == incidents.value);
             if (incident == null) return;
-            SelectVehicle(incident.VehicleId);
+            // A world event may belong to no shuttle: show the first to reach it
+            if (incident.FocusVehicleId != null) SelectVehicle(incident.FocusVehicleId);
             if (!world.FocusIncident(incident.IncidentId)) world.FocusSelected();
         }
 
