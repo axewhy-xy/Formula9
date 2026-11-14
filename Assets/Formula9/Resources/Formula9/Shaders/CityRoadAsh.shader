@@ -7,6 +7,7 @@ Shader "Formula9/CityRoadAsh"
         [HideInInspector] _StencilRef ("Stencil Ref", Float) = 1
         [HideInInspector] _StencilComp ("Stencil Comparison", Float) = 8
         [HideInInspector] _StencilPass ("Stencil Pass", Float) = 0
+        [HideInInspector] _StencilReadMask ("Stencil Read Mask", Float) = 255
         [HideInInspector] _StencilWriteMask ("Stencil Write Mask", Float) = 0
         [HideInInspector] _ZWrite ("Depth Write", Float) = 1
     }
@@ -21,6 +22,7 @@ Shader "Formula9/CityRoadAsh"
             Ref [_StencilRef]
             Comp [_StencilComp]
             Pass [_StencilPass]
+            ReadMask [_StencilReadMask]
             WriteMask [_StencilWriteMask]
         }
         Pass

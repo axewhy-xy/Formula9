@@ -266,7 +266,17 @@ namespace Formula9.World
 
                 var road = new GameObject("Roads", typeof(MeshFilter), typeof(MeshRenderer));
                 road.transform.SetParent(root, false);
-                var geometry = Own(RoadMesh.Build(roads, out int clippedTriangles));
+                LtaMappedRoadPaint.Result junctionPaint = null;
+                if (string.Equals(area, "toa-payoh", StringComparison.OrdinalIgnoreCase))
+                {
+                    try { junctionPaint = LtaMappedRoadPaint.LoadJunctionData(roads); }
+                    catch (Exception error)
+                    {
+                        Debug.LogWarning("[CityView] Could not load junction paint: " + error.Message);
+                    }
+                }
+
+                var geometry = Own(RoadMesh.Build(roads, out int clippedTriangles, junctionPaint));
                 // Hide kerbs in this view to avoid grey bars at intersections.
                 geometry.SetTriangles(Array.Empty<int>(), RoadMesh.KerbLayer);
                 road.GetComponent<MeshFilter>().sharedMesh = geometry;
@@ -277,7 +287,7 @@ namespace Formula9.World
                 if (roadTexture == null)
                     Debug.LogWarning("[CityView] Missing Resources/Formula9/Textures/road_lane_texture. Using generated asphalt grain.");
                 Debug.Log($"[CityView] RoadMesh built {RoadCount} backend roads; " +
-                    $"asphalt triangles clipped={clippedTriangles}; asphaltOnly=true; originalTexture={useAtlas}");
+                    $"asphalt triangles clipped={clippedTriangles}; originalTexture={useAtlas}");
 
             }
             catch (Exception error) when (!(error is OperationCanceledException))

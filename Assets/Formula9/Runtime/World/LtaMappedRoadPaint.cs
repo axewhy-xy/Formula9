@@ -18,9 +18,9 @@ namespace Formula9.World
     {
         private const int GroundLevel = 2;
         private const float ChunkMetres = 450f;
-        private const float ArrowY = RoadMesh.SurfaceY + .095f;
         private const float CrossingY = RoadMesh.SurfaceY + .155f;
         private const float YellowY = RoadMesh.SurfaceY + .12f;
+        private const float DividerEdgeY = RoadMesh.SurfaceY + .105f;
         private const float StopY = RoadMesh.SurfaceY + .115f;
         private const string ResourcesFolder = "Formula9/RoadData/";
 
@@ -35,8 +35,10 @@ namespace Formula9.World
             public readonly List<PaintedMesh> Meshes = new List<PaintedMesh>();
             public readonly List<Vector2> CrossingCenters = new List<Vector2>();
             public readonly List<Vector2> SignalJunctionCenters = new List<Vector2>();
+            internal readonly List<List<Vector2>> StopLines = new List<List<Vector2>>();
             public int GroundLaneFeatures;
-            public int GroundArrowFeatures;
+            public int GroundArrowFeatures; // Retained for existing diagnostics.
+            public int DividerEdgeLineFeatures;
             public int YellowBoxLineFeatures;
             public int ZebraCrossings;
             public int SignalCrossings;
@@ -84,24 +86,6 @@ namespace Formula9.World
                 Triangles.Add(start); Triangles.Add(start + 1); Triangles.Add(start + 2);
                 Triangles.Add(start); Triangles.Add(start + 2); Triangles.Add(start + 3);
             }
-            public void Triangle(Vector2 a, Vector2 b, Vector2 c, float height)
-            {
-                float signedUp = (b.y - a.y) * (c.x - a.x) - (b.x - a.x) * (c.y - a.y);
-                if (Mathf.Abs(signedUp) < .00001f) return;
-                int start = Vertices.Count;
-                Vertices.Add(new Vector3(a.x, height, a.y));
-                if (signedUp > 0f)
-                {
-                    Vertices.Add(new Vector3(b.x, height, b.y));
-                    Vertices.Add(new Vector3(c.x, height, c.y));
-                }
-                else
-                {
-                    Vertices.Add(new Vector3(c.x, height, c.y));
-                    Vertices.Add(new Vector3(b.x, height, b.y));
-                }
-                Triangles.Add(start); Triangles.Add(start + 1); Triangles.Add(start + 2);
-            }
             public Mesh MakeMesh(string title)
             {
                 var mesh = new Mesh { name = title, indexFormat = IndexFormat.UInt32 };
@@ -126,8 +110,6 @@ namespace Formula9.World
             }
             public void Quad(Vector2 a, Vector2 b, Vector2 c, Vector2 d,
                 PaintColour colour, float y) => At((a + b + c + d) * .25f, colour).Quad(a,b,c,d,y);
-            public void Triangle(Vector2 a, Vector2 b, Vector2 c,
-                PaintColour colour, float y) => At((a + b + c) / 3f, colour).Triangle(a,b,c,y);
             public void Stroke(Vector2 from, Vector2 to, float width,
                 PaintColour colour, float y)
             {
@@ -164,57 +146,6 @@ namespace Formula9.World
                         }
                     }
                     distance += length;
-                }
-            }
-            // Solid, road-style arrows with broad filled heads (rather than thin
-            // V-shaped strokes). Position, bearing and type are mapped from LTA;
-            // glyph dimensions are an illustrative texture-like rendering.
-            public void Arrow(Vector2 origin, float headingDeg, string code)
-            {
-                float angle = headingDeg * Mathf.Deg2Rad;
-                Vector2 forward = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
-                Vector2 left = new Vector2(-forward.y, forward.x);
-                Vector2 P(float sideways, float ahead) =>
-                    origin + left * sideways + forward * ahead;
-
-                void Shaft(Vector2 a, Vector2 b, float width = .28f) =>
-                    Stroke(a, b, width, PaintColour.White, ArrowY);
-
-                void Head(Vector2 tip, Vector2 direction, float halfWidth = .48f)
-                {
-                    direction.Normalize();
-                    Vector2 lateral = new Vector2(-direction.y, direction.x);
-                    Vector2 baseAt = tip - direction * 1.05f;
-                    Triangle(tip, baseAt + lateral * halfWidth,
-                        baseAt - lateral * halfWidth, PaintColour.White, ArrowY);
-                }
-
-                void Trunk() => Shaft(P(0f, -1.8f), P(0f, .65f));
-                void Straight()
-                {
-                    Trunk();
-                    Head(P(0f, 2.0f), forward, .52f);
-                }
-                void SideTurn(bool leftTurn, bool trunk)
-                {
-                    float side = leftTurn ? 1f : -1f;
-                    if (trunk) Shaft(P(0f, -1.8f), P(0f, .18f));
-                    Shaft(P(0f, .12f), P(side * .30f, .52f), .24f);
-                    Shaft(P(side * .30f, .52f), P(side * .91f, .66f), .24f);
-                    Head(P(side * 1.85f, .69f), left * side, .40f);
-                }
-
-                switch (code)
-                {
-                    case "A": SideTurn(false, true); break;   // right
-                    case "B": Straight(); SideTurn(true, false); break;
-                    case "C": Straight(); SideTurn(false, false); break;
-                    case "D": Straight(); break;
-                    case "E": SideTurn(true, true); break;    // left
-                    case "F": SideTurn(true, true); SideTurn(false, false); break;
-                    case "I": Straight(); SideTurn(true, false); SideTurn(false, false); break;
-                    // G/H are special merge arrows. No guessed glyph until
-                    // their exact mapped geometry is supplied.
                 }
             }
             public void Export(Result result)
@@ -263,9 +194,8 @@ namespace Formula9.World
             }
             return output;
         }
-        // A mapped type-M line is used as a transverse stop bar only if it is
-        // near a road and broadly perpendicular to its local tangent.
-        // This avoids treating long ordinary lines as stop bars.
+        // LTA type J covers stop lines and expressway shoulder lines.
+        // Use the nearby road direction to select transverse stop-line candidates.
         private static bool IsTransverse(List<Vector2> line, List<CityRoad> roads)
         {
             if (line.Count < 2 || roads == null || roads.Count == 0) return false;
@@ -300,6 +230,25 @@ namespace Formula9.World
             return best < 12f*12f && alignment < .40f;
         }
 
+        internal static Result LoadJunctionData(IEnumerable<CityRoad> roads)
+        {
+            var result = new Result();
+            var roadList = new List<CityRoad>(roads);
+            var markings = TryLoad("toa-payoh-markings");
+            if (markings?["lane_lines"] is JArray lines)
+            {
+                foreach (var item in lines)
+                {
+                    if ((int?)item["level"] != GroundLevel || (string)item["type_code"] != "J") continue;
+                    var path = Points(item["points_m"]);
+                    if (IsTransverse(path, roadList)) result.StopLines.Add(path);
+                }
+            }
+
+            ReadSignalCentres(result);
+            return result;
+        }
+
         public static Result Build(IEnumerable<CityRoad> roads = null)
         {
             var roadList = roads == null ? null : new List<CityRoad>(roads);
@@ -322,10 +271,8 @@ namespace Formula9.World
                     continue;
                 }
                 var code = (string)item["type_code"];
-                // Important: F/I/B/J/etc. longitudinal lane geometry must NOT
-                // compete with RoadMesh.BuildBaseLanePaint. Nor are their endpoints
-                // automatically connected to other mapped fragments.
-                if (code != "N" && code != "M")
+                // Standard lane paint comes from the road material.
+                if (code != "N" && code != "M" && code != "J")
                 {
                     result.SkippedUnknownCodes++;
                     continue;
@@ -337,28 +284,18 @@ namespace Formula9.World
                     painter.Path(path, .34f, PaintColour.Yellow, YellowY);
                     result.YellowBoxLineFeatures++;
                 }
-                else if (IsTransverse(path,roadList))
+                else if (code == "M")
                 {
+                    painter.Path(path, .20f, PaintColour.White, DividerEdgeY);
+                    result.DividerEdgeLineFeatures++;
+                }
+                else
+                {
+                    if (!IsTransverse(path, roadList)) continue;
                     painter.Path(path, .30f, PaintColour.White, StopY);
                     result.GroundStopLineFeatures++;
                 }
                 result.GroundLaneFeatures++;
-            }
-            if (markings["arrows"] is JArray arrows)
-            {
-                foreach (var item in arrows)
-                {
-                    if ((int?)item["level"] != GroundLevel) continue;
-                    string code = (string)item["type_code"];
-                    if (string.IsNullOrEmpty(code) || code.Length != 1 ||
-                        "ABCDEFI".IndexOf(code, StringComparison.Ordinal) < 0) continue;
-                    float? x = (float?)item["x_m"];
-                    float? y = (float?)item["y_m"];
-                    float? heading = (float?)item["heading_deg"];
-                    if (!x.HasValue || !y.HasValue || !heading.HasValue) continue;
-                    painter.Arrow(new Vector2(x.Value, y.Value),heading.Value,code);
-                    result.GroundArrowFeatures++;
-                }
             }
             foreach (var item in crossingsArray)
             {
@@ -390,6 +327,17 @@ namespace Formula9.World
                     result.SignalCrossings++;
                 }
             }
+            ReadSignalCentres(result);
+            painter.Export(result);
+            Debug.Log($"[LtaMappedRoadPaint] Special features only: {result.YellowBoxLineFeatures} " +
+                $"mapped yellow-box paths, {result.GroundStopLineFeatures} type-J stop-line candidates, " +
+                $"{result.DividerEdgeLineFeatures} type-M divider edge lines, {result.ZebraCrossings} zebra " +
+                $"({result.ZebraStripeQuads} stripes), {result.SignalCrossings} signal crossings " +
+                $"({result.SignalBoundarySegments} edges), {result.Meshes.Count} meshes.");
+            return result;
+        }
+        private static void ReadSignalCentres(Result result)
+        {
             var signals = TryLoad("toa-payoh-signals");
             if (signals != null)
             {
@@ -405,14 +353,6 @@ namespace Formula9.World
                     }
                 }
             }
-            painter.Export(result);
-            Debug.Log($"[LtaMappedRoadPaint] Special features only: {result.YellowBoxLineFeatures} " +
-                $"mapped yellow-box paths, {result.GroundStopLineFeatures} transverse mapped type-M lines, " +
-                $"{result.GroundArrowFeatures} mapped arrows, {result.ZebraCrossings} zebra " +
-                $"({result.ZebraStripeQuads} stripes), {result.SignalCrossings} signal crossings " +
-                $"({result.SignalBoundarySegments} edges), {result.Meshes.Count} meshes; " +
-                "no longitudinal lane duplicates or guessed box locations.");
-            return result;
         }
     }
 }

@@ -38,6 +38,10 @@ namespace Formula9.World
             public Vector2[] Offsets;
             public float Width;
             public int Lanes;
+            public List<Section> Sections;
+            public float[] PaintDistances;
+            public float PaintOrigin, PaintDirection;
+            public float PaintLength => PaintDistances[PaintDistances.Length - 1];
             public readonly List<WidthBlend> WidthBlends = new List<WidthBlend>();
             public readonly End Start = new End();
             public readonly End Finish = new End();
@@ -48,6 +52,9 @@ namespace Formula9.World
         {
             public bool Joined;
             public int JunctionIndex = -1;
+            public bool JunctionPaintBreak;
+            public float IntersectionClearance;
+            public int SignalJunction = -1;
             public Vector2 LeftEdge, RightEdge;
             public (RoadPath Path, bool AtStart) Across;
             public Vector2 TangentCorrection;
@@ -77,10 +84,11 @@ namespace Formula9.World
 
         public static Mesh Build(IEnumerable<CityRoad> roads) => Build(roads, out _);
 
-        internal static Mesh Build(IEnumerable<CityRoad> roads, out int clippedTriangles)
+        internal static Mesh Build(IEnumerable<CityRoad> roads, out int clippedTriangles,
+            LtaMappedRoadPaint.Result mapped = null)
         {
             var paths = roads.Select(CreatePath).Where(path => path != null).ToList();
-            var junctions = ConnectEnds(paths);
+            var junctions = ConnectEnds(paths, mapped?.SignalJunctionCenters);
             BuildWidthProfiles(paths);
             // Earlier roads keep the shared area when the asphalt triangles are clipped.
             paths = paths.OrderBy(path => IsUnmarkedClass(path.Road.Class))
@@ -93,13 +101,29 @@ namespace Formula9.World
                 .ThenBy(path => path.Points[path.Points.Count - 1].y)
                 .ToList();
 
+            foreach (var path in paths)
+            {
+                path.Sections = Sample(path);
+                path.PaintDistances = new float[path.Sections.Count];
+                for (int i = 1; i < path.Sections.Count; i++)
+                    path.PaintDistances[i] = path.PaintDistances[i - 1] +
+                        Vector2.Distance(path.Sections[i - 1].Point, path.Sections[i].Point);
+            }
+            SetDashPhases(paths);
+
             var vertices = new List<Vector3>();
+            var laneUV = new List<Vector4>();
+            var paintBounds = new List<Vector4>();
+            var barDistances = new List<Vector2>();
             var layers = Enumerable.Range(0, LayerCount).Select(_ => new List<int>()).ToArray();
 
-            int AddVertex(Vector2 point)
+            int AddVertex(Vector2 point, Vector4 lane = default, Vector4 bounds = default, Vector2 bars = default)
             {
                 int index = vertices.Count;
                 vertices.Add(new Vector3(point.x, SurfaceY, point.y));
+                laneUV.Add(lane);
+                paintBounds.Add(bounds);
+                barDistances.Add(bars);
                 return index;
             }
 
@@ -136,7 +160,38 @@ namespace Formula9.World
 
             foreach (var path in paths)
             {
-                var sections = Sample(path);
+                var sections = path.Sections;
+                float length = path.PaintLength;
+                float startStation = PaintClearance(path.Start, sections[0].HalfWidth, length);
+                float endStation = length - PaintClearance(path.Finish, sections[sections.Count - 1].HalfWidth, length);
+                float lanes = IsUnmarkedClass(path.Road.Class) ? 0f : path.Lanes;
+                // Internal links of a divided intersection can have separate
+                // graph nodes at either end. Keep their entire surface unpainted.
+                bool sameSignalJunction = path.Start.SignalJunction >= 0 &&
+                    path.Start.SignalJunction == path.Finish.SignalJunction;
+                bool internalLink = sameSignalJunction ||
+                    (path.Start.JunctionPaintBreak && path.Finish.JunctionPaintBreak &&
+                        length <= Mathf.Max(2f * path.Width + 2f,
+                            path.Start.IntersectionClearance + path.Finish.IntersectionClearance + 3f));
+                if (internalLink) lanes = 0f;
+
+                // 1 = full one-way approach, 2 = left half, 3 = right half
+                // of the mesh in its FromNode-to-ToNode direction.
+                float startBar = !path.Road.Oneway && path.Start.JunctionPaintBreak ? 3f : 0f;
+                float endBar = path.Finish.JunctionPaintBreak ? (path.Road.Oneway ? 1f : 2f) : 0f;
+
+                bool forward = path.PaintDirection > 0f;
+                float startPaint = path.PaintOrigin + path.PaintDirection * startStation;
+                float endPaint = path.PaintOrigin + path.PaintDirection * endStation;
+                var bounds = startStation < endStation
+                    ? new Vector4(Mathf.Min(startPaint, endPaint), Mathf.Max(startPaint, endPaint),
+                        forward ? startBar : endBar, forward ? endBar : startBar)
+                    : new Vector4(1f, 0f, 0f, 0f);
+                var lowBar = bounds.z > 0f ? StopPlane(path, forward ? startStation : endStation, forward) : default;
+                var highBar = bounds.w > 0f ? StopPlane(path, forward ? endStation : startStation, !forward) : default;
+                Vector2 BarDistances(Vector2 point) =>
+                    new Vector2(lowBar.DistanceTo(point), highBar.DistanceTo(point));
+
                 int previous = -1;
                 for (int i = 0; i < sections.Count; i++)
                 {
@@ -147,8 +202,10 @@ namespace Formula9.World
                     if (i == 0) SetEdges(path.Start, point, edge);
                     if (i == sections.Count - 1) SetEdges(path.Finish, point, edge);
                     int first = AddVertex(point + outer);
-                    AddVertex(point + edge);
-                    AddVertex(point - edge);
+                    float width = 2f * edge.magnitude;
+                    float along = path.PaintOrigin + path.PaintDirection * path.PaintDistances[i];
+                    AddVertex(point + edge, new Vector4(0f, along, lanes, width), bounds, BarDistances(point + edge));
+                    AddVertex(point - edge, new Vector4(width, along, lanes, width), bounds, BarDistances(point - edge));
                     AddVertex(point - outer);
                     if (previous >= 0)
                     {
@@ -184,18 +241,103 @@ namespace Formula9.World
                 if (path.Finish.JunctionIndex < 0) AddCap(path.Points[path.Points.Count - 1], path.Width);
             }
 
-            clippedTriangles = TrimAsphaltOverlaps(layers[AsphaltLayer], vertices);
+            clippedTriangles = TrimAsphaltOverlaps(layers[AsphaltLayer], vertices, laneUV, paintBounds, barDistances);
 
             var mesh = new Mesh { name = "City roads", indexFormat = IndexFormat.UInt32 };
             mesh.SetVertices(vertices);
             // The fallback asphalt shader reads UV0 for its grain texture.
             mesh.SetUVs(0, vertices.Select(vertex => new Vector2(vertex.x, vertex.z) / 8f).ToList());
+            mesh.SetUVs(1, laneUV);
+            mesh.SetUVs(2, paintBounds);
+            mesh.SetUVs(3, barDistances);
             mesh.subMeshCount = LayerCount;
             for (int i = 0; i < LayerCount; i++) mesh.SetTriangles(layers[i], i);
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
             return mesh;
         }
+
+        private const float DashPeriodM = 6f; // Match CityRoadTexture.shader.
+
+        private static void SetDashPhases(List<RoadPath> paths)
+        {
+            // Walk open chains from an end, then seed any closed loops.
+            foreach (var path in paths)
+            {
+                if (path.PaintDirection != 0f) continue;
+                if (!ContinuesPaint(path.Start)) Walk(path, true);
+                else if (!ContinuesPaint(path.Finish)) Walk(path, false);
+            }
+            foreach (var path in paths)
+                if (path.PaintDirection == 0f) Walk(path, true);
+
+            void Walk(RoadPath path, bool enterAtStart)
+            {
+                float phase = 1.5f;
+                while (path.PaintDirection == 0f)
+                {
+                    path.PaintDirection = enterAtStart ? 1f : -1f;
+                    path.PaintOrigin = enterAtStart ? phase : phase + path.PaintLength;
+                    phase = Mathf.Repeat(phase + path.PaintLength, DashPeriodM);
+                    var exit = enterAtStart ? path.Finish : path.Start;
+                    if (!ContinuesPaint(exit)) break;
+                    (path, enterAtStart) = exit.Across;
+                }
+            }
+        }
+
+        private static bool ContinuesPaint(End end) => end.Joined && !end.JunctionPaintBreak;
+
+        private static float PaintClearance(End end, float halfWidth, float length)
+        {
+            if (end.JunctionPaintBreak)
+                return Mathf.Min(length, Mathf.Max(halfWidth, end.IntersectionClearance));
+            return end.Joined ? 0f : Mathf.Min(halfWidth, length * 0.45f);
+        }
+
+        private readonly struct BarPlane
+        {
+            private readonly Vector2 centre, approach;
+
+            public BarPlane(Vector2 centre, Vector2 approach)
+            {
+                this.centre = centre;
+                this.approach = approach;
+            }
+
+            public float DistanceTo(Vector2 point) => Vector2.Dot(point - centre, approach);
+        }
+
+        private static BarPlane StopPlane(RoadPath path, float station, bool towardsFinish)
+        {
+            int i = 1;
+            // At a sample boundary, use the interval on the painted side.
+            while (i < path.PaintDistances.Length - 1 &&
+                (path.PaintDistances[i] < station ||
+                    (towardsFinish && path.PaintDistances[i] == station))) i++;
+
+            float fraction = EndingDividerFraction(path.Lanes, towardsFinish);
+            var a = DividerPoint(path.Sections[i - 1], fraction);
+            var b = DividerPoint(path.Sections[i], fraction);
+            float t = Mathf.InverseLerp(path.PaintDistances[i - 1], path.PaintDistances[i], station);
+            var direction = (b - a).normalized;
+            if (direction == Vector2.zero)
+                direction = (path.Sections[i].Point - path.Sections[i - 1].Point).normalized;
+
+            return new BarPlane(Vector2.Lerp(a, b, t), towardsFinish ? direction : -direction);
+        }
+
+        private static float EndingDividerFraction(int lanes, bool towardsFinish)
+        {
+            if (lanes < 2) return 0f;
+            // Pick the divider closest to the middle of the approach. If two
+            // are equally close, prefer the one on the incoming side.
+            int divider = towardsFinish ? lanes / 2 : (lanes + 1) / 2;
+            return 1f - 2f * divider / lanes;
+        }
+
+        private static Vector2 DividerPoint(Section section, float fraction) =>
+            section.Point + section.Offset * (section.HalfWidth * fraction);
 
         private const float OverlapCellM = 32f;
         private const double MinimumDoubleArea = 0.000001;
@@ -217,7 +359,8 @@ namespace Formula9.World
                 Min.y < other.Max.y && Max.y > other.Min.y;
         }
 
-        private static int TrimAsphaltOverlaps(List<int> indices, List<Vector3> vertices)
+        private static int TrimAsphaltOverlaps(List<int> indices, List<Vector3> vertices,
+            List<Vector4> laneUV, List<Vector4> paintBounds, List<Vector2> barDistances)
         {
             var triangles = new List<AsphaltTriangle>();
             var grid = new Dictionary<Vector2Int, List<int>>();
@@ -293,6 +436,15 @@ namespace Formula9.World
                 {
                     int index = vertices.Count;
                     vertices.Add(new Vector3(point.x, SurfaceY, point.y));
+                    // Keep the original triangle's lane coordinates across new vertices.
+                    float weightB = (float)(Side(triangle.C, triangle.A, point) / area);
+                    float weightC = (float)(Side(triangle.A, triangle.B, point) / area);
+                    var uv = laneUV[a] + (laneUV[b] - laneUV[a]) * weightB +
+                        (laneUV[c] - laneUV[a]) * weightC;
+                    laneUV.Add(uv);
+                    paintBounds.Add(paintBounds[a]);
+                    barDistances.Add(barDistances[a] + (barDistances[b] - barDistances[a]) * weightB +
+                        (barDistances[c] - barDistances[a]) * weightC);
                     return index;
                 }
 
@@ -407,7 +559,7 @@ namespace Formula9.World
             };
         }
 
-        private static List<List<End>> ConnectEnds(List<RoadPath> paths)
+        private static List<List<End>> ConnectEnds(List<RoadPath> paths, List<Vector2> signalCentres)
         {
             var nodes = new Dictionary<long, List<(RoadPath Path, bool AtStart)>>();
             void Add(long node, RoadPath path, bool atStart)
@@ -466,10 +618,62 @@ namespace Formula9.World
                         bestB = j;
                     }
 
-                    if (bestA >= 0) JoinThroughRoad(group[bestA], group[bestB]);
+                    bool intersection = group.Count >= 4;
+                    if (group.Count >= 3 && signalCentres != null)
+                        intersection |= signalCentres.Any(point => (point - origin).sqrMagnitude <= 12f * 12f);
+
+                    if (bestA >= 0)
+                    {
+                        var through = Outward(group[bestA]);
+                        for (int i = 0; i < group.Count; i++)
+                        {
+                            if (i == bestA || i == bestB) continue;
+                            if (Mathf.Abs(Vector2.Dot(through, Outward(group[i]))) < 0.70f)
+                                intersection = true;
+                        }
+                        JoinThroughRoad(group[bestA], group[bestB]);
+                    }
+                    if (!intersection) continue;
+                    int signalJunction = NearestSignalJunction(origin, signalCentres);
+                    for (int i = 0; i < group.Count; i++)
+                    {
+                        var end = junction[i];
+                        end.JunctionPaintBreak = true;
+                        end.SignalJunction = signalJunction;
+
+                        // Move the cutoff to the outer edge of the crossing
+                        // carriageway, with a small setback on the approach.
+                        var approach = Outward(group[i]);
+                        float clearance = group[i].Path.Width;
+                        for (int j = 0; j < group.Count; j++)
+                        {
+                            if (i == j) continue;
+                            float cosine = Mathf.Abs(Vector2.Dot(approach, Outward(group[j])));
+                            if (cosine >= 0.70f) continue;
+                            float sine = Mathf.Sqrt(1f - cosine * cosine);
+                            clearance = Mathf.Max(clearance,
+                                (group[j].Path.Width + cosine * group[i].Path.Width) / sine);
+                        }
+                        end.IntersectionClearance = clearance + 1f;
+                    }
                 }
             }
             return junctions;
+        }
+
+        private static int NearestSignalJunction(Vector2 position, List<Vector2> centres)
+        {
+            if (centres == null) return -1;
+            int nearest = -1;
+            float best = 18f * 18f;
+            for (int i = 0; i < centres.Count; i++)
+            {
+                float distance = (position - centres[i]).sqrMagnitude;
+                if (distance >= best) continue;
+                best = distance;
+                nearest = i;
+            }
+            return nearest;
         }
 
         private static int EndpointIndex((RoadPath Path, bool AtStart) endpoint) =>
