@@ -99,6 +99,8 @@ namespace Formula9.World
         public event Action<DraftRoad, Vector2> RoadClicked;
         public event Action<int> WaypointClicked;
         public event Action ViewChanged;
+        // The shuttle cameras opened (true) or closed (false), whatever closed them
+        public event Action<bool> CamerasToggled;
 
         public bool Ready { get; private set; }
         public string Diagnostic { get; private set; } = "Join a training session to see its world.";
@@ -957,6 +959,7 @@ namespace Formula9.World
             else if (CityShown) viewCamera.enabled = true;
             if (show) SelectCamera(mainCamera);
             RefreshHint();
+            CamerasToggled?.Invoke(show);
         }
 
         // -----------------------------------------------------------------------------------

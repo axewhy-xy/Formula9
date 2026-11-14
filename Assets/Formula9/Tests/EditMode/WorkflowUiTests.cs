@@ -300,6 +300,26 @@ namespace Formula9.Tests
                 workspace.Render();
                 Assert.IsTrue(world.ShowingMap, "not watching the cameras: the closure opens the map");
                 Assert.AreEqual("shuttle-01", world.SelectedId, "on the held shuttle");
+
+                // A closure comes up while watching, but the cameras close another way (2D Map):
+                // there is nothing left to tell when they are next opened and hidden
+                await Hold(false);
+                workspace.Render();
+                world.ShowMap(false);
+                workspace.SelectVehicle("shuttle-03");
+                press.Invoke(workspace, null);
+                Assert.IsTrue(world.CamerasShown);
+                await Hold(true);
+                workspace.Render();
+                world.ShowMap(true);
+                Assert.IsFalse(world.CamerasShown, "2D Map closes the cameras");
+                world.ShowMap(false);
+                var before = notices.Count;
+                press.Invoke(workspace, null);
+                press.Invoke(workspace, null);
+                Assert.IsFalse(world.CamerasShown);
+                Assert.AreEqual(before, notices.Count, "the closure is not told of again");
+                Assert.AreEqual("shuttle-03", world.SelectedId, "the selection does not jump to the held shuttle");
             }
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
         }
