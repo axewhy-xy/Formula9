@@ -808,7 +808,7 @@
   },
   "route_edit": {
     "fixture_id": "m2-integrated-routes-r1",
-    "route_id": "route-m2-detour",
+    "route_id": "route-peer-a",
     "start_node_id": 1,
     "destination_node_id": 1,
     "default_via_node_ids": [
@@ -1360,7 +1360,7 @@
     }
   },
   "vehicle_assignments": [
-    "route-m2-detour",
+    "route-peer-a",
     "route-peer-b",
     "route-peer-c",
     "route-peer-d",
@@ -1383,6 +1383,7 @@
   "incident_overrides": {
     "fixture_id": "m2-integrated-obstruction-r1",
     "scenario_id": "m2-integrated",
+    "route_id": "route-peer-a",
     "block_current_route_entrance": true,
     "trigger_tick": 240
   },
@@ -1417,7 +1418,7 @@
         ]
       },
       "connectors": {
-        "route-m2-detour": [
+        "route-peer-a": [
           [
             3403.06,
             -1479.31
@@ -1681,7 +1682,7 @@
         ]
       },
       "exits": {
-        "route-m2-detour": [
+        "route-peer-a": [
           [
             3034.03,
             -2255.81
@@ -2130,7 +2131,7 @@
         ]
       },
       "connectors": {
-        "route-m2-detour": [
+        "route-peer-a": [
           [
             3403.06,
             -1479.31
@@ -3198,7 +3199,7 @@
         ]
       },
       "exits": {
-        "route-m2-detour": [
+        "route-peer-a": [
           [
             3954.5,
             -2753.45

@@ -16,9 +16,10 @@ from src.api.routes.training_v2 import get_actor_id, get_training_store
 from src.app import app
 from src.persistence.training_store import TrainingStore, TrainingStoreError
 from src.routing.road_graph import get_road_graph_repository
+from src.services import incidents as incidents_module
 from src.services.incidents import (
     LATE_RESPONSE_SHARE, RECORD_FIELDS, IncidentService, delay_share, detour_route_id, detouring,
-    get_incident_service, holding_at_stop, is_detour_of, response_share,
+    get_incident_service, holding_at_stop, is_detour_of, option_id, option_vehicle, response_share,
 )
 from src.services.route_edit import RouteEditService
 from src.services.scene_repository import get_scene_repository
@@ -746,3 +747,48 @@ def test_a_decision_after_arrival_earns_half_the_response_points(fraction, befor
 ])
 def test_delay_avoided_compares_the_choice_with_keeping_the_route_and_the_best_option(keep, chosen, best, share):
     assert delay_share(keep, chosen, best) == pytest.approx(share)
+
+
+@pytest.mark.parametrize("incident_id", ["incident-7", "incident-shuttle-02-collision", "shuttle-01-r2-shuttle-02"])
+def test_an_option_id_names_its_shuttle_whatever_the_incident_is_called(incident_id):
+    for vehicle_id in ("shuttle-01", "shuttle-02"):
+        for action in ("KEEP_ROUTE", "ROAD_DETOUR", "ESCALATE", "HOLD_AT_STOP"):
+            assert option_vehicle(incident_id, option_id(incident_id, 12, vehicle_id, action)) == vehicle_id
+    # An option from before per-shuttle options names no shuttle, nor does another incident's
+    assert option_vehicle(incident_id, f"{incident_id}-r3-wait") is None
+    assert option_vehicle(incident_id, f"{incident_id}-r3-road_detour") is None
+    assert option_vehicle(incident_id, option_id("incident-other", 1, "shuttle-01", "KEEP_ROUTE")) is None
+
+
+def test_attempts_count_for_the_shuttle_the_option_names_not_one_the_incident_id_contains(tmp_path, service):
+    """An incident whose id contains a shuttle id: an attempt for shuttle-01 is not shuttle-02's attempt."""
+    named = "incident-shuttle-02-obstruction"
+    with TrainingStore(tmp_path / "named.sqlite") as store:
+        store.create_session(initial(service))
+        instance = service.instance(record(service, incident_id=named, exposures=EXPOSED))
+        publish(instance, store)
+        refused = command(store, "KEEP_ROUTE", "shuttle-01")
+        refused.reason = "   "
+        assert instance.decide(store, "actor-a", refused).status == "REJECTED"
+        accepted = command(store, "KEEP_ROUTE", "shuttle-02", command_id="second", idempotency_key="second-key")
+        assert instance.decide(store, "actor-a", accepted).status == "APPLIED"
+        event = next(e for e in reversed(store.replay("session-001", 0).events)
+                     if e.event_type == "INCIDENT_DECISION_RECORDED")
+        assert event.data["vehicle_id"] == "shuttle-02" and event.data["assessment"]["attempts"] == 1
+
+
+def test_option_evidence_is_read_again_in_a_new_session_epoch(shared, service, monkeypatch):
+    """Crash recovery can reissue the same option ids from different evidence; it starts a new epoch."""
+    instance = service.instance(record(service, exposures=EXPOSED))
+    snapshot = shared.snapshot("session-001")
+    incident = snapshot.incidents[0]
+    reads = []
+    original = type(instance)._evidence
+    monkeypatch.setattr(type(instance), "_evidence", lambda self, *args: reads.append(1) or original(self, *args))
+    monkeypatch.setattr(incidents_module, "_EVIDENCE_DEPENDENCIES", {})
+    instance._offered_dependencies(shared, snapshot, incident, snapshot.candidates)
+    instance._offered_dependencies(shared, snapshot, incident, snapshot.candidates)
+    assert len(reads) == 1
+    snapshot.session_epoch += 1
+    instance._offered_dependencies(shared, snapshot, incident, snapshot.candidates)
+    assert len(reads) == 2

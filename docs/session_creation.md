@@ -231,19 +231,20 @@ incident/route/battery fixtures and endpoints remain separate integrations.
 Create a new attempt with `scenario_revision_id: scenario-m2-integrated-r1`
 and the same authenticated session-creation endpoint. This opt-in selector is
 an authored planar correctness fixture: five shuttles, three closed patterns,
-two chargers, a permanent closure and a later obstruction. The existing client
+two chargers and a later obstruction. No road is closed at the start, so
+shuttle-01 (`route-peer-a`) can start on its own route. The existing client
 creation buttons and older persisted attempts retain their original selector
 and behavior. This change supplies backend execution; it adds no client UI.
 
-1. While READY, fetch `routes/route-m2-detour/editor` and submit a draft to
-   `route-previews` with `route_id: route-m2-detour`,
+1. Optionally, while READY, fetch `routes/route-peer-a/editor` and submit a
+   draft to `route-previews` with `route_id: route-peer-a`,
    `expected_route_revision: 1` and `draft_revision: 1`. Approve the returned
    preview/revision through `route-approvals`, explicitly targeting
-   `target_vehicle_ids: ["shuttle-01"]` with a reason. The default valid preview
-   replaces the closed main road with bypass B; a via-node draft can choose
-   bypass C. Missing mandatory fit/turn metadata still blocks approval.
-2. Submit START. A route still using the permanent closure receives a durable
-   rejection. Approval and Start use the same session actor and journal.
+   `target_vehicle_ids: ["shuttle-01"]` with a reason. A via-node draft can
+   choose bypass B or C. Missing mandatory fit/turn metadata still blocks
+   approval.
+2. Submit START. A route that uses a road closed at that moment receives a
+   durable rejection. Approval and Start use the same session actor and journal.
 3. At tick 240 (12 simulated seconds), shuttle-01 finishes its initial entrance
    dwell and receives `incident-m2-obstruction`, stopping before departure.
    Other shuttles continue. The obstruction targets its actually approved
