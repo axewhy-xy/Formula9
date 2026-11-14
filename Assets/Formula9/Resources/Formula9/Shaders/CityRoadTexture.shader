@@ -3,29 +3,16 @@ Shader "Formula9/CityRoadTexture"
     Properties
     {
         _Color ("Road tint", Color) = (1.34, 1.36, 1.39, 1)
-        _MainTex ("Road lane atlas", 2D) = "gray" {}
-        [HideInInspector] _StencilRef ("Stencil Ref", Float) = 1
-        [HideInInspector] _StencilComp ("Stencil Comparison", Float) = 8
-        [HideInInspector] _StencilPass ("Stencil Pass", Float) = 0
-        [HideInInspector] _StencilWriteMask ("Stencil Write Mask", Float) = 0
-        [HideInInspector] _ZWrite ("Depth Write", Float) = 1
+        _MainTex ("Asphalt texture", 2D) = "gray" {}
+        [HideInInspector] _UseRoadAtlas ("Use asphalt strip from atlas", Float) = 1
     }
     SubShader
     {
         Tags { "RenderType"="Opaque" "Queue"="Geometry" }
         Cull Off
         ZTest LEqual
-        ZWrite [_ZWrite]
-        // Helps asphalt win against nearby map-tile/ground depth.
-        // Cannot fix overlapping coplanar asphalt polygons inside one mesh.
+        ZWrite On
         Offset -1, -1
-        Stencil
-        {
-            Ref [_StencilRef]
-            Comp [_StencilComp]
-            Pass [_StencilPass]
-            WriteMask [_StencilWriteMask]
-        }
         Pass
         {
             CGPROGRAM
@@ -36,105 +23,38 @@ Shader "Formula9/CityRoadTexture"
 
             sampler2D _MainTex;
             float4 _Color;
-
-            struct appdata
-            {
-                float4 vertex : POSITION;
-                float4 laneUV : TEXCOORD1; // (across 0..1, metres/24, signed lane count, enabled)
-                float4 fadeUV : TEXCOORD2; // (start cutoff m, end cutoff m, fade width m, has end cutoff)
-            };
+            float _UseRoadAtlas;
 
             struct v2f
             {
-                float4 pos : SV_POSITION;
-                float4 laneUV : TEXCOORD0;
-                float4 fadeUV : TEXCOORD1;
-                float2 worldXZ : TEXCOORD2;
+                float4 position : SV_POSITION;
+                float2 worldXZ : TEXCOORD0;
             };
 
-            v2f vert(appdata v)
+            v2f vert(float4 vertex : POSITION)
             {
                 v2f o;
-                o.pos = UnityObjectToClipPos(v.vertex);
-                o.laneUV = v.laneUV;
-                o.fadeUV = v.fadeUV;
-                float3 world = mul(unity_ObjectToWorld, v.vertex).xyz;
-                o.worldXZ = world.xz;
+                o.position = UnityObjectToClipPos(vertex);
+                o.worldXZ = mul(unity_ObjectToWorld, vertex).xz;
                 return o;
             }
 
             fixed4 frag(v2f i) : SV_Target
             {
-                float across = saturate(i.laneUV.x);
-                float along = i.laneUV.y;
-                float lanes = floor(abs(i.laneUV.z) + 0.5);
-                float twoWay = i.laneUV.z < -0.5 ? 1.0 : 0.0;
-
-                // 1. Every road, bend cap and junction cap receives *identical*
-                // plain-asphalt UVs at identical world positions. No road-local
-                // U restart and no atlas-column switch for unmarked asphalt.
-                // Stay inside the user's plain asphalt atlas strip near U=.28.
-                float bareU = 0.28 + 0.055 * sin(i.worldXZ.x * 0.12);
-                float bareV = (i.worldXZ.y + i.worldXZ.x * 0.31) / 24.0;
-                float2 bareUV = float2(bareU, bareV);
-                float2 bareDx = ddx(bareUV);
-                float2 bareDy = ddy(bareUV);
-                fixed4 bare = tex2Dgrad(_MainTex, bareUV, bareDx, bareDy);
-
-                // 2. UV2 stores metres, NOT a per-vertex marking opacity.
-                // Fade each pixel rather than losing all paint on short roads.
-                float fade = saturate(i.laneUV.w);
-                float distanceM = along * 24.0;
-                float fadeSpan = max(0.05, i.fadeUV.z);
-                if (i.fadeUV.x > 0.0)
-                    fade *= smoothstep(i.fadeUV.x, i.fadeUV.x + fadeSpan, distanceM);
-                if (i.fadeUV.w > 0.5)
-                    fade *= 1.0 - smoothstep(i.fadeUV.y - fadeSpan, i.fadeUV.y, distanceM);
-
-                // Old RoadMesh Cap() vertices use zero UV1/UV2: keep them
-                // plain and world-aligned instead of drawing spoked markings.
-                float3 roadRGB = bare.rgb;
-
-                if (lanes >= 1.0 && fade > 0.0)
-                {
-                    // 3. Determine the nearest lane boundary in continuous
-                    // lane-position space. The atlas selection itself jumps,
-                    // so we NEVER use implicit ddx/ddy of the chosen paint UV.
-                    float lanePosition = across * lanes;
-                    float nearest = floor(lanePosition + 0.5);
-                    float laneOffset = lanePosition - nearest;
-                    float edgeLeft = 1.0 - step(0.5, nearest);
-                    float edgeRight = step(lanes - 0.5, nearest);
-                    float paintU = (edgeLeft > 0.5) ? (0.076 + laneOffset * 0.5)
-                                 : (edgeRight > 0.5) ? (0.923 + laneOffset * 0.5)
-                                 : (0.500 + laneOffset * 0.5);
-
-                    float2 paintedUV = float2(paintU, along);
-                    // Gradients are calculated from the continuous UV field,
-                    // NOT from paintU (which changes atlas columns at seams).
-                    float2 paintDx = float2(ddx(lanePosition) * 0.5, ddx(along));
-                    float2 paintDy = float2(ddy(lanePosition) * 0.5, ddy(along));
-                    fixed4 painted = tex2Dgrad(_MainTex, paintedUV, paintDx, paintDy);
-
-                    float feather = max(fwidth(lanePosition), 0.005);
-                    float band = 1.0 - smoothstep(0.15 - feather, 0.15 + feather, abs(laneOffset));
-                    roadRGB = lerp(roadRGB, painted.rgb, saturate(fade * band));
-
-                    if (twoWay > 0.5 && lanes >= 2.0)
-                    {
-                        // Replace centre white paint with two yellow lines.
-                        float centreOffset = abs(lanePosition - lanes * 0.5);
-                        float centreMask = (1.0 - smoothstep(0.17, 0.28, centreOffset)) * fade;
-                        roadRGB = lerp(roadRGB, bare.rgb, centreMask);
-                        float pixelWidth = max(fwidth(lanePosition), 0.005);
-                        float stripe = 1.0 - smoothstep(0.031 - pixelWidth,
-                            0.031 + pixelWidth, abs(centreOffset - 0.061));
-                        roadRGB = lerp(roadRGB, float3(0.98, 0.78, 0.08) / max(_Color.rgb, 0.01),
-                            saturate(stripe * fade));
-                    }
-                }
-
-                return fixed4(saturate(roadRGB * _Color.rgb), 1.0);
+                float2 groundUV = i.worldXZ / 4.0;
+                // Reflect a square of bare asphalt between the left stripe
+                // and the centre dashes. Reflection keeps the tile edges continuous.
+                float2 phase = frac(groundUV * 0.5) * 2.0;
+                float2 mirrored = 1.0 - abs(1.0 - phase);
+                float2 atlasUV = float2(0.16, 0.16) + mirrored * 0.24;
+                // Bound the mip footprint to keep painted columns out of this crop.
+                float2 dx = ddx(groundUV) * 0.24;
+                float2 dy = ddy(groundUV) * 0.24;
+                float gradientScale = min(1.0, 0.015 / max(0.00001, max(length(dx), length(dy))));
+                fixed3 asphalt = _UseRoadAtlas > 0.5
+                    ? tex2Dgrad(_MainTex, atlasUV, dx * gradientScale, dy * gradientScale).rgb
+                    : tex2D(_MainTex, i.worldXZ / 8.0).rgb;
+                return fixed4(saturate(asphalt * _Color.rgb), 1.0);
             }
             ENDCG
         }
