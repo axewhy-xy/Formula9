@@ -3,7 +3,7 @@
  *
  * Author: Choo Jian Wei
  * Date Created: 10/11/2026
- * Last Modified: 10/11/2026
+ * Last Modified: 14/11/2026
  *
  * Description:
  *     Builds the real WorldView with the training layout, a one-building city and the shared
@@ -13,12 +13,13 @@
  *     thumbnail can be shown large, that the cameras follow the shuttle as it moves and turns,
  *     and that the 3D view comes back when there is no shuttle left to watch or something
  *     else needs it. Also checks that the cameras match the city's sky and view distance,
- *     keep watching their shuttle when another is selected, update the hint at once, leave
- *     the hidden 3D view still while following, and that traffic is drawn for every camera
- *     that can see it. And that the thumbnails draw into small images and the camera shown
- *     large into one large image, all freed on closing; that the large view names the
- *     watched shuttle; that the planning overlays are left out; and that closing, by the
- *     button or on its own, goes back to the 2D map the cameras were opened from.
+ *     move to another shuttle the operator picks but stay on theirs when the app selects one,
+ *     a shuttle not in the city is picked or the watched one is picked again, update the hint
+ *     at once, leave the hidden 3D view still while following, and that traffic is drawn for
+ *     every camera that can see it. And that the thumbnails draw into small images and the
+ *     camera shown large into one large image, all freed on closing; that the large view names
+ *     the watched shuttle; that the planning overlays are left out; and that closing, by the
+ *     button or on its own, goes back to the 3D view.
  */
 
 using System;

@@ -201,12 +201,6 @@ namespace Formula9.Tests
                 Assert.AreEqual("shuttle-05", world.WatchedId, "the new route's shuttle");
                 press.Invoke(workspace, null);
                 Assert.IsFalse(world.ShowingMap, "still the 3D view after another route");
-
-                // Opened from the 3D view, closing stays in the 3D view
-                world.ShowMap(false);
-                press.Invoke(workspace, null);
-                press.Invoke(workspace, null);
-                Assert.IsFalse(world.ShowingMap, "back to the 3D view the cameras covered");
             }
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
         }
