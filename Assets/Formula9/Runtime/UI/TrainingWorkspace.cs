@@ -23,7 +23,6 @@ namespace Formula9.UI
         private readonly Action<Task> run;
         private readonly Action<string> notify;
         private readonly List<VisualElement> pages = new List<VisualElement>();
-        private readonly Dictionary<string, int> pageIndex = new Dictionary<string, int>();
         private readonly List<CommandOutcome> ledger = new List<CommandOutcome>();
         private readonly DropdownField routes, incidents, candidates;
         private readonly TextField routeReason, incidentReason;
@@ -70,12 +69,8 @@ namespace Formula9.UI
             ShowSection("operations");
         }
         public event Action IncidentSelected;
-        private const int MaxLedgerEntries = 200;
-        public event Action <string> SectionChanged;
-        private int RoutePage => pageIndex["page-route"];
-        private int ChargingPageIndex => pageIndex["page-charging"];
-        private int ReportsPageIndex => pageIndex["page-reports"];
-        private int ScenariosPageIndex => pageIndex["page-scenarios"];
+        public event Action<string> SectionChanged;
+        private const int RoutePage = 1, ChargingPageIndex = 2, ReportsPage = 4, ScenariosPage = 5, MaxLedgerEntries = 200;
         private int shownPage;
         private readonly VisualElement incidentDecisions;
 
@@ -88,10 +83,10 @@ namespace Formula9.UI
             {
                 var index = pages.Count;
                 pages.Add(root.Q(pageName));
-                pageIndex[pageName] = index;
-                var button = navName == null? null : root.Q<Button>(navName);
+                if (navName == null) continue;
+                var button = root.Q<Button>(navName);
+                button.clicked += () => { ShowPage(index); Render(); };
                 navButtons.Add(button);
-                if (button != null) button.clicked+= () => {ShowPage(index); Render();};
             }
             selection = root.Q<Label>("fleet-selection");
             Bind(root, "follow-selected", () => world.FollowSelected());
@@ -833,15 +828,15 @@ namespace Formula9.UI
             for (var i = 0; i < pages.Count; i++)
             {
                 pages[i].style.display = i == index ? DisplayStyle.Flex : DisplayStyle.None;
-                navButtons[i]?.EnableInClassList("nav-item-selected", i == index);
+                if (i < navButtons.Count) navButtons[i].EnableInClassList("nav-item-selected", i == index);
             }
             // The top menu shows the page's section: Reports and Scenarios, or everything else
-            SectionChanged?.Invoke(index == ReportsPageIndex ? "reports" : index == ScenariosPageIndex ? "scenarios" : "operations");
+            SectionChanged?.Invoke(index == ReportsPage ? "reports" : index == ScenariosPage ? "scenarios" : "operations");
         }
 
         // A refused start sends the trainee here to approve a detour first.
         public void ShowRoutePlanning() { ShowPage(RoutePage); Render(); }
-        public void ShowSection(string section) { ShowPage(section == "reports" ? ReportsPageIndex : section == "scenarios" ? ScenariosPageIndex : 0); Render(); }
+        public void ShowSection(string section) { ShowPage(section == "reports" ? ReportsPage : section == "scenarios" ? ScenariosPage : 0); Render(); }
         private static VisualElement Row(VisualElement parent) { var row = new VisualElement(); row.AddToClassList("row"); parent.Add(row); return row; }
         private static Label Text(VisualElement parent, string text) { var label = new Label(text); label.AddToClassList("workspace-text"); parent.Add(label); return label; }
         internal static VisualElement Table(VisualElement parent, string title, params string[] columns)
