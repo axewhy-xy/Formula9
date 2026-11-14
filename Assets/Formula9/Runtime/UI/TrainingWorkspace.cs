@@ -72,10 +72,13 @@ namespace Formula9.UI
         public event Action IncidentSelected;
         private const int MaxLedgerEntries = 200;
         public event Action <string> SectionChanged;
-        private int RoutePage => pageIndex["page-route"];
-        private int ChargingPageIndex => pageIndex["page-charging"];
-        private int ReportsPageIndex => pageIndex["page-reports"];
-        private int ScenariosPageIndex => pageIndex["page-scenarios"];
+        // A page's index by its UXML name, or -1 when the layout leaves it out
+        private int Page(string name) =>pageIndex.TryGetValue(name, out var index) ? index : -1;
+        private int FleetPage => Page("page-fleet");
+        private int RoutePage => Page("page-route");
+        private int ChargingPageIndex => Page("page-charging");
+        private int ReportsPageIndex => Page("page-reports");
+        private int ScenariosPageIndex => Page("page-scenarios");
         private int shownPage;
         private readonly VisualElement incidentDecisions;
 
@@ -86,8 +89,11 @@ namespace Formula9.UI
             // The pages are laid out in UI/Pages/*.uxml; this binds their controls by name.
             foreach (var (pageName, navName) in new[] { ("page-fleet", "nav-fleet"), ("page-route", "nav-route"), ("page-charging", "nav-charging"), ("page-incident", "nav-incident"), ("page-reports", "nav-reports"), ("page-scenarios", null) })
             {
+                // A page the layout leaves out gets no index: its lookups give -1 and it is never shown
+                var page = root.Q(pageName);
+                if (page == null) continue;
                 var index = pages.Count;
-                pages.Add(root.Q(pageName));
+                pages.Add(page);
                 pageIndex[pageName] = index;
                 var button = navName == null? null : root.Q<Button>(navName);
                 navButtons.Add(button);
@@ -179,7 +185,7 @@ namespace Formula9.UI
             world.RoadClicked += AddRoad;
             world.WaypointClicked += RemoveWaypoint;
             root.schedule.Execute(UpdateActions).Every(250);
-            ShowPage(0);
+            ShowPage(FleetPage);
         }
 
         public void SelectVehicle(string id) { world.SelectEntity(id); selection.text = "Selected: " + id; }
@@ -305,6 +311,7 @@ namespace Formula9.UI
                 s.Incidents.Any(i => i.IncidentId == incidents.value && i.State == "OPTIONS_READY") && !string.IsNullOrWhiteSpace(incidentReason.value);
             previewIncident.SetEnabled(decision);
             approveIncident.SetEnabled(decision && incidentPreviewCommand != null);
+            world.RouteEditing = edit;
             // A decision or a lost connection withdraws the verdict but leaves the draft: ask once more.
             if (edit && draft.Count > 0 && preview == null && !routeBusy && approvedDraft == null && checkedRevision != draftRevision && !previewTimer.isActive) SchedulePreview();
             if (draftView != null && draftView.Editable != (edit && shownPage == RoutePage)) ShowDraftInViews();
@@ -807,8 +814,9 @@ namespace Formula9.UI
 
         private void ShowPage(int index)
         {
+            if (index < 0) return;
             // Fleet Overview and Route Planning have the map beside them; the others take the full width, as in Qt.
-            foreach (var view in operationalViews) view.style.display = index == 0 || index == RoutePage ? DisplayStyle.Flex : DisplayStyle.None;
+            foreach (var view in operationalViews) view.style.display = index == FleetPage || index == RoutePage ? DisplayStyle.Flex : DisplayStyle.None;
             var entering = index == RoutePage && shownPage != RoutePage;
             shownPage = index;
             FitSessionControls();
@@ -830,7 +838,7 @@ namespace Formula9.UI
 
         // A refused start sends the trainee here to approve a detour first.
         public void ShowRoutePlanning() { ShowPage(RoutePage); Render(); }
-        public void ShowSection(string section) { ShowPage(section == "reports" ? ReportsPageIndex : section == "scenarios" ? ScenariosPageIndex : 0); Render(); }
+        public void ShowSection(string section) { ShowPage(section == "reports" ? ReportsPageIndex : section == "scenarios" ? ScenariosPageIndex : FleetPage); Render(); }
         private static VisualElement Row(VisualElement parent) { var row = new VisualElement(); row.AddToClassList("row"); parent.Add(row); return row; }
         private static Label Text(VisualElement parent, string text) { var label = new Label(text); label.AddToClassList("workspace-text"); parent.Add(label); return label; }
         internal static VisualElement Table(VisualElement parent, string title, params string[] columns)

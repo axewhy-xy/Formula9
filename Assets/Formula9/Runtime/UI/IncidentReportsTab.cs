@@ -37,12 +37,14 @@ namespace Formula9.UI
         private readonly List<FullSnapshot> historySnapshots = new List<FullSnapshot>();
         private string boundary;
         private bool busy;
+        // What the incident table shows, so it is only rebuilt when that changes
+        private string shownRows;
 
         public IncidentReportsTab(VisualElement root, TrainingApi api, SessionController session, WorldView world, Action<Task> run)
         {
             this.api = api; this.session = session;
             incidents = root.Q<DropdownField>("reports-incidents");
-            incidents.RegisterValueChangedCallback(_ => { Clear(); UpdateActions(); });
+            incidents.RegisterValueChangedCallback(_ => { Clear(); ShowChosen(); UpdateActions(); });
             incidentTable = TrainingWorkspace.Table(root.Q("reports-incident-table-host"), "", "Incident ID", "Shuttle ID", "Reaches it", "State", "Decided", "Detected tick");
             summary = root.Q<Label>("reports-incident-summary");
             history = root.Q<Button>("reports-incident-history");
@@ -61,15 +63,32 @@ namespace Formula9.UI
         public void Render(FullSnapshot s)
         {
             var current = s == null ? null : $"{s.SessionId}/{s.SessionEpoch}";
-            if (boundary != current) { boundary = current; Clear(); }
+            // A new session is not waiting on the old one's report
+            if (boundary != current) { boundary = current; busy = false; Clear(); }
+            var picked = incidents.value;
             TrainingWorkspace.Choices(incidents, s?.Incidents.Select(i => i.IncidentId) ?? Enumerable.Empty<string>());
+            // The picked incident left the snapshot, so the menu moved without telling us: drop what it showed
+            if (incidents.value != picked) Clear();
             var list = s?.Incidents.OrderBy(i => i.IncidentId, StringComparer.Ordinal).ToList() ?? new List<Incident>();
-            TrainingWorkspace.Rows(incidentTable, list.Select(i => new[] { i.IncidentId, i.VehicleId ?? "—", IncidentRecord.Reach(i.Exposures, 2) ?? "—", i.State, TrainingPresenter.Responses(i) ?? "—", i.DetectedTick.ToString() }));
-            // Clicking a row picks that incident, as the menu does
-            foreach (var row in incidentTable.Children()) { var id = ((Label)row[0]).text; row.RegisterCallback<ClickEvent>(_ => incidents.value = id); }
-            var chosen = list.FirstOrDefault(i => i.IncidentId == incidents.value);
-            summary.text = chosen == null ? "" : TrainingPresenter.IncidentDescription(chosen);
+            var rows = list.Select(i => new[] { i.IncidentId, i.VehicleId ?? "—", IncidentRecord.Reach(i.Exposures, 2) ?? "—", i.State, TrainingPresenter.Responses(i) ?? "—", i.DetectedTick.ToString() }).ToList();
+            // Rebuilding the rows under a click drops it, so only rebuild when they change
+            var shown = string.Join("\n", rows.Select(r => string.Join("\t", r)));
+            if (shown != shownRows)
+            {
+                shownRows = shown;
+                TrainingWorkspace.Rows(incidentTable, rows);
+                // Clicking a row picks that incident, as the menu does
+                foreach (var row in incidentTable.Children()) { var id = ((Label)row[0]).text; row.RegisterCallback<ClickEvent>(_ => incidents.value = id); }
+            }
+            ShowChosen();
             UpdateActions();
+        }
+
+        // The picked incident's description: what and where it is, who reaches it, what was decided
+        private void ShowChosen()
+        {
+            var chosen = session.Store.Snapshot?.Incidents.FirstOrDefault(i => i.IncidentId == incidents.value);
+            summary.text = chosen == null ? "" : TrainingPresenter.IncidentDescription(chosen);
         }
 
         private void UpdateActions()
@@ -92,7 +111,8 @@ namespace Formula9.UI
                 Clear();
                 if (!showDebrief)
                 {
-                    historySnapshots.AddRange(((JArray)result["snapshots"]).Select(raw => ContractParser.Parse<FullSnapshot>(raw.ToString())));
+                    // A report without a replay has no snapshots; its unavailable_reason says why
+                    historySnapshots.AddRange((result["snapshots"] as JArray ?? new JArray()).Select(raw => ContractParser.Parse<FullSnapshot>(raw.ToString())));
                     historySample.highValue = Math.Max(0, historySnapshots.Count - 1);
                     historySample.SetValueWithoutNotify(0);
                     historySample.style.display = historySnapshots.Count > 1 ? DisplayStyle.Flex : DisplayStyle.None;
@@ -100,7 +120,8 @@ namespace Formula9.UI
                 }
                 report.text = (showDebrief ? "DEBRIEF · provisional / uncalibrated\n" : "HISTORICAL SIMULATION · complete: " + result["complete"] + "\n" + result["unavailable_reason"] + "\n") + TrainingWorkspace.FormatDocument(result);
             }
-            finally { busy = false; UpdateActions(); }
+            // A report from an earlier session leaves busy alone: it was freed then, and may belong to a newer request now
+            finally { if (stamp == boundary) busy = false; UpdateActions(); }
         }
 
         private void Clear()

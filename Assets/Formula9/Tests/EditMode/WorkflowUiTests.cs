@@ -116,6 +116,7 @@ namespace Formula9.Tests
                 await session.JoinAsync((string)raw["session_id"]);
                 var suggest = root.Q<Button>("route-suggest");
                 Assert.IsFalse(suggest.enabledSelf, "the first graph is still in flight");
+                Assert.IsFalse(world.RouteEditing, "no graph, nothing to pick on the map");
                 Assert.AreEqual(1, graphs);
 
                 raw["snapshot_id"] = Guid.NewGuid().ToString();
@@ -128,6 +129,7 @@ namespace Formula9.Tests
                 for (var i = 0; i < 30 && graphs < 2; i++) await Task.Delay(10);
                 Assert.AreEqual(2, graphs);
                 Assert.IsTrue(suggest.enabledSelf, string.Join("; ", errors.Select(e => e.Message)));
+                Assert.IsTrue(world.RouteEditing, "the map picks route nodes while the route is edited");
                 Assert.IsEmpty(errors);
                 CollectionAssert.AreEqual(new[] { "Fleet Overview", "Route Planning", "Incident Monitor", "Charging", "Reports" }, root.Q("nav-items").Query<Label>().ToList().Select(l => l.text).ToList());
             }
@@ -453,6 +455,223 @@ namespace Formula9.Tests
                 StringAssert.DoesNotContain("Decide for each shuttle", summary);
             }
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
+        }
+
+        private sealed class IncidentsWindow : EditorWindow { }
+
+        // The app on a real panel, so value-change and click events reach their callbacks. The
+        // session has incident-2 beside incident-1, and answers History and Debrief through Report.
+        private sealed class IncidentsRig : IDisposable
+        {
+            public readonly JObject Raw = Fixture("snapshot");
+            public readonly VisualElement Root;
+            public readonly SessionController Session;
+            public readonly TrainingWorkspace Workspace;
+            public readonly List<Task> Runs = new List<Task>();
+            public readonly List<string> Asked = new List<string>();
+            public Func<string, Task<HttpResponse>> Report;
+            private readonly GameObject rig;
+            private readonly IncidentsWindow window;
+
+            public IncidentsRig(Action<VisualElement> layout = null)
+            {
+                var second = (JObject)Raw["incidents"][0].DeepClone();
+                second["incident_id"] = "incident-2"; second["candidate_ids"] = new JArray(); second["detected_tick"] = 190;
+                second["location"]["road_name"] = "Lorong 4 Toa Payoh";
+                ((JArray)Raw["incidents"]).Add(second);
+                Report = path => Task.FromResult(Answer(path));
+                var backend = new Backend();
+                backend.Reply = request =>
+                {
+                    var path = request.Url.AbsolutePath;
+                    if (path.EndsWith("/history") || path.EndsWith("/debrief")) { Asked.Add(path); return Report(path); }
+                    if (path.EndsWith("/snapshot")) return Task.FromResult(new HttpResponse { Status = 200, Body = Raw.ToString() });
+                    if (path.EndsWith("/events"))
+                    {
+                        var replay = Fixture("event_replay"); replay["events"] = new JArray(); replay["has_more"] = false;
+                        replay["after_sequence"] = Raw["event_sequence"].DeepClone(); replay["next_sequence"] = Raw["event_sequence"].DeepClone();
+                        return Task.FromResult(new HttpResponse { Status = 200, Body = replay.ToString() });
+                    }
+                    return Task.FromResult(new HttpResponse { Failure = HttpFailure.Incomplete });
+                };
+                var auth = new AuthSession(); auth.Begin("trainee", "token", 3600);
+                var api = new TrainingApi(backend, auth, new Uri("http://backend.test"));
+                Session = new SessionController(api, auth);
+                Root = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/Formula9/UI/Formula9App.uxml").CloneTree();
+                layout?.Invoke(Root);
+                window = ScriptableObject.CreateInstance<IncidentsWindow>();
+                window.ShowUtility();
+                window.rootVisualElement.Add(Root);
+                rig = new GameObject("Reports incidents test"); var world = rig.AddComponent<WorldView>();
+                world.Attach(Root.Q("world"), new SceneLoader(backend, new Uri("http://backend.test")));
+                Workspace = new TrainingWorkspace(Root, api, Session, world, Runs.Add, _ => { });
+            }
+
+            // A history of two samples, or a debrief, for the incident the path names
+            public HttpResponse Answer(string path)
+            {
+                var incident = path.Split('/').Reverse().Skip(1).First();
+                var document = new JObject { ["incident_id"] = incident };
+                if (path.EndsWith("/history"))
+                {
+                    var later = (JObject)Raw.DeepClone(); later["tick"] = (long)Raw["tick"] + 10;
+                    document["complete"] = true; document["unavailable_reason"] = JValue.CreateNull();
+                    document["snapshots"] = new JArray(Raw.DeepClone(), later);
+                }
+                else document["assessment"] = "held for 30 s";
+                return new HttpResponse { Status = 200, Body = document.ToString() };
+            }
+
+            public async Task Join() { await Session.JoinAsync((string)Raw["session_id"]); Workspace.Render(); }
+            // Waits on what the tab started. The route editor's graph is left unanswered here, so its load gives up.
+            public async Task Settle()
+            {
+                foreach (var run in Runs.ToArray()) { try { await run; } catch (NoReplyException) { } }
+                Runs.Clear();
+            }
+            public T Q<T>(string name) where T : VisualElement => Root.Q<T>(name);
+            public void Press(string button) { var b = Q<Button>(button); using (var e = NavigationSubmitEvent.GetPooled()) { e.target = b; b.SendEvent(e); } }
+            public VisualElement Row(string incident) => Root.Q("reports-incident-table-host").Query(className: "row").ToList().First(r => r.childCount > 0 && (r[0] as Label)?.text == incident);
+
+            public void Dispose()
+            {
+                Session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig);
+                if (window != null) window.Close();
+            }
+        }
+
+        // Pages are found by name, so a page the layout leaves out moves no other page and breaks nothing.
+        [Test]
+        public async Task ThePagesAreFoundByName()
+        {
+            using (var rig = new IncidentsRig(root => root.Q("page-incident").name = "page-gone"))
+            {
+                await rig.Join();
+                VisualElement Page(string name) => rig.Root.Q(name);
+                rig.Workspace.ShowSection("reports");
+                Assert.AreEqual(DisplayStyle.Flex, Page("page-reports").style.display.value, "Reports, not the page after it");
+                Assert.AreEqual(DisplayStyle.None, Page("page-scenarios").style.display.value);
+                rig.Workspace.ShowSection("scenarios");
+                Assert.AreEqual(DisplayStyle.Flex, Page("page-scenarios").style.display.value);
+                Assert.AreEqual(DisplayStyle.None, Page("page-reports").style.display.value);
+                rig.Workspace.ShowSection("operations");
+                Assert.AreEqual(DisplayStyle.Flex, Page("page-fleet").style.display.value);
+                Assert.AreEqual(DisplayStyle.None, Page("page-scenarios").style.display.value);
+                rig.Workspace.ShowRoutePlanning();
+                Assert.AreEqual(DisplayStyle.Flex, Page("page-route").style.display.value);
+                Assert.AreEqual(DisplayStyle.None, Page("page-fleet").style.display.value);
+            }
+        }
+
+        // Clicking a row picks its incident and describes it at once; a snapshot that changes no row
+        // keeps the rows, so a click is never split across two of them.
+        [Test]
+        public async Task ClickingAnIncidentRowPicksIt()
+        {
+            using (var rig = new IncidentsRig())
+            {
+                await rig.Join();
+                var picker = rig.Q<DropdownField>("reports-incidents");
+                Assert.AreEqual("incident-1", picker.value);
+                var row = rig.Row("incident-2");
+                using (var click = ClickEvent.GetPooled()) { click.target = row; row.SendEvent(click); }
+                Assert.AreEqual("incident-2", picker.value);
+                StringAssert.Contains("Lorong 4 Toa Payoh", rig.Q<Label>("reports-incident-summary").text, "described before the next snapshot");
+                rig.Workspace.Render();
+                Assert.AreSame(row, rig.Row("incident-2"), "an unchanged table keeps its rows");
+            }
+        }
+
+        // History replays the samples on the map; Debrief shows the assessment in their place.
+        [Test]
+        public async Task HistoryAndDebriefShowOnTheIncidentsTab()
+        {
+            using (var rig = new IncidentsRig())
+            {
+                await rig.Join();
+                rig.Press("reports-incident-history"); await rig.Settle();
+                Assert.AreEqual(1, rig.Asked.Count);
+                StringAssert.EndsWith("/session-001/incidents/incident-1/history", rig.Asked[0]);
+                StringAssert.StartsWith("HISTORICAL SIMULATION · complete: True", rig.Q<Label>("reports-incident-report").text);
+                Assert.AreEqual(DisplayStyle.Flex, rig.Q<FleetMap>("reports-evidence-map").style.display.value);
+                var slider = rig.Q<SliderInt>("reports-history-sample");
+                Assert.AreEqual(DisplayStyle.Flex, slider.style.display.value, "two samples to step through");
+                Assert.AreEqual(1, slider.highValue);
+                StringAssert.Contains("sample 1/2", rig.Q<Label>("reports-evidence-status").text);
+                Assert.IsTrue(rig.Q<Button>("reports-incident-history").enabledSelf, "free again once answered");
+
+                rig.Press("reports-incident-debrief"); await rig.Settle();
+                var report = rig.Q<Label>("reports-incident-report").text;
+                StringAssert.StartsWith("DEBRIEF", report);
+                StringAssert.Contains("held for 30 s", report);
+                Assert.AreEqual(DisplayStyle.None, rig.Q<FleetMap>("reports-evidence-map").style.display.value, "the history is cleared");
+                Assert.AreEqual(DisplayStyle.None, slider.style.display.value);
+            }
+        }
+
+        // An answer for an incident no longer picked is dropped, and History is free again after it.
+        [Test]
+        public async Task AStaleReportIsDropped()
+        {
+            using (var rig = new IncidentsRig())
+            {
+                await rig.Join();
+                var held = new TaskCompletionSource<HttpResponse>();
+                rig.Report = _ => held.Task;
+                rig.Press("reports-incident-history");
+                Assert.IsFalse(rig.Q<Button>("reports-incident-history").enabledSelf, "waiting on the answer");
+                rig.Q<DropdownField>("reports-incidents").value = "incident-2";
+                held.SetResult(rig.Answer("/sessions/session-001/incidents/incident-1/history"));
+                await rig.Settle();
+                Assert.IsEmpty(rig.Q<Label>("reports-incident-report").text, "incident-1's history is not shown under incident-2");
+                Assert.AreEqual(DisplayStyle.None, rig.Q<FleetMap>("reports-evidence-map").style.display.value);
+                Assert.IsTrue(rig.Q<Button>("reports-incident-history").enabledSelf);
+            }
+        }
+
+        // The picked incident leaving the session moves the menu without a change event; its history goes too.
+        [Test]
+        public async Task AnIncidentLeavingTheSnapshotClearsItsHistory()
+        {
+            using (var rig = new IncidentsRig())
+            {
+                await rig.Join();
+                rig.Q<DropdownField>("reports-incidents").value = "incident-2";
+                rig.Press("reports-incident-history"); await rig.Settle();
+                Assert.IsNotEmpty(rig.Q<Label>("reports-incident-report").text);
+
+                ((JArray)rig.Raw["incidents"]).RemoveAt(1);
+                rig.Raw["snapshot_id"] = Guid.NewGuid().ToString();
+                await rig.Session.RefreshAsync();
+                Assert.AreEqual("incident-1", rig.Q<DropdownField>("reports-incidents").value);
+                Assert.IsEmpty(rig.Q<Label>("reports-incident-report").text, "incident-2's history is gone");
+                Assert.AreEqual(DisplayStyle.None, rig.Q<FleetMap>("reports-evidence-map").style.display.value);
+                StringAssert.Contains("Lorong 6 Toa Payoh", rig.Q<Label>("reports-incident-summary").text, "incident-1 is described");
+            }
+        }
+
+        // A new session is not kept waiting on the old one's report, and that report is dropped when it comes.
+        [Test]
+        public async Task ANewSessionFreesHistory()
+        {
+            using (var rig = new IncidentsRig())
+            {
+                await rig.Join();
+                var held = new TaskCompletionSource<HttpResponse>();
+                rig.Report = _ => held.Task;
+                rig.Press("reports-incident-history");
+                var history = rig.Q<Button>("reports-incident-history");
+                Assert.IsFalse(history.enabledSelf);
+                // The tab as it sees the next epoch of the session
+                var tab = (IncidentReportsTab)typeof(TrainingWorkspace).GetField("incidentReports", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).GetValue(rig.Workspace);
+                var next = ContractParser.Parse<FullSnapshot>(rig.Raw.ToString()); next.SessionEpoch = 2;
+                tab.Render(next);
+                Assert.IsTrue(history.enabledSelf, "free in the new epoch");
+                held.SetResult(rig.Answer("/sessions/session-001/incidents/incident-1/history"));
+                await rig.Settle();
+                Assert.IsEmpty(rig.Q<Label>("reports-incident-report").text, "the old epoch's history is dropped");
+                Assert.IsTrue(history.enabledSelf);
+            }
         }
     }
 }
