@@ -28,15 +28,14 @@ namespace Formula9.UI
         private readonly DropdownField routes, incidents, candidates;
         private readonly TextField routeReason, incidentReason;
         private readonly Label routeProblem, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes, incidentData, incidentReport, selection;
-        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowClosure, routeCameras, fleetCameras, approve, routeStart, routeWatch, previewIncident, approveIncident, rerouteIncident, history, debrief;
+        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowClosure, routeCameras, fleetCameras, approve, routeStart, routeWatch, previewIncident, approveIncident, rerouteIncident;
         private readonly FleetMap evidenceMap;
         private readonly VisualElement routeStages, routeWaypoints, routeIssues, routeMetrics, routeDecide, routeFeedback, routeApply, routeOutcomePanel, routeOutcomeRows, fleetTable;
         private readonly List<VisualElement> operationalViews;
-        private readonly SliderInt historySample;
         private readonly Label evidenceStatus;
-        private readonly List<FullSnapshot> historySnapshots = new List<FullSnapshot>();
         private readonly ChargingPage charging;
         private readonly ReportsPage reports;
+        private readonly IncidentReportsTab incidentReports;
         private readonly Button sessionToggle;
         private readonly VisualElement sessionCard;
         private bool? sessionToolsOpen;
@@ -120,7 +119,7 @@ namespace Formula9.UI
             routeOutcomeRows = root.Q("route-outcome-rows");
             fleetTable = Table(root.Q("route-fleet-host"), "", "Shuttle ID", "State", "Route / revision", "Battery", "Provenance");
             Tabs(root, ("route-tab-editor", "route-editor-panel"), ("route-tab-fleet", "route-fleet-panel"));
-            Tabs(root, ("reports-tab-log", "reports-log-panel"), ("reports-tab-commands", "reports-commands-panel"));
+            Tabs(root, ("reports-tab-log", "reports-log-panel"), ("reports-tab-commands", "reports-commands-panel"), ("reports-tab-incidents", "reports-incidents-panel"));
             operationalViews = new List<VisualElement> { root.Q("view-bar"), root.Q("world") };
             routeUndo = Bind(root, "route-undo", () => RestoreDraft(-1));
             routeRedo = Bind(root, "route-redo", () => RestoreDraft(1));
@@ -154,16 +153,13 @@ namespace Formula9.UI
             incidentReason.RegisterValueChangedCallback(_ => { ClearIncidentPreview(); UpdateActions(); });
             previewIncident = Bind(root, "incident-preview", () => run(PreviewIncident()));
             approveIncident = Bind(root, "incident-approve", () => run(ApproveIncident()));
-            history = Bind(root, "incident-history", () => run(IncidentReport(false)));
-            debrief = Bind(root, "incident-debrief", () => run(IncidentReport(true)));
             incidentReport = root.Q<Label>("incident-report");
             evidenceStatus = root.Q<Label>("evidence-status");
             evidenceMap = root.Q<FleetMap>("incident-evidence-map");
             world.UseRealMap(evidenceMap);
-            historySample = root.Q<SliderInt>("history-sample");
-            historySample.RegisterValueChangedCallback(_ => ShowHistorySample());
 
             reports = new ReportsPage(root);
+            incidentReports = new IncidentReportsTab(root, api, session, world, run);
             session.SnapshotAccepted += (_, __) => { acceptedAt = Time.realtimeSinceStartup; Render(); };
             session.EventsAccepted += _ => RenderReports();
             session.AvailabilityChanged += _ => { if (!session.Available) { InvalidateRoute(); ClearIncidentPreview(); } Render(); };
@@ -208,6 +204,7 @@ namespace Formula9.UI
                 sessionToolsState = setupState;
             }
             FitSessionControls();
+            incidentReports.Render(s);
             if (s == null) { RenderReports(); UpdateActions(); return; }
             // An applied approval moves its route to a new revision, which finishes the draft. A queued
             // or rejected one never does, so its draft stays for another try.
@@ -296,9 +293,6 @@ namespace Formula9.UI
                 s.Incidents.Any(i => i.IncidentId == incidents.value && i.State == "OPTIONS_READY") && !string.IsNullOrWhiteSpace(incidentReason.value);
             previewIncident.SetEnabled(decision);
             approveIncident.SetEnabled(decision && incidentPreviewCommand != null);
-            history.SetEnabled(!incidentBusy && s != null && !string.IsNullOrEmpty(incidents.value));
-            debrief.SetEnabled(history.enabledSelf);
-            world.RouteEditing = edit;
             // A decision or a lost connection withdraws the verdict but leaves the draft: ask once more.
             if (edit && draft.Count > 0 && preview == null && !routeBusy && approvedDraft == null && checkedRevision != draftRevision && !previewTimer.isActive) SchedulePreview();
             if (draftView != null && draftView.Editable != (edit && shownPage == RoutePage)) ShowDraftInViews();
@@ -739,29 +733,6 @@ namespace Formula9.UI
             UpdateActions();
         }
 
-        private async Task IncidentReport(bool showDebrief)
-        {
-            var s = session.Store.Snapshot; if (s == null || incidentBusy || string.IsNullOrEmpty(incidents.value)) return;
-            var id = incidents.value; var stamp = boundary; incidentBusy = true; UpdateActions();
-            try
-            {
-                var result = await api.GetIncidentReportAsync(s.SessionId, id, showDebrief);
-                if (stamp != boundary || incidents.value != id) return;
-                ClearIncidentPreview();
-                ClearEvidence();
-                if (!showDebrief)
-                {
-                    historySnapshots.AddRange(((JArray)result["snapshots"]).Select(raw => ContractParser.Parse<FullSnapshot>(raw.ToString())));
-                    historySample.highValue = Math.Max(0, historySnapshots.Count - 1);
-                    historySample.SetValueWithoutNotify(0);
-                    historySample.style.display = historySnapshots.Count > 1 ? DisplayStyle.Flex : DisplayStyle.None;
-                    ShowHistorySample();
-                }
-                incidentReport.text = (showDebrief ? "DEBRIEF · provisional / uncalibrated\n" : "HISTORICAL SIMULATION · complete: " + result["complete"] + "\n" + result["unavailable_reason"] + "\n") + FormatDocument(result);
-            }
-            finally { incidentBusy = false; UpdateActions(); }
-        }
-
         private void FocusIncident()
         {
             var incident = session.Store.Snapshot?.Incidents.FirstOrDefault(i => i.IncidentId == incidents.value);
@@ -773,23 +744,15 @@ namespace Formula9.UI
 
         private void ClearEvidence()
         {
-            historySnapshots.Clear(); evidenceMap.Show(null);
-            evidenceMap.style.display = historySample.style.display = DisplayStyle.None;
+            evidenceMap.Show(null);
+            evidenceMap.style.display = DisplayStyle.None;
             evidenceStatus.text = "";
-        }
-
-        private void ShowHistorySample()
-        {
-            if (historySnapshots.Count == 0) return;
-            var sample = historySnapshots[Math.Min(historySample.value, historySnapshots.Count - 1)];
-            evidenceMap.Show(sample); evidenceMap.style.display = DisplayStyle.Flex;
-            evidenceStatus.text = $"Historical simulation · sample {historySample.value + 1}/{historySnapshots.Count} · tick {sample.Tick}.";
         }
 
         private void RenderReports() => reports.Render(session.Store.SelectedSessionId, session.Store.Events, ledger);
 
         // Human-readable nested fields preserve the backend's assumptions, evidence and rubric.
-        private static string FormatDocument(JToken token, int depth = 0)
+        internal static string FormatDocument(JToken token, int depth = 0)
         {
             if (token == null) return "Unavailable";
             if (token is JObject obj) return string.Join("\n", obj.Properties().Where(p => p.Name != "snapshots").Select(p =>
@@ -865,7 +828,7 @@ namespace Formula9.UI
             }
         }
         private static Button Bind(VisualElement root, string name, Action action) { var button = root.Q<Button>(name); button.clicked += action; return button; }
-        private static void Choices(DropdownField field, IEnumerable<string> values)
+        internal static void Choices(DropdownField field, IEnumerable<string> values)
         {
             var choices = values.OrderBy(v => v, StringComparer.Ordinal).ToList();
             if (field.choices.SequenceEqual(choices)) return;

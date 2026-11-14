@@ -16,13 +16,9 @@
             <ui:VisualElement class="row">
                 <ui:Button name="incident-preview" text="Preview option" />
                 <ui:Button name="incident-approve" text="Approve previewed option" />
-                <ui:Button name="incident-history" text="History" />
-                <ui:Button name="incident-debrief" text="Debrief" />
             </ui:VisualElement>
-            <ui:Label name="incident-report" text="Preview, historical evidence and debrief appear here. Live state stays in the fleet view." class="workspace-text" />
+            <ui:Label name="incident-report" text="Previews appear here. History and Debrief are in Reports → Incidents." class="workspace-text" />
             <ui:Label name="evidence-status" class="workspace-text" />
-            <f9:FleetMap name="incident-evidence-map" class="route-map" style="display: none;" />
-            <ui:SliderInt name="history-sample" label="History sample" low-value="0" high-value="0" style="display: none;" />
-        </ui:VisualElement>
+            <f9:FleetMap name="incident-evidence-map" class="route-map" style="display: none;" />        </ui:VisualElement>
     </ui:ScrollView>
 </ui:UXML>
