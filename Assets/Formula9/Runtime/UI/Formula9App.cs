@@ -916,7 +916,7 @@ namespace Formula9.UI
                 card.AddToClassList("fleet-card");
                 card.EnableInClassList("fleet-card-selected", id == world?.SelectedId);
                 card.EnableInClassList("fleet-card-incident", row.Incident != null);
-                card.RegisterCallback<ClickEvent>(_ => workspace?.SelectVehicle(id));
+                card.RegisterCallback<ClickEvent>(_ => workspace?.PickVehicle(id));
 
                 var icon = new VisualElement { pickingMode = PickingMode.Ignore };
                 icon.AddToClassList("bus-icon");
