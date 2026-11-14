@@ -117,7 +117,7 @@ def send(runtime, kind, *, snapshot=None, target_type="SESSION", target_id=None,
 
 def preview(runtime, **changes):
     client, store, service, session_id = runtime
-    body = {"route_id": "route-m2-detour", "expected_route_revision": 1, "draft_revision": 1, **changes}
+    body = {"route_id": "route-peer-a", "expected_route_revision": 1, "draft_revision": 1, **changes}
     response = client.post(f"/api/v2/sessions/{session_id}/route-previews", json=body)
     assert response.status_code == 200, response.text
     return response.json()
@@ -129,7 +129,7 @@ def approve(runtime, draft=None, *, key="route-approval"):
     response = client.post(f"/api/v2/sessions/{session_id}/route-approvals", json={
         "preview_id": draft["preview_id"], "preview_revision": draft["preview_revision"],
         "command_id": uuid4().hex, "idempotency_key": key,
-        "target_vehicle_ids": ["shuttle-01"], "reason": "Avoid the permanent authored main-road closure"})
+        "target_vehicle_ids": ["shuttle-01"], "reason": "Authored pre-trip route approval"})
     assert response.status_code == 200, response.text
     return response.json()
 
@@ -179,9 +179,8 @@ def test_one_live_session_runs_route_incident_depot_and_charging(runtime):
     client, store, service, session_id = runtime
     initial = read(runtime)
     assert len(initial["vehicles"]) == 5 and len(initial["routes"]) == 5 and len(initial["chargers"]) == 4 and len(initial["depots"]) == 2
-    assert send(runtime, "START")["status"] == "REJECTED"  # Closed route never silently starts.
-    assert read(runtime)["session"]["status"] == "READY"
-    draft = preview(runtime)
+    assert initial["disruptions"] == []  # No road block is scripted on shuttle-01's route
+    draft = preview(runtime, via_node_ids=[only_on("bypass-b")])
     assert draft["approvable"] and draft["directed_edge_ids"][0] == "bypass-b:0:forward"
     approved = approve(runtime, draft)
     assert approved["status"] == "APPLIED"
@@ -203,7 +202,7 @@ def test_one_live_session_runs_route_incident_depot_and_charging(runtime):
     advance(runtime, 240)
     continued = read(runtime)
     assert continued["incidents"][0]["state"] == "RESOLVED"
-    assert on_branch(continued["vehicles"][0]["position"], "bypass-b")  # Actor follows bypass B, not the closed main road.
+    assert on_branch(continued["vehicles"][0]["position"], "bypass-b")  # Actor follows the approved bypass B.
     assert continued["vehicles"][4]["service_state"] == "RETURNING_TO_DEPOT"
     assert continued["vehicles"][4]["position"] != initial["vehicles"][4]["position"]
     advance_until(runtime, lambda s: s.vehicles[4].service_state == "CHARGING")
@@ -300,7 +299,7 @@ def test_failed_domain_commit_does_not_install_a_route_and_retry_uses_original_c
     response = client.post(f"/api/v2/sessions/{session_id}/route-approvals", json={
         "preview_id": draft["preview_id"], "preview_revision": draft["preview_revision"],
         "command_id": "original-route-command", "idempotency_key": "route-approval",
-        "target_vehicle_ids": ["shuttle-01"], "reason": "Avoid the permanent authored main-road closure"})
+        "target_vehicle_ids": ["shuttle-01"], "reason": "Authored pre-trip route approval"})
     assert response.status_code == 503
     assert service.sessions[session_id].actor is before and read(runtime)["routes"][0]["revision"] == 1
     monkeypatch.setattr(store, "apply", original)
@@ -385,7 +384,7 @@ def test_unknown_mandatory_route_metadata_prevents_live_approval(runtime, monkey
         monkeypatch.delitem(routes._fixture, "vehicle_width_m")
     else:
         monkeypatch.setitem(routes._network.edges[routes._fixture["detour_directed_edge_ids"][0]], "width_m", None)
-    draft = preview(runtime)
+    draft = preview(runtime, via_node_ids=[only_on("bypass-b")])
     assert draft["validation"] == "UNKNOWN" and not draft["approvable"]
     response = client.post(f"/api/v2/sessions/{session_id}/route-approvals", json={
         "preview_id": draft["preview_id"], "preview_revision": draft["preview_revision"],
@@ -441,7 +440,7 @@ def test_identical_seed_and_inputs_replay_identical_workflow_state(tmp_path, mon
             try:
                 await service.initialize()
                 draft = actor.definition.routes.preview(store.snapshot(actor.session_id), RouteEditRequest(
-                    route_id="route-m2-detour", expected_route_revision=1, draft_revision=1))
+                    route_id="route-peer-a", expected_route_revision=1, draft_revision=1))
                 result = await service.approve_route("operator", actor.session_id, RouteApprovalRequest(
                     preview_id=draft.preview_id, preview_revision=draft.preview_revision, command_id="route", idempotency_key="route",
                     target_vehicle_ids=["shuttle-01"], reason="Deterministic pre-trip bypass"))
@@ -612,9 +611,7 @@ def test_pretrip_recovery_stays_ready_and_can_approve_and_start(tmp_path, monkey
                     advance(runtime, 2)
                     assert read(runtime) == after
                     if attempt == 1:
-                        if not approved:
-                            assert send(runtime, "START")["status"] == "REJECTED"
-                            assert approve(runtime)["status"] == "APPLIED"
+                        # No road is closed at the start, so an attempt starts with or without a pre-trip approval
                         assert send(runtime, "START")["status"] == "APPLIED"
                         advance(runtime, 2)
                         running = read(runtime)

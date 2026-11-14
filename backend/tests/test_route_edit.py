@@ -360,3 +360,13 @@ def test_route_http_contract(tmp_path: Path, service: RouteEditService) -> None:
                 assert response.status_code == 200 and response.json()["status"] == "APPLIED"
         finally:
             app.dependency_overrides.clear()
+
+
+def test_routes_that_serve_the_same_stops_are_refused():
+    """A detour is traced back to the route it was taken from by its stops: two routes with the same stops
+    would make that ambiguous, so the editor refuses them."""
+    config = json.loads(ROUTE_FIXTURE.read_text(encoding="utf-8"))
+    config["peer_routes"] = {"route-twin": {key: config[key] for key in
+                                            ("start_node_id", "destination_node_id", "required_stops")}}
+    with pytest.raises(ValueError, match="serve the same stops"):
+        RouteEditService(get_road_graph_repository(), fixture=config)

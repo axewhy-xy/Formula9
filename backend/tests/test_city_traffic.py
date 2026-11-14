@@ -366,12 +366,12 @@ def test_a_recovered_session_drives_its_traffic_on_exactly(tmp_path, monkeypatch
             store.create_session(actor.generate_snapshot(), runtime_state=checkpoint(actor))
             service = TrainingSessionService(store)
             await service.initialize()
-            # The authored main road is closed: the shuttle needs an approved bypass before the start
+            # A pre-trip route approval for shuttle-01, then the start
             draft = actor.definition.routes.preview(store.snapshot(actor.session_id), RouteEditRequest(
-                route_id="route-m2-detour", expected_route_revision=1, draft_revision=1))
+                route_id="route-peer-a", expected_route_revision=1, draft_revision=1))
             approved = await service.approve_route("operator", actor.session_id, RouteApprovalRequest(
                 preview_id=draft.preview_id, preview_revision=draft.preview_revision, command_id="route",
-                idempotency_key="route", target_vehicle_ids=["shuttle-01"], reason="Pre-trip bypass"))
+                idempotency_key="route", target_vehicle_ids=["shuttle-01"], reason="Pre-trip route"))
             assert approved.status == "APPLIED"
             snapshot = store.snapshot(actor.session_id)
             start = await service.submit("operator", DispatcherCommand(contract_version="2.0", command_id="start",
@@ -400,12 +400,12 @@ def test_a_recovered_session_drives_its_traffic_on_exactly(tmp_path, monkeypatch
 
 
 async def _start(service, store, actor):
-    """Approves the bypass the closed main road needs and starts the session."""
+    """Approves a pre-trip route for shuttle-01 and starts the session."""
     draft = actor.definition.routes.preview(store.snapshot(actor.session_id), RouteEditRequest(
-        route_id="route-m2-detour", expected_route_revision=1, draft_revision=1))
+        route_id="route-peer-a", expected_route_revision=1, draft_revision=1))
     approved = await service.approve_route("operator", actor.session_id, RouteApprovalRequest(
         preview_id=draft.preview_id, preview_revision=draft.preview_revision, command_id="route",
-        idempotency_key="route", target_vehicle_ids=["shuttle-01"], reason="Pre-trip bypass"))
+        idempotency_key="route", target_vehicle_ids=["shuttle-01"], reason="Pre-trip route"))
     assert approved.status == "APPLIED"
     snapshot = store.snapshot(actor.session_id)
     start = await service.submit("operator", DispatcherCommand(contract_version="2.0", command_id="start",
@@ -644,10 +644,10 @@ async def _started(store, actor):
     service = TrainingSessionService(store)
     await service.initialize()
     draft = actor.definition.routes.preview(store.snapshot(actor.session_id), RouteEditRequest(
-        route_id="route-m2-detour", expected_route_revision=1, draft_revision=1))
+        route_id="route-peer-a", expected_route_revision=1, draft_revision=1))
     approved = await service.approve_route("operator", actor.session_id, RouteApprovalRequest(
         preview_id=draft.preview_id, preview_revision=draft.preview_revision, command_id="route",
-        idempotency_key="route", target_vehicle_ids=["shuttle-01"], reason="Pre-trip bypass"))
+        idempotency_key="route", target_vehicle_ids=["shuttle-01"], reason="Pre-trip route"))
     assert approved.status == "APPLIED"
     snapshot = store.snapshot(actor.session_id)
     start = await service.submit("operator", DispatcherCommand(contract_version="2.0", command_id="start",
