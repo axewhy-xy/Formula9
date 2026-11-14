@@ -292,7 +292,7 @@ namespace Formula9.UI
             routeUndo.SetEnabled(edit && historyIndex > 0);
             routeRedo.SetEnabled(edit && historyIndex + 1 < draftHistory.Count);
             routeClear.SetEnabled(edit && (draft.Count > 0 || preview != null));
-            approve.SetEnabled(edit && !routeBusy && preview != null && preview.Approvable && DecisionRules.RoutePreviewMatches(s, preview) && !string.IsNullOrWhiteSpace(routeReason.value));
+            approve.SetEnabled(edit && !routeBusy && preview != null && preview.Approvable && DecisionRules.RoutePreviewMatches(s, heldVehicle, preview) && !string.IsNullOrWhiteSpace(routeReason.value));
             routeApplyNote.text = RoutePresenter.ApprovalNote(s, preview, routeReason.value);
             routes.SetEnabled(!session.HasPendingCommand && !routeBusy && heldIncident == null);
             var routeClosed = s != null && TrainingPresenter.AssignedRouteIsClosed(s);
@@ -317,7 +317,7 @@ namespace Formula9.UI
             if (draftView != null && draftView.Editable != (edit && shownPage == RoutePage)) ShowDraftInViews();
         }
 
-        private bool Editable(FullSnapshot s) => Current && context != null && (s?.Session.Status == "READY" || DecisionRules.ReroutableRoute(s) == context.RouteId);
+        private bool Editable(FullSnapshot s) => Current && context != null && (s?.Session.Status == "READY" || DecisionRules.ReroutableRoute(s, heldVehicle) == context.RouteId);
 
         private static bool Drafting(FullSnapshot s) => s?.Session.Status == "READY" || DecisionRules.HeldIncident(s) != null;
 
@@ -464,7 +464,7 @@ namespace Formula9.UI
             if (s.Session.Status != "READY")
             {
                 // FollowHeldIncident clears the draft once a snapshot shows the incident decided; a refusal keeps it.
-                if (await session.SubmitAsync(DecisionRules.RerouteCommand(s, preview, routeReason.value))) await session.RefreshAsync();
+                if (await session.SubmitAsync(DecisionRules.RerouteCommand(s, heldVehicle, preview, routeReason.value))) await session.RefreshAsync();
                 InvalidateRoute(); Render();
                 return;
             }

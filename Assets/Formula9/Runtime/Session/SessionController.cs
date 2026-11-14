@@ -534,7 +534,8 @@ namespace Formula9.Session
         {
             if (Session == null || !Available || resyncPending || joiningSessionId != null || pending != null) return await Refuse();
             var snapshot = Store.Snapshot;
-            if (!DecisionRules.RoutePreviewMatches(snapshot, preview) || !preview.Approvable || string.IsNullOrWhiteSpace(reason))
+            // A pre-trip approval detours no shuttle round an incident, so it names none.
+            if (!DecisionRules.RoutePreviewMatches(snapshot, null, preview) || !preview.Approvable || string.IsNullOrWhiteSpace(reason))
                 throw new ArgumentException("Validate a fresh route proposal and enter a reason before approving.");
             var approval = new RouteApprovalRequest
             {

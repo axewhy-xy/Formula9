@@ -33,15 +33,15 @@ namespace Formula9.Tests
             var p = ContractParser.Parse<RouteEditPreview>(Fixture("route_edit_preview"));
             p.RouteId = s.Routes[0].RouteId; p.RouteRevision = s.Routes[0].Revision;
             p.ClosureRevisions = s.Disruptions.ToDictionary(d => d.DisruptionId, d => d.AggregateRevision);
-            Assert.IsTrue(DecisionRules.RoutePreviewMatches(s, p));
+            Assert.IsTrue(DecisionRules.RoutePreviewMatches(s, null, p));
             p.Checks[0].Status = "UNKNOWN";
-            Assert.IsFalse(DecisionRules.RoutePreviewMatches(s, p)); p.Checks[0].Status = "PASS";
+            Assert.IsFalse(DecisionRules.RoutePreviewMatches(s, null, p)); p.Checks[0].Status = "PASS";
             s.Disruptions[0].AggregateRevision++;
-            Assert.IsFalse(DecisionRules.RoutePreviewMatches(s, p)); s.Disruptions[0].AggregateRevision--;
+            Assert.IsFalse(DecisionRules.RoutePreviewMatches(s, null, p)); s.Disruptions[0].AggregateRevision--;
             s.Routes[0].Revision++;
-            Assert.IsFalse(DecisionRules.RoutePreviewMatches(s, p)); s.Routes[0].Revision--;
+            Assert.IsFalse(DecisionRules.RoutePreviewMatches(s, null, p)); s.Routes[0].Revision--;
             s.SessionEpoch++;
-            Assert.IsFalse(DecisionRules.RoutePreviewMatches(s, p));
+            Assert.IsFalse(DecisionRules.RoutePreviewMatches(s, null, p));
         }
 
         [Test]
@@ -55,16 +55,16 @@ namespace Formula9.Tests
             p.SessionId = s.SessionId; p.SessionEpoch = s.SessionEpoch; p.SceneRevision = s.SceneRevision;
             foreach (var other in s.Vehicles.Where(v => v.RouteId == p.RouteId)) other.RouteRevision = p.RouteRevision;
             Assert.IsNull(DecisionRules.HeldIncident(s));
-            Assert.IsFalse(DecisionRules.RoutePreviewMatches(s, p));
-            Assert.Throws<ArgumentException>(() => DecisionRules.RerouteCommand(s, p, "Round the closure"));
+            Assert.IsFalse(DecisionRules.RoutePreviewMatches(s, vehicle.VehicleId, p));
+            Assert.Throws<ArgumentException>(() => DecisionRules.RerouteCommand(s, vehicle.VehicleId, p, "Round the closure"));
 
             s.Incidents.Add(new Incident { IncidentId = "closure", VehicleId = vehicle.VehicleId, State = "OPTIONS_READY", AggregateRevision = 3, CandidateIds = new List<string> { "detour", "wait" } });
             s.Candidates.Add(new Candidate { CandidateId = "detour", IncidentId = "closure", Action = "ROAD_DETOUR", Validation = "PASS", ExpiresAtTick = s.Tick + 10 });
             s.Candidates.Add(new Candidate { CandidateId = "wait", IncidentId = "closure", Action = "WAIT", Validation = "PASS", ExpiresAtTick = s.Tick + 10 });
-            Assert.AreEqual(vehicle.RouteId, DecisionRules.ReroutableRoute(s));
-            Assert.IsTrue(DecisionRules.RoutePreviewMatches(s, p));
+            Assert.AreEqual(vehicle.RouteId, DecisionRules.ReroutableRoute(s, vehicle.VehicleId));
+            Assert.IsTrue(DecisionRules.RoutePreviewMatches(s, vehicle.VehicleId, p));
 
-            var command = DecisionRules.RerouteCommand(s, p, "Round the closure");
+            var command = DecisionRules.RerouteCommand(s, vehicle.VehicleId, p, "Round the closure");
             Assert.AreEqual("APPROVE_INCIDENT_OPTION", command.CommandType);
             Assert.AreEqual("closure", command.TargetId);
             Assert.AreEqual(3, command.ExpectedRevision);
@@ -75,11 +75,11 @@ namespace Formula9.Tests
             // Paused: the draft stays, but nothing can be approved until the session runs again.
             s.Session.Status = "PAUSED";
             Assert.IsNotNull(DecisionRules.HeldIncident(s));
-            Assert.IsNull(DecisionRules.ReroutableRoute(s));
+            Assert.IsNull(DecisionRules.ReroutableRoute(s, vehicle.VehicleId));
             s.Session.Status = "RUNNING";
             s.Incidents[0].State = "EXECUTING";
             Assert.IsNull(DecisionRules.HeldIncident(s));
-            Assert.IsFalse(DecisionRules.RoutePreviewMatches(s, p));
+            Assert.IsFalse(DecisionRules.RoutePreviewMatches(s, vehicle.VehicleId, p));
         }
 
         [Test]
@@ -93,8 +93,8 @@ namespace Formula9.Tests
             s.Candidates.Add(new Candidate { CandidateId = "detour", IncidentId = "collision", Action = "ROAD_DETOUR", Validation = "PASS", ExpiresAtTick = s.Tick + 10, VehicleId = exposed.VehicleId });
             Assert.AreEqual("collision", DecisionRules.HeldIncident(s).IncidentId);
             Assert.AreEqual(exposed.VehicleId, DecisionRules.DetourVehicle(s));
-            Assert.AreEqual(exposed.RouteId, DecisionRules.ReroutableRoute(s));
-            Assert.AreEqual("detour", DecisionRules.DetourCandidate(s).CandidateId);
+            Assert.AreEqual(exposed.RouteId, DecisionRules.ReroutableRoute(s, exposed.VehicleId));
+            Assert.AreEqual("detour", DecisionRules.DetourCandidate(s, exposed.VehicleId).CandidateId);
         }
 
         [Test]

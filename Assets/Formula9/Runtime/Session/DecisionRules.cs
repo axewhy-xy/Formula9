@@ -17,44 +17,83 @@ namespace Formula9.Session
             string.Join(";", snapshot.Disruptions.OrderBy(d => d.DisruptionId).Select(d => $"{d.DisruptionId}:{d.AggregateRevision}:{d.ActiveFromTick <= snapshot.Tick && (d.ActiveUntilTick == null || snapshot.Tick < d.ActiveUntilTick)}")) + "/" +
             string.Join(";", snapshot.Vehicles.Where(v => v.RouteId == route).OrderBy(v => v.VehicleId).Select(v => $"{v.VehicleId}:{v.RouteRevision}"));
 
-        // The latest incident still to be decided for that offers a shuttle a road detour round it.
-        public static Incident HeldIncident(FullSnapshot snapshot) => DetourCandidate(snapshot) is Candidate c
-            ? snapshot.Incidents.First(i => i.IncidentId == c.IncidentId) : null;
+        // Decisions are open while the session runs, and stay listed while it is paused.
+        private static bool Live(FullSnapshot snapshot) =>
+            snapshot != null && (snapshot.Session.Status == "RUNNING" || snapshot.Session.Status == "PAUSED");
 
-        // That incident's road detour option: each shuttle that will reach an incident has its own, which
-        // names it (an older snapshot's names none, and is for the incident's own shuttle).
-        public static Candidate DetourCandidate(FullSnapshot snapshot)
+        // The shuttle an option is for: each shuttle that will reach an incident has its own, which names
+        // it (an older snapshot's names none, and is for the incident's own shuttle).
+        private static string VehicleOf(Candidate candidate, Incident incident) => candidate.VehicleId ?? incident.VehicleId;
+
+        private static IEnumerable<Incident> OptionsReady(FullSnapshot snapshot) =>
+            (snapshot.Incidents ?? new List<Incident>()).Where(i => i.State == "OPTIONS_READY");
+
+        // Every decision still to be made: one per shuttle and incident the backend offers that shuttle
+        // options for, soonest arrival first. A shuttle with no exposure is one the incident names and
+        // that is already at it, so it comes first.
+        public static List<PendingDecision> PendingDecisions(FullSnapshot snapshot)
         {
-            if (snapshot == null || (snapshot.Session.Status != "RUNNING" && snapshot.Session.Status != "PAUSED")) return null;
-            foreach (var incident in (snapshot.Incidents ?? new List<Incident>()).Where(i => i.State == "OPTIONS_READY").OrderByDescending(i => i.DetectedTick))
-            {
-                var candidate = snapshot.Candidates.FirstOrDefault(c => c.IncidentId == incident.IncidentId && c.Action == RoadDetour);
-                if (candidate != null) return candidate;
-            }
-            return null;
+            var pending = new List<PendingDecision>();
+            if (!Live(snapshot)) return pending;
+            foreach (var incident in OptionsReady(snapshot))
+                foreach (var options in snapshot.Candidates.Where(c => c.IncidentId == incident.IncidentId)
+                             .GroupBy(c => VehicleOf(c, incident)).Where(g => g.Key != null))
+                    pending.Add(new PendingDecision(options.Key, incident, incident.ExposureOf(options.Key),
+                        options.GroupBy(c => c.Action).ToDictionary(g => g.Key, g => g.First())));
+            return pending.OrderBy(d => d.EtaS ?? -1).ThenBy(d => d.Incident.DetectedTick)
+                .ThenBy(d => d.IncidentId, StringComparer.Ordinal).ThenBy(d => d.VehicleId, StringComparer.Ordinal).ToList();
         }
 
-        // The shuttle a detour drafted now would take round an incident, or null.
-        public static string DetourVehicle(FullSnapshot snapshot)
+        // One shuttle's decisions still to be made, soonest arrival first.
+        public static List<PendingDecision> OptionsFor(FullSnapshot snapshot, string vehicleId) =>
+            PendingDecisions(snapshot).Where(d => d.VehicleId == vehicleId).ToList();
+
+        // The option for this shuttle and action at this incident as the snapshot has it now, or null.
+        // Options are reissued with new IDs at each incident revision and on expiry, so a decision
+        // looks its ID up here when it is sent, never before.
+        public static Candidate CandidateFor(FullSnapshot snapshot, string incidentId, string vehicleId, string action)
         {
-            var candidate = DetourCandidate(snapshot);
-            return candidate == null ? null : candidate.VehicleId ?? snapshot.Incidents.First(i => i.IncidentId == candidate.IncidentId).VehicleId;
+            var incident = snapshot?.Incidents?.FirstOrDefault(i => i.IncidentId == incidentId);
+            return incident == null || vehicleId == null ? null : snapshot.Candidates.FirstOrDefault(c =>
+                c.IncidentId == incidentId && c.Action == action && VehicleOf(c, incident) == vehicleId);
         }
 
-        // The route the operator can edit while the session runs: the one the shuttle to be detoured is on.
-        public static string ReroutableRoute(FullSnapshot snapshot)
+        // Every road detour on offer, in the order the backend's route_edit.detour_target checks a draft
+        // against them: the latest-detected incident first, ties and options in snapshot order (both
+        // sorts are stable). A route has one shuttle, so the route's riders are that shuttle.
+        private static IEnumerable<(Incident Incident, Candidate Candidate, string VehicleId)> Detours(FullSnapshot snapshot)
         {
-            var vehicle = snapshot?.Session.Status == "RUNNING" ? DetourVehicle(snapshot) : null;
-            return vehicle == null ? null : snapshot.Vehicles.FirstOrDefault(v => v.VehicleId == vehicle)?.RouteId;
+            if (!Live(snapshot)) yield break;
+            foreach (var incident in OptionsReady(snapshot).OrderByDescending(i => i.DetectedTick))
+                foreach (var candidate in snapshot.Candidates.Where(c => c.IncidentId == incident.IncidentId && c.Action == RoadDetour))
+                    yield return (incident, candidate, VehicleOf(candidate, incident));
         }
+
+        // The road detour a route drafted for this shuttle now would answer, or null: its option at the
+        // latest-detected incident that offers it one.
+        public static Candidate DetourCandidate(FullSnapshot snapshot, string vehicleId) =>
+            vehicleId == null ? null : Detours(snapshot).FirstOrDefault(d => d.VehicleId == vehicleId).Candidate;
+
+        // Until Route Planning lets the operator pick the shuttle (incident reform phase 2), the panel
+        // follows the first detour on offer by itself: its incident, and its shuttle.
+        public static Incident HeldIncident(FullSnapshot snapshot) => Detours(snapshot).FirstOrDefault().Incident;
+        public static string DetourVehicle(FullSnapshot snapshot) => Detours(snapshot).FirstOrDefault().VehicleId;
+
+        // The route the operator can edit for this shuttle while the session runs: its own, while it has
+        // a detour on offer. Null otherwise, and while paused.
+        public static string ReroutableRoute(FullSnapshot snapshot, string vehicleId) =>
+            snapshot?.Session.Status == "RUNNING" && DetourCandidate(snapshot, vehicleId) != null
+                ? snapshot.Vehicles.FirstOrDefault(v => v.VehicleId == vehicleId)?.RouteId : null;
 
         // Every route but a detour no shuttle is on any more: that road is never driven again.
         public static IEnumerable<string> SelectableRoutes(FullSnapshot snapshot) => snapshot.Routes
             .Where(r => !snapshot.Incidents.Any(i => i.IsDetour(r.RouteId)) || snapshot.Vehicles.Any(v => v.RouteId == r.RouteId))
             .Select(r => r.RouteId);
 
-        public static bool RoutePreviewMatches(FullSnapshot snapshot, RouteEditPreview preview) =>
-            snapshot != null && preview != null && (snapshot.Session.Status == "READY" || ReroutableRoute(snapshot) == preview.RouteId) &&
+        // Whether a preview is still the one to approve: before the start, for any route; while running,
+        // for the route of this shuttle with a detour on offer (vehicleId is ignored before the start).
+        public static bool RoutePreviewMatches(FullSnapshot snapshot, string vehicleId, RouteEditPreview preview) =>
+            snapshot != null && preview != null && (snapshot.Session.Status == "READY" || ReroutableRoute(snapshot, vehicleId) == preview.RouteId) &&
             snapshot.SessionId == preview.SessionId && snapshot.SessionEpoch == preview.SessionEpoch && snapshot.SceneRevision == preview.SceneRevision &&
             snapshot.Routes.Any(r => r.RouteId == preview.RouteId && r.Revision == preview.RouteRevision) &&
             snapshot.Vehicles.Any(v => v.RouteId == preview.RouteId && v.RouteRevision == preview.RouteRevision) &&
@@ -112,20 +151,22 @@ namespace Formula9.Session
 
         public static DispatcherCommand IncidentCommand(FullSnapshot snapshot, string incidentId, string candidateId, string reason)
         {
-            var incident = snapshot.Incidents.Single(i => i.IncidentId == incidentId);
-            var candidate = snapshot.Candidates.Single(c => c.CandidateId == candidateId && c.IncidentId == incidentId);
-            if (snapshot.Session.Status != "RUNNING" || incident.State != "OPTIONS_READY" || !incident.CandidateIds.Contains(candidateId) ||
+            // An option reissued since it was chosen is gone from the snapshot: that is a stale choice too.
+            var incident = snapshot.Incidents.SingleOrDefault(i => i.IncidentId == incidentId);
+            var candidate = snapshot.Candidates.SingleOrDefault(c => c.CandidateId == candidateId && c.IncidentId == incidentId);
+            if (incident == null || candidate == null ||
+                snapshot.Session.Status != "RUNNING" || incident.State != "OPTIONS_READY" || !incident.CandidateIds.Contains(candidateId) ||
                 candidate.Validation != "PASS" || candidate.ExpiresAtTick < snapshot.Tick)
                 throw new ArgumentException("Refresh and choose a current passing incident option.");
             return Command(snapshot, "APPROVE_INCIDENT_OPTION", "INCIDENT", incidentId, incident.AggregateRevision, reason,
                 new JObject { ["candidate_id"] = candidate.CandidateId });
         }
 
-        // The operator's own detour answers the incident in place of the planned one.
-        public static DispatcherCommand RerouteCommand(FullSnapshot snapshot, RouteEditPreview preview, string reason)
+        // The operator's own detour answers the incident in place of the planned one, for this shuttle.
+        public static DispatcherCommand RerouteCommand(FullSnapshot snapshot, string vehicleId, RouteEditPreview preview, string reason)
         {
-            var candidate = DetourCandidate(snapshot);
-            if (!RoutePreviewMatches(snapshot, preview) || !preview.Approvable || candidate == null)
+            var candidate = DetourCandidate(snapshot, vehicleId);
+            if (!RoutePreviewMatches(snapshot, vehicleId, preview) || !preview.Approvable || candidate == null)
                 throw new ArgumentException("Validate a fresh route proposal before approving.");
             var command = IncidentCommand(snapshot, candidate.IncidentId, candidate.CandidateId, reason);
             command.Payload["directed_edge_ids"] = JArray.FromObject(preview.DirectedEdgeIds);
@@ -142,5 +183,29 @@ namespace Formula9.Session
                 CommandType = kind, TargetType = targetType, TargetId = id, Reason = reason.Trim(), Payload = payload,
             };
         }
+    }
+
+    // One shuttle's decision still to be made about one incident: the options the backend offers it, by
+    // action, and how far it is from the incident. Every figure is the backend's estimate; the exposure
+    // is null when the incident names the shuttle but gives no figures for it.
+    public sealed class PendingDecision
+    {
+        public PendingDecision(string vehicleId, Incident incident, IncidentExposure exposure, IReadOnlyDictionary<string, Candidate> candidates)
+        {
+            VehicleId = vehicleId; Incident = incident; Exposure = exposure; Candidates = candidates;
+        }
+
+        public string VehicleId { get; }
+        public Incident Incident { get; }
+        public IncidentExposure Exposure { get; }
+        public IReadOnlyDictionary<string, Candidate> Candidates { get; }
+
+        public string IncidentId => Incident.IncidentId;
+        public double? EtaS => Exposure?.EtaS;
+        public double? DistanceM => Exposure?.DistanceM;
+        public double? KeepRouteDelayS => Exposure?.KeepRouteDelayS;
+
+        // This shuttle's option for an action (KEEP_ROUTE, ROAD_DETOUR, ESCALATE, HOLD_AT_STOP), or null.
+        public Candidate Option(string action) => Candidates.TryGetValue(action, out var candidate) ? candidate : null;
     }
 }
