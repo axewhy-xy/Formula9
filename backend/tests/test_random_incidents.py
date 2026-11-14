@@ -83,7 +83,7 @@ def test_informational_incidents_slow_motion_and_resolve_once_without_closing_ac
     disruptions = [d for d in detected.disruptions if d.disruption_id == "random-info-disruption"]
     assert bool(disruptions) == (kind == "ROAD_BLOCK")
     # Slowdown-only accidents remain available in the route editor.
-    context = client.get(f"/api/v2/sessions/{session_id}/routes/route-m2-detour/editor").json()
+    context = client.get(f"/api/v2/sessions/{session_id}/routes/route-peer-a/editor").json()
     occupied = detected.routes[0].directed_edge_ids[0]
     assert not next(e for e in context["edges"] if e["edge_id"] == occupied)["closed"]
     advance(runtime, 2)

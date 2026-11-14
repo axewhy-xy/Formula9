@@ -393,9 +393,8 @@ class IntegratedSessionActor(SessionActor):
         for route in self.domain.routes:
             route.estimated_duration_s = route.distance_m / data["speed_mps"] + self.DWELL_S
         primary.estimated_duration_s += data["route_edit"]["loop_end_dwell_s"]
-        self.domain.disruptions = [Disruption(disruption_id="closure-m2", aggregate_revision=1,
-            affected_edge_ids=data["route_edit"]["closed_directed_edge_ids"], active_from_tick=0,
-            reason="Authored permanent main-road closure; approve a pre-trip bypass", provenance=self.domain.source)]
+        # No road is closed at the start: shuttle-01 can start on its own route, as the peers do
+        self.domain.disruptions = []
         self.domain.chargers = [Charger(charger_id=key, aggregate_revision=1, port_count=1,
             power_kw=50, occupied_vehicle_ids=[], position=Position(x_m=bay[0], y_m=bay[1], z_m=0))
             for key, bay in self.definition.bay_positions.items()]

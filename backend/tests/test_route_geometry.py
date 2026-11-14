@@ -44,13 +44,12 @@ def test_geometry_must_match_the_edges():
         RouteRevision.model_validate({**base, "edge_paths_m": [[point, point]]})
 
 
-def test_integrated_routes_are_drawable_and_closure_is_on_the_primary_route():
+def test_integrated_routes_are_drawable_and_no_road_is_closed_at_the_start():
     snapshot = IntegratedSessionActor(seed=1000, session_id="geometry-check").generate_snapshot()
     for route in snapshot.routes:
         assert_joined(route)
-    primary = snapshot.routes[0]
-    closed = set(snapshot.disruptions[0].affected_edge_ids)
-    assert closed and closed <= set(primary.directed_edge_ids), "the closure must be drawable on a sent route"
+    assert snapshot.routes[0].route_id == "route-peer-a"
+    assert snapshot.disruptions == [], "no road block is scripted on shuttle-01's route"
 
 
 def test_integrated_routes_place_their_stops_on_the_route():
@@ -77,7 +76,7 @@ def test_stops_m_may_only_place_required_stops():
 def test_every_shuttle_pulls_in_at_every_stop_on_its_route():
     actor = IntegratedSessionActor(seed=1000, session_id="stops")
     routes = {route.route_id: route for route in actor.domain.routes}
-    assert len(routes["route-m2-detour"].stops_m) == 3
+    assert len(routes["route-peer-a"].stops_m) == 3
     assert len({shuttle.route_ID for shuttle in actor.shuttles}) == 5, "every shuttle has its own route"
     pairs = (("route-peer-b", "route-peer-d"), ("route-peer-c", "route-peer-e"))
     for first, second in pairs:

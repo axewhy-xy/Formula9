@@ -136,12 +136,11 @@ table. The backend still runs the other two, and the client can join existing se
 The integrated fixture (`backend/fixtures/m2_integrated.json`) is built by
 `python -m src.routing.build_singapore_fleet_fixture` from the committed OSM extract. It has:
 
-- five shuttles, each on its own route with LTA bus stops: `route-m2-detour` (shuttle-01) and four peer
+- five shuttles, each on its own route with LTA bus stops: `route-peer-a` (shuttle-01) and four peer
   routes on two peer loops, two shuttles a loop. Every route is a list of operating-network roads with
   its own route editor data (`route_edit` and `route_edit.peer_routes`), so any of them can be edited
   and taken round an incident
 - two depots: Toa Payoh Interchange and Saint Michael's Bus Terminal
-- a permanent closure that must be routed around before Start
 - incidents from `fixtures/incidents/predefined_scenarios.json`: a `timeline` of scheduled world events
   (`BREAKDOWN`, `COLLISION`, `ROAD_CLOSURE` on an edge, `SIGNAL_FAULT` at a signalled junction) beside the
   random generator. A random event is placed for an in-service shuttle chosen with the session RNG, about

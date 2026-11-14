@@ -17,7 +17,7 @@ from src.services.integrated_actor import SCENARIO_SELECTOR, get_workflow_defini
 from src.services.training_sessions import TrainingSessionService
 
 
-ROUTE = "route-m2-detour"
+ROUTE = "route-peer-a"
 SPEED_UP = 8
 
 
@@ -91,8 +91,8 @@ def test_the_editor_offers_every_road_with_names_and_no_more_than_it_knows(runti
     client, _, _, session_id = runtime
     context = client.get(f"/api/v2/sessions/{session_id}/routes/{ROUTE}/editor").json()
     assert len(context["edges"]) > 1000, "well beyond the scripted detours"
-    closed = [edge for edge in context["edges"] if edge["closed"]]
-    assert closed and all(edge["road_name"] for edge in closed)
+    assert not any(edge["closed"] for edge in context["edges"]), "no road is closed before the start"
+    assert any(edge["road_name"] for edge in context["edges"])
     assert {edge["fit"] for edge in context["edges"]} >= {"PASS", "FAIL", "UNKNOWN"}
     assert all(len(edge["path"]) >= 2 for edge in context["edges"])
     assert [stop["name"] for stop in context["stops"]] == ["Toa Payoh Police Centre", "Braddell Station Blk 106", "Blk 101c Carpark"]
@@ -147,14 +147,15 @@ def test_unknown_metadata_blocks_approval_and_says_what_is_missing(runtime):
     assert "No width is recorded" in check["message"] or check["status"] == "FAIL"
 
 
-def test_clicking_the_closed_road_fails_on_that_road(runtime):
+def test_shuttle_01s_main_road_is_open_at_the_start(runtime):
+    # No road block is scripted on shuttle-01's route: its main road can be chosen and the session started
+    # without a pre-trip approval
     config = get_workflow_definition().routes._fixture
-    closed = config["closed_directed_edge_ids"][0]
-    draft = preview(runtime, waypoint_edge_ids=[closed])
+    main = config["closed_directed_edge_ids"][0]
+    draft = preview(runtime, waypoint_edge_ids=[main])
     check = next(c for c in draft["checks"] if c["check"] == "CLOSURE")
-    assert check["status"] == "FAIL" and closed in check["edge_ids"]
-    assert network().edges[closed]["road"] in check["message"] and "closed" in check["message"]
-    assert not draft["approvable"]
+    assert check["status"] == "PASS" and draft["approvable"]
+    assert control(runtime, "START")["status"] == "APPLIED"
 
 
 def test_the_planner_never_u_turns_and_serves_stops_from_their_kerb():

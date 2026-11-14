@@ -361,18 +361,14 @@ def run(output: Path, *, ticks=None, validation_samples=None, reconnect_samples=
                     check("one_integrated_runtime", store.runtime_ids() == [session_id]
                           and len(app.state.training_services[store].sessions) == 1
                           and len(initial.vehicles) == 5 and len(initial.routes) == 5 and len(initial.chargers) == 4 and len(initial.depots) == 2)
-                    blocked = send(client, initial, command(initial, "START"))
-                    check("closed_route_prevents_start", blocked["status"] == "REJECTED"
-                          and store.snapshot(session_id).session.status == "READY")
-
                     for index in range(validation_samples):
                         preview = request(client, "POST", path+"/route-previews", json={
-                            "route_id": "route-m2-detour", "expected_route_revision": 1, "draft_revision": index+1})
+                            "route_id": "route-peer-a", "expected_route_revision": 1, "draft_revision": index+1})
                         check("curated_detour_validated", preview["approvable"] and preview["validation"] == "PASS")
                     approval = request(client, "POST", path+"/route-approvals", json={
                         "preview_id": preview["preview_id"], "preview_revision": preview["preview_revision"],
                         "command_id": uuid4().hex, "idempotency_key": "benchmark-route-approval",
-                        "reason": "Avoid the authored permanent closure", "target_vehicle_ids": ["shuttle-01"]})
+                        "reason": "Pre-trip route approval","target_vehicle_ids": ["shuttle-01"]})
                     check("route_approval_durable", approval["status"] == "APPLIED"
                           and store.snapshot(session_id).vehicles[0].route_revision == 2)
                     integration.append({"phase": "command", "command_type": "APPROVE_ROUTE",
