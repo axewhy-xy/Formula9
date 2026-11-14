@@ -186,7 +186,7 @@ namespace Formula9.Tests
 
                 press.Invoke(workspace, null);
                 Assert.IsFalse(world.CamerasShown);
-                Assert.IsTrue(world.ShowingMap, "back to the map the cameras were opened from");
+                Assert.IsFalse(world.ShowingMap, "Hide cameras goes back to the 3D view");
                 Assert.AreEqual("Cameras", toggle.text);
 
                 workspace.SelectVehicle("shuttle-03");
@@ -200,7 +200,7 @@ namespace Formula9.Tests
                 Assert.IsTrue(world.CamerasShown);
                 Assert.AreEqual("shuttle-05", world.WatchedId, "the new route's shuttle");
                 press.Invoke(workspace, null);
-                Assert.IsTrue(world.ShowingMap, "the route change did not forget the map");
+                Assert.IsFalse(world.ShowingMap, "still the 3D view after another route");
 
                 // Opened from the 3D view, closing stays in the 3D view
                 world.ShowMap(false);
@@ -212,8 +212,8 @@ namespace Formula9.Tests
         }
 
         // A closure holding a shuttle opens the map on it, except for someone watching a shuttle's
-        // cameras: they keep watching the shuttle they chose, and closing the cameras takes them to
-        // the map and the held shuttle.
+        // cameras: they keep watching the shuttle they chose, and closing the cameras selects the
+        // held shuttle and tells them, staying in the 3D view.
         [Test]
         public async Task AClosureLeavesSomeoneWatchingTheCameras()
         {
@@ -250,7 +250,8 @@ namespace Formula9.Tests
             try
             {
                 world.Attach(root.Q("world"), new SceneLoader(backend, url), null, null, new CityClient(backend, url));
-                var workspace = new TrainingWorkspace(root, api, session, world, _ => { }, _ => { });
+                var notices = new List<string>();
+                var workspace = new TrainingWorkspace(root, api, session, world, _ => { }, message => notices.Add(message));
                 var toggle = root.Q<Button>("fleet-cameras");
                 var press = typeof(TrainingWorkspace).GetMethod("ToggleSelectedCameras", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 await session.JoinAsync((string)raw["session_id"]);
@@ -269,7 +270,8 @@ namespace Formula9.Tests
 
                 press.Invoke(workspace, null);
                 Assert.IsFalse(world.CamerasShown);
-                Assert.IsTrue(world.ShowingMap, "leaving goes to the closure, on the map");
+                Assert.IsFalse(world.ShowingMap, "leaving stays in 3D; the operator is told of the closure");
+                StringAssert.Contains("shuttle-01 is waiting at a closure", notices.Last(), "and is told where to route it");
                 Assert.AreEqual("shuttle-01", world.SelectedId, "the held shuttle");
 
                 await Hold(false);

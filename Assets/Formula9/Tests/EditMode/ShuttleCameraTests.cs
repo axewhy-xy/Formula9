@@ -122,13 +122,13 @@ namespace Formula9.Tests
         private Camera Cam(string name) => rig.GetComponentsInChildren<Camera>(true).Single(c => c.name == "Shuttle camera " + name);
         private Camera[] Cams() => Names.Select(Cam).ToArray();
         private Camera WorldCamera() => rig.GetComponentsInChildren<Camera>(true).Single(c => c.name == "World Camera");
-        private Transform ShuttleTransform() =>
-            rig.GetComponentsInChildren<Transform>(true).First(t => t.name == "Shuttle " + Shuttle);
+        private Transform ShuttleTransform(string id = Shuttle) =>
+            rig.GetComponentsInChildren<Transform>(true).First(t => t.name == "Shuttle " + id);
 
         // Checks every camera sits on its mount around the shuttle and looks out the right way.
-        private void AssertMounted()
+        private void AssertMounted(string id = Shuttle)
         {
-            var s = ShuttleTransform();
+            var s = ShuttleTransform(id);
             Assert.Greater(Vector3.Dot(Cam("Front").transform.forward, s.forward), 0.999f, "front looks ahead");
             Assert.Greater(Vector3.Dot(Cam("Front").transform.position - s.position, s.forward), 6f, "front is at the nose");
             Assert.Greater(Vector3.Dot(Cam("Rear").transform.forward, -s.forward), 0.999f, "rear looks back");
@@ -295,7 +295,7 @@ namespace Formula9.Tests
             view.Show(gone);
             Frame();
             Assert.IsFalse(view.CamerasShown);
-            Assert.IsTrue(view.ShowingMap, "closing on its own goes back to the map they were opened from");
+            Assert.IsFalse(view.ShowingMap, "closing on its own stays in the 3D view, wherever they were opened from");
             view.ShowMap(false);
 
             view.Show(Snapshot());
@@ -307,10 +307,10 @@ namespace Formula9.Tests
             Assert.IsFalse(view.CamerasShown, "the 2D map has no shuttle cameras");
         }
 
-        // Selecting another shuttle, or nothing, in the fleet table or on the map does not switch
-        // the feed: the operator keeps watching the shuttle they opened the cameras on.
+        // Selecting another shuttle in the fleet list or on the map moves the open cameras to it,
+        // so there is no need to hide them first; clearing the selection keeps that feed.
         [Test]
-        public void AnotherSelectionDoesNotSwitchTheFeed()
+        public void SelectingAnotherShuttleSwitchesTheFeed()
         {
             view.ShowCameras(true);
             Frame();
@@ -318,13 +318,14 @@ namespace Formula9.Tests
             view.SelectEntity(other);
             Frame();
             Assert.IsTrue(view.CamerasShown);
-            Assert.AreEqual(Shuttle, view.WatchedId, "still watching the shuttle they chose");
-            AssertMounted();
+            Assert.AreEqual(other, view.WatchedId, "now watching the shuttle just picked");
+            AssertMounted(other);
 
             view.SelectEntity(null);
             Frame();
-            Assert.IsTrue(view.CamerasShown, "clearing the selection does not close them either");
-            AssertMounted();
+            Assert.IsTrue(view.CamerasShown, "clearing the selection does not close them");
+            Assert.AreEqual(other, view.WatchedId, "and keeps the shuttle being watched");
+            AssertMounted(other);
         }
 
         [Test]

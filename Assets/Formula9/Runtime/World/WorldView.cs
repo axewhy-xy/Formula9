@@ -855,13 +855,17 @@ namespace Formula9.World
         // Function: SelectEntity
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function selects an entity in both views and reports it.
+        //     This function selects an entity in both views and reports it. While the cameras
+        //     are open, picking another shuttle in the 3D city moves them to that shuttle.
         //
         // Args:
         //     id (string): The entity ID, or null.
         public void SelectEntity(string id)
         {
             selectedId = id; map.SelectedId = id;
+            // Open cameras follow the shuttle the operator picks; clearing the selection keeps the feed
+            if (camerasShown && id != null && city != null && city.TryGetShuttlePose(id, out _, out _))
+                ShowCameras(true);
             EntitySelected?.Invoke(id);
         }
 
@@ -875,20 +879,15 @@ namespace Formula9.World
 
         private bool camerasShown;
         private string watchedId;
-        // Remembers whether the cameras were opened from the 2D map.
-        private bool camerasFromMap;
 
         // -----------------------------------------------------------------------------------
         // Function: OpenCameras
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function shows the selected shuttle's cameras in the 3D city, the way both
-        //     Cameras buttons open them. It remembers whether they were opened from the 2D map,
-        //     keeping the first answer when they are opened again for another route's shuttle.
+        //     Cameras buttons open them, leaving the 2D map if it is showing.
         public void OpenCameras()
         {
-            if (!CamerasShown)
-                camerasFromMap = ShowingMap;
             ShowMap(false);
             ShowCameras(true);
         }
@@ -897,21 +896,19 @@ namespace Formula9.World
         // Function: CloseCameras
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function closes the cameras and goes back to where they were opened from,
-        //     the 2D map or the 3D view. It is used by Hide cameras and when the watched
+        //     This function closes the cameras and always goes back to the 3D view, wherever
+        //     they were opened from. It is used by Hide cameras and when the watched
         //     shuttle leaves; Overview and the like use LeaveCameras, as they need the 3D view.
         public void CloseCameras()
         {
             ShowCameras(false);
-            if (camerasFromMap)
-                ShowMap(true);
         }
 
         // Whether the shuttle's cameras are shown in place of the 3D view, whether there is a
         // selected shuttle in the 3D city to watch, and whether this session has a 3D city at all.
         public bool CamerasShown => camerasShown;
-        // The shuttle whose cameras are shown, or null. It stays the same when another shuttle
-        // is selected, so the feed never switches without the operator asking for it.
+        // The shuttle whose cameras are shown, or null. Selecting another shuttle in the 3D city
+        // moves the cameras to it; clearing the selection keeps the shuttle being watched.
         public string WatchedId => camerasShown ? watchedId : null;
         public bool CanShowCameras => CityShown && city != null && city.TryGetShuttlePose(camerasShown ? watchedId : selectedId, out _, out _);
         public bool HasCity => latest != null && latest.Spatial == null && cityClient != null;

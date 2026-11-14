@@ -501,9 +501,9 @@ namespace Formula9.UI
         private void CloseCameras()
         {
             world.CloseCameras();
-            // A closure that came up while watching is waiting on the map
+            // A closure that came up while watching: select its shuttle and say so, staying in 3D
             var held = DecisionRules.DetourVehicle(session.Store.Snapshot);
-            if (held != null) { SelectVehicle(held); world.ShowMap(true); }
+            if (held != null) { SelectVehicle(held); notify($"{held} is waiting at a closure. Switch to the 2D map on Route Planning to route it round."); }
         }
 
         private void WatchRoute()
