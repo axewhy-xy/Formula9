@@ -173,6 +173,8 @@ namespace Formula9.UI
             };
             // The Cameras buttons depend on which shuttle is selected
             world.EntitySelected += id => { selection.text = "Selected: " + id; UpdateActions(); };
+            // However the cameras close, a closure that came up while watching has been seen
+            world.CamerasToggled += shown => { if (!shown) heldWhileWatching = false; };
             world.RouteNodeSelected += AppendNode;
             world.RoadClicked += AddRoad;
             world.WaypointClicked += RemoveWaypoint;
@@ -520,10 +522,11 @@ namespace Formula9.UI
 
         private void CloseCameras()
         {
+            // Closing the cameras clears the flag, so read it first
+            var told = heldWhileWatching;
             world.CloseCameras();
             // A closure that came up while watching: select its shuttle and say so, once, staying in 3D
-            if (!heldWhileWatching || heldVehicle == null) return;
-            heldWhileWatching = false;
+            if (!told || heldVehicle == null) return;
             SelectVehicle(heldVehicle);
             notify(HeldNotice(heldVehicle));
         }
