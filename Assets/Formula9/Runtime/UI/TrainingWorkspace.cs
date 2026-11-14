@@ -23,19 +23,19 @@ namespace Formula9.UI
         private readonly Action<Task> run;
         private readonly Action<string> notify;
         private readonly List<VisualElement> pages = new List<VisualElement>();
+        private readonly Dictionary<string, int> pageIndex = new Dictionary<string, int>();
         private readonly List<CommandOutcome> ledger = new List<CommandOutcome>();
         private readonly DropdownField routes, incidents, candidates;
         private readonly TextField routeReason, incidentReason;
         private readonly Label routeProblem, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes, incidentData, incidentReport, selection;
-        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowClosure, routeCameras, fleetCameras, approve, routeStart, routeWatch, previewIncident, approveIncident, rerouteIncident, history, debrief;
+        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowClosure, routeCameras, fleetCameras, approve, routeStart, routeWatch, previewIncident, approveIncident, rerouteIncident;
         private readonly FleetMap evidenceMap;
         private readonly VisualElement routeStages, routeWaypoints, routeIssues, routeMetrics, routeDecide, routeFeedback, routeApply, routeOutcomePanel, routeOutcomeRows, fleetTable;
         private readonly List<VisualElement> operationalViews;
-        private readonly SliderInt historySample;
         private readonly Label evidenceStatus;
-        private readonly List<FullSnapshot> historySnapshots = new List<FullSnapshot>();
         private readonly ChargingPage charging;
         private readonly ReportsPage reports;
+        private readonly IncidentReportsTab incidentReports;
         private readonly Button sessionToggle;
         private readonly VisualElement sessionCard;
         private bool? sessionToolsOpen;
@@ -70,8 +70,15 @@ namespace Formula9.UI
             ShowSection("operations");
         }
         public event Action IncidentSelected;
-        public event Action<string> SectionChanged;
-        private const int RoutePage = 1, ChargingPageIndex = 2, ReportsPage = 4, ScenariosPage = 5, MaxLedgerEntries = 200;
+        private const int MaxLedgerEntries = 200;
+        public event Action <string> SectionChanged;
+        // A page's index by its UXML name, or -1 when the layout leaves it out
+        private int Page(string name) =>pageIndex.TryGetValue(name, out var index) ? index : -1;
+        private int FleetPage => Page("page-fleet");
+        private int RoutePage => Page("page-route");
+        private int ChargingPageIndex => Page("page-charging");
+        private int ReportsPageIndex => Page("page-reports");
+        private int ScenariosPageIndex => Page("page-scenarios");
         private int shownPage;
         private readonly VisualElement incidentDecisions;
 
@@ -82,12 +89,15 @@ namespace Formula9.UI
             // The pages are laid out in UI/Pages/*.uxml; this binds their controls by name.
             foreach (var (pageName, navName) in new[] { ("page-fleet", "nav-fleet"), ("page-route", "nav-route"), ("page-charging", "nav-charging"), ("page-incident", "nav-incident"), ("page-reports", "nav-reports"), ("page-scenarios", null) })
             {
+                // A page the layout leaves out gets no index: its lookups give -1 and it is never shown
+                var page = root.Q(pageName);
+                if (page == null) continue;
                 var index = pages.Count;
-                pages.Add(root.Q(pageName));
-                if (navName == null) continue;
-                var button = root.Q<Button>(navName);
-                button.clicked += () => { ShowPage(index); Render(); };
+                pages.Add(page);
+                pageIndex[pageName] = index;
+                var button = navName == null? null : root.Q<Button>(navName);
                 navButtons.Add(button);
+                if (button != null) button.clicked+= () => {ShowPage(index); Render();};
             }
             selection = root.Q<Label>("fleet-selection");
             Bind(root, "follow-selected", () => world.FollowSelected());
@@ -116,7 +126,7 @@ namespace Formula9.UI
             routeOutcomeRows = root.Q("route-outcome-rows");
             fleetTable = Table(root.Q("route-fleet-host"), "", "Shuttle ID", "State", "Route / revision", "Battery", "Provenance");
             Tabs(root, ("route-tab-editor", "route-editor-panel"), ("route-tab-fleet", "route-fleet-panel"));
-            Tabs(root, ("reports-tab-log", "reports-log-panel"), ("reports-tab-commands", "reports-commands-panel"));
+            Tabs(root, ("reports-tab-log", "reports-log-panel"), ("reports-tab-commands", "reports-commands-panel"), ("reports-tab-incidents", "reports-incidents-panel"));
             operationalViews = new List<VisualElement> { root.Q("view-bar"), root.Q("world") };
             routeUndo = Bind(root, "route-undo", () => RestoreDraft(-1));
             routeRedo = Bind(root, "route-redo", () => RestoreDraft(1));
@@ -150,16 +160,13 @@ namespace Formula9.UI
             incidentReason.RegisterValueChangedCallback(_ => { ClearIncidentPreview(); UpdateActions(); });
             previewIncident = Bind(root, "incident-preview", () => run(PreviewIncident()));
             approveIncident = Bind(root, "incident-approve", () => run(ApproveIncident()));
-            history = Bind(root, "incident-history", () => run(IncidentReport(false)));
-            debrief = Bind(root, "incident-debrief", () => run(IncidentReport(true)));
             incidentReport = root.Q<Label>("incident-report");
             evidenceStatus = root.Q<Label>("evidence-status");
             evidenceMap = root.Q<FleetMap>("incident-evidence-map");
             world.UseRealMap(evidenceMap);
-            historySample = root.Q<SliderInt>("history-sample");
-            historySample.RegisterValueChangedCallback(_ => ShowHistorySample());
 
             reports = new ReportsPage(root);
+            incidentReports = new IncidentReportsTab(root, api, session, world, run);
             session.SnapshotAccepted += (_, __) => { acceptedAt = Time.realtimeSinceStartup; Render(); };
             session.EventsAccepted += _ => RenderReports();
             session.AvailabilityChanged += _ => { if (!session.Available) { InvalidateRoute(); ClearIncidentPreview(); } Render(); };
@@ -178,7 +185,7 @@ namespace Formula9.UI
             world.RoadClicked += AddRoad;
             world.WaypointClicked += RemoveWaypoint;
             root.schedule.Execute(UpdateActions).Every(250);
-            ShowPage(0);
+            ShowPage(FleetPage);
         }
 
         public void SelectVehicle(string id) { world.SelectEntity(id); selection.text = "Selected: " + id; }
@@ -215,6 +222,7 @@ namespace Formula9.UI
                 sessionToolsState = setupState;
             }
             FitSessionControls();
+            incidentReports.Render(s);
             if (s == null) { RenderReports(); UpdateActions(); return; }
             // An applied approval moves its route to a new revision, which finishes the draft. A queued
             // or rejected one never does, so its draft stays for another try.
@@ -303,8 +311,6 @@ namespace Formula9.UI
                 s.Incidents.Any(i => i.IncidentId == incidents.value && i.State == "OPTIONS_READY") && !string.IsNullOrWhiteSpace(incidentReason.value);
             previewIncident.SetEnabled(decision);
             approveIncident.SetEnabled(decision && incidentPreviewCommand != null);
-            history.SetEnabled(!incidentBusy && s != null && !string.IsNullOrEmpty(incidents.value));
-            debrief.SetEnabled(history.enabledSelf);
             world.RouteEditing = edit;
             // A decision or a lost connection withdraws the verdict but leaves the draft: ask once more.
             if (edit && draft.Count > 0 && preview == null && !routeBusy && approvedDraft == null && checkedRevision != draftRevision && !previewTimer.isActive) SchedulePreview();
@@ -760,29 +766,6 @@ namespace Formula9.UI
             UpdateActions();
         }
 
-        private async Task IncidentReport(bool showDebrief)
-        {
-            var s = session.Store.Snapshot; if (s == null || incidentBusy || string.IsNullOrEmpty(incidents.value)) return;
-            var id = incidents.value; var stamp = boundary; incidentBusy = true; UpdateActions();
-            try
-            {
-                var result = await api.GetIncidentReportAsync(s.SessionId, id, showDebrief);
-                if (stamp != boundary || incidents.value != id) return;
-                ClearIncidentPreview();
-                ClearEvidence();
-                if (!showDebrief)
-                {
-                    historySnapshots.AddRange(((JArray)result["snapshots"]).Select(raw => ContractParser.Parse<FullSnapshot>(raw.ToString())));
-                    historySample.highValue = Math.Max(0, historySnapshots.Count - 1);
-                    historySample.SetValueWithoutNotify(0);
-                    historySample.style.display = historySnapshots.Count > 1 ? DisplayStyle.Flex : DisplayStyle.None;
-                    ShowHistorySample();
-                }
-                incidentReport.text = (showDebrief ? "DEBRIEF · provisional / uncalibrated\n" : "HISTORICAL SIMULATION · complete: " + result["complete"] + "\n" + result["unavailable_reason"] + "\n") + FormatDocument(result);
-            }
-            finally { incidentBusy = false; UpdateActions(); }
-        }
-
         private void FocusIncident()
         {
             var incident = session.Store.Snapshot?.Incidents.FirstOrDefault(i => i.IncidentId == incidents.value);
@@ -794,23 +777,15 @@ namespace Formula9.UI
 
         private void ClearEvidence()
         {
-            historySnapshots.Clear(); evidenceMap.Show(null);
-            evidenceMap.style.display = historySample.style.display = DisplayStyle.None;
+            evidenceMap.Show(null);
+            evidenceMap.style.display = DisplayStyle.None;
             evidenceStatus.text = "";
-        }
-
-        private void ShowHistorySample()
-        {
-            if (historySnapshots.Count == 0) return;
-            var sample = historySnapshots[Math.Min(historySample.value, historySnapshots.Count - 1)];
-            evidenceMap.Show(sample); evidenceMap.style.display = DisplayStyle.Flex;
-            evidenceStatus.text = $"Historical simulation · sample {historySample.value + 1}/{historySnapshots.Count} · tick {sample.Tick}.";
         }
 
         private void RenderReports() => reports.Render(session.Store.SelectedSessionId, session.Store.Events, ledger);
 
         // Human-readable nested fields preserve the backend's assumptions, evidence and rubric.
-        private static string FormatDocument(JToken token, int depth = 0)
+        internal static string FormatDocument(JToken token, int depth = 0)
         {
             if (token == null) return "Unavailable";
             if (token is JObject obj) return string.Join("\n", obj.Properties().Where(p => p.Name != "snapshots").Select(p =>
@@ -839,8 +814,9 @@ namespace Formula9.UI
 
         private void ShowPage(int index)
         {
+            if (index < 0) return;
             // Fleet Overview and Route Planning have the map beside them; the others take the full width, as in Qt.
-            foreach (var view in operationalViews) view.style.display = index == 0 || index == RoutePage ? DisplayStyle.Flex : DisplayStyle.None;
+            foreach (var view in operationalViews) view.style.display = index == FleetPage || index == RoutePage ? DisplayStyle.Flex : DisplayStyle.None;
             var entering = index == RoutePage && shownPage != RoutePage;
             shownPage = index;
             FitSessionControls();
@@ -854,15 +830,15 @@ namespace Formula9.UI
             for (var i = 0; i < pages.Count; i++)
             {
                 pages[i].style.display = i == index ? DisplayStyle.Flex : DisplayStyle.None;
-                if (i < navButtons.Count) navButtons[i].EnableInClassList("nav-item-selected", i == index);
+                navButtons[i]?.EnableInClassList("nav-item-selected", i == index);
             }
             // The top menu shows the page's section: Reports and Scenarios, or everything else
-            SectionChanged?.Invoke(index == ReportsPage ? "reports" : index == ScenariosPage ? "scenarios" : "operations");
+            SectionChanged?.Invoke(index == ReportsPageIndex ? "reports" : index == ScenariosPageIndex ? "scenarios" : "operations");
         }
 
         // A refused start sends the trainee here to approve a detour first.
         public void ShowRoutePlanning() { ShowPage(RoutePage); Render(); }
-        public void ShowSection(string section) { ShowPage(section == "reports" ? ReportsPage : section == "scenarios" ? ScenariosPage : 0); Render(); }
+        public void ShowSection(string section) { ShowPage(section == "reports" ? ReportsPageIndex : section == "scenarios" ? ScenariosPageIndex : FleetPage); Render(); }
         private static VisualElement Row(VisualElement parent) { var row = new VisualElement(); row.AddToClassList("row"); parent.Add(row); return row; }
         private static Label Text(VisualElement parent, string text) { var label = new Label(text); label.AddToClassList("workspace-text"); parent.Add(label); return label; }
         internal static VisualElement Table(VisualElement parent, string title, params string[] columns)
@@ -886,7 +862,7 @@ namespace Formula9.UI
             }
         }
         private static Button Bind(VisualElement root, string name, Action action) { var button = root.Q<Button>(name); button.clicked += action; return button; }
-        private static void Choices(DropdownField field, IEnumerable<string> values)
+        internal static void Choices(DropdownField field, IEnumerable<string> values)
         {
             var choices = values.OrderBy(v => v, StringComparer.Ordinal).ToList();
             if (field.choices.SequenceEqual(choices)) return;

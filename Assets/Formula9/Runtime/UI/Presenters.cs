@@ -522,12 +522,36 @@ namespace Formula9.UI
         }
 
         // -----------------------------------------------------------------------------------
+        // Function: IncidentDescription
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function describes an incident: what and where it is, its state, which
+        //     shuttles will reach it and when, and what was decided. The Reports page shows it
+        //     as it is; the Incident Monitor adds what is asked of the operator.
+        //
+        // Args:
+        //     incident (Incident): The incident.
+        //
+        // Returns:
+        //     string: The text.
+        public static string IncidentDescription(Incident incident)
+        {
+            var name = World.IncidentRecord.Name(incident.EventType,
+                incident.IncidentId.Contains("road_accident") ? World.IncidentSimulation.Accident : World.IncidentSimulation.Block).ToUpperInvariant();
+            var road = incident.Location?.RoadName != null ? $" on {incident.Location.RoadName}" : "";
+            var reach = World.IncidentRecord.Reach(incident.Exposures, 5);
+            var exposure = reach == null ? "No shuttle reaches it before it clears." : $"Shuttles reaching it: {reach}.";
+            var owner = incident.VehicleId == null ? "It belongs to no shuttle. " : "";
+            var decided = Responses(incident);
+            return $"{name}{road} | {incident.State}\n{owner}{exposure}{(decided == null ? "" : $"\nDecided: {decided}.")}";
+        }
+
+        // -----------------------------------------------------------------------------------
         // Function: IncidentSummary
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function describes the selected incident on the Incident Monitor: what and
-        //     where it is, its state, which shuttles will reach it and when, and what is asked of
-        //     the operator.
+        //     This function describes the selected incident on the Incident Monitor, followed by
+        //     what is asked of the operator.
         //
         // Args:
         //     incident (Incident): The incident.
@@ -537,17 +561,10 @@ namespace Formula9.UI
         //     string: The text.
         public static string IncidentSummary(Incident incident, bool hasOptions)
         {
-            var name = World.IncidentRecord.Name(incident.EventType,
-                incident.IncidentId.Contains("road_accident") ? World.IncidentSimulation.Accident : World.IncidentSimulation.Block).ToUpperInvariant();
-            var road = incident.Location?.RoadName != null ? $" on {incident.Location.RoadName}" : "";
-            var reach = World.IncidentRecord.Reach(incident.Exposures, 5);
-            var exposure = reach == null ? "No shuttle reaches it before it clears." : $"Shuttles reaching it: {reach}.";
-            var owner = incident.VehicleId == null ? "It belongs to no shuttle. " : "";
             var ask = hasOptions
                 ? "Decide for each shuttle that will reach it: keep its route, re-route it on the map, hold it at a stop before it, or request assistance (once, for every shuttle). Preview an option's consequences before approval; deciding before the shuttle gets there scores best."
                 : "No operator decision is required for this incident now. Shuttles that reach it meet its queue.";
-            var decided = Responses(incident);
-            return $"{name}{road} | {incident.State}\n{owner}{exposure}\n{(decided == null ? "" : $"Decided: {decided}.\n")}{ask}";
+            return IncidentDescription(incident) + "\n" + ask;
         }
 
         // -----------------------------------------------------------------------------------

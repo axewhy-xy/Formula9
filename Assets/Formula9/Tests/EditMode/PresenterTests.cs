@@ -458,6 +458,25 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
+        // Function: TheReportsDescribeAnIncidentWithoutAskingForADecision
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The Reports page describes an incident and what was decided, but asks nothing of
+        //     the operator; the Incident Monitor's summary is that description and its ask.
+        [Test]
+        public void TheReportsDescribeAnIncidentWithoutAskingForADecision()
+        {
+            var snapshot = (FullSnapshot)ContractParser.ParseMessage(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/incident_decisions_snapshot.json")));
+            var incident = snapshot.Incidents.Single(i => i.IncidentId == "scheduled-collision-1");
+            var description = TrainingPresenter.IncidentDescription(incident);
+            StringAssert.Contains("Decided: shuttle-03 request assistance.", description);
+            StringAssert.DoesNotContain("Decide for each shuttle", description);
+            StringAssert.DoesNotContain("No operator decision is required", description);
+            Assert.AreEqual(description + "\nNo operator decision is required for this incident now. Shuttles that reach it meet its queue.",
+                TrainingPresenter.IncidentSummary(incident, false));
+        }
+
+        // -----------------------------------------------------------------------------------
         // Function: OnlyAnIncidentAShuttleWillReachIsAnnounced
         // -----------------------------------------------------------------------------------
         // Description:
