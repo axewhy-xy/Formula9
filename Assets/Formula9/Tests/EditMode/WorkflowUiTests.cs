@@ -271,8 +271,17 @@ namespace Formula9.Tests
                 press.Invoke(workspace, null);
                 Assert.IsFalse(world.CamerasShown);
                 Assert.IsFalse(world.ShowingMap, "leaving stays in 3D; the operator is told of the closure");
-                StringAssert.Contains("shuttle-01 is waiting at a closure", notices.Last(), "and is told where to route it");
+                Assert.IsNotEmpty(notices, "the operator is told of the closure");
+                StringAssert.Contains("shuttle-01 will reach a closure ahead", notices.Last(), "a moving shuttle is not yet held");
                 Assert.AreEqual("shuttle-01", world.SelectedId, "the held shuttle");
+
+                // Watching again and leaving does not repeat it, or take the selection back
+                var told = notices.Count;
+                workspace.SelectVehicle("shuttle-03");
+                press.Invoke(workspace, null);
+                press.Invoke(workspace, null);
+                Assert.AreEqual(told, notices.Count, "told once");
+                Assert.AreEqual("shuttle-03", world.SelectedId, "the operator's own choice stands");
 
                 await Hold(false);
                 workspace.Render();
