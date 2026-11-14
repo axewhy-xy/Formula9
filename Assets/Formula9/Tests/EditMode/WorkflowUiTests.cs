@@ -376,5 +376,43 @@ namespace Formula9.Tests
             }
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
         }
+
+        // The Reports Incidents tab lists the session's incidents, read-only, and describes the one
+        // picked without asking the operator for a decision.
+        [Test]
+        public async Task TheReportsListTheSessionsIncidents()
+        {
+            var raw = Fixture("snapshot");
+            var backend = new Backend();
+            backend.Reply = request =>
+            {
+                if (request.Url.AbsolutePath.EndsWith("/snapshot")) return Task.FromResult(new HttpResponse { Status = 200, Body = raw.ToString() });
+                if (request.Url.AbsolutePath.EndsWith("/editor")) return Task.FromResult(new HttpResponse { Failure = HttpFailure.Incomplete });
+                var replay = Fixture("event_replay"); replay["events"] = new JArray();
+                replay["after_sequence"] = raw["event_sequence"].DeepClone(); replay["next_sequence"] = raw["event_sequence"].DeepClone();
+                return Task.FromResult(new HttpResponse { Status = 200, Body = replay.ToString() });
+            };
+            var auth = new AuthSession(); auth.Begin("trainee", "token", 3600);
+            var api = new TrainingApi(backend, auth, new Uri("http://backend.test"));
+            var session = new SessionController(api, auth);
+            var root = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/Formula9/UI/Formula9App.uxml").CloneTree();
+            var rig = new GameObject("Reports incidents test"); var world = rig.AddComponent<WorldView>();
+            try
+            {
+                world.Attach(root.Q("world"), new SceneLoader(backend, new Uri("http://backend.test")));
+                var workspace = new TrainingWorkspace(root, api, session, world, _ => { }, _ => { });
+                await session.JoinAsync((string)raw["session_id"]);
+                workspace.Render();
+                var host = root.Q("reports-incident-table-host");
+                var cells = host.Query<Label>(className: "data-cell").ToList().Where(l => !l.ClassListContains("data-heading")).Select(l => l.text).ToList();
+                Assert.Contains("incident-1", cells, "a row for the session's incident");
+                Assert.IsFalse(host.Query<Label>(className: "data-heading").ToList().Any(l => l.text == "Options"), "nothing to decide here");
+                Assert.AreEqual("incident-1", root.Q<DropdownField>("reports-incidents").value);
+                var summary = root.Q<Label>("reports-incident-summary").text;
+                StringAssert.Contains("OPTIONS_READY", summary);
+                StringAssert.DoesNotContain("Decide for each shuttle", summary);
+            }
+            finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
+        }
     }
 }

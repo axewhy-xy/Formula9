@@ -30,7 +30,8 @@ namespace Formula9.UI
         private readonly SessionController session;
         private readonly DropdownField incidents;
         private readonly Button history, debrief;
-        private readonly Label report, evidenceStatus;
+        private readonly Label report, evidenceStatus, summary;
+        private readonly VisualElement incidentTable;
         private readonly FleetMap evidenceMap;
         private readonly SliderInt historySample;
         private readonly List<FullSnapshot> historySnapshots = new List<FullSnapshot>();
@@ -42,6 +43,8 @@ namespace Formula9.UI
             this.api = api; this.session = session;
             incidents = root.Q<DropdownField>("reports-incidents");
             incidents.RegisterValueChangedCallback(_ => { Clear(); UpdateActions(); });
+            incidentTable = TrainingWorkspace.Table(root.Q("reports-incident-table-host"), "", "Incident ID", "Shuttle ID", "Reaches it", "State", "Decided", "Detected tick");
+            summary = root.Q<Label>("reports-incident-summary");
             history = root.Q<Button>("reports-incident-history");
             history.clicked += () => run(Load(false));
             debrief = root.Q<Button>("reports-incident-debrief");
@@ -60,6 +63,12 @@ namespace Formula9.UI
             var current = s == null ? null : $"{s.SessionId}/{s.SessionEpoch}";
             if (boundary != current) { boundary = current; Clear(); }
             TrainingWorkspace.Choices(incidents, s?.Incidents.Select(i => i.IncidentId) ?? Enumerable.Empty<string>());
+            var list = s?.Incidents.OrderBy(i => i.IncidentId, StringComparer.Ordinal).ToList() ?? new List<Incident>();
+            TrainingWorkspace.Rows(incidentTable, list.Select(i => new[] { i.IncidentId, i.VehicleId ?? "—", IncidentRecord.Reach(i.Exposures, 2) ?? "—", i.State, TrainingPresenter.Responses(i) ?? "—", i.DetectedTick.ToString() }));
+            // Clicking a row picks that incident, as the menu does
+            foreach (var row in incidentTable.Children()) { var id = ((Label)row[0]).text; row.RegisterCallback<ClickEvent>(_ => incidents.value = id); }
+            var chosen = list.FirstOrDefault(i => i.IncidentId == incidents.value);
+            summary.text = chosen == null ? "" : TrainingPresenter.IncidentDescription(chosen);
             UpdateActions();
         }
 

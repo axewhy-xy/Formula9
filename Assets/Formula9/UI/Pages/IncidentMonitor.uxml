@@ -19,6 +19,7 @@
             </ui:VisualElement>
             <ui:Label name="incident-report" text="Previews appear here. History and Debrief are in Reports → Incidents." class="workspace-text" />
             <ui:Label name="evidence-status" class="workspace-text" />
-            <f9:FleetMap name="incident-evidence-map" class="route-map" style="display: none;" />        </ui:VisualElement>
+            <f9:FleetMap name="incident-evidence-map" class="route-map" style="display: none;" />
+        </ui:VisualElement>
     </ui:ScrollView>
 </ui:UXML>
