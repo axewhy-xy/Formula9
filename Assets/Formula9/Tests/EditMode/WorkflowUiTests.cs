@@ -186,7 +186,7 @@ namespace Formula9.Tests
 
                 press.Invoke(workspace, null);
                 Assert.IsFalse(world.CamerasShown);
-                Assert.IsTrue(world.ShowingMap, "back to the map the cameras were opened from");
+                Assert.IsFalse(world.ShowingMap, "Hide cameras goes back to the 3D view");
                 Assert.AreEqual("Cameras", toggle.text);
 
                 workspace.SelectVehicle("shuttle-03");
@@ -200,24 +200,23 @@ namespace Formula9.Tests
                 Assert.IsTrue(world.CamerasShown);
                 Assert.AreEqual("shuttle-05", world.WatchedId, "the new route's shuttle");
                 press.Invoke(workspace, null);
-                Assert.IsTrue(world.ShowingMap, "the route change did not forget the map");
-
-                // Opened from the 3D view, closing stays in the 3D view
-                world.ShowMap(false);
-                press.Invoke(workspace, null);
-                press.Invoke(workspace, null);
-                Assert.IsFalse(world.ShowingMap, "back to the 3D view the cameras covered");
+                Assert.IsFalse(world.ShowingMap, "still the 3D view after another route");
             }
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
         }
 
         // A closure holding a shuttle opens the map on it, except for someone watching a shuttle's
-        // cameras: they keep watching the shuttle they chose, and closing the cameras takes them to
-        // the map and the held shuttle.
+        // cameras: they keep watching the shuttle they chose, and closing the cameras selects the
+        // held shuttle and tells them, staying in the 3D view. Picking a shuttle in the fleet moves
+        // the cameras to it, except on Route Planning to a shuttle on another route.
         [Test]
         public async Task AClosureLeavesSomeoneWatchingTheCameras()
         {
             var raw = Fixture("snapshot");
+            // shuttle-05 is on another route, a copy of route-a
+            var routeB = (JObject)raw["routes"][0].DeepClone(); routeB["route_id"] = "route-b";
+            ((JArray)raw["routes"]).Add(routeB);
+            raw["vehicles"][4]["route_id"] = "route-b";
             var backend = new Backend();
             backend.Reply = request =>
             {
@@ -250,7 +249,8 @@ namespace Formula9.Tests
             try
             {
                 world.Attach(root.Q("world"), new SceneLoader(backend, url), null, null, new CityClient(backend, url));
-                var workspace = new TrainingWorkspace(root, api, session, world, _ => { }, _ => { });
+                var notices = new List<string>();
+                var workspace = new TrainingWorkspace(root, api, session, world, _ => { }, message => notices.Add(message));
                 var toggle = root.Q<Button>("fleet-cameras");
                 var press = typeof(TrainingWorkspace).GetMethod("ToggleSelectedCameras", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 await session.JoinAsync((string)raw["session_id"]);
@@ -259,6 +259,16 @@ namespace Formula9.Tests
                 workspace.SelectVehicle("shuttle-03");
                 press.Invoke(workspace, null);
                 Assert.IsTrue(world.CamerasShown);
+
+                // Picking in the fleet moves the cameras; on Route Planning, not to a shuttle on another route
+                workspace.PickVehicle("shuttle-02");
+                Assert.AreEqual("shuttle-02", world.WatchedId, "the fleet pick moves the cameras");
+                workspace.ShowRoutePlanning();
+                workspace.PickVehicle("shuttle-05");
+                Assert.AreEqual("shuttle-02", world.WatchedId, "shuttle-05 is on another route: the feed stays on route-a");
+                workspace.ShowSection("operations");
+                workspace.PickVehicle("shuttle-03");
+                Assert.AreEqual("shuttle-03", world.WatchedId);
 
                 await Hold(true);
                 workspace.Render();
@@ -269,8 +279,18 @@ namespace Formula9.Tests
 
                 press.Invoke(workspace, null);
                 Assert.IsFalse(world.CamerasShown);
-                Assert.IsTrue(world.ShowingMap, "leaving goes to the closure, on the map");
+                Assert.IsFalse(world.ShowingMap, "leaving stays in 3D; the operator is told of the closure");
+                Assert.IsNotEmpty(notices, "the operator is told of the closure");
+                StringAssert.Contains("shuttle-01 will reach a closure ahead", notices.Last(), "a moving shuttle is not yet held");
                 Assert.AreEqual("shuttle-01", world.SelectedId, "the held shuttle");
+
+                // Watching again and leaving does not repeat it, or take the selection back
+                var told = notices.Count;
+                workspace.SelectVehicle("shuttle-03");
+                press.Invoke(workspace, null);
+                press.Invoke(workspace, null);
+                Assert.AreEqual(told, notices.Count, "told once");
+                Assert.AreEqual("shuttle-03", world.SelectedId, "the operator's own choice stands");
 
                 await Hold(false);
                 workspace.Render();

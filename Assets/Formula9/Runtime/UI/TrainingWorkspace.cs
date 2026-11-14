@@ -46,6 +46,7 @@ namespace Formula9.UI
         private int historyIndex;
         private long draftRevision, checkedRevision = -1, requestGeneration, incidentGeneration;
         private string dependencies, boundary, incidentBoundary, ledgerSession, heldIncident, heldVehicle;
+        private bool heldWhileWatching;
         private bool routeBusy, incidentBusy, reloadContext, previewQueued, suggesting, outcomeBusy;
         private float acceptedAt, outcomeAt;
         private long outcomeSequence = -1;
@@ -181,6 +182,15 @@ namespace Formula9.UI
 
         public void SelectVehicle(string id) { world.SelectEntity(id); selection.text = "Selected: " + id; }
 
+        // The operator picking a shuttle in the fleet table or the Fleet List. Open cameras move to it,
+        // except on Route Planning to a shuttle on another route: they stay on the route's shuttle.
+        public void PickVehicle(string id)
+        {
+            var otherRoute = shownPage == RoutePage && session.Store.Snapshot?.Vehicles.FirstOrDefault(v => v.VehicleId == id)?.RouteId != routes.value;
+            if (otherRoute) world.SelectEntity(id); else world.PickShuttle(id);
+            selection.text = "Selected: " + id;
+        }
+
         public void Render()
         {
             var s = session.Store.Snapshot;
@@ -188,7 +198,7 @@ namespace Formula9.UI
             if (boundary != currentBoundary)
             {
                 sessionToolsOpen = null;
-                boundary = currentBoundary; dependencies = null; context = null; requestGeneration++; approvedDraft = null; heldIncident = heldVehicle = null;
+                boundary = currentBoundary; dependencies = null; context = null; requestGeneration++; approvedDraft = null; heldIncident = heldVehicle = null; heldWhileWatching = false;
                 if (ledgerSession != s?.SessionId) { ledger.Clear(); ledgerSession = s?.SessionId; }
                 charging.Reset();
                 routeReason.value = incidentReason.value = "";
@@ -226,7 +236,7 @@ namespace Formula9.UI
             RenderExercise(s);
             RefreshOutcome(s);
             Rows(fleetTable, TrainingPresenter.Fleet(s, SelectedIncident).Select(r => new[] { r.ShuttleId, r.State, r.Route, r.Battery, r.Provenance }));
-            foreach (var row in fleetTable.Children()) { var id = ((Label)row[0]).text; row.RegisterCallback<ClickEvent>(_ => SelectVehicle(id)); }
+            foreach (var row in fleetTable.Children()) { var id = ((Label)row[0]).text; row.RegisterCallback<ClickEvent>(_ => PickVehicle(id)); }
             charging.Render(s);
             Choices(incidents, s.Incidents.Select(i => i.IncidentId));
             var selectedIncident = s.Incidents.FirstOrDefault(i => i.IncidentId == incidents.value);
@@ -318,13 +328,15 @@ namespace Formula9.UI
             dependencies = null;
             if (held == null)
             {
+                heldWhileWatching = false;
                 // A route is edited on the map; running, it is watched in 3D, or through its cameras
                 if (shownPage == RoutePage && heldVehicle != null && !world.CamerasShown) world.WatchShuttle(heldVehicle);
                 return;
             }
             Choices(incidents, s.Incidents.Select(i => i.IncidentId));
             incidents.SetValueWithoutNotify(held.IncidentId);
-            if (!world.CamerasShown) SelectVehicle(heldVehicle);
+            if (world.CamerasShown) heldWhileWatching = true;
+            else SelectVehicle(heldVehicle);
             var standing = s.Vehicles.FirstOrDefault(v => v.VehicleId == heldVehicle)?.ServiceState == "AWAITING_GUIDANCE";
             notify(standing
                 ? $"{heldVehicle} is held at a road closure. Route it round the closure, or choose another option in the Incident Monitor."
@@ -497,12 +509,23 @@ namespace Formula9.UI
             UpdateActions();
         }
 
+        // Standing at the closure, or still on its way there
+        private string HeldNotice(string vehicle)
+        {
+            var standing = session.Store.Snapshot?.Vehicles.FirstOrDefault(v => v.VehicleId == vehicle)?.ServiceState == "AWAITING_GUIDANCE";
+            return standing
+                ? $"{vehicle} is waiting at a closure. Switch to the 2D map on Route Planning to route it round."
+                : $"{vehicle} will reach a closure ahead. Switch to the 2D map on Route Planning to route it round.";
+        }
+
         private void CloseCameras()
         {
             world.CloseCameras();
-            // A closure that came up while watching is waiting on the map
-            var held = DecisionRules.DetourVehicle(session.Store.Snapshot);
-            if (held != null) { SelectVehicle(held); world.ShowMap(true); }
+            // A closure that came up while watching: select its shuttle and say so, once, staying in 3D
+            if (!heldWhileWatching || heldVehicle == null) return;
+            heldWhileWatching = false;
+            SelectVehicle(heldVehicle);
+            notify(HeldNotice(heldVehicle));
         }
 
         private void WatchRoute()
