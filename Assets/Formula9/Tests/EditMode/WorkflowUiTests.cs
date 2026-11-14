@@ -213,11 +213,16 @@ namespace Formula9.Tests
 
         // A closure holding a shuttle opens the map on it, except for someone watching a shuttle's
         // cameras: they keep watching the shuttle they chose, and closing the cameras selects the
-        // held shuttle and tells them, staying in the 3D view.
+        // held shuttle and tells them, staying in the 3D view. Picking a shuttle in the fleet moves
+        // the cameras to it, except on Route Planning to a shuttle on another route.
         [Test]
         public async Task AClosureLeavesSomeoneWatchingTheCameras()
         {
             var raw = Fixture("snapshot");
+            // shuttle-05 is on another route, a copy of route-a
+            var routeB = (JObject)raw["routes"][0].DeepClone(); routeB["route_id"] = "route-b";
+            ((JArray)raw["routes"]).Add(routeB);
+            raw["vehicles"][4]["route_id"] = "route-b";
             var backend = new Backend();
             backend.Reply = request =>
             {
@@ -260,6 +265,16 @@ namespace Formula9.Tests
                 workspace.SelectVehicle("shuttle-03");
                 press.Invoke(workspace, null);
                 Assert.IsTrue(world.CamerasShown);
+
+                // Picking in the fleet moves the cameras; on Route Planning, not to a shuttle on another route
+                workspace.PickVehicle("shuttle-02");
+                Assert.AreEqual("shuttle-02", world.WatchedId, "the fleet pick moves the cameras");
+                workspace.ShowRoutePlanning();
+                workspace.PickVehicle("shuttle-05");
+                Assert.AreEqual("shuttle-02", world.WatchedId, "shuttle-05 is on another route: the feed stays on route-a");
+                workspace.ShowSection("operations");
+                workspace.PickVehicle("shuttle-03");
+                Assert.AreEqual("shuttle-03", world.WatchedId);
 
                 await Hold(true);
                 workspace.Render();

@@ -855,18 +855,31 @@ namespace Formula9.World
         // Function: SelectEntity
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function selects an entity in both views and reports it. While the cameras
-        //     are open, picking another shuttle in the 3D city moves them to that shuttle.
+        //     This function selects an entity in both views and reports it. Open cameras stay on
+        //     the shuttle they are watching; PickShuttle is for the operator choosing another.
         //
         // Args:
         //     id (string): The entity ID, or null.
         public void SelectEntity(string id)
         {
             selectedId = id; map.SelectedId = id;
-            // Open cameras follow the shuttle the operator picks; clearing the selection keeps the feed
-            if (camerasShown && id != null && city != null && city.TryGetShuttlePose(id, out _, out _))
-                ShowCameras(true);
             EntitySelected?.Invoke(id);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: PickShuttle
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function selects the shuttle the operator picked. Open cameras move to it when
+        //     it is another shuttle in the 3D city; otherwise they stay as they are.
+        //
+        // Args:
+        //     id (string): The shuttle, or null.
+        public void PickShuttle(string id)
+        {
+            SelectEntity(id);
+            if (camerasShown && id != null && id != watchedId && city != null && city.TryGetShuttlePose(id, out _, out _))
+                ShowCameras(true);
         }
 
         // -----------------------------------------------------------------------------------

@@ -181,6 +181,15 @@ namespace Formula9.UI
 
         public void SelectVehicle(string id) { world.SelectEntity(id); selection.text = "Selected: " + id; }
 
+        // The operator picking a shuttle in the fleet table or the Fleet List. Open cameras move to it,
+        // except on Route Planning to a shuttle on another route: they stay on the route's shuttle.
+        public void PickVehicle(string id)
+        {
+            var otherRoute = shownPage == RoutePage && session.Store.Snapshot?.Vehicles.FirstOrDefault(v => v.VehicleId == id)?.RouteId != routes.value;
+            if (otherRoute) world.SelectEntity(id); else world.PickShuttle(id);
+            selection.text = "Selected: " + id;
+        }
+
         public void Render()
         {
             var s = session.Store.Snapshot;
@@ -225,7 +234,7 @@ namespace Formula9.UI
             RenderExercise(s);
             RefreshOutcome(s);
             Rows(fleetTable, TrainingPresenter.Fleet(s, SelectedIncident).Select(r => new[] { r.ShuttleId, r.State, r.Route, r.Battery, r.Provenance }));
-            foreach (var row in fleetTable.Children()) { var id = ((Label)row[0]).text; row.RegisterCallback<ClickEvent>(_ => SelectVehicle(id)); }
+            foreach (var row in fleetTable.Children()) { var id = ((Label)row[0]).text; row.RegisterCallback<ClickEvent>(_ => PickVehicle(id)); }
             charging.Render(s);
             Choices(incidents, s.Incidents.Select(i => i.IncidentId));
             var selectedIncident = s.Incidents.FirstOrDefault(i => i.IncidentId == incidents.value);

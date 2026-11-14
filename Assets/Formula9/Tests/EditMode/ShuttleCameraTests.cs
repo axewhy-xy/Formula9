@@ -307,10 +307,30 @@ namespace Formula9.Tests
             Assert.IsFalse(view.CamerasShown, "the 2D map has no shuttle cameras");
         }
 
-        // Selecting another shuttle in the fleet list or on the map moves the open cameras to it,
+        // Picking another shuttle in the fleet table or the Fleet List moves the open cameras to it,
         // so there is no need to hide them first; clearing the selection keeps that feed.
         [Test]
-        public void SelectingAnotherShuttleSwitchesTheFeed()
+        public void PickingAnotherShuttleSwitchesTheFeed()
+        {
+            view.ShowCameras(true);
+            Frame();
+            var other = Snapshot().Vehicles.First(v => v.VehicleId != Shuttle).VehicleId;
+            view.PickShuttle(other);
+            Frame();
+            Assert.IsTrue(view.CamerasShown);
+            Assert.AreEqual(other, view.WatchedId, "now watching the shuttle just picked");
+            AssertMounted(other);
+
+            view.PickShuttle(null);
+            Frame();
+            Assert.IsTrue(view.CamerasShown, "clearing the selection does not close them");
+            Assert.AreEqual(other, view.WatchedId, "and keeps the shuttle being watched");
+            AssertMounted(other);
+        }
+
+        // A shuttle the app selects by itself, such as one held at a closure, leaves the feed alone
+        [Test]
+        public void SelectingAShuttleInCodeKeepsTheFeed()
         {
             view.ShowCameras(true);
             Frame();
@@ -318,14 +338,33 @@ namespace Formula9.Tests
             view.SelectEntity(other);
             Frame();
             Assert.IsTrue(view.CamerasShown);
-            Assert.AreEqual(other, view.WatchedId, "now watching the shuttle just picked");
-            AssertMounted(other);
+            Assert.AreEqual(Shuttle, view.WatchedId, "still watching the same shuttle");
+            AssertMounted(Shuttle);
+        }
 
-            view.SelectEntity(null);
+        // A shuttle with no place in the 3D city cannot be watched: the cameras stay where they are
+        [Test]
+        public void PickingAShuttleNotInTheCityKeepsTheFeed()
+        {
+            view.ShowCameras(true);
             Frame();
-            Assert.IsTrue(view.CamerasShown, "clearing the selection does not close them");
-            Assert.AreEqual(other, view.WatchedId, "and keeps the shuttle being watched");
-            AssertMounted(other);
+            view.PickShuttle("shuttle-99");
+            Frame();
+            Assert.IsTrue(view.CamerasShown, "the cameras stay open");
+            Assert.AreEqual(Shuttle, view.WatchedId, "on the shuttle being watched");
+            AssertMounted();
+        }
+
+        // Picking the shuttle already being watched changes nothing
+        [Test]
+        public void RepickingTheWatchedShuttleLeavesTheCamerasAlone()
+        {
+            view.ShowCameras(true);
+            Frame();
+            Cam("Front").farClipPlane = 123;   // a rebuild copies the 3D view's distance over this
+            view.PickShuttle(Shuttle);
+            Assert.AreEqual(123f, Cam("Front").farClipPlane, "the cameras were not set up again");
+            Assert.AreEqual(Shuttle, view.WatchedId);
         }
 
         [Test]
