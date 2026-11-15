@@ -9,7 +9,11 @@
 
         <ui:VisualElement name="route-editor-panel">
             <ui:VisualElement name="route-stages" class="route-stages" />
-            <ui:DropdownField name="routes" label="Route" />
+            <ui:VisualElement name="route-pending" class="route-pending">
+                <ui:Label name="route-pending-title" class="route-pending-title" />
+                <ui:VisualElement name="route-pending-items" class="route-pending-items" />
+            </ui:VisualElement>
+            <ui:DropdownField name="shuttles" label="Shuttle" />
 
             <ui:VisualElement class="route-card route-card-problem">
                 <ui:Label text="The problem" class="route-card-title" />

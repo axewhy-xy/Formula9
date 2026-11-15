@@ -320,14 +320,17 @@ namespace Formula9.UI
         //
         // Returns:
         //     bool: True when a detour must be approved first.
-        public static bool AssignedRouteIsClosed(FullSnapshot snapshot)
+        public static bool AssignedRouteIsClosed(FullSnapshot snapshot) => ClosedRouteVehicles(snapshot).Any();
+
+        // The shuttles whose own route crosses a road closed now, in snapshot order.
+        public static IEnumerable<string> ClosedRouteVehicles(FullSnapshot snapshot)
         {
             var closed = new HashSet<string>(snapshot.Disruptions
                 .Where(d => d.ActiveFromTick <= snapshot.Tick && (d.ActiveUntilTick == null || snapshot.Tick < d.ActiveUntilTick))
                 .SelectMany(d => d.AffectedEdgeIds));
             var routes = snapshot.Routes.ToDictionary(r => r.RouteId);
-            return snapshot.Vehicles.Any(v => v.RouteId != null && routes.TryGetValue(v.RouteId, out var route)
-                                              && route.DirectedEdgeIds.Any(closed.Contains));
+            return snapshot.Vehicles.Where(v => v.RouteId != null && routes.TryGetValue(v.RouteId, out var route)
+                                                && route.DirectedEdgeIds.Any(closed.Contains)).Select(v => v.VehicleId);
         }
 
         // -----------------------------------------------------------------------------------

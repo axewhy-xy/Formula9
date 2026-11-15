@@ -74,21 +74,15 @@ namespace Formula9.Session
         public static Candidate DetourCandidate(FullSnapshot snapshot, string vehicleId) =>
             vehicleId == null ? null : Detours(snapshot).FirstOrDefault(d => d.VehicleId == vehicleId).Candidate;
 
-        // Until Route Planning lets the operator pick the shuttle (incident reform phase 2), the panel
-        // follows the first detour on offer by itself: its incident, and its shuttle.
-        public static Incident HeldIncident(FullSnapshot snapshot) => Detours(snapshot).FirstOrDefault().Incident;
-        public static string DetourVehicle(FullSnapshot snapshot) => Detours(snapshot).FirstOrDefault().VehicleId;
-
         // The route the operator can edit for this shuttle while the session runs: its own, while it has
         // a detour on offer. Null otherwise, and while paused.
         public static string ReroutableRoute(FullSnapshot snapshot, string vehicleId) =>
             snapshot?.Session.Status == "RUNNING" && DetourCandidate(snapshot, vehicleId) != null
                 ? snapshot.Vehicles.FirstOrDefault(v => v.VehicleId == vehicleId)?.RouteId : null;
 
-        // Every route but a detour no shuttle is on any more: that road is never driven again.
-        public static IEnumerable<string> SelectableRoutes(FullSnapshot snapshot) => snapshot.Routes
-            .Where(r => !snapshot.Incidents.Any(i => i.IsDetour(r.RouteId)) || snapshot.Vehicles.Any(v => v.RouteId == r.RouteId))
-            .Select(r => r.RouteId);
+        // The shuttles still waiting for a decision, each once, soonest arrival first.
+        public static List<string> PendingVehicles(FullSnapshot snapshot) =>
+            PendingDecisions(snapshot).Select(d => d.VehicleId).Distinct().ToList();
 
         // Whether a preview is still the one to approve: before the start, for any route; while running,
         // for the route of this shuttle with a detour on offer (vehicleId is ignored before the start).

@@ -27,11 +27,12 @@ namespace Formula9.UI
     {
         public static readonly string[] Stages = { "Problem", "Detour", "Check", "Approve", "Outcome" };
 
-        // Where the exercise has got to, as an index into Stages.
-        public static int Stage(FullSnapshot snapshot, bool routeClosed, bool hasDraft, RouteEditPreview preview)
+        // Where the exercise has got to for this shuttle, as an index into Stages. Running, it is back at
+        // the detour while the shuttle has one on offer, and at the outcome otherwise.
+        public static int Stage(FullSnapshot snapshot, string vehicleId, bool routeClosed, bool hasDraft, RouteEditPreview preview)
         {
             if (snapshot == null) return 0;
-            if (snapshot.Session.Status != "READY" && DecisionRules.HeldIncident(snapshot) == null) return 4;
+            if (snapshot.Session.Status != "READY" && DecisionRules.DetourCandidate(snapshot, vehicleId) == null) return 4;
             if (!routeClosed) return 3;
             if (preview != null) return preview.Approvable ? 3 : 2;
             return hasDraft ? 2 : 1;
@@ -192,6 +193,26 @@ namespace Formula9.UI
             var served = outcome.Stops.Count(s => s.ServedThisLoop);
             return $"{vehicle.VehicleId} · {state} · stops this loop {served} of {outcome.Stops.Count} · loops finished {outcome.Loops.Count}";
         }
+
+        // "shuttle-03" reads "Shuttle 03"; any other ID is shown as it is.
+        public static string ShuttleName(string vehicleId)
+        {
+            const string prefix = "shuttle-";
+            return vehicleId != null && vehicleId.Length > prefix.Length && vehicleId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                ? "Shuttle " + vehicleId.Substring(prefix.Length) : vehicleId;
+        }
+
+        // One entry of the shuttle picker: the shuttle, the route it drives now (a detour it was given,
+        // too), and whether it is waiting for a decision.
+        public static string ShuttleChoice(FleetVehicle vehicle, bool pending) =>
+            $"{ShuttleName(vehicle.VehicleId)} · {vehicle.RouteId ?? "no route"}" + (pending ? "   ● needs a decision" : "");
+
+        public static string PendingTitle(int shuttles) => $"Needs a decision ({shuttles})";
+
+        // A shuttle on the Needs a decision strip, and about how soon it reaches its first incident.
+        public static string PendingChip(PendingDecision decision) =>
+            "● " + ShuttleName(decision.VehicleId) +
+            (decision.EtaS is double eta ? " · " + (eta < 0.5 ? "now" : "~" + Duration(eta)) : "");
 
         public static string Duration(double seconds)
         {

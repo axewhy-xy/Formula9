@@ -54,7 +54,7 @@ namespace Formula9.Tests
             p.ClosureRevisions = s.Disruptions.ToDictionary(d => d.DisruptionId, d => d.AggregateRevision);
             p.SessionId = s.SessionId; p.SessionEpoch = s.SessionEpoch; p.SceneRevision = s.SceneRevision;
             foreach (var other in s.Vehicles.Where(v => v.RouteId == p.RouteId)) other.RouteRevision = p.RouteRevision;
-            Assert.IsNull(DecisionRules.HeldIncident(s));
+            Assert.IsNull(DecisionRules.DetourCandidate(s, vehicle.VehicleId));
             Assert.IsFalse(DecisionRules.RoutePreviewMatches(s, vehicle.VehicleId, p));
             Assert.Throws<ArgumentException>(() => DecisionRules.RerouteCommand(s, vehicle.VehicleId, p, "Round the closure"));
 
@@ -74,11 +74,11 @@ namespace Formula9.Tests
 
             // Paused: the draft stays, but nothing can be approved until the session runs again.
             s.Session.Status = "PAUSED";
-            Assert.IsNotNull(DecisionRules.HeldIncident(s));
+            Assert.IsNotNull(DecisionRules.DetourCandidate(s, vehicle.VehicleId), "still listed while paused");
             Assert.IsNull(DecisionRules.ReroutableRoute(s, vehicle.VehicleId));
             s.Session.Status = "RUNNING";
             s.Incidents[0].State = "EXECUTING";
-            Assert.IsNull(DecisionRules.HeldIncident(s));
+            Assert.IsNull(DecisionRules.DetourCandidate(s, vehicle.VehicleId));
             Assert.IsFalse(DecisionRules.RoutePreviewMatches(s, vehicle.VehicleId, p));
         }
 
@@ -91,36 +91,11 @@ namespace Formula9.Tests
                 CandidateIds = new List<string> { "keep", "detour" } });
             s.Candidates.Add(new Candidate { CandidateId = "keep", IncidentId = "collision", Action = "KEEP_ROUTE", Validation = "PASS", ExpiresAtTick = s.Tick + 10, VehicleId = s.Vehicles[0].VehicleId });
             s.Candidates.Add(new Candidate { CandidateId = "detour", IncidentId = "collision", Action = "ROAD_DETOUR", Validation = "PASS", ExpiresAtTick = s.Tick + 10, VehicleId = exposed.VehicleId });
-            Assert.AreEqual("collision", DecisionRules.HeldIncident(s).IncidentId);
-            Assert.AreEqual(exposed.VehicleId, DecisionRules.DetourVehicle(s));
+            CollectionAssert.AreEquivalent(new[] { s.Vehicles[0].VehicleId, exposed.VehicleId }, DecisionRules.PendingVehicles(s));
+            Assert.IsNull(DecisionRules.DetourCandidate(s, s.Vehicles[0].VehicleId), "keeping the route is all it is offered");
+            Assert.IsNull(DecisionRules.ReroutableRoute(s, s.Vehicles[0].VehicleId));
             Assert.AreEqual(exposed.RouteId, DecisionRules.ReroutableRoute(s, exposed.VehicleId));
             Assert.AreEqual("detour", DecisionRules.DetourCandidate(s, exposed.VehicleId).CandidateId);
-        }
-
-        [Test]
-        public void EachShuttlesDetourLeavesTheRouteListOnceNobodyDrivesIt()
-        {
-            var s = Snapshot();
-            s.Incidents.Clear();
-            s.Incidents.Add(new Incident { IncidentId = "closure" });
-            s.Routes[0].RouteId = "closure-detour-shuttle-01";
-            s.Vehicles[0].RouteId = "closure-detour-shuttle-01";
-            Assert.Contains("closure-detour-shuttle-01", DecisionRules.SelectableRoutes(s).ToList());
-            foreach (var vehicle in s.Vehicles) vehicle.RouteId = "elsewhere";
-            CollectionAssert.DoesNotContain(DecisionRules.SelectableRoutes(s).ToList(), "closure-detour-shuttle-01");
-        }
-
-        [Test]
-        public void AReplacedDetourLeavesTheRouteList()
-        {
-            var s = Snapshot();
-            s.Incidents.Clear();
-            s.Incidents.Add(new Incident { IncidentId = "closure" });
-            s.Routes[0].RouteId = "closure-detour";
-            s.Vehicles[0].RouteId = "closure-detour";
-            Assert.Contains("closure-detour", DecisionRules.SelectableRoutes(s).ToList());
-            foreach (var vehicle in s.Vehicles) vehicle.RouteId = "elsewhere";
-            CollectionAssert.DoesNotContain(DecisionRules.SelectableRoutes(s).ToList(), "closure-detour");
         }
 
         [Test]

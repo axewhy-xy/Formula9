@@ -741,6 +741,21 @@
 .route-stage-done { color: rgb(15, 76, 92); background-color: rgb(209, 232, 226); }
 .route-stage-current { color: rgb(255, 255, 255); -unity-font-style: bold; background-color: rgb(15, 76, 92); }
 
+/* Every shuttle waiting for a decision, soonest first; a click opens that shuttle. */
+.route-pending { flex-shrink: 0; flex-direction: row; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.route-pending-title { -unity-font-style: bold; margin-right: 8px; color: rgb(190, 42, 44); }
+.route-pending-items { flex-direction: row; flex-wrap: wrap; }
+.app Button.route-pending-item {
+    height: 26px;
+    margin: 0 6px 4px 0;
+    padding: 0 10px;
+    font-size: 12px;
+    border-radius: 13px;
+    border-color: rgb(214, 48, 49);
+    background-color: rgb(253, 236, 236);
+}
+.app Button.route-pending-item-selected { color: rgb(255, 255, 255); background-color: rgb(190, 42, 44); }
+
 .route-card {
     flex-shrink: 0;
     margin-bottom: 10px;

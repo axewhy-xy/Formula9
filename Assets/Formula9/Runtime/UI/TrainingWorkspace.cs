@@ -21,11 +21,13 @@ namespace Formula9.UI
         private readonly SessionController session;
         private readonly WorldView world;
         private readonly Action<Task> run;
-        private readonly Action<string> notify;
         private readonly List<VisualElement> pages = new List<VisualElement>();
         private readonly Dictionary<string, int> pageIndex = new Dictionary<string, int>();
         private readonly List<CommandOutcome> ledger = new List<CommandOutcome>();
-        private readonly DropdownField routes, incidents, candidates;
+        private readonly DropdownField shuttles, incidents, candidates;
+        private readonly Dictionary<string, string> shuttleByChoice = new Dictionary<string, string>();
+        private readonly VisualElement routePending, routePendingItems;
+        private readonly Label routePendingTitle;
         private readonly TextField routeReason, incidentReason;
         private readonly Label routeProblem, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes, incidentData, incidentReport, selection;
         private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowClosure, routeCameras, fleetCameras, approve, routeStart, routeWatch, previewIncident, approveIncident, rerouteIncident;
@@ -45,8 +47,10 @@ namespace Formula9.UI
         private List<RouteWaypoint> draft = new List<RouteWaypoint>();
         private int historyIndex;
         private long draftRevision, checkedRevision = -1, requestGeneration, incidentGeneration;
-        private string dependencies, boundary, incidentBoundary, ledgerSession, heldIncident, heldVehicle;
-        private bool heldWhileWatching;
+        private string dependencies, boundary, incidentBoundary, ledgerSession;
+        // The shuttle Route Planning is for, the route it drives now, the incident its detour would
+        // answer, and the shuttles that were waiting for a decision at the last snapshot.
+        private string selectedVehicle, route, selectedDetour, pendingSeen, pendingStrip;
         private bool routeBusy, incidentBusy, reloadContext, previewQueued, suggesting, outcomeBusy;
         private float acceptedAt, outcomeAt;
         private long outcomeSequence = -1;
@@ -85,7 +89,7 @@ namespace Formula9.UI
         public TrainingWorkspace(VisualElement root, TrainingApi api, SessionController session, WorldView world,
             Action<Task> run, Action<string> notify)
         {
-            this.api = api; this.session = session; this.world = world; this.run = run; this.notify = notify;
+            this.api = api; this.session = session; this.world = world; this.run = run;
             // The pages are laid out in UI/Pages/*.uxml; this binds their controls by name.
             foreach (var (pageName, navName) in new[] { ("page-fleet", "nav-fleet"), ("page-route", "nav-route"), ("page-charging", "nav-charging"), ("page-incident", "nav-incident"), ("page-reports", "nav-reports"), ("page-scenarios", null) })
             {
@@ -104,8 +108,11 @@ namespace Formula9.UI
             fleetCameras = Bind(root, "fleet-cameras", ToggleSelectedCameras);
             Bind(root, "camera-overview", () => world.Overview());
 
-            routes = root.Q<DropdownField>("routes");
-            routes.RegisterValueChangedCallback(_ => { ResetDraft(); dependencies = null; RequestContext(); if (world.CamerasShown) ShowRouteCameras(); });
+            shuttles = root.Q<DropdownField>("shuttles");
+            shuttles.RegisterValueChangedCallback(change => { if (shuttleByChoice.TryGetValue(change.newValue ?? "", out var id)) ChooseShuttle(id); });
+            routePending = root.Q("route-pending");
+            routePendingTitle = root.Q<Label>("route-pending-title");
+            routePendingItems = root.Q("route-pending-items");
             Bind(root, "refresh", RequestContext);
             routeCameras = Bind(root, "route-cameras", ToggleCameras);
             routeStages = root.Q("route-stages");
@@ -153,7 +160,11 @@ namespace Formula9.UI
             incidentTable = Table(root.Q("incident-table-host"), "", "Incident ID", "Shuttle ID", "Reaches it", "State", "Decided", "Detected tick", "Options");
             candidateTable = Table(root.Q("candidate-table-host"), "", "Candidate", "Shuttle", "Action", "Validation", "Expires tick", "Assumptions");
             Bind(root, "incident-focus", FocusIncident);
-            rerouteIncident = Bind(root, "incident-reroute", ShowRoutePlanning);
+            rerouteIncident = Bind(root, "incident-reroute", () =>
+            {
+                var vehicle = RerouteVehicle(session.Store.Snapshot, incidents.value);
+                if (vehicle != null) DecideFor(vehicle, incidents.value);
+            });
             candidates = root.Q<DropdownField>("candidates");
             candidates.RegisterValueChangedCallback(_ => { ClearIncidentPreview(); UpdateActions(); });
             incidentReason = root.Q<TextField>("incident-reason");
@@ -179,8 +190,6 @@ namespace Formula9.UI
             };
             // The Cameras buttons depend on which shuttle is selected
             world.EntitySelected += id => { selection.text = "Selected: " + id; UpdateActions(); };
-            // However the cameras close, a closure that came up while watching has been seen
-            world.CamerasToggled += shown => { if (!shown) heldWhileWatching = false; };
             world.RouteNodeSelected += AppendNode;
             world.RoadClicked += AddRoad;
             world.WaypointClicked += RemoveWaypoint;
@@ -191,12 +200,28 @@ namespace Formula9.UI
         public void SelectVehicle(string id) { world.SelectEntity(id); selection.text = "Selected: " + id; }
 
         // The operator picking a shuttle in the fleet table or the Fleet List. Open cameras move to it,
-        // except on Route Planning to a shuttle on another route: they stay on the route's shuttle.
+        // except on Route Planning to a shuttle other than the one it is for: they stay on that one.
         public void PickVehicle(string id)
         {
-            var otherRoute = shownPage == RoutePage && session.Store.Snapshot?.Vehicles.FirstOrDefault(v => v.VehicleId == id)?.RouteId != routes.value;
-            if (otherRoute) world.SelectEntity(id); else world.PickShuttle(id);
+            if (shownPage == RoutePage && id != selectedVehicle) world.SelectEntity(id); else world.PickShuttle(id);
             selection.text = "Selected: " + id;
+        }
+
+        // Opens Route Planning on a shuttle's decision and frames the incident: from the Needs a
+        // decision strip, and the Incident Monitor's re-route. Without an incident, the shuttle's
+        // soonest one. This is the operator's own choice, so it replaces any draft for another shuttle.
+        public void DecideFor(string vehicleId, string incidentId = null)
+        {
+            var s = session.Store.Snapshot;
+            if (s == null || s.Vehicles.All(v => v.VehicleId != vehicleId)) return;
+            if (vehicleId != selectedVehicle) SetShuttle(s, vehicleId);
+            SelectVehicle(vehicleId);
+            ShowPage(RoutePage);
+            Render();
+            var incident = s.Incidents.FirstOrDefault(i => i.IncidentId == (incidentId ?? DecisionRules.OptionsFor(s, vehicleId).FirstOrDefault()?.IncidentId));
+            if (incident == null) return;
+            // The 3D city frames the incident itself; the map frames its road
+            if (!world.FocusIncident(incident.IncidentId) && incident.Location?.EdgeId != null) world.FocusRoads(new[] { incident.Location.EdgeId });
         }
 
         public void Render()
@@ -206,7 +231,8 @@ namespace Formula9.UI
             if (boundary != currentBoundary)
             {
                 sessionToolsOpen = null;
-                boundary = currentBoundary; dependencies = null; context = null; requestGeneration++; approvedDraft = null; heldIncident = heldVehicle = null; heldWhileWatching = false;
+                boundary = currentBoundary; dependencies = null; context = null; requestGeneration++; approvedDraft = null;
+                selectedVehicle = route = selectedDetour = pendingSeen = pendingStrip = null;
                 if (ledgerSession != s?.SessionId) { ledger.Clear(); ledgerSession = s?.SessionId; }
                 charging.Reset();
                 routeReason.value = incidentReason.value = "";
@@ -233,9 +259,10 @@ namespace Formula9.UI
                 draft = new List<RouteWaypoint>(); draftHistory.Clear(); draftHistory.Add(new List<RouteWaypoint>()); historyIndex = 0;
                 outcomeSequence = -1;
             }
-            Choices(routes, DecisionRules.SelectableRoutes(s));
-            FollowHeldIncident(s);
-            var changed = DecisionRules.RouteDependencies(s, routes.value);
+            var pending = DecisionRules.PendingDecisions(s);
+            FollowPending(s, pending);
+            RenderShuttles(s, pending);
+            var changed = DecisionRules.RouteDependencies(s, route);
             if (changed != dependencies)
             {
                 dependencies = changed; context = null; InvalidateRoute();
@@ -255,7 +282,7 @@ namespace Formula9.UI
             var hasOptions = selectedIncident != null && selectedIncident.CandidateIds.Count > 0;
             incidentData.text = selectedIncident == null ? "No incident selected." : TrainingPresenter.IncidentSummary(selectedIncident, hasOptions);
             incidentDecisions.style.display = s.Incidents.Count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
-            rerouteIncident.style.display = selectedIncident != null && selectedIncident.IncidentId == heldIncident ? DisplayStyle.Flex : DisplayStyle.None;
+            rerouteIncident.style.display = RerouteVehicle(s, selectedIncident?.IncidentId) != null ? DisplayStyle.Flex : DisplayStyle.None;
             candidates.style.display = hasOptions ? DisplayStyle.Flex : DisplayStyle.None;
             incidentReason.style.display = hasOptions ? DisplayStyle.Flex : DisplayStyle.None;
             previewIncident.style.display = hasOptions ? DisplayStyle.Flex : DisplayStyle.None;
@@ -292,9 +319,10 @@ namespace Formula9.UI
             routeUndo.SetEnabled(edit && historyIndex > 0);
             routeRedo.SetEnabled(edit && historyIndex + 1 < draftHistory.Count);
             routeClear.SetEnabled(edit && (draft.Count > 0 || preview != null));
-            approve.SetEnabled(edit && !routeBusy && preview != null && preview.Approvable && DecisionRules.RoutePreviewMatches(s, heldVehicle, preview) && !string.IsNullOrWhiteSpace(routeReason.value));
+            approve.SetEnabled(edit && !routeBusy && preview != null && preview.Approvable && DecisionRules.RoutePreviewMatches(s, selectedVehicle, preview) && !string.IsNullOrWhiteSpace(routeReason.value));
             routeApplyNote.text = RoutePresenter.ApprovalNote(s, preview, routeReason.value);
-            routes.SetEnabled(!session.HasPendingCommand && !routeBusy && heldIncident == null);
+            // Any shuttle can be picked, even with others waiting: the operator decides in which order
+            shuttles.SetEnabled(!session.HasPendingCommand && !routeBusy);
             var routeClosed = s != null && TrainingPresenter.AssignedRouteIsClosed(s);
             routeStart.style.display = s?.Session.Status == "READY" && !routeClosed ? DisplayStyle.Flex : DisplayStyle.None;
             routeStart.SetEnabled(Current && s?.Session.Status == "READY" && !routeClosed);
@@ -317,42 +345,123 @@ namespace Formula9.UI
             if (draftView != null && draftView.Editable != (edit && shownPage == RoutePage)) ShowDraftInViews();
         }
 
-        private bool Editable(FullSnapshot s) => Current && context != null && (s?.Session.Status == "READY" || DecisionRules.ReroutableRoute(s, heldVehicle) == context.RouteId);
+        private bool Editable(FullSnapshot s) => Current && context != null && (s?.Session.Status == "READY" || DecisionRules.ReroutableRoute(s, selectedVehicle) == context.RouteId);
 
-        private static bool Drafting(FullSnapshot s) => s?.Session.Status == "READY" || DecisionRules.HeldIncident(s) != null;
+        // Before the start every route can be drafted; running, the route of a shuttle with a detour on offer.
+        private bool Drafting(FullSnapshot s) => s?.Session.Status == "READY" || DecisionRules.DetourCandidate(s, selectedVehicle) != null;
 
-        // A closure holding a shuttle brings the route editor to that shuttle's route, whatever the
-        // operator was looking at. A decision, or the road reopening, ends it and leaves the editor there.
-        // Someone watching a shuttle's cameras keeps watching it, until they close them.
-        private void FollowHeldIncident(FullSnapshot s)
+        // Nothing the operator would lose: no draft, no reason typed, nothing on its way to the backend.
+        private bool Idle => draft.Count == 0 && !suggesting && preview == null && approvedDraft == null &&
+                             string.IsNullOrWhiteSpace(routeReason.value) && !session.HasPendingCommand;
+
+        // Route Planning is for one shuttle at a time. It keeps to the one the operator picked, and only
+        // moves by itself, to the shuttle that reaches its incident soonest, when the shuttles waiting for
+        // a decision change while the panel is idle and its own shuttle needs none. It never changes the
+        // page, the 3D view or the cameras, and says nothing: the incident alert does.
+        private void FollowPending(FullSnapshot s, List<PendingDecision> decisions)
         {
-            var held = DecisionRules.HeldIncident(s);
-            if (held?.IncidentId == heldIncident) return;
-            heldIncident = held?.IncidentId;
-            heldVehicle = DecisionRules.DetourVehicle(s) ?? heldVehicle;
-            var route = s.Vehicles.FirstOrDefault(v => v.VehicleId == heldVehicle)?.RouteId;
-            if (route != null) routes.SetValueWithoutNotify(route);
+            var pending = decisions.Select(d => d.VehicleId).Distinct().ToList();
+            var seen = string.Join(";", pending.OrderBy(v => v, StringComparer.Ordinal));
+            var changed = seen != pendingSeen;
+            pendingSeen = seen;
+            if (s.Vehicles.All(v => v.VehicleId != selectedVehicle))
+            {
+                var fallback = DefaultShuttle(s, pending);
+                if (fallback != selectedVehicle) SetShuttle(s, fallback);
+                return;
+            }
+
+            // The shuttle drives another route now: the detour it was given
+            var current = s.Vehicles.First(v => v.VehicleId == selectedVehicle).RouteId;
+            if (current != route) { route = current; ClearDraft(); }
+            // Its detour was decided or withdrawn, or a newer incident's replaced it: the draft answers nothing now
+            var detour = DecisionRules.DetourCandidate(s, selectedVehicle)?.IncidentId;
+            var ended = false;
+            if (detour != selectedDetour) { ended = detour == null && selectedDetour != null; selectedDetour = detour; ClearDraft(); }
+
+            if (changed && pending.Count > 0 && !pending.Contains(selectedVehicle) && Idle) { SetShuttle(s, pending[0]); return; }
+            // Decided: a route is edited on the map; running, it is watched in 3D, or through its cameras
+            if (ended && shownPage == RoutePage && !world.CamerasShown) world.WatchShuttle(selectedVehicle);
+        }
+
+        // With nothing picked yet: the shuttle that reaches its incident soonest, else one whose route
+        // is closed (the exercise before the start), else the first.
+        private static string DefaultShuttle(FullSnapshot s, List<string> pending) =>
+            pending.FirstOrDefault() ?? TrainingPresenter.ClosedRouteVehicles(s).OrderBy(v => v, StringComparer.Ordinal).FirstOrDefault() ??
+            s.Vehicles.Select(v => v.VehicleId).OrderBy(v => v, StringComparer.Ordinal).FirstOrDefault();
+
+        // Points the panel at a shuttle and the route it drives now, with a fresh draft.
+        private void SetShuttle(FullSnapshot s, string vehicleId)
+        {
+            selectedVehicle = vehicleId;
+            route = s?.Vehicles.FirstOrDefault(v => v.VehicleId == vehicleId)?.RouteId;
+            selectedDetour = DecisionRules.DetourCandidate(s, vehicleId)?.IncidentId;
+            ClearDraft();
+        }
+
+        private void ClearDraft()
+        {
             ResetDraft();
             RenderWaypoints();
             dependencies = null;
-            if (held == null)
-            {
-                heldWhileWatching = false;
-                // A route is edited on the map; running, it is watched in 3D, or through its cameras
-                if (shownPage == RoutePage && heldVehicle != null && !world.CamerasShown) world.WatchShuttle(heldVehicle);
-                return;
-            }
-            Choices(incidents, s.Incidents.Select(i => i.IncidentId));
-            incidents.SetValueWithoutNotify(held.IncidentId);
-            if (world.CamerasShown) heldWhileWatching = true;
-            else SelectVehicle(heldVehicle);
-            var standing = s.Vehicles.FirstOrDefault(v => v.VehicleId == heldVehicle)?.ServiceState == "AWAITING_GUIDANCE";
-            notify(standing
-                ? $"{heldVehicle} is held at a road closure. Route it round the closure, or choose another option in the Incident Monitor."
-                : $"{heldVehicle} will reach an incident ahead. Route it round, or choose another option in the Incident Monitor.");
-            ShowPage(RoutePage);
-            if (!world.CamerasShown) world.ShowMap(true);
         }
+
+        // The operator choosing a shuttle in the picker. Open cameras move to it; Render loads its roads.
+        private void ChooseShuttle(string vehicleId)
+        {
+            var s = session.Store.Snapshot;
+            if (s == null || vehicleId == selectedVehicle) return;
+            SetShuttle(s, vehicleId);
+            if (world.CamerasShown) ShowRouteCameras();
+            Render();
+        }
+
+        // The picker, one entry per shuttle, and the strip of those waiting for a decision. Both keep
+        // their elements while nothing changes, so a click is never split across two of them.
+        private void RenderShuttles(FullSnapshot s, List<PendingDecision> decisions)
+        {
+            var pending = new HashSet<string>(decisions.Select(d => d.VehicleId));
+            var vehicles = s.Vehicles.OrderBy(v => v.VehicleId, StringComparer.Ordinal).ToList();
+            var labels = vehicles.Select(v => RoutePresenter.ShuttleChoice(v, pending.Contains(v.VehicleId))).ToList();
+            if (!shuttles.choices.SequenceEqual(labels))
+            {
+                shuttleByChoice.Clear();
+                for (var i = 0; i < labels.Count; i++) shuttleByChoice[labels[i]] = vehicles[i].VehicleId;
+                shuttles.choices = labels;
+            }
+            var selected = vehicles.FindIndex(v => v.VehicleId == selectedVehicle);
+            var label = selected < 0 ? "" : labels[selected];
+            if (shuttles.value != label) shuttles.SetValueWithoutNotify(label);
+
+            // The soonest decision of each shuttle, soonest first
+            var first = decisions.GroupBy(d => d.VehicleId).Select(g => g.First()).ToList();
+            routePending.style.display = first.Count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
+            routePendingTitle.text = RoutePresenter.PendingTitle(first.Count);
+            var strip = string.Join(";", first.Select(d => d.VehicleId));
+            if (strip != pendingStrip)
+            {
+                pendingStrip = strip;
+                routePendingItems.Clear();
+                foreach (var decision in first)
+                {
+                    var vehicle = decision.VehicleId;
+                    var item = new Button(() => DecideFor(vehicle)) { userData = vehicle };
+                    item.AddToClassList("route-pending-item");
+                    routePendingItems.Add(item);
+                }
+            }
+            for (var i = 0; i < first.Count; i++)
+            {
+                var item = (Button)routePendingItems[i];
+                item.text = RoutePresenter.PendingChip(first[i]);
+                item.tooltip = first[i].Incident.Location?.RoadName;
+                item.EnableInClassList("route-pending-item-selected", first[i].VehicleId == selectedVehicle);
+            }
+        }
+
+        // The shuttle the Incident Monitor's re-route opens: the soonest whose detour answers this incident.
+        private static string RerouteVehicle(FullSnapshot s, string incidentId) => incidentId == null ? null :
+            DecisionRules.PendingVehicles(s).FirstOrDefault(v => DecisionRules.DetourCandidate(s, v)?.IncidentId == incidentId);
 
         private void InvalidateRoute()
         {
@@ -394,17 +503,17 @@ namespace Formula9.UI
         private async Task LoadContext()
         {
             var s = session.Store.Snapshot;
-            if (s == null || string.IsNullOrEmpty(routes.value) || routeBusy) return;
+            if (s == null || string.IsNullOrEmpty(route) || routeBusy) return;
             reloadContext = false;
             var generation = ++requestGeneration;
-            var route = routes.value;
-            var stamp = DecisionRules.RouteDependencies(s, route);
+            var asked = route;
+            var stamp = DecisionRules.RouteDependencies(s, asked);
             context = null; InvalidateRoute(); routeBusy = true; UpdateActions();
             try
             {
-                var result = await api.GetRouteEditorAsync(s.SessionId, route);
-                if (generation != requestGeneration || stamp != DecisionRules.RouteDependencies(session.Store.Snapshot, routes.value)) return;
-                if (result.SessionEpoch != s.SessionEpoch || result.SceneRevision != s.SceneRevision || result.RouteRevision != s.Routes.Single(r => r.RouteId == route).Revision)
+                var result = await api.GetRouteEditorAsync(s.SessionId, asked);
+                if (generation != requestGeneration || stamp != DecisionRules.RouteDependencies(session.Store.Snapshot, route)) return;
+                if (result.SessionEpoch != s.SessionEpoch || result.SceneRevision != s.SceneRevision || result.RouteRevision != s.Routes.Single(r => r.RouteId == asked).Revision)
                     throw new ContractException("Route graph is stale; refresh it.");
                 context = result; dependencies = stamp;
                 routeAssumptions.text = string.Join("\n", result.Assumptions);
@@ -417,7 +526,7 @@ namespace Formula9.UI
             // as the Qt editor does, rather than raising it.
             catch (BackendErrorException error) when (error.Error.Code == "INVALID_REFERENCE")
             {
-                if (generation == requestGeneration) routeProblem.text = $"{route} can't be edited in this scenario: {error.Error.Message}.";
+                if (generation == requestGeneration) routeProblem.text = $"{asked} can't be edited in this scenario: {error.Error.Message}.";
             }
             finally { routeBusy = false; UpdateActions(); if (reloadContext) run(LoadContext()); }
         }
@@ -443,7 +552,7 @@ namespace Formula9.UI
                 if (picksRoads) request.WaypointEdgeIds = draft.Select(w => w.EdgeId).ToList();
                 else request.ViaNodeIds = draft.Select(w => w.NodeId).ToList();
                 var result = await api.PreviewRouteAsync(context.SessionId, request);
-                if (generation != requestGeneration || revision != draftRevision || stamp != DecisionRules.RouteDependencies(session.Store.Snapshot, routes.value)) return;
+                if (generation != requestGeneration || revision != draftRevision || stamp != DecisionRules.RouteDependencies(session.Store.Snapshot, route)) return;
                 preview = result;
                 ShowDraftInViews();
                 // The verdict is what the operator just asked for: bring it into view, once it is laid out
@@ -463,8 +572,8 @@ namespace Formula9.UI
             var s = session.Store.Snapshot;
             if (s.Session.Status != "READY")
             {
-                // FollowHeldIncident clears the draft once a snapshot shows the incident decided; a refusal keeps it.
-                if (await session.SubmitAsync(DecisionRules.RerouteCommand(s, heldVehicle, preview, routeReason.value))) await session.RefreshAsync();
+                // FollowPending clears the draft once a snapshot shows the shuttle decided for; a refusal keeps it.
+                if (await session.SubmitAsync(DecisionRules.RerouteCommand(s, selectedVehicle, preview, routeReason.value))) await session.RefreshAsync();
                 InvalidateRoute(); Render();
                 return;
             }
@@ -484,15 +593,11 @@ namespace Formula9.UI
             if (await session.SendControlAsync("START")) { if (!world.CamerasShown) WatchRoute(); await session.RefreshAsync(); }
         }
 
-        // The shuttle whose cameras this route shows: the selected one if it is on this route.
-        private string RouteVehicle()
-        {
-            var onRoute = session.Store.Snapshot?.Vehicles.Where(v => v.RouteId == routes.value).OrderBy(v => v.VehicleId, StringComparer.Ordinal).Select(v => v.VehicleId).ToList();
-            if (onRoute == null) return null;
-            return onRoute.Contains(world.SelectedId) ? world.SelectedId : outcome?.VehicleId ?? onRoute.FirstOrDefault();
-        }
+        // The shuttle Route Planning shows the cameras of: the one it is for.
+        private string RouteVehicle() =>
+            session.Store.Snapshot?.Vehicles.Any(v => v.VehicleId == selectedVehicle) == true ? selectedVehicle : null;
 
-        // Shows the cameras of this route's shuttle in place of the 3D view.
+        // Shows the cameras of the panel's shuttle in place of the 3D view.
         private void ShowRouteCameras()
         {
             var vehicle = RouteVehicle();
@@ -501,7 +606,7 @@ namespace Formula9.UI
             world.OpenCameras();
         }
 
-        // The Cameras button on Route Planning: this route's shuttle's cameras, or back to 3D.
+        // The Cameras button on Route Planning: the panel's shuttle's cameras, or back to 3D.
         private void ToggleCameras()
         {
             if (world.CamerasShown) CloseCameras();
@@ -518,30 +623,11 @@ namespace Formula9.UI
             UpdateActions();
         }
 
-        // Standing at the closure, or still on its way there
-        private string HeldNotice(string vehicle)
-        {
-            var standing = session.Store.Snapshot?.Vehicles.FirstOrDefault(v => v.VehicleId == vehicle)?.ServiceState == "AWAITING_GUIDANCE";
-            return standing
-                ? $"{vehicle} is waiting at a closure. Switch to the 2D map on Route Planning to route it round."
-                : $"{vehicle} will reach a closure ahead. Switch to the 2D map on Route Planning to route it round.";
-        }
-
-        private void CloseCameras()
-        {
-            // Closing the cameras clears the flag, so read it first
-            var told = heldWhileWatching;
-            world.CloseCameras();
-            // A closure that came up while watching: select its shuttle and say so, once, staying in 3D
-            if (!told || heldVehicle == null) return;
-            SelectVehicle(heldVehicle);
-            notify(HeldNotice(heldVehicle));
-        }
+        private void CloseCameras() => world.CloseCameras();
 
         private void WatchRoute()
         {
-            var s = session.Store.Snapshot;
-            var vehicle = outcome?.VehicleId ?? s?.Vehicles.Where(v => v.RouteId == routes.value).OrderBy(v => v.VehicleId, StringComparer.Ordinal).Select(v => v.VehicleId).FirstOrDefault();
+            var vehicle = RouteVehicle() ?? outcome?.VehicleId;
             if (vehicle == null) return;
             world.WatchShuttle(vehicle);
             selection.text = "Selected: " + vehicle;
@@ -632,7 +718,7 @@ namespace Formula9.UI
 
         private void RenderStages(FullSnapshot s)
         {
-            var stage = RoutePresenter.Stage(s, s != null && TrainingPresenter.AssignedRouteIsClosed(s), draft.Count > 0 || suggesting, preview);
+            var stage = RoutePresenter.Stage(s, selectedVehicle, s != null && TrainingPresenter.AssignedRouteIsClosed(s), draft.Count > 0 || suggesting, preview);
             for (var i = 0; i < routeStages.childCount; i++)
             {
                 routeStages[i].EnableInClassList("route-stage-current", i == stage);
@@ -700,11 +786,11 @@ namespace Formula9.UI
         // The report follows the session's events, at the pace a person can read it.
         private void RefreshOutcome(FullSnapshot s)
         {
-            if (outcomeBusy || string.IsNullOrEmpty(routes.value) || !session.Available) return;
+            if (outcomeBusy || string.IsNullOrEmpty(route) || !session.Available) return;
             if (s.EventSequence == outcomeSequence || Time.realtimeSinceStartup - outcomeAt < OutcomeRefreshSeconds) return;
             if (TrainingPresenter.AssignedRouteIsClosed(s) && s.Session.Status == "READY") return;
             outcomeSequence = s.EventSequence; outcomeAt = Time.realtimeSinceStartup; outcomeBusy = true;
-            run(LoadOutcome(s.SessionId, routes.value));
+            run(LoadOutcome(s.SessionId, route));
         }
 
         private async Task LoadOutcome(string sessionId, string route)
@@ -712,7 +798,7 @@ namespace Formula9.UI
             try
             {
                 var result = await api.GetRouteOutcomeAsync(sessionId, route);
-                if (session.Store.Snapshot?.SessionId != sessionId || routes.value != route) return;
+                if (session.Store.Snapshot?.SessionId != sessionId || this.route != route) return;
                 outcome = result;
                 RenderOutcome(session.Store.Snapshot);
                 UpdateActions();
