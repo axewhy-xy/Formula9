@@ -1009,6 +1009,8 @@ class IncidentService:
         return result, {
             "command_id": command.command_id, "candidate_id": candidate_id, "action": action,
             "vehicle_id": vehicle_id, "reason": command.reason, "transitions": transitions,
+            "applied_route_id": shuttle.route_id if action == "ROAD_DETOUR" else None,
+            "directed_edge_ids": refreshed.directed_edge_ids if action == "ROAD_DETOUR" else [],
             "hold_stop_id": stop.get("stop_id"),
             "response_time_s": response_s, "before_arrival": before_arrival,
             "timing_basis": "SERVER_SIMULATION_CLOCK_EXCLUDES_PAUSES",

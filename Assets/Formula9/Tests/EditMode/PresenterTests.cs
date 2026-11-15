@@ -312,16 +312,68 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: OnlyTheSingaporeExerciseIsOffered
+        // Function: AssessmentModeUsesTheSessionMetadata
         // -----------------------------------------------------------------------------------
         // Description:
-        //     New sessions offer only the Singapore exercise.
+        //     The header reflects the joined exercise and still recognizes saved scored sessions.
         [Test]
-        public void OnlyTheSingaporeExerciseIsOffered()
+        public void AssessmentModeUsesTheSessionMetadata()
         {
-            Assert.AreEqual(1, TrainingPresenter.Scenarios.Count);
-            Assert.AreEqual(SessionController.IntegratedScenario, TrainingPresenter.Scenarios[0].Id);
-            StringAssert.StartsWith("Singapore", TrainingPresenter.ScenarioTitle(SessionController.IntegratedScenario));
+            var snapshot = new FullSnapshot
+            {
+                Scenario = new ScenarioRevision(),
+                Session = new TrainingSession { ScenarioRevisionId = SessionController.IntegratedScenario, Status = "RUNNING" },
+            };
+            StringAssert.StartsWith("Singapore", TrainingPresenter.Title(snapshot));
+            Assert.IsFalse(TrainingPresenter.IsAssessment(snapshot));
+            Assert.IsNull(TrainingPresenter.AssessmentClock(snapshot, true).Text);
+            snapshot.Session.ScenarioRevisionId = "scored-toa-payoh-legacy";
+            Assert.IsTrue(TrainingPresenter.IsAssessment(snapshot));
+            StringAssert.Contains("scored", TrainingPresenter.Title(snapshot));
+        }
+
+        // The countdown follows simulation time and the deadline pinned to the joined attempt.
+        [TestCase("READY", 120, 0, true, null, false)]
+        [TestCase("RUNNING", 120, 0, true, "2:00 left", false)]
+        [TestCase("RUNNING", 120, 119.95, true, "0:01 left", true)]
+        [TestCase("PAUSED", 120, 92.25, true, "Paused · 0:28 left", false)]
+        [TestCase("RUNNING", 120, 92.25, false, "Last seen · 0:28 left", false)]
+        [TestCase("RECOVERING", 120, 92.25, false, "Last seen · 0:28 left", false)]
+        [TestCase("RUNNING", 960, 30.0, true, "15:30 left", false)]
+        [TestCase("COMPLETED", 120, 120, true, "Time’s up · 0:00", false)]
+        [TestCase("ARCHIVED", 120, 22, true, null, false)]
+        public void CountdownFollowsTheScoredSnapshot(string status, int duration, double elapsed, bool available,
+            string text, bool urgent)
+        {
+            var snapshot = new FullSnapshot
+            {
+                Scenario = new ScenarioRevision { AssessmentDurationS = duration },
+                Session = new TrainingSession { Status = status },
+                SimulationTimeS = elapsed,
+            };
+            var clock = TrainingPresenter.AssessmentClock(snapshot, available);
+            Assert.AreEqual(text, clock.Text);
+            Assert.AreEqual(urgent, clock.Urgent);
+        }
+
+        // Replay the time in a scored snapshot from before the duration field was introduced.
+        [TestCase("toa-payoh-rubric-r2", false, "0:47 left")]
+        [TestCase("toa-payoh-rubric-r1", false, "14:47 left")]
+        [TestCase(null, true, "Loading timer…")]
+        [TestCase("unknown-rubric", false, "Timer unavailable")]
+        public void CountdownUsesPinnedLegacyRubric(string revision, bool loading, string text)
+        {
+            var snapshot = new FullSnapshot
+            {
+                Scenario = new ScenarioRevision(),
+                Session = new TrainingSession { ScenarioRevisionId = "scored-toa-payoh-legacy", Status = "RUNNING" },
+                SimulationTimeS = 73.45,
+            };
+            var legacyDuration = TrainingPresenter.LegacyAssessmentDuration(revision);
+            Assert.AreEqual(text, TrainingPresenter.AssessmentClock(snapshot, true, legacyDuration, loading).Text);
+
+            snapshot.Scenario.AssessmentDurationS = 120;
+            Assert.AreEqual("0:47 left", TrainingPresenter.AssessmentClock(snapshot, true, legacyDuration, loading).Text);
         }
 
         // -----------------------------------------------------------------------------------

@@ -1,0 +1,231 @@
+{
+  "$comment": "Author: Nur Syazliyarni Binte Zazali. Generated from assessment.py.",
+  "$defs": {
+    "AssessmentCriterion": {
+      "additionalProperties": true,
+      "description": "Points and the durable simulation evidence supporting a single rule.",
+      "properties": {
+        "event_ids": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          "title": "Event Ids",
+          "type": "array"
+        },
+        "explanation": {
+          "title": "Explanation",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "maximum": {
+          "minimum": 0,
+          "title": "Maximum",
+          "type": "integer"
+        },
+        "points": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Points"
+        },
+        "rule_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Rule Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rule_id",
+        "label",
+        "points",
+        "maximum",
+        "explanation",
+        "event_ids"
+      ],
+      "title": "AssessmentCriterion",
+      "type": "object"
+    },
+    "AssessmentFailure": {
+      "additionalProperties": true,
+      "description": "A confirmed safety breach that overrides the numerical grade.",
+      "properties": {
+        "event_ids": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          "title": "Event Ids",
+          "type": "array"
+        },
+        "explanation": {
+          "title": "Explanation",
+          "type": "string"
+        },
+        "rule_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Rule Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rule_id",
+        "explanation",
+        "event_ids"
+      ],
+      "title": "AssessmentFailure",
+      "type": "object"
+    }
+  },
+  "$id": "https://formula9.local/contracts/v2/session_assessment.schema.json",
+  "additionalProperties": true,
+  "description": "Current status or the persisted final report for one session.",
+  "properties": {
+    "automatic_failures": {
+      "items": {
+        "$ref": "#/$defs/AssessmentFailure"
+      },
+      "title": "Automatic Failures",
+      "type": "array"
+    },
+    "criteria": {
+      "items": {
+        "$ref": "#/$defs/AssessmentCriterion"
+      },
+      "title": "Criteria",
+      "type": "array"
+    },
+    "explanation": {
+      "title": "Explanation",
+      "type": "string"
+    },
+    "maximum": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Maximum"
+    },
+    "pass_mark": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Pass Mark"
+    },
+    "points": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Points"
+    },
+    "rubric_revision": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Rubric Revision"
+    },
+    "scenario_revision_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Scenario Revision Id",
+      "type": "string"
+    },
+    "session_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+      "title": "Session Id",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "PRACTICE",
+        "IN_PROGRESS",
+        "INCOMPLETE",
+        "PASS",
+        "FAIL"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "through_event_sequence": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Through Event Sequence"
+    },
+    "through_tick": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Through Tick"
+    }
+  },
+  "required": [
+    "session_id",
+    "scenario_revision_id",
+    "rubric_revision",
+    "status",
+    "points",
+    "maximum",
+    "pass_mark",
+    "through_tick",
+    "through_event_sequence",
+    "explanation"
+  ],
+  "title": "SessionAssessment",
+  "type": "object"
+}

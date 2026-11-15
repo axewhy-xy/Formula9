@@ -8,6 +8,38 @@ using Newtonsoft.Json.Linq;
 
 namespace Formula9.Contracts
 {
+    /// <summary>Points and the durable simulation evidence supporting a single rule.</summary>
+    public sealed partial class AssessmentCriterion
+    {
+        [JsonProperty("event_ids", Required = Required.Always)]
+        public List<string> EventIds { get; set; }
+        [JsonProperty("explanation", Required = Required.Always)]
+        public string Explanation { get; set; }
+        [JsonProperty("label", Required = Required.Always)]
+        public string Label { get; set; }
+        [JsonProperty("maximum", Required = Required.Always)]
+        public long Maximum { get; set; }
+        [JsonProperty("points", Required = Required.AllowNull)]
+        public double? Points { get; set; }
+        [JsonProperty("rule_id", Required = Required.Always)]
+        public string RuleId { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>A confirmed safety breach that overrides the numerical grade.</summary>
+    public sealed partial class AssessmentFailure
+    {
+        [JsonProperty("event_ids", Required = Required.Always)]
+        public List<string> EventIds { get; set; }
+        [JsonProperty("explanation", Required = Required.Always)]
+        public string Explanation { get; set; }
+        [JsonProperty("rule_id", Required = Required.Always)]
+        public string RuleId { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
     /// <summary>CameraBookmark from the shared v2 contract.</summary>
     public sealed partial class CameraBookmark
     {
@@ -1104,6 +1136,9 @@ namespace Formula9.Contracts
     /// <summary>ScenarioRevision from the shared v2 contract.</summary>
     public sealed partial class ScenarioRevision
     {
+        /// <summary>Simulation seconds available in a scored attempt, pinned at creation.</summary>
+        [JsonProperty("assessment_duration_s", Required = Required.Default)]
+        public long? AssessmentDurationS { get; set; }
         [JsonProperty("energy_model_revision", Required = Required.Always)]
         public string EnergyModelRevision { get; set; }
         [JsonProperty("provenance", Required = Required.Always)]
@@ -1192,6 +1227,37 @@ namespace Formula9.Contracts
         public string ProxyId { get; set; }
         [JsonProperty("render_asset_id", Required = Required.Always)]
         public string RenderAssetId { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>Current status or the persisted final report for one session.</summary>
+    public sealed partial class SessionAssessment
+    {
+        [JsonProperty("automatic_failures", Required = Required.Default)]
+        public List<AssessmentFailure> AutomaticFailures { get; set; } = new List<AssessmentFailure>();
+        [JsonProperty("criteria", Required = Required.Default)]
+        public List<AssessmentCriterion> Criteria { get; set; } = new List<AssessmentCriterion>();
+        [JsonProperty("explanation", Required = Required.Always)]
+        public string Explanation { get; set; }
+        [JsonProperty("maximum", Required = Required.AllowNull)]
+        public long? Maximum { get; set; }
+        [JsonProperty("pass_mark", Required = Required.AllowNull)]
+        public long? PassMark { get; set; }
+        [JsonProperty("points", Required = Required.AllowNull)]
+        public double? Points { get; set; }
+        [JsonProperty("rubric_revision", Required = Required.AllowNull)]
+        public string RubricRevision { get; set; }
+        [JsonProperty("scenario_revision_id", Required = Required.Always)]
+        public string ScenarioRevisionId { get; set; }
+        [JsonProperty("session_id", Required = Required.Always)]
+        public string SessionId { get; set; }
+        [JsonProperty("status", Required = Required.Always)]
+        public string Status { get; set; }
+        [JsonProperty("through_event_sequence", Required = Required.AllowNull)]
+        public long? ThroughEventSequence { get; set; }
+        [JsonProperty("through_tick", Required = Required.AllowNull)]
+        public long? ThroughTick { get; set; }
         // Additive 2.x fields from a newer backend are kept, not rejected.
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }

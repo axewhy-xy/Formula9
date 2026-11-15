@@ -58,6 +58,7 @@ namespace Formula9.UI
         private Func<Task> dialogAction;
 
         private VisualElement loginScreen, trainingScreen, fleet, confirmRow, fleetPanel, sessionPlayback;
+        private VisualElement sessionCard;
         private TextField fleetSearch;
         private VisualElement fleetEmpty;
         private Label fleetTitle;
@@ -66,10 +67,14 @@ namespace Formula9.UI
         private const string RememberedUserKey = "login.rememberedUser";
         private TextField username, password, confirm, sessionId;
         private Label signUpHint, loginError, title, user, capacity, status, message, sessionBadge, worldNotice;
+        private Label assessmentBadge, assessmentTimer;
+        private AssessmentDeadlineLookup assessmentDeadline;
         private string sessionBadgeClass;
         private readonly SessionStatusPresenter sessionStatusPresenter = new SessionStatusPresenter();
         private Button forgot, submit, modeSwitch, start, pause, resume, archive, refreshSessions;
-        private DropdownField scenario, sessions;
+        private DropdownField sessions;
+        private Button createPractice, assessmentMode;
+        private bool creatingSession;
 
         private string incidentHistorySessionId;
         private WorldView world;
@@ -100,11 +105,12 @@ namespace Formula9.UI
                     incidentHistorySessionId = snapshot.SessionId;
                     Run(LoadIncidentMapHistory(snapshot.SessionId, snapshot.EventSequence));
                 }
-                Render();
+                // The workspace handles snapshot and availability events to update action freshness.
+                Render(renderWorkspace: false);
                 Run(RefreshSessionListIfChanged());
             };
             session.TrafficFramesAccepted += frames => world.ShowTraffic(frames);
-            session.AvailabilityChanged += available => Render();
+            session.AvailabilityChanged += _ => Render(renderWorkspace: false);
             session.CommandFinished += outcome =>
             {
                 ShowMessage(TrainingPresenter.Outcome(outcome));
@@ -206,6 +212,7 @@ namespace Formula9.UI
         //     This function stops the session controller and polling.
         private void OnDisable()
         {
+            assessmentDeadline = null;
             session?.Shutdown();
             StopAllCoroutines();
         }
@@ -368,18 +375,22 @@ namespace Formula9.UI
         private void BindTraining(VisualElement root)
         {
             trainingScreen = root.Q("training-host");
+            sessionCard = root.Q("content-card");
             title = root.Q<Label>("title");
             user = root.Q<Label>("user");
             capacity = root.Q<Label>("capacity");
             status = root.Q<Label>("status");
             sessionBadge = root.Q<Label>("session-badge");
+            assessmentBadge = root.Q<Label>("assessment-mode-badge");
+            assessmentTimer = root.Q<Label>("assessment-timer");
             message = root.Q<Label>("message");
             ShowMessage("");
             worldNotice = root.Q<Label>("world-notice");
             fleet = root.Q("fleet");
             sessionId = root.Q<TextField>("session-id");
-            scenario = root.Q<DropdownField>("scenario");
             sessions = root.Q<DropdownField>("sessions");
+            createPractice = root.Q<Button>("create");
+            assessmentMode = root.Q<Button>("assessment-mode");
             start = root.Q<Button>("start");
             pause = root.Q<Button>("pause");
             resume = root.Q<Button>("resume");
@@ -407,11 +418,6 @@ namespace Formula9.UI
             root.Q<Button>("toggle-fleet").clicked += () =>
                 fleetPanel.style.display = fleetPanel.resolvedStyle.display == DisplayStyle.None ? DisplayStyle.Flex : DisplayStyle.None;
 
-            scenario.choices = TrainingPresenter.Scenarios.Select(s => s.Label).ToList();
-            scenario.index = 0;
-            scenario.tooltip = string.Join(" ", TrainingPresenter.Scenarios.Select(s => $"{s.Label}: {s.Description}"));
-            session.Scenario = TrainingPresenter.Scenarios[0].Id;
-            scenario.RegisterValueChangedCallback(_ => { session.Scenario = TrainingPresenter.Scenarios[scenario.index].Id; Render(); });
             sessions.RegisterValueChangedCallback(_ =>
             {
                 RenderCleanup();
@@ -439,9 +445,10 @@ namespace Formula9.UI
                 Run(authClient.LogOutAsync());
             };
             root.Q<Button>("exit-app").clicked += ConfirmExit;
-            root.Q<Button>("create").clicked += () => Run(Create());
+            createPractice.clicked += () => Run(Create(SessionController.IntegratedScenario));
+            assessmentMode.clicked += () => Run(Create(SessionController.ScoredScenario));
             root.Q<Button>("join").clicked += () => Run(Join(sessionId.value.Trim()));
-            root.Q<Button>("refresh").clicked += () => Run(session.RefreshAsync());
+            root.Q<Button>("refresh").clicked += () => Run(RefreshCurrentSession());
             refreshSessions.clicked += () => Run(RefreshSessionList());
             start.clicked += () => Run(session.SendControlAsync("START"));
             pause.clicked += () => Run(session.SendControlAsync("PAUSE"));
@@ -546,6 +553,7 @@ namespace Formula9.UI
         //     clean login screen; an expired login explains that the work is kept.
         private void OnLoginEnded()
         {
+            assessmentDeadline = null;
             ShowLogin(loggingOut ? null : LoginMessages.Expired);
             loggingOut = false;
         }
@@ -586,12 +594,24 @@ namespace Formula9.UI
         //     This function creates a training session, showing progress meanwhile. The progress
         //     note goes once the attempt finishes; a failure has already replaced it with its own
         //     message, which stays.
-        private async Task Create()
+        private async Task Create(string scenario)
         {
-            const string creating = "Creating a training session…";
+            if (creatingSession || (session.CreationPending && session.PendingCreationScenario != scenario)) return;
+            session.Scenario = scenario;
+            var creating = scenario == SessionController.ScoredScenario ? "Creating an assessment…" : "Creating a training session…";
+            creatingSession = true;
+            RenderAssessment(session.Store.Snapshot);
             ShowMessage(creating);
-            await session.CreateAsync();
-            if (message.text == creating) ShowMessage("");
+            try
+            {
+                await session.CreateAsync();
+                if (message.text == creating) ShowMessage("");
+            }
+            finally
+            {
+                creatingSession = false;
+                RenderAssessment(session.Store.Snapshot);
+            }
         }
 
         // -----------------------------------------------------------------------------------
@@ -637,7 +657,7 @@ namespace Formula9.UI
         //     admin action, and the dialog says so. SessionController.ArchiveAllAsync does the
         //     work and reports how many were really archived.
         private void ConfirmArchiveAll() => Confirm(
-            "Archive every live session on this backend, including other trainees' running ones? Each attempt ends for everyone in it and its slot is freed. Their history stays available.",
+            "Archive all live sessions you can change? This includes shared practice sessions and your own scored attempts. Archived sessions release their slots and keep their history.",
             "Archive all", () => Cleanup("Archiving live sessions…", async () =>
             {
                 var (live, archived) = await session.ArchiveAllAsync();
@@ -668,22 +688,21 @@ namespace Formula9.UI
         // Function: ConfirmPurgeSessions
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function reads the session counts, then asks before deleting the finished
-        //     sessions older than the KeptByPurge newest, saying exactly how many go; with none
-        //     to delete it says so instead of asking. Live sessions are never deleted.
+        //     This function checks whether a purge could apply and confirms the retention
+        //     policy. The backend counts eligible practice sessions at the time of the purge.
         //
         // Returns:
         //     Task: The count and the question.
         private async Task ConfirmPurgeSessions()
         {
             var list = await api.ListSessionsAsync(1);
-            var deleted = TrainingPresenter.PurgeCount(list, KeptByPurge);
-            if (deleted == 0)
+            if (TrainingPresenter.PurgeCount(list, KeptByPurge) == 0)
             {
                 ShowMessage(TrainingPresenter.PurgeQuestion(list, KeptByPurge));
                 return;
             }
-            Confirm(TrainingPresenter.PurgeQuestion(list, KeptByPurge), $"Delete {deleted}", () => Cleanup(
+            Confirm($"Delete old finished practice sessions? The {KeptByPurge} newest finished practice sessions, every scored attempt and every live session are kept.",
+                "Delete old practice sessions", () => Cleanup(
                 "Deleting old sessions…",
                 async () => TrainingPresenter.Purged(await api.PurgeSessionsAsync(KeptByPurge))));
         }
@@ -696,7 +715,9 @@ namespace Formula9.UI
         //     Pause and Resume, so a slip must not end the attempt. If the session can no longer
         //     be archived by the time the trainee confirms, nothing is sent.
         private void ConfirmArchive() => Confirm(
-            "Archive this session? The attempt ends and its runtime slot is released. Its history remains available.",
+            TrainingPresenter.IsAssessment(session.Store.Snapshot)
+                ? "End this scored attempt early? Reports will show it as incomplete unless a critical safety breach is already confirmed."
+                : "Archive this session? The attempt ends and its runtime slot is released. Its history remains available.",
             "Archive session", () => archive.enabledSelf ? session.SendControlAsync("ARCHIVE") : Task.CompletedTask);
 
         // -----------------------------------------------------------------------------------
@@ -842,13 +863,23 @@ namespace Formula9.UI
             return RefreshSessionList();
         }
 
+        /// <summary>Let a manual refresh retry a legacy deadline lookup that did not resolve.</summary>
+        private Task RefreshCurrentSession()
+        {
+            if (assessmentDeadline != null && !assessmentDeadline.Pending && assessmentDeadline.DurationS == null)
+                assessmentDeadline = null;
+            return session.RefreshAsync();
+        }
+
         // -----------------------------------------------------------------------------------
         // Function: Render
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function shows the current state: view switch and 3D notice, session
         //     controls, the workspace, the status line and the fleet panel.
-        private void Render()
+        private void Render() => Render(renderWorkspace: true);
+
+        private void Render(bool renderWorkspace)
         {
             var snapshot = session.Store.Snapshot;
             var worldReady = world != null && world.Ready;
@@ -871,21 +902,87 @@ namespace Formula9.UI
             pause.SetEnabled(controls.Pause);
             resume.SetEnabled(controls.Resume);
             archive.SetEnabled(controls.Archive);
-            workspace?.Render();
+            RenderAssessment(snapshot);
+            if (renderWorkspace) workspace?.Render();
             world?.SetOffline(snapshot != null && !session.Available);
             RenderSessionStatus(snapshot);
+            title.text = TrainingPresenter.Title(snapshot);
             if (snapshot == null)
             {
-                title.text = TrainingPresenter.ScenarioTitle(session.Scenario);
                 fleetTitle.text = "Fleet List (0)";
                 fleet.Clear();
                 fleet.style.display = DisplayStyle.None;
                 fleetEmpty.style.display = DisplayStyle.Flex;
                 return;
             }
-            title.text = TrainingPresenter.Title(snapshot);
             sessionId.SetValueWithoutNotify(snapshot.SessionId);
             RenderFleet(snapshot);
+        }
+
+        /// <summary>Keep the mode indicator and countdown visible across the training pages.</summary>
+        private void RenderAssessment(FullSnapshot snapshot)
+        {
+            var assessed = TrainingPresenter.IsAssessment(snapshot);
+            var ended = TrainingPresenter.IsTerminalSession(snapshot?.Session?.Status);
+            var pending = session.PendingCreationScenario;
+            createPractice.SetEnabled(!creatingSession && (pending == null || pending == SessionController.IntegratedScenario));
+            assessmentMode.SetEnabled(!creatingSession && (pending == null || pending == SessionController.ScoredScenario));
+            assessmentMode.style.display = !assessed || ended ? DisplayStyle.Flex : DisplayStyle.None;
+            assessmentMode.text = assessed && ended ? "New assessment" : "Assessment mode";
+            assessmentBadge.style.display = assessed ? DisplayStyle.Flex : DisplayStyle.None;
+            sessionCard.EnableInClassList("assessment-active", assessed);
+            start.text = assessed ? "Start assessment" : "Start scenario";
+
+            if (!assessed || ended || snapshot.Scenario?.AssessmentDurationS != null || session.SignedInUsername == null)
+                assessmentDeadline = null;
+            else
+            {
+                if (assessmentDeadline?.SessionId != snapshot.SessionId) assessmentDeadline = null;
+                if (assessmentDeadline == null && session.Available)
+                {
+                    assessmentDeadline = new AssessmentDeadlineLookup(snapshot.SessionId);
+                    Run(LoadAssessmentDeadline(assessmentDeadline));
+                }
+            }
+            RenderAssessmentClock(snapshot);
+        }
+
+        private void RenderAssessmentClock(FullSnapshot snapshot)
+        {
+            var clock = TrainingPresenter.AssessmentClock(snapshot, session.Available,
+                assessmentDeadline?.DurationS, assessmentDeadline?.Pending == true);
+            if (assessmentTimer.text != clock.Text) assessmentTimer.text = clock.Text;
+            assessmentTimer.style.display = clock.Text == null ? DisplayStyle.None : DisplayStyle.Flex;
+            assessmentTimer.EnableInClassList("assessment-timer-urgent", clock.Urgent);
+        }
+
+        private sealed class AssessmentDeadlineLookup
+        {
+            public readonly string SessionId;
+            public bool Pending = true;
+            public long? DurationS;
+
+            public AssessmentDeadlineLookup(string sessionId) => SessionId = sessionId;
+        }
+
+        /// <summary>Look up the pinned rubric once when an older backend omits the duration.</summary>
+        private async Task LoadAssessmentDeadline(AssessmentDeadlineLookup lookup)
+        {
+            try
+            {
+                var grade = await api.GetAssessmentAsync(lookup.SessionId);
+                lookup.DurationS = TrainingPresenter.LegacyAssessmentDuration(grade.RubricRevision);
+            }
+            catch (Exception error) when (error is BackendErrorException || error is NoReplyException || error is ContractException)
+            {
+                // The clock reports an unavailable deadline. The session status still comes from snapshots.
+            }
+            finally
+            {
+                lookup.Pending = false;
+                // Leaving the session or ending the login invalidates any in-flight lookup.
+                if (assessmentDeadline == lookup) RenderAssessmentClock(session.Store.Snapshot);
+            }
         }
 
         // Keep the operator's state readable: badge, tooltip and one-line summary.

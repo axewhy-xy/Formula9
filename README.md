@@ -237,6 +237,10 @@ Any screen showing this data must credit LTA with the `attribution` in each file
 
 ## Training workspace
 
+Click **Assessment mode** to create the timed Toa Payoh exercise and receive a grade for route
+planning, incident response, and charging under **Reports → Assessment**. See the [grading rubric](docs/grading.md) for the
+exercise, point rules and automatic failures.
+
 All seven remaining Qt client workflows are available in Unity. The workspace tabs beside
 the world view are **Fleet**, **Route planning**, **Charging**, **Incidents** and **Reports**.
 

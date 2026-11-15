@@ -88,6 +88,8 @@ class ScenarioRevision(WireModel):
     seed: int
     provenance: Provenance
     spatial: SpatialReference | None = None
+    assessment_duration_s: int | None = Field(default=None, gt=0,
+        description="Simulation seconds available in a scored attempt, pinned at creation.")
 
 
 class TrainingSession(WireModel):
