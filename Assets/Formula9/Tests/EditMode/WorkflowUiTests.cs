@@ -350,7 +350,14 @@ namespace Formula9.Tests
                 Assert.AreEqual("05", Panel());
                 Assert.AreEqual("shuttle-05", world.SelectedId);
                 Assert.IsEmpty(reason.value, "the draft for shuttle-04 is gone");
+                Assert.IsFalse(world.ShowingMap, "nothing is drafted until the operator chooses to re-route");
+                Assert.AreEqual(DisplayStyle.Flex, root.Q("route-options").style.display.value, "its options are offered");
+                Assert.AreEqual(DisplayStyle.None, root.Q("route-decide").style.display.value);
+                typeof(TrainingWorkspace).GetMethod("ChooseOption", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    .Invoke(workspace, new object[] { "ROAD_DETOUR" });
                 Assert.IsTrue(world.ShowingMap, "its detour is drafted on the map");
+                Assert.AreEqual(DisplayStyle.Flex, root.Q("route-decide").style.display.value);
+                Assert.AreEqual(DisplayStyle.Flex, root.Q("route-stages").style.display.value, "the re-route has its stages");
                 Assert.IsTrue(Items().Single(b => b.text.Contains("Shuttle 05")).ClassListContains("route-pending-item-selected"));
                 Assert.IsFalse(Items().Single(b => b.text.Contains("Shuttle 01")).ClassListContains("route-pending-item-selected"));
 
@@ -368,6 +375,157 @@ namespace Formula9.Tests
                 Assert.AreEqual(DisplayStyle.None, root.Q("route-pending").style.display.value);
                 Assert.AreEqual("Shuttle 02 · route-a", picker.value);
                 Assert.IsEmpty(notices);
+            }
+            finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
+        }
+
+        // An option is chosen on Route Planning and confirmed with a reason. The option sent is the one
+        // the snapshot has when Confirm is pressed; a refusal keeps the row open with the backend's
+        // message, and options reissued while it is open close it.
+        [Test]
+        public async Task ConfirmingAnOptionDecidesForThatShuttle()
+        {
+            var raw = Fixture("incident_decisions_snapshot");
+            var commands = new List<JObject>();
+            Func<JObject, HttpResponse> answer = null;
+            var backend = new Backend();
+            backend.Reply = request =>
+            {
+                var path = request.Url.AbsolutePath;
+                if (path.EndsWith("/snapshot")) return Task.FromResult(new HttpResponse { Status = 200, Body = raw.ToString() });
+                if (request.Method == "POST" && path.EndsWith("/commands"))
+                {
+                    var command = JObject.Parse(request.Body); commands.Add(command);
+                    return Task.FromResult(answer(command));
+                }
+                if (path.Contains("/events"))
+                {
+                    var replay = Fixture("event_replay"); replay["events"] = new JArray(); replay["has_more"] = false;
+                    replay["after_sequence"] = raw["event_sequence"].DeepClone(); replay["next_sequence"] = raw["event_sequence"].DeepClone();
+                    return Task.FromResult(new HttpResponse { Status = 200, Body = replay.ToString() });
+                }
+                return Task.FromResult(new HttpResponse { Failure = HttpFailure.Incomplete });
+            };
+            HttpResponse Applied(JObject command)
+            {
+                var status = Fixture("command_status");
+                foreach (var field in new[] { "command_id", "idempotency_key", "target_type", "target_id" }) status[field] = command[field].DeepClone();
+                return new HttpResponse { Status = 200, Body = status.ToString() };
+            }
+            // A new revision of the collision, which reissues shuttle-04's options under new IDs
+            void Reissue(int revision)
+            {
+                var collision = (JObject)raw["incidents"][1];
+                collision["aggregate_revision"] = revision;
+                foreach (var candidate in ((JArray)raw["candidates"]).Where(c => (string)c["incident_id"] == "scheduled-collision-1"))
+                {
+                    candidate["candidate_id"] = ((string)candidate["candidate_id"]).Replace($"-r{revision - 1}-", $"-r{revision}-");
+                    candidate["dependency_revisions"]["scheduled-collision-1"] = revision;
+                }
+                collision["candidate_ids"] = new JArray(((JArray)raw["candidates"]).Where(c => (string)c["incident_id"] == "scheduled-collision-1").Select(c => c["candidate_id"].DeepClone()));
+                raw["snapshot_id"] = Guid.NewGuid().ToString();
+            }
+            var auth = new AuthSession(); auth.Begin("trainee", "token", 3600);
+            var api = new TrainingApi(backend, auth, new Uri("http://backend.test"));
+            var session = new SessionController(api, auth);
+            var root = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/Formula9/UI/Formula9App.uxml").CloneTree();
+            var rig = new GameObject("Decision card test"); var world = rig.AddComponent<WorldView>();
+            var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+            try
+            {
+                world.Attach(root.Q("world"), new SceneLoader(backend, new Uri("http://backend.test")));
+                var workspace = new TrainingWorkspace(root, api, session, world, _ => { }, _ => { });
+                void Choose(string action) => typeof(TrainingWorkspace).GetMethod("ChooseOption", flags).Invoke(workspace, new object[] { action });
+                Task Confirm() => (Task)typeof(TrainingWorkspace).GetMethod("ConfirmChoice", flags).Invoke(workspace, null);
+                bool Shown(string name) => root.Q(name).style.display.value == DisplayStyle.Flex;
+                Button Option(string name) => root.Q<Button>(name);
+                await session.JoinAsync((string)raw["session_id"]);
+                // The options' figures are in the backend's OPTIONS_READY event
+                var ready = ContractParser.Parse<EventReplay>(Fixture("event_replay").ToString()).Events.Single();
+                ready.EventSequence = session.Store.LastEventSequence + 1; ready.EntityId = "scheduled-collision-1";
+                ready.Data = new JObject
+                {
+                    ["options"] = new JObject
+                    {
+                        ["scheduled-collision-1-r3-shuttle-04-keep_route"] = new JObject { ["estimated_delay_s"] = 25.0 },
+                        ["scheduled-collision-1-r3-shuttle-04-hold_at_stop"] = new JObject { ["estimated_delay_s"] = 120.0, ["hold_stop"] = new JObject { ["stop_id"] = "52449-kim-keat-stop" } },
+                    },
+                };
+                Assert.IsNull(session.Store.AcceptEvents(session.SessionId, session.Store.Snapshot.SessionEpoch, new[] { ready }));
+                workspace.DecideFor("shuttle-04");
+
+                Assert.IsTrue(Shown("route-options"));
+                Assert.AreEqual("What should Shuttle 04 do?", root.Q<Label>("route-options-title").text);
+                Assert.AreEqual("Keep route ~+25 s", Option("option-keep").text);
+                Assert.AreEqual("Hold at Kim Keat Stop ~+2 min", Option("option-hold").text);
+                Assert.IsTrue(Option("option-hold").enabledSelf);
+                Assert.IsFalse(Option("option-assist").enabledSelf);
+                Assert.AreEqual("Assistance has already been requested.", Option("option-assist").tooltip);
+                Assert.IsFalse(Option("option-reroute").enabledSelf);
+                Assert.IsFalse(Shown("route-confirm"), "nothing chosen yet");
+                Assert.IsFalse(Shown("route-outcome"));
+                Assert.IsFalse(Shown("route-decide"));
+                Assert.IsFalse(Shown("route-stages"), "only the re-route has stages");
+
+                // One confirm step, with a reason to start from
+                Choose("HOLD_AT_STOP");
+                Assert.IsTrue(Shown("route-confirm"));
+                Assert.IsTrue(Option("option-hold").ClassListContains("segment-selected"));
+                Assert.AreEqual("Hold Shuttle 04 at Kim Keat Stop until the collision on Lorong 6 Toa Payoh clears.", root.Q<Label>("route-confirm-summary").text);
+                var reason = root.Q<TextField>("route-confirm-reason");
+                Assert.IsNotEmpty(reason.value);
+                Assert.IsTrue(root.Q<Button>("route-confirm-send").enabledSelf);
+                reason.value = "Hold before the queue, clears soon";
+
+                // Refused: the row stays open with the backend's own words
+                answer = _ => new HttpResponse { Status = 409, Body = "{\"error\":{\"code\":\"STALE_REVISION\",\"message\":\"The incident moved on\"}}" };
+                await Confirm();
+                Assert.AreEqual(1, commands.Count);
+                Assert.AreEqual("APPROVE_INCIDENT_OPTION", (string)commands[0]["command_type"]);
+                Assert.AreEqual("scheduled-collision-1", (string)commands[0]["target_id"]);
+                Assert.AreEqual("scheduled-collision-1-r3-shuttle-04-hold_at_stop", (string)commands[0]["payload"]["candidate_id"]);
+                Assert.AreEqual("Hold before the queue, clears soon", (string)commands[0]["reason"]);
+                Assert.IsTrue(Shown("route-confirm"), "kept open for another try");
+                StringAssert.Contains("The incident moved on", root.Q<Label>("route-confirm-note").text);
+
+                // The options are reissued while it is open: it closes, and says so
+                Reissue(4);
+                await session.RefreshAsync();
+                Assert.IsFalse(Shown("route-confirm"));
+                Assert.AreEqual(RoutePresenter.OptionsRefreshed, root.Q<Label>("route-options-hint").text);
+                Assert.AreEqual("Hold at a stop", Option("option-hold").text, "the event describes the old options: no figures");
+
+                // Chosen again and confirmed: sent by the ID it has now, and the row closes
+                Choose("HOLD_AT_STOP");
+                Assert.IsTrue(Shown("route-confirm"));
+                Assert.AreEqual("", root.Q<Label>("route-options-hint").text);
+                answer = command =>
+                {
+                    var collision = (JObject)raw["incidents"][1];
+                    ((JArray)collision["responses"]).Add(new JObject { ["action"] = "HOLD_AT_STOP", ["before_arrival"] = true, ["decided_tick"] = 200, ["vehicle_id"] = "shuttle-04", ["hold_stop_id"] = "52449-kim-keat-stop" });
+                    raw["candidates"] = new JArray(((JArray)raw["candidates"]).Where(c => (string)c["incident_id"] != "scheduled-collision-1"));
+                    collision["candidate_ids"] = new JArray();
+                    raw["snapshot_id"] = Guid.NewGuid().ToString();
+                    return Applied(command);
+                };
+                await Confirm();
+                Assert.AreEqual(2, commands.Count);
+                Assert.AreEqual("scheduled-collision-1-r4-shuttle-04-hold_at_stop", (string)commands[1]["payload"]["candidate_id"]);
+                Assert.IsFalse(Shown("route-confirm"));
+                // Idle again, the panel moves on to the shuttle still waiting
+                StringAssert.StartsWith("Shuttle 01", root.Q<DropdownField>("shuttles").value);
+                workspace.DecideFor("shuttle-04");
+                Assert.IsFalse(Shown("route-options"), "shuttle-04 has been decided for");
+                Assert.IsTrue(Shown("route-outcome"));
+                StringAssert.Contains("Decided for Shuttle 04: hold at Kim Keat Stop", root.Q<Label>("route-problem").text);
+
+                // Back closes the row without sending anything
+                workspace.DecideFor("shuttle-01");
+                Choose("KEEP_ROUTE");
+                Assert.IsTrue(Shown("route-confirm"));
+                typeof(TrainingWorkspace).GetMethod("CloseChoice", flags).Invoke(workspace, new object[] { null });
+                Assert.IsFalse(Shown("route-confirm"));
+                Assert.AreEqual(2, commands.Count);
             }
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
         }

@@ -24,8 +24,31 @@
                 </ui:VisualElement>
             </ui:VisualElement>
 
+            <ui:VisualElement name="route-options" class="route-card route-card-options">
+                <ui:Label name="route-options-title" text="What should the shuttle do?" class="route-card-title" />
+                <ui:VisualElement class="route-option-buttons">
+                    <ui:Button name="option-keep" text="Keep route" class="route-option" />
+                    <ui:Button name="option-hold" text="Hold at a stop" class="route-option" />
+                    <ui:Button name="option-assist" text="Request assistance" class="route-option" />
+                    <ui:Button name="option-reroute" text="Re-route on the map" class="route-option" />
+                </ui:VisualElement>
+                <ui:Label name="route-options-hint" class="route-card-text route-options-hint" />
+                <ui:VisualElement name="route-confirm" class="route-confirm">
+                    <ui:Label name="route-confirm-summary" class="route-verdict" />
+                    <ui:TextField name="route-confirm-reason" max-length="512" multiline="true" placeholder-text="Why?" />
+                    <ui:Label name="route-confirm-note" class="route-card-text route-confirm-note" />
+                    <ui:VisualElement class="draft-actions">
+                        <ui:Button name="route-confirm-send" text="Confirm" class="route-action" />
+                        <ui:Button name="route-confirm-back" text="Back" class="draft-last" />
+                    </ui:VisualElement>
+                </ui:VisualElement>
+            </ui:VisualElement>
+
             <ui:VisualElement name="route-decide" class="route-card">
-                <ui:Label text="Your route" class="route-card-title" />
+                <ui:VisualElement class="route-decide-head">
+                    <ui:Label text="Your route" class="route-card-title" />
+                    <ui:Button name="route-reroute-back" text="Back to the options" tooltip="Leave the re-route and choose another option. The route drawn here is dropped." class="route-link" />
+                </ui:VisualElement>
                 <ui:Label text="Click roads on the map to send the shuttle along them. It still serves its stops in order. Click a pin to remove it." class="route-card-text" />
                 <ui:VisualElement name="route-waypoints" class="route-waypoints" />
                 <ui:VisualElement class="draft-actions">

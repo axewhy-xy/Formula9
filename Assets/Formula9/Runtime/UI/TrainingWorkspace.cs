@@ -65,6 +65,21 @@ namespace Formula9.UI
         private DispatcherCommand incidentPreviewCommand;
         private (string Route, long BasedOn)? approvedDraft;  // route and revision of a submitted approval
 
+        // The decision card: a button per option, and the confirm row of the one chosen. A choice is
+        // bound to (incident, shuttle, action); choiceCandidate is the option's ID when it was chosen, to
+        // tell a reissue apart, and the ID sent is looked up again when Confirm is pressed.
+        private readonly VisualElement routeOptions, routeConfirm;
+        private readonly Label routeOptionsTitle, routeOptionsHint, routeConfirmSummary, routeConfirmNote;
+        private readonly TextField confirmReason;
+        private readonly Button routeConfirmSend, routeConfirmBack, routeRerouteBack;
+        private readonly Dictionary<string, Button> optionButtons = new Dictionary<string, Button>();
+        private List<DecisionOption> options = new List<DecisionOption>();
+        private DecisionOption choice;
+        private string choiceCandidate, confirmCommand, optionsNote;
+        // rerouting: the operator chose Re-route on the map, so the route editor is open for the shuttle.
+        // awaitingError: a refusal whose backend message comes next, through ErrorOccurred.
+        private bool rerouting, awaitingError;
+
         private readonly List<Button> navButtons = new List<Button>();
         public string SelectedIncident => incidents.value;
         public void SelectIncident(string incidentId)
@@ -141,6 +156,19 @@ namespace Formula9.UI
             routeClear = Bind(root, "route-cancel", () => { if (!session.HasPendingCommand) { routeReason.value = ""; SetDraft(new List<RouteWaypoint>()); } });
             routeSuggest = Bind(root, "route-suggest", SuggestDetour);
             routeShowProblem = Bind(root, "route-show-problem", ShowProblem);
+            routeOptions = root.Q("route-options");
+            routeOptionsTitle = root.Q<Label>("route-options-title");
+            routeOptionsHint = root.Q<Label>("route-options-hint");
+            foreach (var (action, name) in new[] { ("KEEP_ROUTE", "option-keep"), ("HOLD_AT_STOP", "option-hold"), ("ESCALATE", "option-assist"), ("ROAD_DETOUR", "option-reroute") })
+                optionButtons[action] = Bind(root, name, () => ChooseOption(action));
+            routeConfirm = root.Q("route-confirm");
+            routeConfirmSummary = root.Q<Label>("route-confirm-summary");
+            routeConfirmNote = root.Q<Label>("route-confirm-note");
+            confirmReason = root.Q<TextField>("route-confirm-reason");
+            confirmReason.RegisterValueChangedCallback(_ => UpdateActions());
+            routeConfirmSend = Bind(root, "route-confirm-send", () => run(ConfirmChoice()));
+            routeConfirmBack = Bind(root, "route-confirm-back", () => { if (confirmCommand == null) CloseChoice(null); });
+            routeRerouteBack = Bind(root, "route-reroute-back", () => { if (!session.HasPendingCommand) { LeaveReroute(); Render(); } });
             routeReason = root.Q<TextField>("route-reason");
             routeReason.RegisterValueChangedCallback(_ => UpdateActions());
             approve = Bind(root, "route-approve", () => run(ApproveRoute()));
@@ -164,7 +192,9 @@ namespace Formula9.UI
             rerouteIncident = Bind(root, "incident-reroute", () =>
             {
                 var vehicle = RerouteVehicle(session.Store.Snapshot, incidents.value);
-                if (vehicle != null) DecideFor(vehicle, incidents.value);
+                if (vehicle == null) return;
+                DecideFor(vehicle, incidents.value);
+                ChooseOption("ROAD_DETOUR");
             });
             candidates = root.Q<DropdownField>("candidates");
             candidates.RegisterValueChangedCallback(_ => { ClearIncidentPreview(); UpdateActions(); });
@@ -187,7 +217,16 @@ namespace Formula9.UI
                 ledger.RemoveAll(o => o.CommandId == outcome.CommandId); ledger.Add(outcome);
                 if (ledger.Count > MaxLedgerEntries) ledger.RemoveAt(0);
                 if (outcome.Status != "QUEUED" && outcome.Status != "PENDING_CONFIRMATION") { InvalidateRoute(); ClearIncidentPreview(); }
+                if (outcome.CommandId != null && outcome.CommandId == confirmCommand) ConfirmOutcome(outcome);
                 RenderReports(); UpdateActions();
+            };
+            // A submission the backend refused outright reports its message right after its outcome
+            session.ErrorOccurred += message =>
+            {
+                if (!awaitingError) return;
+                awaitingError = false;
+                const string prefix = "Training command failed: ";
+                SetConfirmNote("The backend refused it: " + (message.StartsWith(prefix) ? message.Substring(prefix.Length) : message), true);
             };
             // The Cameras buttons depend on which shuttle is selected
             world.EntitySelected += id => { selection.text = "Selected: " + id; UpdateActions(); };
@@ -234,9 +273,10 @@ namespace Formula9.UI
                 sessionToolsOpen = null;
                 boundary = currentBoundary; dependencies = null; context = null; requestGeneration++; approvedDraft = null;
                 selectedVehicle = route = selectedDetour = pendingSeen = pendingStrip = null;
+                choice = null; choiceCandidate = confirmCommand = optionsNote = null; rerouting = awaitingError = false;
                 if (ledgerSession != s?.SessionId) { ledger.Clear(); ledgerSession = s?.SessionId; }
                 charging.Reset();
-                routeReason.value = incidentReason.value = "";
+                routeReason.value = incidentReason.value = confirmReason.value = "";
                 draft = new List<RouteWaypoint>(); draftHistory.Clear(); draftHistory.Add(new List<RouteWaypoint>()); historyIndex = 0;
                 preview = null; draftView = null; outcome = null; outcomeSequence = -1; suggesting = false;
                 ClearIncidentPreview(); ClearEvidence(); incidentReport.text = "";
@@ -340,19 +380,33 @@ namespace Formula9.UI
                 s.Incidents.Any(i => i.IncidentId == incidents.value && i.State == "OPTIONS_READY") && !string.IsNullOrWhiteSpace(incidentReason.value);
             previewIncident.SetEnabled(decision);
             approveIncident.SetEnabled(decision && incidentPreviewCommand != null);
+            // The decision card: usable while the session runs, is connected and is up to date
+            var free = Current && confirmCommand == null;
+            foreach (var option in options)
+                if (optionButtons.TryGetValue(option.Action, out var button)) button.SetEnabled(free && option.Enabled);
+            routeConfirmSend.SetEnabled(free && choice != null && s?.Session.Status == "RUNNING" && !string.IsNullOrWhiteSpace(confirmReason.value));
+            routeConfirmBack.SetEnabled(confirmCommand == null);
+            confirmReason.SetEnabled(confirmCommand == null);
+            routeRerouteBack.SetEnabled(!session.HasPendingCommand);
+            var hint = optionsNote ?? RoutePresenter.OptionsHint(s, session.Available, session.HasPendingCommand, Time.realtimeSinceStartup - acceptedAt <= 5);
+            routeOptionsHint.text = hint ?? "";
+            routeOptionsHint.style.display = string.IsNullOrEmpty(hint) ? DisplayStyle.None : DisplayStyle.Flex;
             world.RouteEditing = edit;
             // A decision or a lost connection withdraws the verdict but leaves the draft: ask once more.
             if (edit && draft.Count > 0 && preview == null && !routeBusy && approvedDraft == null && checkedRevision != draftRevision && !previewTimer.isActive) SchedulePreview();
             if (draftView != null && draftView.Editable != (edit && shownPage == RoutePage)) ShowDraftInViews();
         }
 
-        private bool Editable(FullSnapshot s) => Current && context != null && (s?.Session.Status == "READY" || DecisionRules.ReroutableRoute(s, selectedVehicle) == context.RouteId);
+        private bool Editable(FullSnapshot s) => Current && context != null &&
+            (s?.Session.Status == "READY" || (rerouting && DecisionRules.ReroutableRoute(s, selectedVehicle) == context.RouteId));
 
-        // Before the start every route can be drafted; running, the route of a shuttle with a detour on offer.
-        private bool Drafting(FullSnapshot s) => s?.Session.Status == "READY" || DecisionRules.DetourCandidate(s, selectedVehicle) != null;
+        // Before the start every route can be drafted; running, the route of a shuttle with a detour on
+        // offer, once the operator chose to re-route it.
+        private bool Drafting(FullSnapshot s) => s?.Session.Status == "READY" || (rerouting && DecisionRules.DetourCandidate(s, selectedVehicle) != null);
 
-        // Nothing the operator would lose: no draft, no reason typed, nothing on its way to the backend.
-        private bool Idle => draft.Count == 0 && !suggesting && preview == null && approvedDraft == null &&
+        // Nothing the operator would lose: no draft, no reason typed, no decision being confirmed or
+        // re-routed, nothing on its way to the backend.
+        private bool Idle => draft.Count == 0 && !suggesting && preview == null && approvedDraft == null && choice == null && !rerouting &&
                              string.IsNullOrWhiteSpace(routeReason.value) && !session.HasPendingCommand;
 
         // Route Planning is for one shuttle at a time. It keeps to the one the operator picked, and only
@@ -379,6 +433,8 @@ namespace Formula9.UI
             var detour = DecisionRules.DetourCandidate(s, selectedVehicle)?.IncidentId;
             var ended = false;
             if (detour != selectedDetour) { ended = detour == null && selectedDetour != null; selectedDetour = detour; ClearDraft(); }
+            if (detour == null) rerouting = false;
+            FollowChoice(s);
 
             if (changed && pending.Count > 0 && !pending.Contains(selectedVehicle) && Idle) { SetShuttle(s, pending[0]); return; }
             // Decided: a route is edited on the map; running, it is watched in 3D, or through its cameras
@@ -397,6 +453,7 @@ namespace Formula9.UI
             selectedVehicle = vehicleId;
             route = s?.Vehicles.FirstOrDefault(v => v.VehicleId == vehicleId)?.RouteId;
             selectedDetour = DecisionRules.DetourCandidate(s, vehicleId)?.IncidentId;
+            choice = null; choiceCandidate = optionsNote = null; rerouting = false;
             ClearDraft();
         }
 
@@ -720,14 +777,146 @@ namespace Formula9.UI
             var expiry = RoutePresenter.OptionsExpiry(s, selectedVehicle);
             routeOptionsExpiry.text = expiry ?? "";
             routeOptionsExpiry.style.display = expiry == null ? DisplayStyle.None : DisplayStyle.Flex;
-            var routeClosed = s != null && TrainingPresenter.AssignedRouteIsClosed(s);
-            var deciding = Drafting(s) && routeClosed;
-            routeDecide.style.display = deciding ? DisplayStyle.Flex : DisplayStyle.None;
-            routeFeedback.style.display = deciding ? DisplayStyle.Flex : DisplayStyle.None;
-            routeApply.style.display = deciding ? DisplayStyle.Flex : DisplayStyle.None;
-            routeOutcomePanel.style.display = deciding ? DisplayStyle.None : DisplayStyle.Flex;
+            // Before the start: the problem, the editor while a route is closed, else the outcome. Running
+            // with a decision to make: the problem and the options, and the editor while re-routing.
+            // Otherwise: the problem and the outcome.
+            var ready = s?.Session.Status == "READY";
+            var pending = s != null && DecisionRules.OptionsFor(s, selectedVehicle).Count > 0;
+            var editing = ready ? s != null && TrainingPresenter.AssignedRouteIsClosed(s) : Drafting(s);
+            routeOptions.style.display = !ready && pending ? DisplayStyle.Flex : DisplayStyle.None;
+            routeDecide.style.display = editing ? DisplayStyle.Flex : DisplayStyle.None;
+            routeFeedback.style.display = editing ? DisplayStyle.Flex : DisplayStyle.None;
+            routeApply.style.display = editing ? DisplayStyle.Flex : DisplayStyle.None;
+            routeRerouteBack.style.display = !ready && editing ? DisplayStyle.Flex : DisplayStyle.None;
+            routeOutcomePanel.style.display = editing || (!ready && pending) ? DisplayStyle.None : DisplayStyle.Flex;
+            // The stages are the re-route's (and the exercise's before the start); the other options have none
+            routeStages.style.display = ready || editing ? DisplayStyle.Flex : DisplayStyle.None;
+            RenderOptions(s);
             RenderStages(s);
             RenderOutcome(s);
+        }
+
+        // The option buttons, from the snapshot and the latest options event of the shuttle's first
+        // incident, and the confirm row of the option chosen.
+        private void RenderOptions(FullSnapshot s)
+        {
+            var first = DecisionRules.OptionsFor(s, selectedVehicle).FirstOrDefault();
+            options = s == null ? new List<DecisionOption>() : RoutePresenter.Options(s, selectedVehicle, RoutePresenter.OptionsEvent(session.Store.Events, first?.IncidentId));
+            routeOptionsTitle.text = RoutePresenter.OptionsTitle(selectedVehicle);
+            foreach (var option in options)
+            {
+                if (!optionButtons.TryGetValue(option.Action, out var button)) continue;
+                button.text = option.Label;
+                button.tooltip = option.Tooltip;
+                button.style.display = option.Shown ? DisplayStyle.Flex : DisplayStyle.None;
+                button.EnableInClassList("segment-selected", option.Action == "ROAD_DETOUR" ? rerouting : option.Action == choice?.Action);
+            }
+            routeConfirm.style.display = choice != null ? DisplayStyle.Flex : DisplayStyle.None;
+            if (choice != null) routeConfirmSummary.text = choice.Confirm;
+            UpdateActions();
+        }
+
+        // The operator pressing an option. Re-route opens the editor; any other opens its confirm row,
+        // with a reason to start from, and leaves a re-route.
+        private void ChooseOption(string action)
+        {
+            var s = session.Store.Snapshot;
+            var option = options.FirstOrDefault(o => o.Action == action);
+            if (s == null || option == null || !option.Enabled || !Current || confirmCommand != null) return;
+            optionsNote = null;
+            if (action == "ROAD_DETOUR")
+            {
+                if (rerouting) return;
+                choice = null; choiceCandidate = null;
+                rerouting = true;
+                if (string.IsNullOrWhiteSpace(routeReason.value)) routeReason.value = option.Reason;
+                // A route is drawn on the map; closing the cameras is the operator's call
+                if (shownPage == RoutePage && !world.CamerasShown) world.ShowMap(true);
+                ShowDraftInViews();
+                Render();
+                return;
+            }
+            if (choice?.Action == action) return;
+            if (rerouting) LeaveReroute();
+            choice = option;
+            choiceCandidate = DecisionRules.CandidateFor(s, option.IncidentId, selectedVehicle, option.CandidateAction)?.CandidateId;
+            confirmReason.value = option.Reason;
+            SetConfirmNote("", false);
+            Render();
+        }
+
+        // Leaves the re-route; the route drawn for it is dropped.
+        private void LeaveReroute()
+        {
+            rerouting = false;
+            routeReason.value = "";
+            draft = new List<RouteWaypoint>(); draftHistory.Clear(); draftHistory.Add(new List<RouteWaypoint>()); historyIndex = 0;
+            InvalidateRoute();
+            RenderWaypoints();
+        }
+
+        // Closes the confirm row, saying why when it was not the operator's own Back.
+        private void CloseChoice(string note)
+        {
+            choice = null; choiceCandidate = null;
+            optionsNote = note;
+            SetConfirmNote("", false);
+            RenderOptions(session.Store.Snapshot);
+        }
+
+        private void SetConfirmNote(string text, bool refused)
+        {
+            routeConfirmNote.text = text;
+            routeConfirmNote.style.display = string.IsNullOrEmpty(text) ? DisplayStyle.None : DisplayStyle.Flex;
+            routeConfirmNote.EnableInClassList("route-confirm-refused", refused);
+        }
+
+        // An open confirm row whose option was reissued, or is gone, closes: the figures it showed may
+        // no longer hold. Not while its decision is on its way, which itself moves the options on.
+        private void FollowChoice(FullSnapshot s)
+        {
+            if (choice == null || confirmCommand != null) return;
+            var current = DecisionRules.CandidateFor(s, choice.IncidentId, selectedVehicle, choice.CandidateAction);
+            if (current == null) CloseChoice(DecisionRules.OptionsFor(s, selectedVehicle).Count > 0 ? RoutePresenter.OptionsWithdrawn : null);
+            else if (current.CandidateId != choiceCandidate) CloseChoice(RoutePresenter.OptionsRefreshed);
+        }
+
+        // Sends the chosen option, by the ID it has now. A refusal keeps the row open with the reason.
+        private async Task ConfirmChoice()
+        {
+            var s = session.Store.Snapshot;
+            if (s == null || choice == null || !Current || confirmCommand != null) return;
+            var candidate = DecisionRules.CandidateFor(s, choice.IncidentId, selectedVehicle, choice.CandidateAction);
+            if (candidate == null) { CloseChoice(RoutePresenter.OptionsWithdrawn); return; }
+            if (candidate.CandidateId != choiceCandidate) { CloseChoice(RoutePresenter.OptionsRefreshed); return; }
+            DispatcherCommand command;
+            try { command = DecisionRules.IncidentCommand(s, choice.IncidentId, candidate.CandidateId, confirmReason.value); }
+            catch (ArgumentException error) { SetConfirmNote(error.Message, true); return; }
+            confirmCommand = command.CommandId; awaitingError = false;
+            SetConfirmNote("Sending…", false);
+            UpdateActions();
+            var sent = await session.SubmitAsync(command);
+            if (!sent && confirmCommand == command.CommandId)
+            {
+                confirmCommand = null;
+                SetConfirmNote("It couldn't be sent: the session is busy or not connected. Try again in a moment.", true);
+            }
+            UpdateActions();
+            if (sent && choice == null) await session.RefreshAsync();
+        }
+
+        // The outcome of the decision sent from the confirm row.
+        private void ConfirmOutcome(CommandOutcome outcome)
+        {
+            if (outcome.Status == "PENDING_CONFIRMATION" || outcome.Status == "QUEUED")
+            {
+                SetConfirmNote(outcome.Status == "QUEUED" ? "Accepted; waiting for it to be applied…" : "Sending…", false);
+                return;
+            }
+            confirmCommand = null;
+            if (outcome.Status == "APPLIED") { CloseChoice(null); return; }
+            awaitingError = outcome.Status == "NOT_ACCEPTED" || outcome.Status == "UNCONFIRMED";
+            SetConfirmNote(RoutePresenter.Refusal(outcome), true);
         }
 
         private void RenderStages(FullSnapshot s)

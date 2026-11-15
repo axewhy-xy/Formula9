@@ -776,6 +776,21 @@
 .route-problem-actions { flex-direction: row; align-items: center; min-height: 26px; }
 .route-options-expiry { flex-grow: 1; -unity-text-align: middle-right; font-size: 12px; color: rgb(110, 120, 120); }
 
+/* One button per option the backend offers the shuttle; one it does not offer is greyed out, with why as its tooltip. */
+.route-card-options { border-left-width: 4px; border-left-color: rgb(15, 76, 92); }
+.route-option-buttons { flex-direction: row; flex-wrap: wrap; flex-shrink: 0; margin-bottom: 4px; }
+.app Button.route-option { height: 32px; margin: 0 6px 6px 0; padding: 0 12px; }
+.app Button.route-option.segment-selected, .app Button.route-option.segment-selected:hover {
+    color: rgb(255, 255, 255);
+    background-color: rgb(15, 76, 92);
+    border-color: rgb(15, 76, 92);
+}
+.route-options-hint { font-size: 12px; color: rgb(110, 120, 120); }
+.route-confirm { flex-shrink: 0; margin-top: 4px; padding-top: 8px; border-top-width: 1px; border-top-color: rgb(220, 230, 230); }
+.route-confirm-note { margin-top: 4px; color: rgb(110, 120, 120); }
+.route-confirm-refused { color: rgb(190, 42, 44); }
+.route-decide-head { flex-direction: row; align-items: center; justify-content: space-between; }
+
 .route-waypoints { flex-shrink: 0; margin-bottom: 6px; }
 .route-waypoint { flex-direction: row; align-items: center; margin-bottom: 4px; }
 .route-waypoint-number {

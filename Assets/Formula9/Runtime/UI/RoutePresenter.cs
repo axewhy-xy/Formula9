@@ -4,6 +4,7 @@ using System.Linq;
 using Formula9.Contracts;
 using Formula9.Session;
 using Formula9.World;
+using Newtonsoft.Json.Linq;
 
 namespace Formula9.UI
 {
@@ -22,19 +23,38 @@ namespace Formula9.UI
         public bool Worse;
     }
 
+    // One button of the decision card: an action the shuttle could take at its first incident, whether
+    // the backend offers it, and the words for it. The decision is bound to (IncidentId, the shuttle,
+    // CandidateAction), never to a candidate ID, which changes whenever the options are reissued.
+    public sealed class DecisionOption
+    {
+        public string Action;           // KEEP_ROUTE, HOLD_AT_STOP, ESCALATE or ROAD_DETOUR: the button
+        public string CandidateAction;  // the action of the option to send (WAIT on an older backend), or null
+        public string IncidentId;       // the incident the option decides, or null when not offered
+        public bool Shown, Enabled;
+        public string Label, Tooltip;
+        public string Confirm;          // the sentence the confirm row shows; null for the re-route
+        public string Reason;           // the reason the confirm row (or the route's) starts with
+    }
+
     // The routing exercise in the operator's words. Names people know, no IDs; every number here
     // came from the backend.
     public static class RoutePresenter
     {
         public static readonly string[] Stages = { "Problem", "Detour", "Check", "Approve", "Outcome" };
 
+        // The decision card's buttons, in order.
+        public static readonly string[] OptionActions = { "KEEP_ROUTE", "HOLD_AT_STOP", "ESCALATE", "ROAD_DETOUR" };
+
         // Where the exercise has got to for this shuttle, as an index into Stages. Running, it is back at
-        // the detour while the shuttle has one on offer, and at the outcome otherwise.
+        // the detour while the shuttle has one on offer (there is something to go round, closed or not),
+        // and at the outcome otherwise.
         public static int Stage(FullSnapshot snapshot, string vehicleId, bool routeClosed, bool hasDraft, RouteEditPreview preview)
         {
             if (snapshot == null) return 0;
-            if (snapshot.Session.Status != "READY" && DecisionRules.DetourCandidate(snapshot, vehicleId) == null) return 4;
-            if (!routeClosed) return 3;
+            var ready = snapshot.Session.Status == "READY";
+            if (!ready && DecisionRules.DetourCandidate(snapshot, vehicleId) == null) return 4;
+            if (ready && !routeClosed) return 3;
             if (preview != null) return preview.Approvable ? 3 : 2;
             return hasDraft ? 2 : 1;
         }
@@ -121,6 +141,143 @@ namespace Formula9.UI
                 ? "hold at " + RouteDraftView.StopName(response.HoldStopId)
                 : TrainingPresenter.ActionLabel(response.Action).ToLowerInvariant();
             return $"Decided for {name}: {what}" + (response.BeforeArrival ? "" : ", after it got there") + ". Waiting to see how it turns out.";
+        }
+
+        // The latest OPTIONS_READY event of an incident in the retained window, or null: the figures on
+        // the option buttons come from it. The window is limited, so after a long session or a late
+        // join there may be none; the decision itself still comes from the snapshot.
+        public static Event OptionsEvent(IEnumerable<Event> events, string incidentId) =>
+            incidentId == null || events == null ? null : events.LastOrDefault(e => e.EventType == "OPTIONS_READY" && e.EntityId == incidentId);
+
+        // The decision card for this shuttle: a button per action, for its first incident (the one its
+        // Problem card lists first). A re-route answers the latest-detected incident that offers the
+        // shuttle a detour, as the backend checks a drafted route against that one. Figures come from
+        // optionsEvent, and only when it describes the options the snapshot has now; without it, the
+        // buttons show none. Nothing is shown when the shuttle has no decision to make.
+        public static List<DecisionOption> Options(FullSnapshot snapshot, string vehicleId, Event optionsEvent)
+        {
+            var decision = DecisionRules.OptionsFor(snapshot, vehicleId).FirstOrDefault();
+            if (decision == null) return OptionActions.Select(a => new DecisionOption { Action = a, Label = DefaultLabel(a) }).ToList();
+            var incident = decision.Incident;
+            var name = ShuttleName(vehicleId);
+            var what = IncidentPhrase(incident);
+            var paused = snapshot.Session.Status != "RUNNING";
+            var evidence = optionsEvent?.EntityId == incident.IncidentId ? optionsEvent.Data?["options"] as JObject : null;
+            JObject Evidence(Candidate c) => c == null ? null : evidence?[c.CandidateId] as JObject;
+            double? Delay(Candidate c)
+            {
+                var value = Evidence(c)?["estimated_delay_s"];
+                return value != null && (value.Type == JTokenType.Float || value.Type == JTokenType.Integer) ? (double?)value : null;
+            }
+
+            var options = new List<DecisionOption>();
+            foreach (var action in OptionActions)
+            {
+                var option = new DecisionOption { Action = action, Shown = true, Label = DefaultLabel(action) };
+                options.Add(option);
+                if (action == "ROAD_DETOUR")
+                {
+                    var detour = DecisionRules.DetourCandidate(snapshot, vehicleId);
+                    var answers = detour == null ? null : snapshot.Incidents.FirstOrDefault(i => i.IncidentId == detour.IncidentId);
+                    option.Reason = "Go round " + IncidentPhrase(answers ?? incident);
+                    if (detour == null)
+                    {
+                        option.Tooltip = incident.EventType == "SIGNAL_FAULT" ? "Signal faults can't be routed round."
+                            : $"{name}'s route can't be taken round it.";
+                        continue;
+                    }
+                    option.CandidateAction = detour.Action; option.IncidentId = detour.IncidentId;
+                    option.Tooltip = detour.IncidentId == incident.IncidentId ? "Draw a way round it on the map."
+                        : $"Draw a way round {IncidentPhrase(answers)} on the map: the latest one detected, which a new route answers.";
+                    Enable(option, detour, snapshot, paused);
+                    continue;
+                }
+
+                var candidate = decision.Option(action) ?? (action == "KEEP_ROUTE" ? decision.Option("WAIT") : null);
+                var delay = Delay(candidate);
+                var figure = delay == null ? "" : delay < 1 ? " ~no delay" : " ~+" + Rough(delay.Value);
+                switch (action)
+                {
+                    case "KEEP_ROUTE":
+                        option.Label = "Keep route" + figure;
+                        option.Confirm = $"{name} keeps its route through {what}" + (delay >= 1 ? $", about {Rough(delay.Value)} later." : ".");
+                        option.Reason = "Keep the route; the delay is acceptable";
+                        option.Tooltip = candidate == null ? $"Keeping the route isn't offered to {name}." : null;
+                        break;
+                    case "HOLD_AT_STOP":
+                        var stopId = (string)(Evidence(candidate)?["hold_stop"] as JObject)?["stop_id"];
+                        var stop = string.IsNullOrEmpty(stopId) ? null : RouteDraftView.StopName(stopId);
+                        option.Label = (stop == null ? "Hold at a stop" : "Hold at " + stop) + figure;
+                        option.Confirm = $"Hold {name} at {stop ?? "the stop before it"} until {what} clears.";
+                        option.Reason = "Hold before the queue until it clears";
+                        if (candidate == null)
+                            option.Tooltip = snapshot.Vehicles.FirstOrDefault(v => v.VehicleId == vehicleId)?.ServiceState == "AWAITING_GUIDANCE"
+                                ? $"{name} is already stopped at it." : "There is no stop before it to hold at.";
+                        break;
+                    case "ESCALATE":
+                        // Assistance is for the incident, so every shuttle that reaches it gets it
+                        var shuttles = Names(new[] { incident.VehicleId }.Concat(incident.ExposedVehicleIds ?? new List<string>())
+                            .Where(v => v != null).Distinct().OrderBy(v => v, StringComparer.Ordinal).Select(ShuttleName));
+                        option.Label = "Request assistance" + figure;
+                        option.Confirm = $"Request assistance at {what}. It applies to every shuttle that reaches it" +
+                                         (string.IsNullOrEmpty(shuttles) ? "." : $": {shuttles}.");
+                        option.Reason = "Assistance clears the incident sooner";
+                        if (candidate == null)
+                            option.Tooltip = incident.Responses?.Any(r => r.Action == "ESCALATE") == true
+                                ? "Assistance has already been requested." : "Assistance isn't offered for this incident.";
+                        break;
+                }
+                if (candidate == null) continue;
+                option.CandidateAction = candidate.Action; option.IncidentId = incident.IncidentId;
+                Enable(option, candidate, snapshot, paused);
+            }
+            return options;
+        }
+
+        // An offered option can be chosen while the session runs, the backend clears it and it stands.
+        private static void Enable(DecisionOption option, Candidate candidate, FullSnapshot snapshot, bool paused)
+        {
+            if (paused) option.Tooltip = "The session is paused. Resume it to decide.";
+            else if (candidate.Validation != "PASS") option.Tooltip = "The backend can't clear this option now.";
+            else if (candidate.ExpiresAtTick < snapshot.Tick) option.Tooltip = "Options are being renewed.";
+            else option.Enabled = true;
+        }
+
+        private static string DefaultLabel(string action) =>
+            action == "HOLD_AT_STOP" ? "Hold at a stop" : action == "ROAD_DETOUR" ? "Re-route on the map" : TrainingPresenter.ActionLabel(action);
+
+        // "the collision on Lorong 6 Toa Payoh", or "the collision" when it is on no named road.
+        private static string IncidentPhrase(Incident incident)
+        {
+            var road = incident.Location?.RoadName;
+            return "the " + TrainingPresenter.IncidentName(incident).ToLowerInvariant() + (string.IsNullOrEmpty(road) ? "" : " on " + road);
+        }
+
+        public static string OptionsTitle(string vehicleId) => $"What should {ShuttleName(vehicleId)} do?";
+
+        // Why the option buttons can't be used now, or null when they can.
+        public static string OptionsHint(FullSnapshot snapshot, bool available, bool sending, bool fresh)
+        {
+            if (snapshot?.Session.Status == "PAUSED") return "The session is paused. Resume it to decide.";
+            if (!available) return "Not connected to the session. Decisions wait until it is back.";
+            if (sending) return "Sending a decision…";
+            if (!fresh) return "Waiting for a fresh update from the session…";
+            return null;
+        }
+
+        public const string OptionsRefreshed = "Options were refreshed; choose again.";
+        public const string OptionsWithdrawn = "That option is no longer offered; choose again.";
+
+        // What the confirm row says when a decision was not applied: it stays open for another try.
+        public static string Refusal(CommandOutcome outcome)
+        {
+            switch (outcome.Status)
+            {
+                case "EXPIRED": return "The option expired before it was applied. Choose again.";
+                case "NEEDS_RECONFIRMATION": return "The connection dropped, so it isn't known whether this was applied. Check the problem, then try again.";
+                case "REJECTED": case "NOT_ACCEPTED": return $"The backend refused it ({outcome.FailureCode ?? "no reason given"}).";
+                default: return $"It wasn't applied ({outcome.Status}).";
+            }
         }
 
         private static bool Live(FullSnapshot snapshot) =>
