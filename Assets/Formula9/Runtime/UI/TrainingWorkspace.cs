@@ -78,6 +78,13 @@ namespace Formula9.UI
         // The incident last picked on the map; the Fleet List marks the shuttles it concerns
         public string SelectedIncident { get; private set; }
         public event Action IncidentSelected;
+        // Selecting, or clearing, the incident tells the Fleet List to mark its shuttles again
+        private void SelectIncident(string incidentId)
+        {
+            if (SelectedIncident == incidentId) return;
+            SelectedIncident = incidentId;
+            IncidentSelected?.Invoke();
+        }
         private const int MaxLedgerEntries = 200;
         public event Action <string> SectionChanged;
         // A page's index by its UXML name, or -1 when the layout leaves it out
@@ -171,7 +178,7 @@ namespace Formula9.UI
             sessionToggle = root.Q<Button>("session-toggle");
             sessionToggle.clicked += ToggleSessionTools;
 
-reports = new ReportsPage(root);
+            reports = new ReportsPage(root);
             incidentReports = new IncidentReportsTab(root, api, session, world, run);
             session.SnapshotAccepted += (_, __) => { acceptedAt = Time.realtimeSinceStartup; Render(); };
             session.EventsAccepted += _ => RenderReports();
@@ -238,7 +245,7 @@ reports = new ReportsPage(root);
             var s = session.Store.Snapshot;
             var incident = s?.Incidents.FirstOrDefault(i => i.IncidentId == incidentId);
             if (incident == null) return;
-            SelectedIncident = incidentId; IncidentSelected?.Invoke();
+            SelectIncident(incidentId);
             var vehicle = DecisionRules.PendingDecisions(s).FirstOrDefault(d => d.IncidentId == incidentId)?.VehicleId ??
                           (incident.Exposures ?? new List<IncidentExposure>()).OrderBy(e => e.EtaS).FirstOrDefault(e => incident.ResponseOf(e.VehicleId) == null)?.VehicleId ??
                           incident.FocusVehicleId;
@@ -256,6 +263,8 @@ reports = new ReportsPage(root);
                 boundary = currentBoundary; dependencies = null; context = null; requestGeneration++; approvedDraft = null;
                 selectedVehicle = route = selectedDetour = pendingSeen = pendingStrip = null;
                 choice = null; choiceCandidate = confirmCommand = optionsNote = null; rerouting = awaitingError = false;
+                // Incident IDs repeat across sessions, so another session's selection would mark the wrong one
+                SelectIncident(null);
                 if (ledgerSession != s?.SessionId) { ledger.Clear(); ledgerSession = s?.SessionId; }
                 charging.Reset();
                 routeReason.value = confirmReason.value = "";
@@ -293,11 +302,11 @@ reports = new ReportsPage(root);
             }
             RenderExercise(s);
             RefreshOutcome(s);
+            // An incident that has left the session is no longer selected
+            if (SelectedIncident != null && s.Incidents.All(i => i.IncidentId != SelectedIncident)) SelectIncident(null);
             Rows(fleetTable, TrainingPresenter.Fleet(s, SelectedIncident).Select(r => new[] { r.ShuttleId, r.State, r.Route, r.Battery, r.Provenance }));
             foreach (var row in fleetTable.Children()) { var id = ((Label)row[0]).text; row.RegisterCallback<ClickEvent>(_ => PickVehicle(id)); }
             charging.Render(s);
-            // An incident that has left the session is no longer selected
-            if (SelectedIncident != null && s.Incidents.All(i => i.IncidentId != SelectedIncident)) SelectedIncident = null;
             RenderReports(); UpdateActions();
         }
 
@@ -492,7 +501,7 @@ reports = new ReportsPage(root);
             if (button != null && button.tooltip != hint) button.tooltip = hint;
         }
 
-private void InvalidateRoute()
+        private void InvalidateRoute()
         {
             draftRevision++; preview = null; suggesting = false;
             RenderFeedback();

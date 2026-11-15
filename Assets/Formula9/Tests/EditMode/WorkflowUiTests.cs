@@ -374,12 +374,15 @@ namespace Formula9.Tests
 
                 // A marker on the map opens the first shuttle still waiting for a decision there
                 workspace.ShowSection("operations");
+                var selections = 0;
+                workspace.IncidentSelected += () => selections++;
                 workspace.DecideForIncident("incident-1");
                 Assert.IsTrue(Shown("page-route"));
                 Assert.AreEqual("01", Panel());
                 workspace.DecideForIncident("incident-2");
                 Assert.AreEqual("02", Panel());
                 Assert.AreEqual("incident-2", workspace.SelectedIncident, "the Fleet List marks it selected");
+                Assert.AreEqual(2, selections, "the Fleet List is told each time");
 
                 // Nobody waits any more: the strip goes, and the panel stays where it is
                 raw["snapshot_id"] = Guid.NewGuid().ToString();
@@ -389,6 +392,8 @@ namespace Formula9.Tests
                 Assert.AreEqual(DisplayStyle.None, root.Q("route-pending").style.display.value);
                 Assert.AreEqual(DisplayStyle.None, badge.style.display.value, "no badge with nobody waiting");
                 Assert.AreEqual("Shuttle 02 · route-a", picker.value);
+                Assert.IsNull(workspace.SelectedIncident, "an incident that has gone is no longer selected");
+                Assert.AreEqual(3, selections, "and the Fleet List is told so");
                 Assert.IsEmpty(notices);
             }
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
@@ -756,6 +761,25 @@ namespace Formula9.Tests
             {
                 Session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig);
                 if (window != null) window.Close();
+            }
+        }
+
+        // Incident IDs repeat across sessions: leaving one clears its selected incident, and the Fleet List
+        // is told, so the next session's incident of the same ID is not marked.
+        [Test]
+        public async Task LeavingASessionClearsTheSelectedIncident()
+        {
+            using (var rig = new IncidentsRig())
+            {
+                await rig.Join();
+                var selections = 0;
+                rig.Workspace.IncidentSelected += () => selections++;
+                rig.Workspace.DecideForIncident("incident-1");
+                Assert.AreEqual("incident-1", rig.Workspace.SelectedIncident);
+                rig.Session.Leave();
+                rig.Workspace.Render();
+                Assert.IsNull(rig.Workspace.SelectedIncident);
+                Assert.AreEqual(2, selections, "selected, then cleared");
             }
         }
 
