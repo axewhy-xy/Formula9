@@ -5,14 +5,15 @@
  * Contributors: Rishika (page layout, fleet cards, map/3D switch),
  *     Lau Xiang Yang (training workspace, session list and cleanup, exit)
  * Date Created: 30/10/2026
- * Last Modified: 10/11/2026
+ * Last Modified: 15/11/2026
  *
  * Description:
  *     Part of the Unity client's UI. Wires the UI Toolkit screens to the login and session layers,
  *     the 3D world, the training workspace, the alerts and the interface sounds. Decisions about
- *     what to show live in LoginMessages and TrainingPresenter; this class only moves values on and
- *     off screen. It polls the joined session every second while logged in. Esc or an Exit button
- *     asks before closing the application, so a stray key press does not end the attempt.
+ *     what to show live in LoginMessages and TrainingPresenter, and which incident notifications are
+ *     open in NotificationQueue; this class only moves values on and off screen. It polls the
+ *     joined session every second while logged in. Esc or an Exit button asks before closing the
+ *     application, so a stray key press does not end the attempt.
  */
 
 using System;
@@ -142,15 +143,29 @@ namespace Formula9.UI
             foreach (var name in new[] { "operations", "scenarios", "reports" })
                 rootElement.Q<Button>("section-" + name).clicked += () => workspace.ShowSection(name);
             workspace.ShowSection("operations");
-            world.IncidentSelected += id => workspace.SelectIncident(id);
+            // A marker on the map opens Route Planning for the first shuttle still to be decided for there
+            world.IncidentSelected += id => workspace.DecideForIncident(id);
             workspace.IncidentSelected += () => { if (session.Store.Snapshot != null) RenderFleet(session.Store.Snapshot); };
 
             // Alerts play for live events the store accepted, and for events a recovery appended.
             var player = new GameObject("Alerts").AddComponent<AlertPlayer>();
             player.transform.SetParent(transform, false);
             var alerts = new TrainingAlerts(player.Play);
-            // An incident a shuttle will reach says who reaches it and when, once, as it is detected
-            alerts.Fresh = e => { var headline = TrainingPresenter.IncidentHeadline(e); if (headline != null) ShowMessage(headline); };
+            // Incident alerts become notifications, one per shuttle and incident, each with a Decide
+            // button. They pass the same gate as the sounds, so muting and replays behave alike. An
+            // incident event the notifications don't take still says its headline on the message line.
+            var notifications = new NotificationQueue();
+            var stack = new NotificationStack(rootElement.Q("notifications"), notifications,
+                (vehicle, incident) => workspace.DecideFor(vehicle, incident), () => workspace.ShowRoutePlanning());
+            stack.Anchor(rootElement.Q("world"));
+            session.SnapshotAccepted += (snapshot, _) => notifications.OnSnapshot(snapshot);
+            session.SessionLeft += notifications.Clear;
+            alerts.Fresh = e =>
+            {
+                if (notifications.OnEvent(e)) return;
+                var headline = TrainingPresenter.IncidentHeadline(e);
+                if (headline != null) ShowMessage(headline);
+            };
             var mute = new MuteSetting(new PlayerPreferences(), alerts);
             var muteToggle = GetComponent<UIDocument>().rootVisualElement.Q<Toggle>("mute");
             muteToggle.SetValueWithoutNotify(mute.Muted);

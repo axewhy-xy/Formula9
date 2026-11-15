@@ -320,14 +320,17 @@ namespace Formula9.UI
         //
         // Returns:
         //     bool: True when a detour must be approved first.
-        public static bool AssignedRouteIsClosed(FullSnapshot snapshot)
+        public static bool AssignedRouteIsClosed(FullSnapshot snapshot) => ClosedRouteVehicles(snapshot).Any();
+
+        // The shuttles whose own route crosses a road closed now, in snapshot order.
+        public static IEnumerable<string> ClosedRouteVehicles(FullSnapshot snapshot)
         {
             var closed = new HashSet<string>(snapshot.Disruptions
                 .Where(d => d.ActiveFromTick <= snapshot.Tick && (d.ActiveUntilTick == null || snapshot.Tick < d.ActiveUntilTick))
                 .SelectMany(d => d.AffectedEdgeIds));
             var routes = snapshot.Routes.ToDictionary(r => r.RouteId);
-            return snapshot.Vehicles.Any(v => v.RouteId != null && routes.TryGetValue(v.RouteId, out var route)
-                                              && route.DirectedEdgeIds.Any(closed.Contains));
+            return snapshot.Vehicles.Where(v => v.RouteId != null && routes.TryGetValue(v.RouteId, out var route)
+                                                && route.DirectedEdgeIds.Any(closed.Contains)).Select(v => v.VehicleId);
         }
 
         // -----------------------------------------------------------------------------------
@@ -522,6 +525,22 @@ namespace Formula9.UI
         }
 
         // -----------------------------------------------------------------------------------
+        // Function: IncidentName
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function names what an incident is, in capitals: "COLLISION", or the kind an
+        //     older backend's incident ID gives when it has no world event.
+        //
+        // Args:
+        //     incident (Incident): The incident.
+        //
+        // Returns:
+        //     string: The name.
+        public static string IncidentName(Incident incident) =>
+            World.IncidentRecord.Name(incident.EventType,
+                incident.IncidentId.Contains("road_accident") ? World.IncidentSimulation.Accident : World.IncidentSimulation.Block).ToUpperInvariant();
+
+        // -----------------------------------------------------------------------------------
         // Function: IncidentDescription
         // -----------------------------------------------------------------------------------
         // Description:
@@ -536,8 +555,7 @@ namespace Formula9.UI
         //     string: The text.
         public static string IncidentDescription(Incident incident)
         {
-            var name = World.IncidentRecord.Name(incident.EventType,
-                incident.IncidentId.Contains("road_accident") ? World.IncidentSimulation.Accident : World.IncidentSimulation.Block).ToUpperInvariant();
+            var name = IncidentName(incident);
             var road = incident.Location?.RoadName != null ? $" on {incident.Location.RoadName}" : "";
             var reach = World.IncidentRecord.Reach(incident.Exposures, 5);
             var exposure = reach == null ? "No shuttle reaches it before it clears." : $"Shuttles reaching it: {reach}.";
