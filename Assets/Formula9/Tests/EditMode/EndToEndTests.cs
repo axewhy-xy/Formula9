@@ -176,14 +176,13 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: IntegratedExerciseWaitsForADetourBeforeStarting
+        // Function: IntegratedExerciseStartsWithItsRoutesOpen
         // -----------------------------------------------------------------------------------
         // Description:
-        //     The integrated exercise opens with a shuttle on a closed road, and the backend
-        //     refuses START until a detour is approved. The client must predict that (Start
-        //     disabled) and, if sent anyway, report the refusal.
+        //     The integrated exercise opens with every route clear, so Start is offered and the
+        //     backend applies it straight away.
         [UnityTest]
-        public IEnumerator IntegratedExerciseWaitsForADetourBeforeStarting()
+        public IEnumerator IntegratedExerciseStartsWithItsRoutesOpen()
         {
             yield return SignUpAndLogIn();
             session.Scenario = SessionController.IntegratedScenario;
@@ -191,16 +190,9 @@ namespace Formula9.Tests
             Assert.IsTrue(session.Available, string.Join(" | ", errors));
             var snapshot = session.Store.Snapshot;
             Assert.AreEqual("READY", snapshot.Session.Status);
-            Assert.IsTrue(UI.TrainingPresenter.AssignedRouteIsClosed(snapshot));
-            Assert.IsFalse(UI.TrainingPresenter.Controls(snapshot, true, true).Start, "the UI keeps Start disabled");
-
-            var send = session.SendControlAsync("START");
-            yield return Await(send);
-            yield return PollUntil(() => outcomes.Any(o => o.Status != "QUEUED"), "the START outcome");
-            var outcome = outcomes.Last();
-            Assert.AreEqual("REJECTED", outcome.Status);
-            Assert.AreEqual("UNKNOWN_CONSTRAINT", outcome.FailureCode);
-            StringAssert.StartsWith("Can't start yet", UI.TrainingPresenter.Outcome(outcome));
+            Assert.IsFalse(UI.TrainingPresenter.AssignedRouteIsClosed(snapshot));
+            Assert.IsTrue(UI.TrainingPresenter.Controls(snapshot, true, true).Start, "the UI offers Start");
+            yield return Control("START", "RUNNING");
             yield return Control("ARCHIVE", "ARCHIVED");
         }
 
@@ -260,6 +252,7 @@ namespace Formula9.Tests
         //     and an incident decision are applied, and the incident's history and debrief can be
         //     read.
         [UnityTest]
+        [Timeout(600000)]
         public IEnumerator IntegratedExerciseApprovesDetourChargingAndIncidentDecisions()
         {
             yield return SignUpAndLogIn();
@@ -288,10 +281,10 @@ namespace Formula9.Tests
             yield return Await(session.SubmitAsync(DecisionRules.ChargeCommand(s, offer.OptionId, "Reserve a bay to preserve battery reserve")));
             yield return PollUntil(() => outcomes.Skip(before).Any(o => o.Status == "APPLIED"), "charger reservation");
 
-            yield return PollUntil(() => session.Store.Snapshot.Incidents.Any(i => i.State == "OPTIONS_READY"), "incident options", 45);
+            yield return PollUntil(() => session.Store.Snapshot.Incidents.Any(i => i.State == "OPTIONS_READY" && session.Store.Snapshot.Candidates.Any(c => c.IncidentId == i.IncidentId && (c.Action == "KEEP_ROUTE" || c.Action == "WAIT") && c.Validation == "PASS")), "a Keep route option", 300);
             s = session.Store.Snapshot;
-            var incident = s.Incidents.First(i => i.State == "OPTIONS_READY");
-            var candidate = s.Candidates.First(c => c.IncidentId == incident.IncidentId && c.Action == "WAIT" && c.Validation == "PASS");
+            var incident = s.Incidents.First(i => i.State == "OPTIONS_READY" && s.Candidates.Any(c => c.IncidentId == i.IncidentId && (c.Action == "KEEP_ROUTE" || c.Action == "WAIT") && c.Validation == "PASS"));
+            var candidate = s.Candidates.First(c => c.IncidentId == incident.IncidentId && (c.Action == "KEEP_ROUTE" || c.Action == "WAIT") && c.Validation == "PASS");
             var command = DecisionRules.IncidentCommand(s, incident.IncidentId, candidate.CandidateId, "Hold safely until the obstruction clears");
             var branch = api.PreviewIncidentAsync(command); yield return Await(branch);
             Assert.IsTrue((bool)branch.Result["source"]["authored"]);

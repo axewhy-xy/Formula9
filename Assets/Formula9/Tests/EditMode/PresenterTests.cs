@@ -415,7 +415,7 @@ namespace Formula9.Tests
         // -----------------------------------------------------------------------------------
         // Description:
         //     A world event that names no shuttle still shows on the cards of the shuttles it
-        //     will reach, with their ETAs, and on the Incident Monitor with who reaches it.
+        //     will reach, with their ETAs, and in its description with who reaches it.
         [Test]
         public void AShuttleShowsAnIncidentItWillReachAndWhen()
         {
@@ -436,13 +436,13 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: TheIncidentMonitorSaysWhatWasDecidedForEachShuttle
+        // Function: TheDescriptionSaysWhatWasDecidedForEachShuttle
         // -----------------------------------------------------------------------------------
         // Description:
         //     Each shuttle's decision is listed, a late one marked, and the options are named
         //     for people.
         [Test]
-        public void TheIncidentMonitorSaysWhatWasDecidedForEachShuttle()
+        public void TheDescriptionSaysWhatWasDecidedForEachShuttle()
         {
             var snapshot = (FullSnapshot)ContractParser.ParseMessage(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/incident_decisions_snapshot.json")));
             var incident = snapshot.Incidents.Single(i => i.IncidentId == "scheduled-collision-1");

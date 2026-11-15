@@ -131,7 +131,7 @@ namespace Formula9.Tests
                 Assert.IsTrue(suggest.enabledSelf, string.Join("; ", errors.Select(e => e.Message)));
                 Assert.IsTrue(world.RouteEditing, "the map picks route nodes while the route is edited");
                 Assert.IsEmpty(errors);
-                CollectionAssert.AreEqual(new[] { "Fleet Overview", "Route Planning", "Incident Monitor", "Charging", "Reports" }, root.Q("nav-items").Query<Label>().ToList().Where(l => !l.ClassListContains("nav-badge")).Select(l => l.text).ToList());
+                CollectionAssert.AreEqual(new[] { "Fleet Overview", "Route Planning", "Charging", "Reports" }, root.Q("nav-items").Query<Label>().ToList().Where(l => !l.ClassListContains("nav-badge")).Select(l => l.text).ToList());
             }
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
         }
@@ -623,7 +623,7 @@ namespace Formula9.Tests
                 await session.JoinAsync((string)raw["session_id"]);
                 workspace.Render();
                 var tables = root.Query<ScrollView>(className: "data-table").ToList();
-                Assert.GreaterOrEqual(tables.Count, 7, "Charging, Incidents and Reports tables");
+                Assert.GreaterOrEqual(tables.Count, 6, "Charging, Reports and Route Planning tables");
                 foreach (var table in tables)
                 {
                     Assert.AreEqual(1, table.contentContainer.childCount, "one column holds heading and rows");
@@ -763,7 +763,7 @@ namespace Formula9.Tests
         [Test]
         public async Task ThePagesAreFoundByName()
         {
-            using (var rig = new IncidentsRig(root => root.Q("page-incident").name = "page-gone"))
+            using (var rig = new IncidentsRig(root => root.Q("page-charging").name = "page-gone"))
             {
                 await rig.Join();
                 VisualElement Page(string name) => rig.Root.Q(name);
