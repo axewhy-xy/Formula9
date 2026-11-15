@@ -463,7 +463,7 @@ class IncidentService:
 
     def _road_preview(self, snapshot: FullSnapshot, vehicle_id: str):
         return self._route_service(snapshot, vehicle_id).continuation_preview(self._avoiding(snapshot, vehicle_id),
-                                                                              vehicle_id)
+                                                                              vehicle_id, live=snapshot)
 
     def _delays(self, snapshot: FullSnapshot, incident: Incident, vehicle_id: str) -> dict:
         """About how long each option but a detour holds one shuttle up from now, from what the actor last

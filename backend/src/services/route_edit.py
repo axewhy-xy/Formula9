@@ -303,10 +303,7 @@ class RouteEditService:
         vehicle = next(v for v in snapshot.vehicles if v.vehicle_id == vehicle_id)
         route = next(r for r in snapshot.routes if r.route_id == vehicle.route_id)
         planning = scene_closed(snapshot, incident, self._driven_prefix(vehicle, route))
-        preview = self.continuation_preview(planning, vehicle_id, request)
-        # The scene's closure only steers the planner; the preview answers the live closures
-        preview.closure_revisions = {d.disruption_id: d.aggregate_revision for d in snapshot.disruptions}
-        return preview
+        return self.continuation_preview(planning, vehicle_id, request, live=snapshot)
 
     def _driven_prefix(self, vehicle, route) -> list[str]:
         """The roads of a route already driven, through the one the shuttle is on; empty when it is off the route."""
@@ -327,14 +324,18 @@ class RouteEditService:
         return route.directed_edge_ids[:nearest[1]+1] if nearest[0] <= 0.01 else []
 
     def continuation_preview(self, snapshot: FullSnapshot, vehicle_id: str,
-                             draft: RouteEditRequest | None = None) -> RouteEditPreview:
-        """Validate a detour that still contains the shuttle's current road and driven prefix."""
+                             draft: RouteEditRequest | None = None, *, live: FullSnapshot | None = None) -> RouteEditPreview:
+        """Validate a detour that still contains the shuttle's current road and driven prefix.
+
+        snapshot is the one the detour is planned in. When that is a hypothetical one, with an incident's
+        scene closed for a moment (scene_closed), live is the session's own: the preview answers its
+        closures, not the planner's."""
         vehicle = next(v for v in snapshot.vehicles if v.vehicle_id == vehicle_id)
         route = next(r for r in snapshot.routes if r.route_id == vehicle.route_id)
         request = dict(route_id=route.route_id, expected_route_revision=draft.expected_route_revision if draft else route.revision,
                        draft_revision=draft.draft_revision if draft else 1)
         if self._network is None:
-            return self.preview(snapshot, RouteEditRequest(**request), retain=False)
+            return self.preview(snapshot, RouteEditRequest(**request), retain=False, live=live)
         prefix = self._driven_prefix(vehicle, route)
         visited = self._stop_visits(prefix, self._walk(prefix, self._edges()))
         remaining_stops = [self._fixture["stop_approach_edge_ids"][stop]
@@ -343,7 +344,7 @@ class RouteEditService:
                                                     self._closed(snapshot), self._fixture,
                                                     draft.waypoint_edge_ids if draft else [])
         result = self.preview(snapshot, RouteEditRequest(**request,
-                              directed_edge_ids=ids or route.directed_edge_ids), retain=False)
+                              directed_edge_ids=ids or route.directed_edge_ids), retain=False, live=live)
         if not ids:
             message = (f"The shuttle can't reach {self._network.road_name(unreached)} from where it is held and still complete its loop."
                        if unreached else "No detour connects to the shuttle's current road")
@@ -365,7 +366,8 @@ class RouteEditService:
             result.validation, result.approvable = "FAIL", False
         return result
 
-    def preview(self, snapshot: FullSnapshot, request: RouteEditRequest, *, retain: bool = True) -> RouteEditPreview:
+    def preview(self, snapshot: FullSnapshot, request: RouteEditRequest, *, retain: bool = True,
+                live: FullSnapshot | None = None) -> RouteEditPreview:
         route = next((r for r in snapshot.routes if r.route_id == request.route_id), None)
         if route is None:
             raise TrainingStoreError("INVALID_REFERENCE", "Route was not found")
@@ -465,7 +467,8 @@ class RouteEditService:
                                    route_id=route.route_id,
                                    route_revision=route.revision, scene_revision=snapshot.scene_revision,
                                    fixture_id=config["fixture_id"],
-                                   closure_revisions={d.disruption_id: d.aggregate_revision for d in snapshot.disruptions},
+                                   # The session's closures: a planner's temporary one is not the client's to match
+                                   closure_revisions={d.disruption_id: d.aggregate_revision for d in (live or snapshot).disruptions},
                                    directed_edge_ids=ids, node_ids=nodes,
                                    polyline=[{"x": float(self._graph_repository.get().graph.nodes[node]["x"]),
                                               "y": float(self._graph_repository.get().graph.nodes[node]["y"]),
