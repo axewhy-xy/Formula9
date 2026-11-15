@@ -284,7 +284,7 @@ namespace Formula9.UI
             snapshot?.Session != null && (snapshot.Session.Status == "RUNNING" || snapshot.Session.Status == "PAUSED");
 
         // A time for people, to the nearest step past a minute (10 s for an estimate): "40 s", "1 min 50 s", "3 min".
-        private static string Rough(double seconds, int step = 10)
+        internal static string Rough(double seconds, int step = 10)
         {
             var whole = (int)Math.Round(Math.Abs(seconds));
             if (whole < 60) return $"{whole} s";

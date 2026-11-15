@@ -131,7 +131,7 @@ namespace Formula9.Tests
                 Assert.IsTrue(suggest.enabledSelf, string.Join("; ", errors.Select(e => e.Message)));
                 Assert.IsTrue(world.RouteEditing, "the map picks route nodes while the route is edited");
                 Assert.IsEmpty(errors);
-                CollectionAssert.AreEqual(new[] { "Fleet Overview", "Route Planning", "Incident Monitor", "Charging", "Reports" }, root.Q("nav-items").Query<Label>().ToList().Select(l => l.text).ToList());
+                CollectionAssert.AreEqual(new[] { "Fleet Overview", "Route Planning", "Incident Monitor", "Charging", "Reports" }, root.Q("nav-items").Query<Label>().ToList().Where(l => !l.ClassListContains("nav-badge")).Select(l => l.text).ToList());
             }
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
         }
@@ -298,6 +298,9 @@ namespace Formula9.Tests
                 StringAssert.EndsWith("● needs a decision", picker.value);
                 CollectionAssert.AreEqual(new[] { "● Shuttle 01 · ~8 s" }, Strip());
                 Assert.AreEqual("Needs a decision (1)", root.Q<Label>("route-pending-title").text);
+                var badge = root.Q<Label>("nav-route-badge");
+                Assert.AreEqual("1", badge.text, "the Route Planning nav item counts the shuttles waiting");
+                Assert.AreNotEqual(DisplayStyle.None, badge.style.display.value);
 
                 // Picking in the fleet moves the cameras; on Route Planning, not to another shuttle
                 workspace.PickVehicle("shuttle-02");
@@ -336,6 +339,8 @@ namespace Formula9.Tests
                 Assert.AreEqual("Keeping an eye on 04", reason.value);
                 CollectionAssert.AreEqual(new[] { "● Shuttle 02 · ~1 s", "● Shuttle 05 · ~2 s", "● Shuttle 01 · ~8 s" }, Strip());
                 Assert.AreEqual("Needs a decision (3)", root.Q<Label>("route-pending-title").text);
+                Assert.AreEqual("3", badge.text);
+                Assert.AreEqual("Route Planning: 3 shuttles need a decision", root.Q<Button>("nav-route").tooltip);
 
                 // Closing the cameras is just that
                 press.Invoke(workspace, null);
@@ -367,12 +372,22 @@ namespace Formula9.Tests
                 CollectionAssert.AreEqual(new[] { "● Shuttle 02 · ~1 s", "● Shuttle 01 · ~8 s" }, Strip());
                 Assert.AreEqual("02", Panel());
 
+                // A marker on the map opens the first shuttle still waiting for a decision there
+                workspace.ShowSection("operations");
+                workspace.DecideForIncident("incident-1");
+                Assert.IsTrue(Shown("page-route"));
+                Assert.AreEqual("01", Panel());
+                workspace.DecideForIncident("incident-2");
+                Assert.AreEqual("02", Panel());
+                Assert.AreEqual("incident-2", workspace.SelectedIncident, "the Fleet List marks it selected");
+
                 // Nobody waits any more: the strip goes, and the panel stays where it is
                 raw["snapshot_id"] = Guid.NewGuid().ToString();
                 raw["incidents"] = new JArray(); raw["candidates"] = new JArray();
                 await session.RefreshAsync();
                 workspace.Render();
                 Assert.AreEqual(DisplayStyle.None, root.Q("route-pending").style.display.value);
+                Assert.AreEqual(DisplayStyle.None, badge.style.display.value, "no badge with nobody waiting");
                 Assert.AreEqual("Shuttle 02 · route-a", picker.value);
                 Assert.IsEmpty(notices);
             }

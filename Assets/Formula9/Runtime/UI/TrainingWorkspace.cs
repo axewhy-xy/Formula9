@@ -27,7 +27,7 @@ namespace Formula9.UI
         private readonly DropdownField shuttles, incidents, candidates;
         private readonly Dictionary<string, string> shuttleByChoice = new Dictionary<string, string>();
         private readonly VisualElement routePending, routePendingItems;
-        private readonly Label routePendingTitle;
+        private readonly Label routePendingTitle, routeBadge;
         private readonly TextField routeReason, incidentReason;
         private readonly Label routeProblem, routeOptionsExpiry, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes, incidentData, incidentReport, selection;
         private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowProblem, routeCameras, fleetCameras, approve, routeStart, routeWatch, previewIncident, approveIncident, rerouteIncident;
@@ -82,12 +82,6 @@ namespace Formula9.UI
 
         private readonly List<Button> navButtons = new List<Button>();
         public string SelectedIncident => incidents.value;
-        public void SelectIncident(string incidentId)
-        {
-            if (string.IsNullOrEmpty(incidentId)) return;
-            incidents.value = incidentId;
-            ShowSection("operations");
-        }
         public event Action IncidentSelected;
         private const int MaxLedgerEntries = 200;
         public event Action <string> SectionChanged;
@@ -128,6 +122,7 @@ namespace Formula9.UI
             routePending = root.Q("route-pending");
             routePendingTitle = root.Q<Label>("route-pending-title");
             routePendingItems = root.Q("route-pending-items");
+            routeBadge = root.Q<Label>("nav-route-badge");
             Bind(root, "refresh", RequestContext);
             routeCameras = Bind(root, "route-cameras", ToggleCameras);
             routeStages = root.Q("route-stages");
@@ -247,9 +242,10 @@ namespace Formula9.UI
             selection.text = "Selected: " + id;
         }
 
-        // Opens Route Planning on a shuttle's decision and frames the incident: from the Needs a
-        // decision strip, and the Incident Monitor's re-route. Without an incident, the shuttle's
-        // soonest one. This is the operator's own choice, so it replaces any draft for another shuttle.
+        // Opens Route Planning on a shuttle's decision and frames the incident: from a notification's
+        // Decide, the Needs a decision strip, an incident's map marker and the Incident Monitor's
+        // re-route. Without an incident, the shuttle's soonest one. This is the operator's own choice,
+        // so it replaces any draft for another shuttle.
         public void DecideFor(string vehicleId, string incidentId = null)
         {
             var s = session.Store.Snapshot;
@@ -262,6 +258,23 @@ namespace Formula9.UI
             if (incident == null) return;
             // The 3D city frames the incident itself; the map frames its road
             if (!world.FocusIncident(incident.IncidentId) && incident.Location?.EdgeId != null) world.FocusRoads(new[] { incident.Location.EdgeId });
+        }
+
+        // An incident's map marker was clicked: decide for the first shuttle still waiting for a
+        // decision about it, else the first that reaches it and was not decided for, else the shuttle
+        // it concerns, whose Problem card describes it. An incident that concerns no shuttle is only
+        // framed. The incident is also selected, so the Fleet List and the Incident Monitor follow.
+        public void DecideForIncident(string incidentId)
+        {
+            var s = session.Store.Snapshot;
+            var incident = s?.Incidents.FirstOrDefault(i => i.IncidentId == incidentId);
+            if (incident == null) return;
+            incidents.value = incidentId;
+            var vehicle = DecisionRules.PendingDecisions(s).FirstOrDefault(d => d.IncidentId == incidentId)?.VehicleId ??
+                          (incident.Exposures ?? new List<IncidentExposure>()).OrderBy(e => e.EtaS).FirstOrDefault(e => incident.ResponseOf(e.VehicleId) == null)?.VehicleId ??
+                          incident.FocusVehicleId;
+            if (vehicle != null && s.Vehicles.Any(v => v.VehicleId == vehicle)) { DecideFor(vehicle, incidentId); return; }
+            if (!world.FocusIncident(incidentId) && incident.Location?.EdgeId != null) world.FocusRoads(new[] { incident.Location.EdgeId });
         }
 
         public void Render()
@@ -290,7 +303,7 @@ namespace Formula9.UI
             }
             FitSessionControls();
             incidentReports.Render(s);
-            if (s == null) { RenderReports(); UpdateActions(); return; }
+            if (s == null) { RenderBadge(0); RenderReports(); UpdateActions(); return; }
             // An applied approval moves its route to a new revision, which finishes the draft. A queued
             // or rejected one never does, so its draft stays for another try.
             if (approvedDraft is (string approvedRoute, long basedOn) && s.Routes.Any(r => r.RouteId == approvedRoute && r.Revision > basedOn))
@@ -303,6 +316,7 @@ namespace Formula9.UI
             var pending = DecisionRules.PendingDecisions(s);
             FollowPending(s, pending);
             RenderShuttles(s, pending);
+            RenderBadge(pending.Select(d => d.VehicleId).Distinct().Count());
             var changed = DecisionRules.RouteDependencies(s, route);
             if (changed != dependencies)
             {
@@ -515,6 +529,19 @@ namespace Formula9.UI
                 item.tooltip = first[i].Incident.Location?.RoadName;
                 item.EnableInClassList("route-pending-item-selected", first[i].VehicleId == selectedVehicle);
             }
+        }
+
+        // How many shuttles need a decision, on the Route Planning nav item; nothing when none do.
+        private void RenderBadge(int shuttles)
+        {
+            if (routeBadge == null) return;
+            var text = shuttles.ToString();
+            if (routeBadge.text != text) routeBadge.text = text;
+            // Shown, the stylesheet decides: it keeps the badge when the nav panel collapses
+            routeBadge.style.display = shuttles > 0 ? new StyleEnum<DisplayStyle>(StyleKeyword.Null) : new StyleEnum<DisplayStyle>(DisplayStyle.None);
+            var hint = shuttles == 0 ? "Route Planning" : shuttles == 1 ? "Route Planning: 1 shuttle needs a decision" : $"Route Planning: {shuttles} shuttles need a decision";
+            var button = routeBadge.parent;
+            if (button != null && button.tooltip != hint) button.tooltip = hint;
         }
 
         // The shuttle the Incident Monitor's re-route opens: the soonest whose detour answers this incident.

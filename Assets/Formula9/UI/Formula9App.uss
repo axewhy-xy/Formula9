@@ -756,6 +756,79 @@
 }
 .app Button.route-pending-item-selected { color: rgb(255, 255, 255); background-color: rgb(190, 42, 44); }
 
+/* Incident notifications: a stack over the map's top-right corner; right is set from code. */
+.notifications { position: absolute; top: 10px; right: 10px; width: 320px; max-width: 60%; }
+.notifications-list { flex-direction: column; }
+.notification {
+    flex-shrink: 0;
+    margin-bottom: 8px;
+    padding: 10px 12px 8px 12px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-left-width: 5px;
+    border-color: rgb(232, 196, 196);
+    border-left-color: rgb(214, 48, 49);
+    background-color: rgba(255, 255, 255, 0.97);
+}
+.notification-options { border-left-color: rgb(31, 122, 122); }
+.notification-tag { font-size: 11px; -unity-font-style: bold; color: rgb(190, 42, 44); margin: 0 0 2px 0; padding: 0; }
+.notification-options .notification-tag { color: rgb(15, 76, 92); }
+.notification-title { font-size: 14px; -unity-font-style: bold; white-space: normal; color: rgb(30, 42, 46); margin: 0; padding: 0; }
+.notification-body { font-size: 12px; white-space: normal; color: rgb(52, 70, 74); margin: 2px 0 0 0; padding: 0; }
+.notification-actions { flex-direction: row; justify-content: flex-end; align-items: center; margin-top: 6px; }
+.app Button.notification-decide {
+    height: 28px;
+    margin: 0 6px 0 0;
+    padding: 0 12px;
+    font-size: 12px;
+    -unity-font-style: bold;
+    color: rgb(255, 255, 255);
+    border-width: 0;
+    border-radius: 14px;
+    background-color: rgb(190, 42, 44);
+}
+.app Button.notification-decide:hover { background-color: rgb(160, 32, 34); }
+.app Button.notification-close {
+    width: 28px;
+    height: 28px;
+    margin: 0;
+    padding: 0;
+    font-size: 16px;
+    color: rgb(74, 93, 97);
+    border-width: 0;
+    border-radius: 14px;
+    background-color: rgba(0, 0, 0, 0);
+}
+.app Button.notification-close:hover { background-color: rgb(236, 240, 240); }
+.app Button.notification-more {
+    align-self: flex-end;
+    height: 26px;
+    margin: 0;
+    padding: 0 12px;
+    font-size: 12px;
+    border-radius: 13px;
+    border-color: rgb(214, 48, 49);
+    background-color: rgb(253, 236, 236);
+}
+
+/* How many shuttles need a decision, on the Route Planning nav item; it stays when the panel collapses. */
+.nav-item .nav-badge {
+    position: absolute;
+    right: 8px;
+    top: 12px;
+    min-width: 20px;
+    height: 20px;
+    margin: 0;
+    padding: 0 6px;
+    border-radius: 10px;
+    font-size: 11px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-center;
+    color: rgb(255, 255, 255);
+    background-color: rgb(214, 48, 49);
+}
+.nav-panel.collapsed .nav-item .nav-badge { display: flex; opacity: 1; right: 2px; top: 2px; min-width: 16px; height: 16px; padding: 0 4px; font-size: 10px; }
+
 .route-card {
     flex-shrink: 0;
     margin-bottom: 10px;
