@@ -303,7 +303,10 @@ class RouteEditService:
         vehicle = next(v for v in snapshot.vehicles if v.vehicle_id == vehicle_id)
         route = next(r for r in snapshot.routes if r.route_id == vehicle.route_id)
         planning = scene_closed(snapshot, incident, self._driven_prefix(vehicle, route))
-        return self.continuation_preview(planning, vehicle_id, request)
+        preview = self.continuation_preview(planning, vehicle_id, request)
+        # The scene's closure only steers the planner; the preview answers the live closures
+        preview.closure_revisions = {d.disruption_id: d.aggregate_revision for d in snapshot.disruptions}
+        return preview
 
     def _driven_prefix(self, vehicle, route) -> list[str]:
         """The roads of a route already driven, through the one the shuttle is on; empty when it is off the route."""

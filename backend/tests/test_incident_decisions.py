@@ -9,7 +9,7 @@ import pytest
 
 from contracts.v2.models import Disruption
 
-from backend.tests.test_training_integration import advance, advance_until, approve, read, runtime, send, stage_boundary
+from backend.tests.test_training_integration import advance, advance_until, approve, preview, read, runtime, send, stage_boundary
 from src.services.incident_scenarios.world_events import ScheduledEvent
 from src.services.incidents import detour_route_id, is_detour_of
 
@@ -106,6 +106,18 @@ def test_a_detour_round_a_collision_keeps_off_its_road(runtime, monkeypatch):
     advance_until(runtime, lambda s: s.vehicles[0].service_state == "DWELLING", limit=4000)
     advance_until(runtime, lambda s: s.vehicles[0].service_state != "DWELLING", limit=4000)
     assert read(runtime)["vehicles"][0]["service_state"] == "DETOURING"
+
+
+def test_a_drafted_detour_round_a_collision_answers_the_live_closures(runtime, monkeypatch):
+    # The planner closes the collision's road for a moment to go round it. The preview must still report the
+    # session's own closures, or the client takes it for stale and never lets the operator approve it.
+    edge, _ = schedule(runtime, monkeypatch)
+    snapshot = read(runtime)
+    route = next(r for r in snapshot["routes"] if r["route_id"] == snapshot["vehicles"][0]["route_id"])
+    drafted = preview(runtime, route_id=route["route_id"], expected_route_revision=route["revision"])
+    assert drafted["approvable"], drafted["checks"]
+    assert edge not in drafted["directed_edge_ids"]
+    assert drafted["closure_revisions"] == {d["disruption_id"]: d["aggregate_revision"] for d in snapshot["disruptions"]}
 
 
 def test_assistance_shortens_a_collision_for_the_traffic_and_everyone(runtime, monkeypatch):
