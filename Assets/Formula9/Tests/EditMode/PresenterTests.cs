@@ -425,14 +425,14 @@ namespace Formula9.Tests
             Assert.AreEqual("! Incident scheduled-collision-1 · Detected · reaches it in ~110 s", rows["shuttle-04"].Incident);
             Assert.IsNull(rows["shuttle-05"].Incident);
             var world = snapshot.Incidents.Single(i => i.IncidentId == "scheduled-collision-1");
-            var summary = TrainingPresenter.IncidentSummary(world, false);
+            var summary = TrainingPresenter.IncidentDescription(world);
             StringAssert.StartsWith("COLLISION on Lorong 6 Toa Payoh | DETECTED", summary);
             StringAssert.Contains("It belongs to no shuttle.", summary);
             StringAssert.Contains("Shuttles reaching it: shuttle-03 in ~85 s, shuttle-04 in ~110 s.", summary);
-            StringAssert.Contains("No shuttle reaches it before it clears.", TrainingPresenter.IncidentSummary(new Incident
+            StringAssert.Contains("No shuttle reaches it before it clears.", TrainingPresenter.IncidentDescription(new Incident
             {
                 IncidentId = "random-road_block-9", State = "DETECTED", VehicleId = "shuttle-01", CandidateIds = new List<string>(),
-            }, false));
+            }));
         }
 
         // -----------------------------------------------------------------------------------
@@ -447,9 +447,8 @@ namespace Formula9.Tests
             var snapshot = (FullSnapshot)ContractParser.ParseMessage(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/incident_decisions_snapshot.json")));
             var incident = snapshot.Incidents.Single(i => i.IncidentId == "scheduled-collision-1");
             Assert.AreEqual("shuttle-03 request assistance", TrainingPresenter.Responses(incident));
-            var summary = TrainingPresenter.IncidentSummary(incident, true);
+            var summary = TrainingPresenter.IncidentDescription(incident);
             StringAssert.Contains("Decided: shuttle-03 request assistance.", summary);
-            StringAssert.Contains("Decide for each shuttle that will reach it", summary);
             incident.Responses.Add(new IncidentResponse { VehicleId = "shuttle-04", Action = "KEEP_ROUTE", DecidedTick = 230, BeforeArrival = false });
             Assert.AreEqual("shuttle-03 request assistance, shuttle-04 keep route (late)", TrainingPresenter.Responses(incident));
             Assert.IsNull(TrainingPresenter.Responses(new Incident { IncidentId = "none" }));
@@ -462,7 +461,7 @@ namespace Formula9.Tests
         // -----------------------------------------------------------------------------------
         // Description:
         //     The Reports page describes an incident and what was decided, but asks nothing of
-        //     the operator; the Incident Monitor's summary is that description and its ask.
+        //     the operator.
         [Test]
         public void TheReportsDescribeAnIncidentWithoutAskingForADecision()
         {
@@ -472,8 +471,6 @@ namespace Formula9.Tests
             StringAssert.Contains("Decided: shuttle-03 request assistance.", description);
             StringAssert.DoesNotContain("Decide for each shuttle", description);
             StringAssert.DoesNotContain("No operator decision is required", description);
-            Assert.AreEqual(description + "\nNo operator decision is required for this incident now. Shuttles that reach it meet its queue.",
-                TrainingPresenter.IncidentSummary(incident, false));
         }
 
         // -----------------------------------------------------------------------------------

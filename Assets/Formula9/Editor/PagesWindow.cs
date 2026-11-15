@@ -24,14 +24,13 @@ namespace Formula9.EditorTools
             new Page("Main shell (sidebar, top bar, session controls)", "MainShell", "page-fleet", "nav-fleet"),
             new Page("Fleet Overview", "FleetOverview", "page-fleet", "nav-fleet"),
             new Page("Route Planning", "RoutePlanning", "page-route", "nav-route"),
-            new Page("Incident Monitor", "IncidentMonitor", "page-incident", "nav-incident"),
             new Page("Charging", "Charging", "page-charging", "nav-charging"),
             new Page("Reports", "Reports", "page-reports", "nav-reports"),
             new Page("Scenarios", "Scenarios", "page-scenarios", null),
         };
 
-        private static readonly string[] Hosts = { "page-fleet", "page-route", "page-charging", "page-incident", "page-reports", "page-scenarios" };
-        private static readonly string[] NavItems = { "nav-fleet", "nav-route", "nav-charging", "nav-incident", "nav-reports" };
+        private static readonly string[] Hosts = { "page-fleet", "page-route", "page-charging", "page-reports", "page-scenarios" };
+        private static readonly string[] NavItems = { "nav-fleet", "nav-route", "nav-charging", "nav-reports" };
 
         private const string OpenedKey = "Formula9.PagesWindowOpened", SelectedKey = "Formula9.SelectedPage";
         private const double CheckEverySeconds = 0.5;
