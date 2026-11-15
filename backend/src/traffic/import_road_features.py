@@ -2,12 +2,16 @@
 
 Run from backend/: python -m src.traffic.import_road_features [--area toa-payoh] [--release Sep2026] [--source-dir DIR]
 
-Downloads DataMall's static geospatial files, keeps what is in the area and writes signals, crossings
-and markings JSON to fixtures/traffic/. Positions are local metres in the frame the fleet map uses (x
-east and y north of central Singapore). --source-dir reads zips already downloaded to a folder.
+Downloads DataMall's static geospatial files, filters them to the area and writes
+signals, crossings, markings and one JSON per available infrastructure layer
+to fixtures/traffic/.
+--source-dir accepts local shapefile ZIPs, extracted shapefiles and GeoJSON.
+--unity-resources-dir also copies the fixtures into Formula9/RoadData below the
+given Unity Resources directory. Coordinates are local metres (x east, y north).
 
-From LTA: every position, bearing, road code and type code. LTA does not say what its type codes mean,
-so they are passed on unexplained. LTA's staff usernames and job numbers are left out.
+LTA positions, bearings and codes are retained. Infrastructure files expose
+layer-specific fields and retain additional source attributes. Optional layers
+are exported when available.
 Worked out here, and marked as such in the files: which heads form a junction, the ways into it from the
 OpenStreetMap roads, the approach, direction and phase of each head, whether a crossing has a signal, and
 each crossing's stripes or edges. See src.traffic.signal_cycle for the colours, which are simulated.
@@ -17,12 +21,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import math
 import sys
 import tempfile
 import zipfile
 from datetime import date
+from html import unescape
+from numbers import Integral, Real
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from src.routing.build_singapore_fleet_fixture import DEFAULT_AREA, SERVICE_AREAS, extract_path, project
@@ -32,7 +40,60 @@ from src.traffic.import_vehicle_population import OUTPUT_DIRECTORY, area_box_m, 
 DOWNLOAD_URL = "https://datamall.lta.gov.sg/content/dam/datamall/datasets/Geospatial/{name}_{release}.zip"
 LICENCE_URL = "https://datamall.lta.gov.sg/content/datamall/en/SingaporeOpenDataLicence.html"
 DEFAULT_RELEASE = "Sep2026"
-LAYERS = ("TrafficLight", "RoadCrossing", "LaneMarking", "ArrowMarking", "WordMarking", "RoadHump")
+REQUIRED_LAYERS = ("TrafficLight", "RoadCrossing", "LaneMarking", "ArrowMarking", "WordMarking", "RoadHump")
+INFRASTRUCTURE_LAYERS = {
+    "Bollard": "bollards",
+    "Footpath": "footpaths",
+    "GuardRail": "guard_rails",
+    "KerbLine": "kerb_lines",
+    "PassengerPickupBay": "passenger_pickup_bays",
+    "Railing": "railings",
+    "RoadSectionLine": "road_section_lines",
+    "SchoolZone": "school_zones",
+    "SilverZone": "silver_zones",
+    "SpeedRegulatingStrip": "speed_regulating_strips",
+    "StreetPaint": "street_paint",
+    "TrafficSign": "traffic_signs",
+}
+# LTA GIS Data Collection Specification v2.6 Part 2, section 16.
+TYPE_CODE = {"type_code": ("TYP_CD", "TYPE_CODE", "TYPE_CD")}
+ROAD_CODE = {"road_code": ("RD_CD", "ROAD_CODE", "ROAD_CD")}
+LEVEL = {"level": ("LVL_NUM", "LEVEL_NUM", "LEVEL")}
+
+INFRASTRUCTURE_FIELDS = {
+    "Bollard": TYPE_CODE | ROAD_CODE | LEVEL,
+    "Footpath": TYPE_CODE | ROAD_CODE | LEVEL | {
+        "width_category_code": ("WDT_CATG_CD", "WDT_CATG_C"),
+        "drain_grating_indicator": ("GRNT_IND",),
+    },
+    "GuardRail": TYPE_CODE | ROAD_CODE | LEVEL,
+    "KerbLine": LEVEL,
+    "PassengerPickupBay": ROAD_CODE | LEVEL | {"bay_count": ("BAY_CNT",)},
+    "Railing": TYPE_CODE | ROAD_CODE | LEVEL,
+    "SpeedRegulatingStrip": ROAD_CODE | LEVEL,
+    "StreetPaint": TYPE_CODE | ROAD_CODE | LEVEL,
+    "TrafficSign": TYPE_CODE | ROAD_CODE | LEVEL | {
+        "bearing_deg": ("BEARG_NUM",),
+        "sign_category_code": ("CATG_CD",),
+        "mounting_method_code": ("MOUNT_MTD_CD", "MOUNT_MTD_"),
+        "sign_count": ("SGN_CNT",),
+        "signboard_height": ("SGNBD_HT_NUM", "SGNBD_HT_N"),
+        "signboard_width": ("SGNBD_WDT_NUM", "SGNBD_WDT_"),
+    },
+}
+INTEGER_INFRASTRUCTURE_FIELDS = {"level", "bay_count", "width_category_code", "sign_count", "sign_category_code"}
+DECIMAL_INFRASTRUCTURE_FIELDS = {"bearing_deg", "signboard_height", "signboard_width"}
+
+LAYERS = (*REQUIRED_LAYERS, *INFRASTRUCTURE_LAYERS)
+REQUIRED_GEOMETRY = {
+    "TrafficLight": "Point",
+    "RoadCrossing": "LineString",
+    "LaneMarking": "LineString",
+    "ArrowMarking": "Point",
+    "WordMarking": "Point",
+    "RoadHump": "LineString",
+}
+SOURCE_SUFFIXES = (".zip", ".shp", ".geojson", ".json")
 
 # Heads closer than this are one junction. The junction count barely moves from 50 to 70 m.
 JUNCTION_LINK_M = 60.0
@@ -63,22 +124,169 @@ def attribution(release: str, retrieved: str) -> list[str]:
             f"available under the terms of the Singapore Open Data Licence version 1.0: {LICENCE_URL}"]
 
 
-def read_layer(path: Path, box: tuple[float, float, float, float]) -> list[dict]:
-    """A zip's rows touching a (south, west, north, east) box. Multi-part shapes become one row per part."""
-    import geopandas  # Only the import needs it, not the backend serving the result
+def source_index(directory: Path) -> dict[str, list[Path]]:
+    if not directory.is_dir():
+        raise FileNotFoundError(f"Source directory does not exist: {directory}")
+    files: dict[str, list[Path]] = {}
+    for path in sorted(directory.rglob("*")):
+        if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES:
+            files.setdefault(path.name.lower(), []).append(path)
+    return files
 
+
+def local_source(files: dict[str, list[Path]], layer: str, release: str) -> Path | None:
+    for stem in (f"{layer}_{release}", layer):
+        for suffix in SOURCE_SUFFIXES:
+            matches = files.get((stem + suffix).lower(), [])
+            if len(matches) > 1:
+                raise ValueError(f"Multiple files match {stem}{suffix}: " + ", ".join(map(str, matches)))
+            if matches:
+                return matches[0]
+    return None
+
+
+def source_uri(path: Path, layer: str, release: str) -> str:
+    if path.suffix.lower() != ".zip":
+        return str(path)
     with zipfile.ZipFile(path) as archive:
-        inner = next(name for name in archive.namelist() if name.endswith(".shp"))
-    frame = geopandas.read_file(f"zip://{path.as_posix()}!{inner}")
-    # Some of LTA's rows have no shape at all
-    frame = frame[frame.geometry.notna() & ~frame.geometry.is_empty].to_crs(4326)
+        shapes = [name for name in archive.namelist()
+                  if name.lower().endswith(".shp") and not name.startswith("__MACOSX/")]
+    if len(shapes) == 1:
+        return f"zip://{path.resolve().as_posix()}!{shapes[0]}"
+    for stem in (f"{layer}_{release}", layer):
+        matches = [name for name in shapes if Path(name).stem.casefold() == stem.casefold()]
+        if len(matches) == 1:
+            return f"zip://{path.resolve().as_posix()}!{matches[0]}"
+    raise ValueError(f"Cannot identify the {layer} shapefile inside {path.name}")
+
+
+def geometry_parts(geometry):
+    if geometry is None or geometry.is_empty:
+        return
+    if geometry.geom_type.startswith("Multi") or geometry.geom_type == "GeometryCollection":
+        for part in geometry.geoms:
+            yield from geometry_parts(part)
+    elif geometry.geom_type in ("Point", "LineString", "Polygon"):
+        yield geometry
+
+
+def lat_lon(sequence) -> list[tuple[float, float]]:
+    return [(y, x) for x, y, *_ in sequence]
+
+
+def numeric(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def source_attributes(fields: dict) -> dict:
+    """Collect property values without forcing a common schema on all layers."""
+    attributes = {}
+    for name, value in fields.items():
+        if name in {"GEOMETRY", "DESCRIPTION"} or re.search(
+            r"USER|LOGIN|PASSWORD|EMAIL|PHONE|CONTACT|JOB|SURVEYOR|EDITOR|OPERATOR|(?:^|_)USR(?:_|$)|(?:CRT|UPD|CREAT|EDIT)_BY",
+            name,
+        ):
+            continue
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                continue
+        elif isinstance(value, bool):
+            pass
+        elif isinstance(value, Integral):
+            value = int(value)
+        elif isinstance(value, Real):
+            value = numeric(value)
+            if value is None:
+                continue
+        elif isinstance(value, date) and str(value) != "NaT":
+            value = value.isoformat()
+        else:
+            continue
+        attributes[name] = value
+    return attributes
+
+
+def infrastructure_attributes(fields: dict, layer: str) -> dict:
+    """Read published LTA fields, including attributes in GeoJSON descriptions."""
+    attributes = source_attributes(fields)
+    description = fields.get("DESCRIPTION")
+    if isinstance(description, str) and "<table" in description.lower():
+        # Some published GeoJSON uses the KML description table for properties.
+        embedded = {}
+        for key, value in re.findall(
+            r"<th\b[^>]*>\s*([A-Z][A-Z0-9_. ]*)\s*</th>\s*<td\b[^>]*>(.*?)</td>",
+            description, flags=re.IGNORECASE | re.DOTALL,
+        ):
+            key = key.strip().upper().replace(" ", "_")
+            embedded[key] = unescape(re.sub(r"<[^>]*>", "", value))
+        attributes = source_attributes(embedded) | attributes
+    result = {}
+    # Layers without an attribute table in this specification retain source properties.
+    for name, aliases in INFRASTRUCTURE_FIELDS.get(layer, {}).items():
+        for alias in aliases:
+            if alias not in attributes:
+                continue
+            raw = attributes[alias]
+            if name in INTEGER_INFRASTRUCTURE_FIELDS:
+                value = numeric(raw)
+                if value is None or not value.is_integer():
+                    continue
+                result[name] = int(value)
+            elif name in DECIMAL_INFRASTRUCTURE_FIELDS:
+                value = numeric(raw)
+                if value is None:
+                    continue
+                result[name] = value
+            else:
+                result[name] = str(raw)
+            break
+    if attributes:
+        result["source_attributes"] = attributes
+    return result
+
+
+def read_layer(path: Path, box: tuple[float, float, float, float], layer: str, release: str) -> list[dict]:
+    """Read local shapes touching a (south, west, north, east) box."""
+    import geopandas  # Only the import needs it, not the backend serving the result.
+    from shapely.geometry import box as make_box
+
+    frame = geopandas.read_file(source_uri(path, layer, release))
+    if frame.crs is None:
+        raise ValueError(f"{path.name} has no coordinate reference system. Supply its CRS or shapefile .prj.")
+    frame = frame.to_crs(4326)
     south, west, north, east = box
-    frame = frame.cx[west:east, south:north].explode(index_parts=False)
+    bounds = make_box(west, south, east, north)
+    frame = frame.cx[west:east, south:north]
+    required_geometry = REQUIRED_GEOMETRY.get(layer)
     rows = []
     for row in frame.to_dict("records"):
-        points = [(y, x) for x, y, *_ in row["geometry"].coords]
-        rows.append({"points": points, "type_code": text(row.get("TYP_CD")), "road_code": text(row.get("RD_CD")),
-                     "word": text(row.get("DESC_TXT")), "bearing_deg": row.get("BEARG_NUM"), "level": row.get("LVL_NUM")})
+        fields = {key.upper().rsplit(".", 1)[-1]: value for key, value in row.items()
+                  if isinstance(key, str) and key != frame.geometry.name}
+        infrastructure = infrastructure_attributes(fields, layer) if layer in INFRASTRUCTURE_LAYERS else {}
+        for part in geometry_parts(row[frame.geometry.name]):
+            kind = part.geom_type
+            if required_geometry and kind != required_geometry:
+                continue
+            if not part.intersects(bounds):
+                continue
+            points = lat_lon(part.exterior.coords if kind == "Polygon" else part.coords)
+            if kind == "LineString" and len(set(points)) < 2:
+                continue
+            if layer == "RoadCrossing" and points[0] == points[-1]:
+                continue
+            rows.append({
+                "geometry_type": kind, "points": points,
+                "holes": [lat_lon(ring.coords) for ring in part.interiors] if kind == "Polygon" else [],
+                "type_code": text(fields.get("TYP_CD")), "road_code": text(fields.get("RD_CD")),
+                "word": text(fields.get("DESC_TXT")), "bearing_deg": numeric(fields.get("BEARG_NUM")),
+                "level": numeric(fields.get("LVL_NUM")),
+                "infrastructure": infrastructure,
+            })
     return rows
 
 
@@ -239,10 +447,10 @@ def build_signals(rows: list[dict], box: tuple[float, float, float, float], road
         approaches = sorted(approaches_of([positions[index] for index in group], roads), key=lambda a: (a["road"], a["heading_deg"]))
         for count, (approach, phase) in enumerate(zip(approaches, phases_of([a["heading_deg"] for a in approaches])), 1):
             approach.update(id=f"{junction_id}-approach-{count}", phase=phase)
-        lta_phases = phases_of([float(heads[index]["bearing_deg"]) for index in group])
+        lta_phases = phases_of([float(heads[index]["bearing_deg"] or 0) for index in group])
         for index, lta_phase in zip(group, lta_phases):
             head = heads[index]
-            bearing = float(head["bearing_deg"])
+            bearing = float(head["bearing_deg"] or 0)
             controlled = approach_for_head(positions[index], approaches)
             # Off the road map, as on an expressway, only LTA's own bearing says anything about direction
             traffic = controlled["heading_deg"] if controlled else heading_of_bearing(bearing)
@@ -337,6 +545,37 @@ def build_markings(lanes: list[dict], arrows: list[dict], words: list[dict], hum
     }
 
 
+def build_infrastructure(layers: dict[str, list[dict]], header: dict) -> dict[str, dict]:
+    features = {}
+    for layer, key in INFRASTRUCTURE_LAYERS.items():
+        if layer not in layers:
+            continue
+        records = []
+        for number, row in enumerate(sorted_rows(layers[layer]), 1):
+            geometry_type = row["geometry_type"]
+            feature = {
+                "id": f"{key}-{number:05d}",
+                "geometry_type": geometry_type,
+                **row["infrastructure"],
+            }
+            if geometry_type == "Point":
+                feature["x_m"], feature["y_m"] = metres(row)[0]
+            elif geometry_type == "LineString":
+                feature["points_m"] = metres(row)
+            else:
+                feature["rings_m"] = [metres(row)] + [
+                    [list(project(*point)) for point in ring] for ring in row["holes"]
+                ]
+            records.append(feature)
+        features[key.replace("_", "-")] = {
+            **header,
+            "coordinate_space": "city-local-xz-metres",
+            "layer": layer,
+            key: records,
+        }
+    return features
+
+
 def build(layers: dict[str, list[dict]], signal_rows: list[dict], roads: list[dict], area_key: str, release: str, retrieved: str) -> dict[str, dict]:
     """Each file's contents, by name. signal_rows reaches past the area, so edge crossings find their heads."""
     area = SERVICE_AREAS[area_key]
@@ -351,6 +590,7 @@ def build(layers: dict[str, list[dict]], signal_rows: list[dict], roads: list[di
         "signals": {**header, "timing": timing, **build_signals(signal_rows, area["box"], roads)},
         "crossings": {**header, **build_crossings(layers["RoadCrossing"], signal_rows)},
         "markings": {**header, **build_markings(layers["LaneMarking"], layers["ArrowMarking"], layers["WordMarking"], layers["RoadHump"])},
+        **build_infrastructure(layers, header),
     }
 
 
@@ -371,24 +611,53 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--area", choices=sorted(SERVICE_AREAS), default=DEFAULT_AREA)
     parser.add_argument("--release", default=DEFAULT_RELEASE, help="DataMall's release, in its file names (default %(default)s)")
-    parser.add_argument("--source-dir", type=Path, default=None, help="folder of zips already downloaded")
+    parser.add_argument("--source-dir", type=Path, help="folder of downloaded ZIPs, shapefiles or GeoJSON")
+    parser.add_argument("--unity-resources-dir", type=Path,
+                        help="optional Unity Resources folder, for example ../Formula9/Assets/Resources")
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIRECTORY)
     arguments = parser.parse_args(argv)
     box = SERVICE_AREAS[arguments.area]["box"]
     wider = (box[0] - SIGNAL_MARGIN_DEGREES, box[1] - SIGNAL_MARGIN_DEGREES, box[2] + SIGNAL_MARGIN_DEGREES, box[3] + SIGNAL_MARGIN_DEGREES)
     try:
         with tempfile.TemporaryDirectory() as temporary:
-            paths = {name: (arguments.source_dir / f"{name}_{arguments.release}.zip" if arguments.source_dir
-                            else download(name, arguments.release, Path(temporary))) for name in LAYERS}
-            layers = {name: read_layer(path, box) for name, path in paths.items()}
-            signal_rows = read_layer(paths["TrafficLight"], wider)
+            files = source_index(arguments.source_dir) if arguments.source_dir else None
+            layers = {}
+            for layer in LAYERS:
+                source_box = wider if layer == "TrafficLight" else box
+                try:
+                    path = (local_source(files, layer, arguments.release) if files is not None
+                            else download(layer, arguments.release, Path(temporary)))
+                except HTTPError as error:
+                    if layer in REQUIRED_LAYERS or error.code not in (404, 410):
+                        raise
+                    path = None
+                if path is None:
+                    if layer in REQUIRED_LAYERS:
+                        raise FileNotFoundError(f"Missing {layer} for release {arguments.release}")
+                    print(f"Skipping unavailable layer: {layer}", file=sys.stderr)
+                    continue
+                layers[layer] = read_layer(path, source_box, layer, arguments.release)
+            signal_rows = layers["TrafficLight"]
         roads = road_network(json.loads(extract_path(arguments.area).read_text(encoding="utf-8")), box)
         files = build(layers, signal_rows, roads, arguments.area, arguments.release, date.today().isoformat())
-    except (OSError, KeyError, ValueError, StopIteration) as error:
+    except (OSError, KeyError, ValueError, ImportError, RuntimeError, zipfile.BadZipFile) as error:
         print(f"Could not prepare the road features; nothing was written. {error}", file=sys.stderr)
         return 1
-    for kind, data in files.items():
-        write_json(output_path(arguments.area, kind, arguments.output_dir), data)
+    output_dirs = [arguments.output_dir]
+    if arguments.unity_resources_dir is not None:
+        output_dirs.append(arguments.unity_resources_dir / "Formula9" / "RoadData")
+    try:
+        for directory in output_dirs:
+            directory.mkdir(parents=True, exist_ok=True)
+            for kind, data in files.items():
+                path = output_path(arguments.area, kind, directory)
+                write_json(path, data)
+                print(f"Wrote {path}")
+    except OSError as error:
+        print(f"Could not write the road features: {error}", file=sys.stderr)
+        return 1
+    print(f"Exported {sum('layer' in data for data in files.values())} infrastructure layers, "
+          f"including {len(files.get('kerb-lines', {}).get('kerb_lines', []))} kerb features.")
     print(f"{files['signals']['area']['name']}: {len(files['signals']['signals'])} signal heads at "
           f"{len(files['signals']['junctions'])} junctions, {len(files['crossings']['crossings'])} crossings, "
           f"{len(files['markings']['lane_lines'])} lane lines, {len(files['markings']['arrows'])} arrows, "

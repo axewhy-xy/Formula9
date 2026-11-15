@@ -6,9 +6,9 @@ using UnityEngine.Rendering;
 
 namespace Formula9.World
 {
-    public static class RoadMesh
+    public static partial class RoadMesh
     {
-        public const int KerbLayer = 0, AsphaltLayer = 1, MarkingLayer = 2, LayerCount = 3;
+        public const int KerbLayer = 0, AsphaltLayer = 1, MarkingLayer = 2, ConcreteMedianLayer = 3, GreenMedianLayer = 4, LayerCount = 5;
         public const float LaneWidthM = 3.2f;
         public const float ShoulderM = 0.6f, KerbM = 0.55f;
         public const float SurfaceY = 0.1f, KerbSurfaceY = SurfaceY;
@@ -133,8 +133,8 @@ namespace Formula9.World
                 if (Mathf.Abs(normalY) < 0.000001f) return;
                 var triangles = layers[layer];
                 triangles.Add(a);
-                triangles.Add(normalY > 0 ? b : c);
-                triangles.Add(normalY > 0 ? c : b);
+                triangles.Add(normalY > 0f ? b : c);
+                triangles.Add(normalY > 0f ? c : b);
             }
 
             void AddQuad(int leftA, int rightA, int leftB, int rightB, int layer)
@@ -204,8 +204,8 @@ namespace Formula9.World
                     int first = AddVertex(point + outer);
                     float width = 2f * edge.magnitude;
                     float along = path.PaintOrigin + path.PaintDirection * path.PaintDistances[i];
-                    AddVertex(point + edge, new Vector4(0f, along, lanes, width), bounds, BarDistances(point + edge));
-                    AddVertex(point - edge, new Vector4(width, along, lanes, width), bounds, BarDistances(point - edge));
+                    AddVertex(point + edge, new Vector4(0f, along, path.Road.Oneway ? lanes : -lanes, width), bounds, BarDistances(point + edge));
+                    AddVertex(point - edge, new Vector4(width, along, path.Road.Oneway ? lanes : -lanes, width), bounds, BarDistances(point - edge));
                     AddVertex(point - outer);
                     if (previous >= 0)
                     {
@@ -242,6 +242,17 @@ namespace Formula9.World
             }
 
             clippedTriangles = TrimAsphaltOverlaps(layers[AsphaltLayer], vertices, laneUV, paintBounds, barDistances);
+
+            foreach (var median in FindMedianStrips(paths))
+            {
+                int layer = median.Width >= PlantingGapM ? GreenMedianLayer : ConcreteMedianLayer;
+                // The divider sits flush with the asphalt, above the ground tiles.
+                int a = AddVertex(median.A);
+                int b = AddVertex(median.B);
+                int c = AddVertex(median.C);
+                int d = AddVertex(median.D);
+                AddQuad(a, b, c, d, layer);
+            }
 
             var mesh = new Mesh { name = "City roads", indexFormat = IndexFormat.UInt32 };
             mesh.SetVertices(vertices);

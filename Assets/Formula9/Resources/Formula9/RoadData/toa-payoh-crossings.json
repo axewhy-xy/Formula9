@@ -1,6 +1,6 @@
 {
- "attribution": ["Contains information from LTA DataMall static datasets (Sep2026) accessed on 2026-10-31, which is made available under the terms of the Singapore Open Data Licence version 1.0: https://datamall.lta.gov.sg/content/datamall/en/SingaporeOpenDataLicence.html"],
- "source": {"name":"LTA DataMall static datasets","release":"Sep2026","retrieved":"2026-10-31"},
+ "attribution": ["Contains information from LTA DataMall static datasets (Sep2026) accessed on 2026-11-15, which is made available under the terms of the Singapore Open Data Licence version 1.0: https://datamall.lta.gov.sg/content/datamall/en/SingaporeOpenDataLicence.html"],
+ "source": {"name":"LTA DataMall static datasets","release":"Sep2026","retrieved":"2026-11-15"},
  "area": {"key":"toa-payoh","name":"Toa Payoh","box_latlon":[1.326,103.838,1.344,103.86],"box_m":[2025.46,-2885.98,4473.82,-895.65]},
  "crossing_shape": {"assumed":true,"note":"LTA gives only the walking line. These sizes are chosen, not measured.","width_m":3.0,"stripe_thickness_m":0.5,"stripe_gap_m":0.5},
  "crossings": [
