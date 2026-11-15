@@ -29,8 +29,8 @@ namespace Formula9.UI
         private readonly VisualElement routePending, routePendingItems;
         private readonly Label routePendingTitle;
         private readonly TextField routeReason, incidentReason;
-        private readonly Label routeProblem, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes, incidentData, incidentReport, selection;
-        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowClosure, routeCameras, fleetCameras, approve, routeStart, routeWatch, previewIncident, approveIncident, rerouteIncident;
+        private readonly Label routeProblem, routeOptionsExpiry, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes, incidentData, incidentReport, selection;
+        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowProblem, routeCameras, fleetCameras, approve, routeStart, routeWatch, previewIncident, approveIncident, rerouteIncident;
         private readonly FleetMap evidenceMap;
         private readonly VisualElement routeStages, routeWaypoints, routeIssues, routeMetrics, routeDecide, routeFeedback, routeApply, routeOutcomePanel, routeOutcomeRows, fleetTable;
         private readonly List<VisualElement> operationalViews;
@@ -118,6 +118,7 @@ namespace Formula9.UI
             routeStages = root.Q("route-stages");
             foreach (var stage in RoutePresenter.Stages) { var chip = new Label(stage); chip.AddToClassList("route-stage"); routeStages.Add(chip); }
             routeProblem = root.Q<Label>("route-problem");
+            routeOptionsExpiry = root.Q<Label>("route-options-expiry");
             routeVerdict = root.Q<Label>("route-verdict");
             routeAssumptions = root.Q<Label>("route-assumptions");
             routeApplyNote = root.Q<Label>("route-apply-note");
@@ -139,7 +140,7 @@ namespace Formula9.UI
             routeRedo = Bind(root, "route-redo", () => RestoreDraft(1));
             routeClear = Bind(root, "route-cancel", () => { if (!session.HasPendingCommand) { routeReason.value = ""; SetDraft(new List<RouteWaypoint>()); } });
             routeSuggest = Bind(root, "route-suggest", SuggestDetour);
-            routeShowClosure = Bind(root, "route-show-closure", ShowClosure);
+            routeShowProblem = Bind(root, "route-show-problem", ShowProblem);
             routeReason = root.Q<TextField>("route-reason");
             routeReason.RegisterValueChangedCallback(_ => UpdateActions());
             approve = Bind(root, "route-approve", () => run(ApproveRoute()));
@@ -693,8 +694,17 @@ namespace Formula9.UI
             run(PreviewRoute());
         }
 
-        private void ShowClosure()
+        // Frames what the Problem card is about: the shuttle's first incident, on the map by its road and
+        // in the 3D city by its scene; without one, the closure on its route.
+        private void ShowProblem()
         {
+            var incident = RoutePresenter.ProblemIncidents(session.Store.Snapshot, selectedVehicle).FirstOrDefault();
+            if (incident != null)
+            {
+                if (incident.Location?.EdgeId != null) world.FocusRoads(new[] { incident.Location.EdgeId });
+                world.FocusIncident(incident.IncidentId);
+                return;
+            }
             if (context == null) return;
             var committed = new HashSet<string>(context.OriginalDirectedEdgeIds);
             var closed = context.Edges.Where(e => e.Closed).OrderByDescending(e => committed.Contains(e.EdgeId)).Select(e => e.EdgeId).ToList();
@@ -704,8 +714,12 @@ namespace Formula9.UI
         private void RenderExercise(FullSnapshot s)
         {
             if (routeProblem == null) return;
-            routeProblem.text = RoutePresenter.Problem(context, s);
-            routeShowClosure.style.display = context != null && context.Edges.Any(e => e.Closed) ? DisplayStyle.Flex : DisplayStyle.None;
+            routeProblem.text = RoutePresenter.Problem(context, s, selectedVehicle);
+            var incident = RoutePresenter.ProblemIncidents(s, selectedVehicle).Count > 0;
+            routeShowProblem.style.display = incident || (context != null && context.Edges.Any(e => e.Closed)) ? DisplayStyle.Flex : DisplayStyle.None;
+            var expiry = RoutePresenter.OptionsExpiry(s, selectedVehicle);
+            routeOptionsExpiry.text = expiry ?? "";
+            routeOptionsExpiry.style.display = expiry == null ? DisplayStyle.None : DisplayStyle.Flex;
             var routeClosed = s != null && TrainingPresenter.AssignedRouteIsClosed(s);
             var deciding = Drafting(s) && routeClosed;
             routeDecide.style.display = deciding ? DisplayStyle.Flex : DisplayStyle.None;

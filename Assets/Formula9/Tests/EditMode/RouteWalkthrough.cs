@@ -69,7 +69,7 @@ namespace Formula9.Tests
                 Note("Problem: " + Text("route-problem"));
                 yield return Shoot("problem");
 
-                Press("route-show-closure");
+                Press("route-show-problem");
                 yield return Seconds(1);
                 yield return Shoot("closure-focused");
 

@@ -525,6 +525,22 @@ namespace Formula9.UI
         }
 
         // -----------------------------------------------------------------------------------
+        // Function: IncidentName
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function names what an incident is, in capitals: "COLLISION", or the kind an
+        //     older backend's incident ID gives when it has no world event.
+        //
+        // Args:
+        //     incident (Incident): The incident.
+        //
+        // Returns:
+        //     string: The name.
+        public static string IncidentName(Incident incident) =>
+            World.IncidentRecord.Name(incident.EventType,
+                incident.IncidentId.Contains("road_accident") ? World.IncidentSimulation.Accident : World.IncidentSimulation.Block).ToUpperInvariant();
+
+        // -----------------------------------------------------------------------------------
         // Function: IncidentDescription
         // -----------------------------------------------------------------------------------
         // Description:
@@ -539,8 +555,7 @@ namespace Formula9.UI
         //     string: The text.
         public static string IncidentDescription(Incident incident)
         {
-            var name = World.IncidentRecord.Name(incident.EventType,
-                incident.IncidentId.Contains("road_accident") ? World.IncidentSimulation.Accident : World.IncidentSimulation.Block).ToUpperInvariant();
+            var name = IncidentName(incident);
             var road = incident.Location?.RoadName != null ? $" on {incident.Location.RoadName}" : "";
             var reach = World.IncidentRecord.Reach(incident.Exposures, 5);
             var exposure = reach == null ? "No shuttle reaches it before it clears." : $"Shuttles reaching it: {reach}.";

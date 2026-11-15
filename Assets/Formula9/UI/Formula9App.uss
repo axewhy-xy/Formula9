@@ -772,6 +772,9 @@
 .route-verdict-good { color: rgb(24, 122, 76); }
 .route-verdict-bad { color: rgb(190, 42, 44); }
 .app Button.route-link { align-self: flex-start; height: 26px; margin: 0; padding: 0 10px; font-size: 12px; }
+/* Show on map, and how long the shuttle's options stand, at the far end. */
+.route-problem-actions { flex-direction: row; align-items: center; min-height: 26px; }
+.route-options-expiry { flex-grow: 1; -unity-text-align: middle-right; font-size: 12px; color: rgb(110, 120, 120); }
 
 .route-waypoints { flex-shrink: 0; margin-bottom: 6px; }
 .route-waypoint { flex-direction: row; align-items: center; margin-bottom: 4px; }

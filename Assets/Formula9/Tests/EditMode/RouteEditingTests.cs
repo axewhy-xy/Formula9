@@ -78,9 +78,9 @@ namespace Formula9.Tests
         public void TheProblemIsSaidInNamesNotIds()
         {
             var snapshot = new FullSnapshot { Vehicles = new List<FleetVehicle> { new FleetVehicle { VehicleId = "shuttle-01", RouteId = "route-a" } } };
-            var text = RoutePresenter.Problem(Context(), snapshot);
+            var text = RoutePresenter.Problem(Context(), snapshot, "shuttle-01");
             StringAssert.Contains("Lorong 4 Toa Payoh is closed", text);
-            StringAssert.Contains("shuttle-01", text);
+            StringAssert.Contains("Shuttle 01", text);
             StringAssert.Contains("Toa Payoh Police Centre", text);
             StringAssert.DoesNotContain("main:0", text);
         }
@@ -96,7 +96,7 @@ namespace Formula9.Tests
             var snapshot = new FullSnapshot { Vehicles = new List<FleetVehicle> { new FleetVehicle { VehicleId = "shuttle-01", RouteId = "route-a" } } };
             var context = Context();
             context.OriginalDirectedEdgeIds = new List<string> { "side:0:forward" };
-            Assert.AreEqual("Lorong 4 Toa Payoh is closed. shuttle-01's route goes round it.", RoutePresenter.Problem(context, snapshot));
+            Assert.AreEqual("Lorong 4 Toa Payoh is closed. Shuttle 01's route goes round it.", RoutePresenter.Problem(context, snapshot, "shuttle-01"));
         }
 
         [Test]

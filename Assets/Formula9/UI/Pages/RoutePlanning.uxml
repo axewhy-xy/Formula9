@@ -18,7 +18,10 @@
             <ui:VisualElement class="route-card route-card-problem">
                 <ui:Label text="The problem" class="route-card-title" />
                 <ui:Label name="route-problem" text="Join a session to see its routes." class="route-card-text" />
-                <ui:Button name="route-show-closure" text="Show the closure" class="route-link" />
+                <ui:VisualElement class="route-problem-actions">
+                    <ui:Button name="route-show-problem" text="Show on map" class="route-link" />
+                    <ui:Label name="route-options-expiry" class="route-options-expiry" />
+                </ui:VisualElement>
             </ui:VisualElement>
 
             <ui:VisualElement name="route-decide" class="route-card">
