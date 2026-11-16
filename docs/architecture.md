@@ -492,9 +492,14 @@ Screens that show LTA or OSM data must credit them. `FleetMap` draws these credi
 | Backend | `run.bat --test` (temporary storage, MongoDB off) | Contracts, actors, traffic, signals, energy, incidents, route editing, persistence, real process crash and recovery, API |
 | Unity EditMode | Test Runner, or `Unity.exe -batchmode -runTests -testPlatform EditMode` | Contract parsing and fixtures, presenters, session controller and store rules, world maths, traffic playback, camera rig, alerts |
 | Live backend | `LiveBackend` category; skipped without a backend | The client against a running server |
-| End to end | `EndToEnd` category with `FORMULA9_E2E_BACKEND_URL` set to `Tools/isolated_backend.py` | Sign up, create, start, approve detour, reserve charger, incident preview and approve, history and debrief, 3D load. `RouteWalkthrough` plays the route exercise through the real UI. |
+| End to end | `EndToEnd` category with `FORMULA9_E2E_BACKEND_URL` set to `Tools/isolated_backend.py --seed-incidents` | Sign up, create, start, approve detour, reserve charger, incident preview and approve, history and debrief, 3D load. `RouteWalkthrough` plays the route exercise through the real UI. |
 
 The end-to-end tests sign up throwaway users. Never point them at the shared team backend.
+
+`--seed-incidents` schedules known incidents in every session (a collision on a road two shuttles
+drive, and a signal fault), beside the random ones. The incident end-to-end test and
+`RouteWalkthrough` decide these, so without the flag they fail after waiting for them (60 seconds
+for the end-to-end test).
 
 ## 10. Known limitations
 

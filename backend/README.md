@@ -24,10 +24,12 @@ override those settings. The bundled map also requires the adjacent `map.osm`.
 For a disposable server with in-memory accounts and temporary session storage:
 
 ```powershell
-backend\.venv\Scripts\python Tools/isolated_backend.py
+backend\.venv\Scripts\python Tools/isolated_backend.py --seed-incidents
 ```
 
-It listens on port 8010 and is intended for Unity end-to-end tests. The sections
+It listens on port 8010 and is intended for Unity end-to-end tests. `--seed-incidents`
+schedules known incidents in every session, beside the random ones; the incident
+end-to-end test and `RouteWalkthrough` need them. The sections
 below preserve the original backend service documentation, including historical
 Qt/web references; those client applications are not required to run this backend.
 

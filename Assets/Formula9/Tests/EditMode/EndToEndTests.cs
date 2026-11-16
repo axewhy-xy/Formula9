@@ -4,11 +4,12 @@
  * Author: Choo Jian Wei
  * Contributors: Lau Xiang Yang (detour, charging and incident decisions)
  * Date Created: 30/10/2026
- * Last Modified: 30/10/2026
+ * Last Modified: 16/11/2026
  *
  * Description:
  *     Runs only when FORMULA9_E2E_BACKEND_URL points at an isolated backend with throwaway accounts
- *     (Tools/isolated_backend.py: in-memory accounts, temporary training database). Each test signs
+ *     (Tools/isolated_backend.py --seed-incidents: in-memory accounts, temporary training database,
+ *     and the known incidents the incident test decides). Each test signs
  *     up a random user, so never point it at the team's shared backend. The tests go over real
  *     HTTP: log in, create, start, pause, resume and archive sessions, approve the integrated
  *     detour, reserve a charger, decide an incident, and load and place a live 3D world.
