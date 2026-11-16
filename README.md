@@ -404,16 +404,18 @@ so they only run against an isolated backend and are skipped unless
 `FORMULA9_E2E_BACKEND_URL` is set:
 
 ```
-backend\.venv\Scripts\python Tools/isolated_backend.py  # in-memory accounts, temporary sessions, port 8010
+backend\.venv\Scripts\python Tools/isolated_backend.py --seed-incidents  # in-memory accounts, temporary sessions, port 8010
 set FORMULA9_E2E_BACKEND_URL=http://127.0.0.1:8010
 ```
 
-Never point `FORMULA9_E2E_BACKEND_URL` at the team's shared backend. The `Render` test draws the real scene and needs a GPU,
+`--seed-incidents` schedules a known collision and signal fault in every session, beside the
+random ones. The incident end-to-end test decides the seeded collision, so without the flag it
+fails after waiting 60 seconds for it. Never point `FORMULA9_E2E_BACKEND_URL` at the team's shared backend. The `Render` test draws the real scene and needs a GPU,
 so it is skipped under `-nographics`; set `FORMULA9_RENDER_OUT` to a `.png` path to keep the
 image. `RouteWalkthrough`, in the same category, plays the routing exercise through the real UI in Play
 mode and keeps a picture and a log line per step in `FORMULA9_WALKTHROUGH_OUT`. It signs up
 throwaway users too, so it is skipped unless `FORMULA9_BACKEND_URL` is also set, at the isolated
-backend.
+backend. It decides the seeded incidents, so that backend must also run with `--seed-incidents`.
 
 The workflow tests also cover stale route graph replies, inclusive offer expiry ticks,
 lost approval replies, readiness payloads, and canonical mesh picks against the shared
