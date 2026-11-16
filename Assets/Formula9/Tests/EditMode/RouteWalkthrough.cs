@@ -14,8 +14,9 @@ using UnityEngine.UIElements;
 namespace Formula9.Tests
 {
     // Plays the routing exercise in the real scene, through the UI, and keeps a picture of each step
-    // to look at. Needs a GPU and the isolated backend: run without -nographics, with
-    // FORMULA9_BACKEND_URL at Tools/isolated_backend.py and FORMULA9_WALKTHROUGH_OUT at a folder.
+    // to look at. Needs a GPU and the isolated backend with its seeded incidents: run without
+    // -nographics, with FORMULA9_BACKEND_URL at `Tools/isolated_backend.py --seed-incidents` and
+    // FORMULA9_WALKTHROUGH_OUT at a folder.
     [Category("Render")]
     public class RouteWalkthrough
     {
@@ -116,27 +117,34 @@ namespace Formula9.Tests
                 Press("view-world");
                 Note("HUD back in 3D: " + root.Q("world-hud").style.display.value);
 
-                yield return Until(() => Text("world-hud").Contains("incident"), "the incident hold", 120);
+                // The seeded signal fault and collision each ask for a decision within seconds of the start
+                yield return Until(() => DecideButtons().Count > 0, "an incident to decide", 60);
                 Note("HUD: " + Text("world-hud"));
                 Note("Outcome during hold: " + Text("route-outcome-headline") + " | " + Text("route-outcome-notes"));
                 yield return Seconds(3);
                 Note("Outcome 3 s into the hold: " + Text("route-outcome-headline") + " | " + Text("route-outcome-notes"));
-                // The hold opened the map
-                Press("view-world");
+                // The incident leaves the view alone; a notification asks for a decision
                 yield return Shoot("3d-incident-hold");
-
-                var incidentNav = root.Q("nav-items").Query<Button>().ToList().First(b => b.Query<Label>().ToList().Any(l => l.text == "Incident Monitor"));
-                Press(incidentNav);
-                yield return Until(() => root.Q<DropdownField>("candidates").choices.Count > 0, "incident options");
-                var candidates = root.Q<DropdownField>("candidates");
-                Note("Options: " + string.Join(", ", candidates.choices));
-                candidates.value = candidates.choices.FirstOrDefault(c => c.ToUpperInvariant().Contains("WAIT")) ?? candidates.choices[0];
-                root.Q<TextField>("incident-reason").value = "Hold until the obstruction clears";
-                yield return Until(() => root.Q<Button>("incident-preview").enabledSelf, "incident preview enabled", 10);
-                yield return Shoot("incident-page");
-                Press("incident-preview");
-                yield return Until(() => root.Q<Button>("incident-approve").enabledSelf, "incident approve enabled");
-                Press("incident-approve");
+                yield return Until(() => DecideButtons().Count > 0, "the incident notification");
+                Press(DecideButtons()[0]);
+                yield return Until(() => root.Q("route-options").resolvedStyle.display == DisplayStyle.Flex, "the options");
+                Note("Problem: " + Text("route-problem"));
+                Note("Options: " + string.Join(", ", root.Q("route-options").Query<Button>().ToList().Where(b => b.name.StartsWith("option-") && b.resolvedStyle.display == DisplayStyle.Flex).Select(b => b.text)));
+                yield return Shoot("decision-card");
+                // Hold where the shuttle has a stop before the incident, else keep its route: the first shown and usable
+                var option = new[] { "option-hold", "option-keep" }.Select(n => root.Q<Button>(n))
+                    .FirstOrDefault(b => b.resolvedStyle.display == DisplayStyle.Flex && b.enabledInHierarchy);
+                Assert.IsNotNull(option, "Hold or Keep route offered");
+                // "Shuttle 04", from the picker's "Shuttle 04 · route-peer-d   ● needs a decision"
+                var decided = root.Q<DropdownField>("shuttles").value.Split('·')[0].Trim();
+                Press(option);
+                root.Q<TextField>("route-confirm-reason").value = "Hold until the obstruction clears";
+                yield return Until(() => root.Q<Button>("route-confirm-send").enabledSelf, "confirm enabled", 10);
+                Press("route-confirm-send");
+                // Applied, not just closed: the shuttle leaves the Needs a decision strip. (The panel may then
+                // move on by itself to another shuttle still waiting.)
+                yield return Until(() => !root.Q("route-pending-items").Query<Button>().ToList().Any(b => b.text.Contains(decided)), "the decision applied");
+                Note($"{decided} decided; still waiting: " + string.Join(", ", root.Q("route-pending-items").Query<Button>().ToList().Select(b => b.text)));
                 yield return Seconds(3);
                 Press(nav);
 
@@ -218,35 +226,34 @@ namespace Formula9.Tests
                 yield return Until(() => root.Q("world-hud")?.resolvedStyle.display == DisplayStyle.Flex, "the 3D status line");
 
                 var world = UnityEngine.Object.FindFirstObjectByType<WorldView>();
-                var workspaceIncident = root.Q<DropdownField>("incidents");
-                // A closure holding the shuttle opens the map, and only the 3D view has the incident's line
-                yield return Until(() => world.ShowingMap, "the first road block to open the map", 120);
+                var workspaceIncident = root.Q<DropdownField>("reports-incidents");
+                // The seeded collision ahead of Shuttles 02 and 04 shows a notification for each; the view
+                // stays in 3D. Shuttle 04 has a way round it: re-route it before it gets there.
+                yield return Until(() => DecideButton("Shuttle 04") != null, "Shuttle 04's notification", 60);
+                Press(DecideButton("Shuttle 04"));
+                yield return Until(() => root.Q<Button>("option-reroute").resolvedStyle.display == DisplayStyle.Flex && root.Q<Button>("option-reroute").enabledInHierarchy, "Re-route offered");
+                Press("option-reroute");
+                yield return Until(() => root.Q<Button>("route-suggest").enabledSelf, "the editor for the re-route");
+                Press("route-suggest");
+                yield return Until(() => root.Q<Button>("route-approve").enabledSelf, "approve enabled", 20);
+                Note("Verdict: " + Text("route-verdict"));
+                yield return Shoot("reroute-drawn");
+                Press("route-approve");
+                yield return Until(() => Text("route-problem").Contains("Decided for"), "the re-route applied");
+                Note("Problem: " + Text("route-problem"));
+                Press(nav);
                 Press("view-world");
-                yield return Until(() => Text("world-hud").Contains("Road block"), "the first road block");
+                yield return Until(() => Text("world-hud").Contains("Road") || Text("world-hud").Contains("Collision") || Text("world-hud").Contains("incident"), "the first incident on the status line");
                 Note("HUD: " + Text("world-hud"));
                 Note("Focus: " + world.FocusIncident(workspaceIncident.choices.Last()));
                 yield return Seconds(1);
-                yield return Shoot("block-start");
+                yield return Shoot("incident-start");
                 yield return Seconds(12);
-                yield return Shoot("block-12s");
+                yield return Shoot("incident-12s");
                 yield return Seconds(18);
                 Note("HUD: " + Text("world-hud"));
-                yield return Shoot("block-30s");
+                yield return Shoot("incident-30s");
 
-                // Go round it, so the session carries on to its random incidents
-                var incidentNav = root.Q("nav-items").Query<Button>().ToList().First(b => b.Query<Label>().ToList().Any(l => l.text == "Incident Monitor"));
-                Press(incidentNav);
-                yield return Until(() => root.Q<DropdownField>("candidates").choices.Count > 0, "incident options");
-                var candidates = root.Q<DropdownField>("candidates");
-                Note("Options: " + string.Join(", ", candidates.choices));
-                candidates.value = candidates.choices.First(c => c.ToUpperInvariant().Contains("DETOUR"));
-                root.Q<TextField>("incident-reason").value = "Go round the obstruction";
-                yield return Until(() => root.Q<Button>("incident-preview").enabledSelf, "incident preview enabled", 10);
-                Press("incident-preview");
-                yield return Until(() => root.Q<Button>("incident-approve").enabledSelf, "incident approve enabled");
-                Press("incident-approve");
-                yield return Seconds(3);
-                Press(nav);
 
                 var began = Time.realtimeSinceStartup;
                 var shownAccident = false; var sawSlow = false;
@@ -255,11 +262,12 @@ namespace Formula9.Tests
                     // The decision leaves the map up, and a later closure opens it again
                     if (world.ShowingMap) Press("view-world");
                     yield return Seconds(2);
-                    if (!shownAccident && Text("world-hud").Contains("Road accident"))
+                    // The seeded collision, or a random accident after it
+                    if (!shownAccident && (Text("world-hud").Contains("Road accident") || Text("world-hud").Contains("Collision")))
                     {
                         shownAccident = true;
                         Note("HUD: " + Text("world-hud"));
-                        var latest = workspaceIncident.choices.Last(c => c.Contains("accident"));
+                        var latest = workspaceIncident.choices.LastOrDefault(c => c.Contains("accident")) ?? workspaceIncident.choices.First(c => c.Contains("two-shuttles"));
                         Note("Focus: " + world.FocusIncident(latest));
                         yield return Seconds(1);
                         yield return Shoot("accident-start");
@@ -339,6 +347,13 @@ namespace Formula9.Tests
         }
 
         private void Press(string name) => Press(root.Q<Button>(name));
+
+        // The Decide buttons of the incident notifications showing now
+        private List<Button> DecideButtons() =>
+            root.Q("notifications").Query<Button>(className: "notification-decide").ToList();
+
+        // The Decide button for one shuttle ("Shuttle 04"), looked up when it is about to be pressed
+        private Button DecideButton(string shuttle) => DecideButtons().FirstOrDefault(b => b.text.EndsWith(shuttle));
 
         private void Press(Button button)
         {

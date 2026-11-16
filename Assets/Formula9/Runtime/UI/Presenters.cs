@@ -545,8 +545,8 @@ namespace Formula9.UI
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function describes an incident: what and where it is, its state, which
-        //     shuttles will reach it and when, and what was decided. The Reports page shows it
-        //     as it is; the Incident Monitor adds what is asked of the operator.
+        //     shuttles will reach it and when, and what was decided. Reports → Incidents shows it;
+        //     it asks nothing of the operator, whose decisions are made on Route Planning.
         //
         // Args:
         //     incident (Incident): The incident.
@@ -562,27 +562,6 @@ namespace Formula9.UI
             var owner = incident.VehicleId == null ? "It belongs to no shuttle. " : "";
             var decided = Responses(incident);
             return $"{name}{road} | {incident.State}\n{owner}{exposure}{(decided == null ? "" : $"\nDecided: {decided}.")}";
-        }
-
-        // -----------------------------------------------------------------------------------
-        // Function: IncidentSummary
-        // -----------------------------------------------------------------------------------
-        // Description:
-        //     This function describes the selected incident on the Incident Monitor, followed by
-        //     what is asked of the operator.
-        //
-        // Args:
-        //     incident (Incident): The incident.
-        //     hasOptions (bool): Whether it offers options to decide on.
-        //
-        // Returns:
-        //     string: The text.
-        public static string IncidentSummary(Incident incident, bool hasOptions)
-        {
-            var ask = hasOptions
-                ? "Decide for each shuttle that will reach it: keep its route, re-route it on the map, hold it at a stop before it, or request assistance (once, for every shuttle). Preview an option's consequences before approval; deciding before the shuttle gets there scores best."
-                : "No operator decision is required for this incident now. Shuttles that reach it meet its queue.";
-            return IncidentDescription(incident) + "\n" + ask;
         }
 
         // -----------------------------------------------------------------------------------

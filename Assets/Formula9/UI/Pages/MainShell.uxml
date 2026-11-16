@@ -2,7 +2,6 @@
     <ui:Template name="FleetOverview" src="project://database/Assets/Formula9/UI/Pages/FleetOverview.uxml" />
     <ui:Template name="RoutePlanning" src="project://database/Assets/Formula9/UI/Pages/RoutePlanning.uxml" />
     <ui:Template name="Charging" src="project://database/Assets/Formula9/UI/Pages/Charging.uxml" />
-    <ui:Template name="IncidentMonitor" src="project://database/Assets/Formula9/UI/Pages/IncidentMonitor.uxml" />
     <ui:Template name="Reports" src="project://database/Assets/Formula9/UI/Pages/Reports.uxml" />
     <ui:Template name="Scenarios" src="project://database/Assets/Formula9/UI/Pages/Scenarios.uxml" />
     <Style src="project://database/Assets/Formula9/UI/Formula9App.uss" />
@@ -21,7 +20,6 @@
             <ui:VisualElement name="nav-items" class="nav-items">
                 <ui:Button name="nav-fleet" class="nav-item" tooltip="Fleet Overview"><f9:Glyph kind="Bus" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Fleet Overview" picking-mode="Ignore" /></ui:Button>
                 <ui:Button name="nav-route" class="nav-item" tooltip="Route Planning"><f9:Glyph kind="Pin" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Route Planning" picking-mode="Ignore" /><ui:Label name="nav-route-badge" class="nav-badge" picking-mode="Ignore" style="display: none;" /></ui:Button>
-                <ui:Button name="nav-incident" class="nav-item" tooltip="Incident Monitor"><f9:Glyph kind="Warning" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Incident Monitor" picking-mode="Ignore" /></ui:Button>
                 <ui:Button name="nav-charging" class="nav-item" tooltip="Charging"><f9:Glyph kind="Plug" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Charging" picking-mode="Ignore" /></ui:Button>
                 <ui:Button name="nav-reports" class="nav-item" tooltip="Reports"><f9:Glyph kind="Document" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Reports" picking-mode="Ignore" /></ui:Button>
             </ui:VisualElement>
@@ -104,7 +102,6 @@
                         <ui:Instance template="FleetOverview" name="page-fleet" class="page-host" />
                         <ui:Instance template="RoutePlanning" name="page-route" class="page-host" style="display: none;" />
                         <ui:Instance template="Charging" name="page-charging" class="page-host" style="display: none;" />
-                        <ui:Instance template="IncidentMonitor" name="page-incident" class="page-host" style="display: none;" />
                         <ui:Instance template="Reports" name="page-reports" class="page-host" style="display: none;" />
                         <ui:Instance template="Scenarios" name="page-scenarios" class="page-host" style="display: none;" />
                     </ui:VisualElement>

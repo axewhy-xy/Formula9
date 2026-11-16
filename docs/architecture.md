@@ -86,7 +86,7 @@ flowchart LR
 ```
 
 - The client talks to the backend over plain HTTP. It does not use the WebSocket: snapshots are polled
-  once a second, and traffic frames are long-polled (section 6.5).
+  once a second, and traffic frames are long-polled (section 6.6).
 - The backend binds to loopback by default. `FORMULA9_BACKEND_URL` points the client somewhere else.
 - **Development:** `run.bat` (or `python Tools/run_backend.py`) runs the backend from `backend/.venv`,
   and the Unity Editor connects to it.
@@ -169,7 +169,7 @@ The integrated fixture (`backend/fixtures/m2_integrated.json`) is built by
   incident and battery decisions take that lock.
 - **Traffic frames:** the integrated actor steps its background traffic every two ticks. The service
   keeps the latest 30 frames in memory, and `GET …/traffic` returns up to one second of them
-  (section 6.5).
+  (section 6.6).
 - **Lifecycle:** the commands are `START`, `PAUSE`, `RESUME` and `ARCHIVE`. `ARCHIVE` ends an attempt,
   frees its slot and keeps its final snapshot, events and command receipts. `DELETE`, `purge` and
   `compact` remove old attempts and reclaim disk space (see
@@ -334,7 +334,7 @@ glTFast, Newtonsoft.Json and the Test Framework.
 | `Backend` | `HttpTransport`, `BackendClientBase`, `AuthClient`, `AuthSession`, `TrainingApi` (with `WorkflowApi` and `TrafficApi`), `CityClient`, `TransitClient`, `BackendEndpoint`, `BundledBackend` | HTTP access. Each failure is one of three exceptions: `BackendErrorException` (a full error reply), `NoReplyException` (the outcome is unknown, so the command must be confirmed, never re-created) or `NotLoggedInException`. The token is kept in memory only. |
 | `Contracts` | Generated models, `ContractParser`, `SchemaValidator`, `ContractRules` | Typed, validated contract objects |
 | `Session` | `SessionController`, `SessionStore`, `DecisionRules` | Creating, joining and polling a session; event replay; the command lifecycle; read-side checks on offers |
-| `UI` | `Formula9App`, `TrainingWorkspace`, `ChargingPage`, `ReportsPage`, presenters, `ReportFilter`, `LoginBackdrop` | Pages and their bindings. Presenters are plain static classes so they can be tested without a scene. |
+| `UI` | `Formula9App`, `TrainingWorkspace`, `ChargingPage`, `ReportsPage`, `IncidentReportsTab`, `NotificationQueue` and `NotificationStack`, presenters, `ReportFilter`, `LoginBackdrop` | Pages and their bindings. Presenters are plain static classes so they can be tested without a scene. |
 | `World` | `WorldView`, `FleetMap`, `CityView`, `WorldBuilder`, `SceneLoader`, `CityTrafficRenderer`, `CityIncidents`, `ShuttleMotion`, `ShuttleCameraRig`, `TrafficPlaybackClock`, `RoadMesh`, `CityMesh`, `LtaMappedRoadPaint`, `BusStopShelterFactory`, `Traffic/` | The 2D map, the 3D city, the scene-package world, interaction and cameras |
 | `Audio` | `AlertGate`, `TrainingAlerts`, `AlertPlayer`, `BatteryWatch`, `UiSounds`, `Preferences` | Training alerts, deduplicated by event ID; interface sounds; the Mute alerts preference |
 | `Editor/` | `SceneBuilder`, `PagesWindow`, `PlayerBuild` | Rebuilding the scene and panel settings, previewing and editing pages, batch player builds |
@@ -349,19 +349,46 @@ in `Assets/Formula9/UI/Pages`:
    list you can create, join or archive a session. Admin actions archive every live session, delete
    a finished one, delete all but the 20 newest finished ones, and reclaim disk space. `TrainingWorkspace` binds the workspace pages by control `name`:
    - **Fleet Overview:** fleet cards, the map or 3D view, follow and overview cameras.
-   - **Route Planning:** the detour exercise, in five steps: Problem, Detour, Check, Approve, Outcome.
+   - **Route Planning:** one shuttle at a time. Before the start, the detour exercise in five steps:
+     Problem, Detour, Check, Approve, Outcome. While running, the shuttle's incident decisions (see
+     6.3).
    - **Charging:** battery forecasts, charger occupancy, offers, bookings and the reserve-or-continue
      decision.
-   - **Incident Monitor:** incident options, hypothetical previews, history and debrief.
    - **Reports:** the latest 1,000 events and 200 commands this client has seen, with search and
-     filters.
+     filters, and an **Incidents** tab listing the session's incidents with each one's history
+     (replayed on a map, a sample at a time) and debrief.
    - **Scenarios:** a placeholder. A scenario is chosen when a session is created, and configuring
      scenarios is not built yet.
 
 Fleet Overview and Route Planning show the world view beside them. The other pages take the full
-width. Controls are found by `name`, so a page's layout can change in UI Builder without changing code.
+width. Controls are found by `name`, so a page's layout can change in UI Builder without changing code,
+and pages are looked up by name, so one left out of the layout moves no other.
 
-### 6.3 Session controller and store
+### 6.3 Incident decisions
+
+There is no Incident Monitor page any more: incidents are decided where the shuttle is planned
+([plan: issue 80](https://github.com/axewhy-xy/Formula9/issues/80)).
+
+- **Notifications:** `NotificationQueue` opens one notification per shuttle and incident when an
+  incident alert arrives (detected, another shuttle will reach it, options ready), and closes it
+  when that shuttle is decided for, its options are withdrawn or the incident ends. `NotificationStack`
+  shows the soonest three over the map's top-right corner, each with **Decide** and ×. Incident
+  alerts pass the same gate as their sounds, so muting and replays behave alike.
+- **Route Planning:** **Decide** opens it on that shuttle and frames the incident; it never changes
+  the page, the view or the cameras by itself. A **Needs a decision** strip lists every waiting
+  shuttle, soonest first, and the nav item shows how many. The Problem card says what the incident
+  is, where, when the shuttle reaches it and what keeping its route costs, with a countdown to the
+  options' expiry. `DecisionRules.PendingDecisions` works these out per shuttle from the snapshot.
+- **Options:** Keep route, Hold at a stop, Request assistance and Re-route on the map. One the
+  backend doesn't offer is greyed out with the reason (a signal fault can't be routed round). Each
+  opens a confirm row with a reason; Confirm looks the option's ID up again, so a reissued option
+  asks the operator to choose again instead of sending a stale one. Re-route opens the route editor
+  for that shuttle; approving its route sends the decision. Pausing or losing the connection
+  disables them, with a hint saying why.
+- **Review:** Reports → Incidents (`IncidentReportsTab`) describes each incident and what was
+  decided, without asking anything, and loads its History and Debrief.
+
+### 6.4 Session controller and store
 
 `SessionController` keeps one joined session in step with the backend:
 
@@ -378,7 +405,7 @@ width. Controls are found by `name`, so a page's layout can change in UI Builder
 `SessionStore` accepts only valid updates. It refuses older epochs, stale or reused snapshots and
 event gaps, and keeps the latest 1,000 events. The UI reads only from the store's accepted state.
 
-### 6.4 World views
+### 6.5 World views
 
 `WorldView` owns the world panel and picks what it shows from the snapshot:
 
@@ -409,7 +436,7 @@ Other parts of the world view:
 - **Culling:** traffic is culled against every active camera, so the shuttle cameras and the main view
   each draw only what they can see.
 
-### 6.5 Background traffic
+### 6.6 Background traffic
 
 The backend drives the traffic (section 4.4). The client only draws it:
 
@@ -425,7 +452,7 @@ The backend drives the traffic (section 4.4). The client only draws it:
 frames. Any change to how traffic drives is made in `backend/src/traffic/city_traffic.py` first. The
 snapshot, not the traffic frame, stays the authority on where a shuttle is along its route.
 
-### 6.6 Alerts and sounds
+### 6.7 Alerts and sounds
 
 `AlertGate` plays a sound only for the event keys listed in `contracts/v2/alert_cues.json`. Each event
 ID plays at most once, history never plays, and muting still marks events as seen. **Mute alerts** is

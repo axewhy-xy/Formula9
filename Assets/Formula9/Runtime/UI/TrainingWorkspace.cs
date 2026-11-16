@@ -6,8 +6,6 @@ using Formula9.Backend;
 using Formula9.Contracts;
 using Formula9.Session;
 using Formula9.World;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -24,17 +22,15 @@ namespace Formula9.UI
         private readonly List<VisualElement> pages = new List<VisualElement>();
         private readonly Dictionary<string, int> pageIndex = new Dictionary<string, int>();
         private readonly List<CommandOutcome> ledger = new List<CommandOutcome>();
-        private readonly DropdownField shuttles, incidents, candidates;
+        private readonly DropdownField shuttles;
         private readonly Dictionary<string, string> shuttleByChoice = new Dictionary<string, string>();
         private readonly VisualElement routePending, routePendingItems;
         private readonly Label routePendingTitle, routeBadge;
-        private readonly TextField routeReason, incidentReason;
-        private readonly Label routeProblem, routeOptionsExpiry, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes, incidentData, incidentReport, selection;
-        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowProblem, routeCameras, fleetCameras, approve, routeStart, routeWatch, previewIncident, approveIncident, rerouteIncident;
-        private readonly FleetMap evidenceMap;
+        private readonly TextField routeReason;
+        private readonly Label routeProblem, routeOptionsExpiry, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes, selection;
+        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowProblem, routeCameras, fleetCameras, approve, routeStart, routeWatch;
         private readonly VisualElement routeStages, routeWaypoints, routeIssues, routeMetrics, routeDecide, routeFeedback, routeApply, routeOutcomePanel, routeOutcomeRows, fleetTable;
         private readonly List<VisualElement> operationalViews;
-        private readonly Label evidenceStatus;
         private readonly ChargingPage charging;
         private readonly ReportsPage reports;
         private readonly IncidentReportsTab incidentReports;
@@ -42,16 +38,15 @@ namespace Formula9.UI
         private readonly VisualElement sessionCard;
         private bool? sessionToolsOpen;
         private string sessionToolsState;
-        private readonly VisualElement incidentTable, candidateTable;
         private readonly List<List<RouteWaypoint>> draftHistory = new List<List<RouteWaypoint>> { new List<RouteWaypoint>() };
         private List<RouteWaypoint> draft = new List<RouteWaypoint>();
         private int historyIndex;
-        private long draftRevision, checkedRevision = -1, requestGeneration, incidentGeneration;
-        private string dependencies, boundary, incidentBoundary, ledgerSession;
+        private long draftRevision, checkedRevision = -1, requestGeneration;
+        private string dependencies, boundary, ledgerSession;
         // The shuttle Route Planning is for, the route it drives now, the incident its detour would
         // answer, and the shuttles that were waiting for a decision at the last snapshot.
         private string selectedVehicle, route, selectedDetour, pendingSeen, pendingStrip;
-        private bool routeBusy, incidentBusy, reloadContext, previewQueued, suggesting, outcomeBusy;
+        private bool routeBusy, reloadContext, previewQueued, suggesting, outcomeBusy;
         private float acceptedAt, outcomeAt;
         private long outcomeSequence = -1;
         private RouteEditorContext context;
@@ -62,7 +57,6 @@ namespace Formula9.UI
         private const long PreviewSettleMs = 120;
         private const float OutcomeRefreshSeconds = 2;
         private const int MaxWaypoints = 16;
-        private DispatcherCommand incidentPreviewCommand;
         private (string Route, long BasedOn)? approvedDraft;  // route and revision of a submitted approval
 
         // The decision card: a button per option, and the confirm row of the one chosen. A choice is
@@ -81,8 +75,16 @@ namespace Formula9.UI
         private bool rerouting, awaitingError;
 
         private readonly List<Button> navButtons = new List<Button>();
-        public string SelectedIncident => incidents.value;
+        // The incident last picked on the map; the Fleet List marks the shuttles it concerns
+        public string SelectedIncident { get; private set; }
         public event Action IncidentSelected;
+        // Selecting, or clearing, the incident tells the Fleet List to mark its shuttles again
+        private void SelectIncident(string incidentId)
+        {
+            if (SelectedIncident == incidentId) return;
+            SelectedIncident = incidentId;
+            IncidentSelected?.Invoke();
+        }
         private const int MaxLedgerEntries = 200;
         public event Action <string> SectionChanged;
         // A page's index by its UXML name, or -1 when the layout leaves it out
@@ -93,14 +95,13 @@ namespace Formula9.UI
         private int ReportsPageIndex => Page("page-reports");
         private int ScenariosPageIndex => Page("page-scenarios");
         private int shownPage;
-        private readonly VisualElement incidentDecisions;
 
         public TrainingWorkspace(VisualElement root, TrainingApi api, SessionController session, WorldView world,
             Action<Task> run, Action<string> notify)
         {
             this.api = api; this.session = session; this.world = world; this.run = run;
             // The pages are laid out in UI/Pages/*.uxml; this binds their controls by name.
-            foreach (var (pageName, navName) in new[] { ("page-fleet", "nav-fleet"), ("page-route", "nav-route"), ("page-charging", "nav-charging"), ("page-incident", "nav-incident"), ("page-reports", "nav-reports"), ("page-scenarios", null) })
+            foreach (var (pageName, navName) in new[] { ("page-fleet", "nav-fleet"), ("page-route", "nav-route"), ("page-charging", "nav-charging"), ("page-reports", "nav-reports"), ("page-scenarios", null) })
             {
                 // A page the layout leaves out gets no index: its lookups give -1 and it is never shown
                 var page = root.Q(pageName);
@@ -177,41 +178,16 @@ namespace Formula9.UI
             sessionToggle = root.Q<Button>("session-toggle");
             sessionToggle.clicked += ToggleSessionTools;
 
-            incidentDecisions = root.Q("incident-decisions");
-            incidents = root.Q<DropdownField>("incidents");
-            incidents.RegisterValueChangedCallback(_ => { ClearIncidentPreview(); Render(); IncidentSelected?.Invoke(); });
-            incidentData = root.Q<Label>("incident-data");
-            incidentTable = Table(root.Q("incident-table-host"), "", "Incident ID", "Shuttle ID", "Reaches it", "State", "Decided", "Detected tick", "Options");
-            candidateTable = Table(root.Q("candidate-table-host"), "", "Candidate", "Shuttle", "Action", "Validation", "Expires tick", "Assumptions");
-            Bind(root, "incident-focus", FocusIncident);
-            rerouteIncident = Bind(root, "incident-reroute", () =>
-            {
-                var vehicle = RerouteVehicle(session.Store.Snapshot, incidents.value);
-                if (vehicle == null) return;
-                DecideFor(vehicle, incidents.value);
-                ChooseOption("ROAD_DETOUR");
-            });
-            candidates = root.Q<DropdownField>("candidates");
-            candidates.RegisterValueChangedCallback(_ => { ClearIncidentPreview(); UpdateActions(); });
-            incidentReason = root.Q<TextField>("incident-reason");
-            incidentReason.RegisterValueChangedCallback(_ => { ClearIncidentPreview(); UpdateActions(); });
-            previewIncident = Bind(root, "incident-preview", () => run(PreviewIncident()));
-            approveIncident = Bind(root, "incident-approve", () => run(ApproveIncident()));
-            incidentReport = root.Q<Label>("incident-report");
-            evidenceStatus = root.Q<Label>("evidence-status");
-            evidenceMap = root.Q<FleetMap>("incident-evidence-map");
-            world.UseRealMap(evidenceMap);
-
             reports = new ReportsPage(root);
             incidentReports = new IncidentReportsTab(root, api, session, world, run);
             session.SnapshotAccepted += (_, __) => { acceptedAt = Time.realtimeSinceStartup; Render(); };
             session.EventsAccepted += _ => RenderReports();
-            session.AvailabilityChanged += _ => { if (!session.Available) { InvalidateRoute(); ClearIncidentPreview(); } Render(); };
+            session.AvailabilityChanged += _ => { if (!session.Available) InvalidateRoute(); Render(); };
             session.CommandLedgerChanged += outcome =>
             {
                 ledger.RemoveAll(o => o.CommandId == outcome.CommandId); ledger.Add(outcome);
                 if (ledger.Count > MaxLedgerEntries) ledger.RemoveAt(0);
-                if (outcome.Status != "QUEUED" && outcome.Status != "PENDING_CONFIRMATION") { InvalidateRoute(); ClearIncidentPreview(); }
+                if (outcome.Status != "QUEUED" && outcome.Status != "PENDING_CONFIRMATION") InvalidateRoute();
                 if (outcome.CommandId != null && outcome.CommandId == confirmCommand) ConfirmOutcome(outcome);
                 RenderReports(); UpdateActions();
             };
@@ -243,9 +219,9 @@ namespace Formula9.UI
         }
 
         // Opens Route Planning on a shuttle's decision and frames the incident: from a notification's
-        // Decide, the Needs a decision strip, an incident's map marker and the Incident Monitor's
-        // re-route. Without an incident, the shuttle's soonest one. This is the operator's own choice,
-        // so it replaces any draft for another shuttle.
+        // Decide, the Needs a decision strip and an incident's map marker. Without an incident, the
+        // shuttle's soonest one. This is the operator's own choice, so it replaces any draft for another
+        // shuttle.
         public void DecideFor(string vehicleId, string incidentId = null)
         {
             var s = session.Store.Snapshot;
@@ -263,13 +239,13 @@ namespace Formula9.UI
         // An incident's map marker was clicked: decide for the first shuttle still waiting for a
         // decision about it, else the first that reaches it and was not decided for, else the shuttle
         // it concerns, whose Problem card describes it. An incident that concerns no shuttle is only
-        // framed. The incident is also selected, so the Fleet List and the Incident Monitor follow.
+        // framed. The incident is also selected, so the Fleet List follows.
         public void DecideForIncident(string incidentId)
         {
             var s = session.Store.Snapshot;
             var incident = s?.Incidents.FirstOrDefault(i => i.IncidentId == incidentId);
             if (incident == null) return;
-            incidents.value = incidentId;
+            SelectIncident(incidentId);
             var vehicle = DecisionRules.PendingDecisions(s).FirstOrDefault(d => d.IncidentId == incidentId)?.VehicleId ??
                           (incident.Exposures ?? new List<IncidentExposure>()).OrderBy(e => e.EtaS).FirstOrDefault(e => incident.ResponseOf(e.VehicleId) == null)?.VehicleId ??
                           incident.FocusVehicleId;
@@ -287,12 +263,13 @@ namespace Formula9.UI
                 boundary = currentBoundary; dependencies = null; context = null; requestGeneration++; approvedDraft = null;
                 selectedVehicle = route = selectedDetour = pendingSeen = pendingStrip = null;
                 choice = null; choiceCandidate = confirmCommand = optionsNote = null; rerouting = awaitingError = false;
+                // Incident IDs repeat across sessions, so another session's selection would mark the wrong one
+                SelectIncident(null);
                 if (ledgerSession != s?.SessionId) { ledger.Clear(); ledgerSession = s?.SessionId; }
                 charging.Reset();
-                routeReason.value = incidentReason.value = confirmReason.value = "";
+                routeReason.value = confirmReason.value = "";
                 draft = new List<RouteWaypoint>(); draftHistory.Clear(); draftHistory.Add(new List<RouteWaypoint>()); historyIndex = 0;
                 preview = null; draftView = null; outcome = null; outcomeSequence = -1; suggesting = false;
-                ClearIncidentPreview(); ClearEvidence(); incidentReport.text = "";
                 world.SetRouteDraft(null, null, null);
             }
             var setupState = s?.Session?.Status;
@@ -325,26 +302,11 @@ namespace Formula9.UI
             }
             RenderExercise(s);
             RefreshOutcome(s);
+            // An incident that has left the session is no longer selected
+            if (SelectedIncident != null && s.Incidents.All(i => i.IncidentId != SelectedIncident)) SelectIncident(null);
             Rows(fleetTable, TrainingPresenter.Fleet(s, SelectedIncident).Select(r => new[] { r.ShuttleId, r.State, r.Route, r.Battery, r.Provenance }));
             foreach (var row in fleetTable.Children()) { var id = ((Label)row[0]).text; row.RegisterCallback<ClickEvent>(_ => PickVehicle(id)); }
             charging.Render(s);
-            Choices(incidents, s.Incidents.Select(i => i.IncidentId));
-            var selectedIncident = s.Incidents.FirstOrDefault(i => i.IncidentId == incidents.value);
-            var newIncidentBoundary = selectedIncident == null ? null : $"{boundary}/{selectedIncident.IncidentId}/{selectedIncident.AggregateRevision}/" +
-                string.Join(";", s.Candidates.Where(c => c.IncidentId == selectedIncident.IncidentId).Select(c => $"{c.CandidateId}:{c.Revision}:{c.Validation}"));
-            if (incidentBoundary != newIncidentBoundary) { incidentBoundary = newIncidentBoundary; ClearIncidentPreview(); ClearEvidence(); incidentReport.text = ""; }
-            Choices(candidates, selectedIncident?.CandidateIds ?? Enumerable.Empty<string>());
-            var hasOptions = selectedIncident != null && selectedIncident.CandidateIds.Count > 0;
-            incidentData.text = selectedIncident == null ? "No incident selected." : TrainingPresenter.IncidentSummary(selectedIncident, hasOptions);
-            incidentDecisions.style.display = s.Incidents.Count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
-            rerouteIncident.style.display = RerouteVehicle(s, selectedIncident?.IncidentId) != null ? DisplayStyle.Flex : DisplayStyle.None;
-            candidates.style.display = hasOptions ? DisplayStyle.Flex : DisplayStyle.None;
-            incidentReason.style.display = hasOptions ? DisplayStyle.Flex : DisplayStyle.None;
-            previewIncident.style.display = hasOptions ? DisplayStyle.Flex : DisplayStyle.None;
-            approveIncident.style.display = hasOptions ? DisplayStyle.Flex : DisplayStyle.None;
-            Rows(incidentTable, s.Incidents.OrderBy(i => i.IncidentId, StringComparer.Ordinal).Select(i => new[] { i.IncidentId, i.VehicleId ?? "—", IncidentRecord.Reach(i.Exposures, 2) ?? "—", i.State, TrainingPresenter.Responses(i) ?? "—", i.DetectedTick.ToString(), string.Join(", ", i.CandidateIds) }));
-            foreach (var row in incidentTable.Children()) { var id = ((Label)row[0]).text; row.RegisterCallback<ClickEvent>(_ => incidents.value = id); }
-            Rows(candidateTable, s.Candidates.Where(c => c.IncidentId == incidents.value).Select(c => new[] { c.CandidateId, c.VehicleId ?? selectedIncident?.VehicleId ?? "—", TrainingPresenter.ActionLabel(c.Action), c.Validation, c.ExpiresAtTick.ToString(), string.Join("; ", c.Assumptions) }));
             RenderReports(); UpdateActions();
         }
 
@@ -389,11 +351,6 @@ namespace Formula9.UI
             fleetCameras.text = world.CamerasShown ? "Hide cameras" : "Cameras";
             fleetCameras.EnableInClassList("segment-selected", world.CamerasShown);
             charging.UpdateActions();
-            var candidate = s?.Candidates.FirstOrDefault(c => c.CandidateId == candidates.value && c.IncidentId == incidents.value);
-            var decision = Current && !incidentBusy && s?.Session.Status == "RUNNING" && candidate?.Validation == "PASS" && candidate.ExpiresAtTick >= s.Tick &&
-                s.Incidents.Any(i => i.IncidentId == incidents.value && i.State == "OPTIONS_READY") && !string.IsNullOrWhiteSpace(incidentReason.value);
-            previewIncident.SetEnabled(decision);
-            approveIncident.SetEnabled(decision && incidentPreviewCommand != null);
             // The decision card: usable while the session runs, is connected and is up to date
             var free = Current && confirmCommand == null;
             foreach (var option in options)
@@ -543,10 +500,6 @@ namespace Formula9.UI
             var button = routeBadge.parent;
             if (button != null && button.tooltip != hint) button.tooltip = hint;
         }
-
-        // The shuttle the Incident Monitor's re-route opens: the soonest whose detour answers this incident.
-        private static string RerouteVehicle(FullSnapshot s, string incidentId) => incidentId == null ? null :
-            DecisionRules.PendingVehicles(s).FirstOrDefault(v => DecisionRules.DetourCandidate(s, v)?.IncidentId == incidentId);
 
         private void InvalidateRoute()
         {
@@ -1049,68 +1002,7 @@ namespace Formula9.UI
             world.SetExecutionStatus(RoutePresenter.ExecutionLine(s, outcome));
         }
 
-        private void ClearIncidentPreview() { incidentPreviewCommand = null; incidentGeneration++; }
-
-        private async Task PreviewIncident()
-        {
-            if (!Current || incidentBusy) return;
-            var command = DecisionRules.IncidentCommand(session.Store.Snapshot, incidents.value, candidates.value, incidentReason.value);
-            var stamp = incidentBoundary;
-            incidentBusy = true; ClearIncidentPreview(); UpdateActions();
-            var generation = incidentGeneration;
-            try
-            {
-                var result = await api.PreviewIncidentAsync(command);
-                if (generation != incidentGeneration || stamp != incidentBoundary || candidates.value != (string)command.Payload["candidate_id"] || incidentReason.value.Trim() != command.Reason) return;
-                incidentPreviewCommand = command;
-                incidentReport.text = "HYPOTHETICAL SIMULATION · backend estimate\n" + result["camera_unavailable_reason"] + "\n" + FormatDocument(result["decision"]);
-                ClearEvidence();
-                evidenceMap.Show(ContractParser.Parse<FullSnapshot>(result["snapshot"].ToString()));
-                evidenceMap.style.display = DisplayStyle.Flex;
-                evidenceStatus.text = "Hypothetical branch · base tick " + result["base_tick"] + " · live fleet continues separately.";
-            }
-            finally { incidentBusy = false; UpdateActions(); }
-        }
-
-        private async Task ApproveIncident()
-        {
-            if (!Current || incidentPreviewCommand == null || incidentBusy) return;
-            // Recheck the live candidate before submitting the exact previewed command identity.
-            DecisionRules.IncidentCommand(session.Store.Snapshot, incidents.value, candidates.value, incidentReason.value);
-            var command = incidentPreviewCommand; ClearIncidentPreview();
-            if (await session.SubmitAsync(command)) await session.RefreshAsync();
-            UpdateActions();
-        }
-
-        private void FocusIncident()
-        {
-            var incident = session.Store.Snapshot?.Incidents.FirstOrDefault(i => i.IncidentId == incidents.value);
-            if (incident == null) return;
-            // A world event may belong to no shuttle: show the first to reach it
-            if (incident.FocusVehicleId != null) SelectVehicle(incident.FocusVehicleId);
-            if (!world.FocusIncident(incident.IncidentId)) world.FocusSelected();
-        }
-
-        private void ClearEvidence()
-        {
-            evidenceMap.Show(null);
-            evidenceMap.style.display = DisplayStyle.None;
-            evidenceStatus.text = "";
-        }
-
         private void RenderReports() => reports.Render(session.Store.SelectedSessionId, session.Store.Events, ledger);
-
-        // Human-readable nested fields preserve the backend's assumptions, evidence and rubric.
-        internal static string FormatDocument(JToken token, int depth = 0)
-        {
-            if (token == null) return "Unavailable";
-            if (token is JObject obj) return string.Join("\n", obj.Properties().Where(p => p.Name != "snapshots").Select(p =>
-                new string(' ', depth * 2) + p.Name.Replace('_', ' ') + ": " + (p.Value is JContainer ? "\n" : "") + FormatDocument(p.Value, depth + 1))) +
-                (obj["snapshots"] is JArray snapshots ? "\nHistory samples:\n" + string.Join("\n", snapshots.Select(s => $"tick {s["tick"]} · simulation time {s["simulation_time_s"]} s\n" +
-                    string.Join("\n", (s["vehicles"] as JArray ?? new JArray()).Select(v => $"  {v["vehicle_id"]}: {v["service_state"]} · {v["battery_kwh"]} kWh · position {v["position"]?.ToString(Formatting.None)}")))) : "");
-            if (token is JArray array) return string.Join("\n", array.Select(t => FormatDocument(t, depth)));
-            return token.Type == JTokenType.Null ? "Unavailable" : token.ToString();
-        }
 
         private void ToggleSessionTools()
         {

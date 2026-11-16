@@ -176,14 +176,13 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: IntegratedExerciseWaitsForADetourBeforeStarting
+        // Function: IntegratedExerciseStartsWithItsRoutesOpen
         // -----------------------------------------------------------------------------------
         // Description:
-        //     The integrated exercise opens with a shuttle on a closed road, and the backend
-        //     refuses START until a detour is approved. The client must predict that (Start
-        //     disabled) and, if sent anyway, report the refusal.
+        //     The integrated exercise opens with every route clear, so Start is offered and the
+        //     backend applies it straight away.
         [UnityTest]
-        public IEnumerator IntegratedExerciseWaitsForADetourBeforeStarting()
+        public IEnumerator IntegratedExerciseStartsWithItsRoutesOpen()
         {
             yield return SignUpAndLogIn();
             session.Scenario = SessionController.IntegratedScenario;
@@ -191,16 +190,9 @@ namespace Formula9.Tests
             Assert.IsTrue(session.Available, string.Join(" | ", errors));
             var snapshot = session.Store.Snapshot;
             Assert.AreEqual("READY", snapshot.Session.Status);
-            Assert.IsTrue(UI.TrainingPresenter.AssignedRouteIsClosed(snapshot));
-            Assert.IsFalse(UI.TrainingPresenter.Controls(snapshot, true, true).Start, "the UI keeps Start disabled");
-
-            var send = session.SendControlAsync("START");
-            yield return Await(send);
-            yield return PollUntil(() => outcomes.Any(o => o.Status != "QUEUED"), "the START outcome");
-            var outcome = outcomes.Last();
-            Assert.AreEqual("REJECTED", outcome.Status);
-            Assert.AreEqual("UNKNOWN_CONSTRAINT", outcome.FailureCode);
-            StringAssert.StartsWith("Can't start yet", UI.TrainingPresenter.Outcome(outcome));
+            Assert.IsFalse(UI.TrainingPresenter.AssignedRouteIsClosed(snapshot));
+            Assert.IsTrue(UI.TrainingPresenter.Controls(snapshot, true, true).Start, "the UI offers Start");
+            yield return Control("START", "RUNNING");
             yield return Control("ARCHIVE", "ARCHIVED");
         }
 
@@ -256,9 +248,10 @@ namespace Formula9.Tests
         // Function: IntegratedExerciseApprovesDetourChargingAndIncidentDecisions
         // -----------------------------------------------------------------------------------
         // Description:
-        //     The integrated exercise runs after a detour is approved, then a charger reservation
-        //     and an incident decision are applied, and the incident's history and debrief can be
-        //     read.
+        //     The integrated exercise runs after a detour is approved, then a charger reservation and
+        //     an incident decision are applied, and the incident's history and debrief can be read.
+        //     The incident is the collision the backend seeds (Tools/isolated_backend.py
+        //     --seed-incidents), decided before the shuttles reach it.
         [UnityTest]
         public IEnumerator IntegratedExerciseApprovesDetourChargingAndIncidentDecisions()
         {
@@ -281,17 +274,28 @@ namespace Formula9.Tests
             Assert.IsFalse(UI.TrainingPresenter.AssignedRouteIsClosed(session.Store.Snapshot));
             yield return Control("START", "RUNNING");
 
-            yield return PollUntil(() => session.Store.Snapshot.ChargeOptions.Any(o => o.Action == "CHARGE_NOW" && o.Validation == "PASS"), "charging offers");
-            s = session.Store.Snapshot;
-            var offer = s.ChargeOptions.First(o => o.Action == "CHARGE_NOW" && o.Validation == "PASS");
-            before = outcomes.Count;
-            yield return Await(session.SubmitAsync(DecisionRules.ChargeCommand(s, offer.OptionId, "Reserve a bay to preserve battery reserve")));
-            yield return PollUntil(() => outcomes.Skip(before).Any(o => o.Status == "APPLIED"), "charger reservation");
+            // A charging option is reissued as the forecasts move: one chosen from a snapshot that is already
+            // out of date is refused as stale, and is chosen again from a fresh one, as the app does
+            CommandOutcome reserved = null;
+            for (var attempt = 0; attempt < 3 && reserved?.Status != "APPLIED"; attempt++)
+            {
+                yield return PollUntil(() => session.Store.Snapshot.ChargeOptions.Any(o => o.Action == "CHARGE_NOW" && o.Validation == "PASS"), "charging offers");
+                s = session.Store.Snapshot;
+                var offer = s.ChargeOptions.First(o => o.Action == "CHARGE_NOW" && o.Validation == "PASS");
+                before = outcomes.Count;
+                yield return Await(session.SubmitAsync(DecisionRules.ChargeCommand(s, offer.OptionId, "Reserve a bay to preserve battery reserve")));
+                yield return PollUntil(() => outcomes.Skip(before).Any(o => o.Status != "QUEUED" && o.Status != "PENDING_CONFIRMATION"), "charger reservation");
+                reserved = outcomes.Skip(before).Last();
+                if (reserved.Status != "APPLIED") Assert.AreEqual("STALE_REVISION", reserved.FailureCode, $"charger reservation: {reserved.Status}; {string.Join(" | ", errors)}");
+            }
+            Assert.AreEqual("APPLIED", reserved.Status, "charger reservation, chosen afresh after each stale refusal");
 
-            yield return PollUntil(() => session.Store.Snapshot.Incidents.Any(i => i.State == "OPTIONS_READY"), "incident options", 45);
+            const string Seeded = "scheduled-two-shuttles";
+            bool KeepRoute(Candidate c) => c.IncidentId == Seeded && (c.Action == "KEEP_ROUTE" || c.Action == "WAIT") && c.Validation == "PASS";
+            yield return PollUntil(() => session.Store.Snapshot.Candidates.Any(KeepRoute), "the seeded collision's Keep route option (run the backend with --seed-incidents)", 60);
             s = session.Store.Snapshot;
-            var incident = s.Incidents.First(i => i.State == "OPTIONS_READY");
-            var candidate = s.Candidates.First(c => c.IncidentId == incident.IncidentId && c.Action == "WAIT" && c.Validation == "PASS");
+            var incident = s.Incidents.Single(i => i.IncidentId == Seeded);
+            var candidate = s.Candidates.First(KeepRoute);
             var command = DecisionRules.IncidentCommand(s, incident.IncidentId, candidate.CandidateId, "Hold safely until the obstruction clears");
             var branch = api.PreviewIncidentAsync(command); yield return Await(branch);
             Assert.IsTrue((bool)branch.Result["source"]["authored"]);

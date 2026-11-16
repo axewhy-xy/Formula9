@@ -633,7 +633,7 @@ namespace Formula9.World
                 foreach (var item in incidentMarkers)
                 {
                     var active = snapshot.Incidents.FirstOrDefault(i => i.IncidentId == item.Key);
-                    // A finished incident leaves the map; its record stays in the Incident Monitor
+                    // A finished incident leaves the map; its record stays in Reports → Incidents
                     if (active == null || IncidentEnded(active)) continue;
                     var at = Project(item.Value.Position.x, item.Value.Position.y);
                     var color = item.Value.Kind == "ROAD_ACCIDENT" ? ApprovedDetour : RoadClosed;
