@@ -406,7 +406,7 @@ namespace Formula9.World
                 foreach (var vehicle in snapshot.Vehicles.OrderBy(v => v.VehicleId == SelectedId ? 0 : 1).ThenBy(v => v.VehicleId, StringComparer.Ordinal))
                 {
                     var at = ShownAt(vehicle);
-                    var label = PlaceLabel(vehicle.VehicleId + (snapshot.Incidents.Any(i => i.VehicleId == vehicle.VehicleId && i.State != "RESOLVED") ? " !" : ""), at, LabelStyle.Below, DotOutline);
+                    var label = PlaceLabel(vehicle.VehicleId + (snapshot.Incidents.Any(i => i.Involves(vehicle.VehicleId) && i.State != "RESOLVED") ? " !" : ""), at, LabelStyle.Below, DotOutline);
                     if (label != null) vehicleLabels[vehicle.VehicleId] = (label, at);
                 }
                 foreach (var depot in snapshot.Depots) PlaceLabel(DepotName(depot.DepotId), Project(depot.Position.XM, depot.Position.YM), LabelStyle.Below, DepotColor);
@@ -633,7 +633,7 @@ namespace Formula9.World
                 foreach (var item in incidentMarkers)
                 {
                     var active = snapshot.Incidents.FirstOrDefault(i => i.IncidentId == item.Key);
-                    // A finished incident leaves the map; its record stays in the Incident Monitor
+                    // A finished incident leaves the map; its record stays in Reports → Incidents
                     if (active == null || IncidentEnded(active)) continue;
                     var at = Project(item.Value.Position.x, item.Value.Position.y);
                     var color = item.Value.Kind == "ROAD_ACCIDENT" ? ApprovedDetour : RoadClosed;
@@ -664,7 +664,7 @@ namespace Formula9.World
             for (var i = 0; i < ordered.Count; i++)
             {
                 var vehicle = ordered[i]; var at = ShownAt(vehicle);
-                if (!offline && snapshot.Incidents.Any(n => n.VehicleId == vehicle.VehicleId && n.State != "RESOLVED"))
+                if (!offline && snapshot.Incidents.Any(n => n.Involves(vehicle.VehicleId) && n.State != "RESOLVED"))
                 {
                     painter.strokeColor = new Color(RoadClosed.r, RoadClosed.g, RoadClosed.b, 1 - 0.6f * pulse); painter.lineWidth = 3;
                     painter.BeginPath(); painter.Arc(at, 10 + 8 * pulse, 0, 360); painter.Stroke();

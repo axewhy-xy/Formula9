@@ -25,6 +25,30 @@ def twin_id(edge_id: str) -> str:
     return f"{name}:{index}:{'reverse' if direction == 'forward' else 'forward'}"
 
 
+def road_fit(edge: dict, name: str, config: dict) -> tuple[str, str]:
+    """Whether a vehicle of config's size may use a road with this metadata (width_m, height_m, access),
+    and a sentence saying why; name is what the sentence calls the road."""
+    if edge["access"] == "closed_to_buses":
+        return DOES_NOT_FIT, f"{capitalised(name)} is closed to buses."
+    if edge["access"] == "destination_only":
+        return DOES_NOT_FIT, f"{capitalised(name)} is for local access only."
+    if any(key not in config for key in ("vehicle_width_m", "vehicle_height_m", "minimum_side_clearance_m")):
+        return FIT_UNKNOWN, f"The shuttle's size isn't on record, so it can't be cleared to use {name}."
+    problems = []
+    needed_width =float(config["vehicle_width_m"]) + 2 * float(config["minimum_side_clearance_m"])
+    if edge["width_m"] is None:
+        return FIT_UNKNOWN, f"No width is recorded for {name}, so the shuttle can't be cleared to use it."
+    if edge["width_m"] < needed_width:
+        problems.append(f"it is {edge['width_m']:.1f} m wide and the shuttle needs {needed_width:.1f} m")
+    if edge["height_m"] is None:
+        return FIT_UNKNOWN, f"No headroom is recorded for {name}, so the shuttle can't be cleared to pass under it."
+    if edge["height_m"] < float(config["vehicle_height_m"]):
+        problems.append(f"its height limit is {edge['height_m']:.1f} m and the shuttle is {float(config['vehicle_height_m']):.1f} m tall")
+    if problems:
+        return DOES_NOT_FIT, f"The shuttle doesn't fit on {name}: {' and '.join(problems)}."
+    return FITS, f"The shuttle fits on {name}."
+
+
 class OperatingNetwork:
     def __init__(self, fixture: dict):
         self.edges: dict[str, dict] = fixture["edges"]
@@ -43,26 +67,7 @@ class OperatingNetwork:
 
     def fit(self, edge_id: str, config: dict) -> tuple[str, str]:
         """Whether the vehicle may use this road, and a sentence saying why."""
-        edge, name = self.edges[edge_id], self.road_name(edge_id)
-        if edge["access"] == "closed_to_buses":
-            return DOES_NOT_FIT, f"{capitalised(name)} is closed to buses."
-        if edge["access"] == "destination_only":
-            return DOES_NOT_FIT, f"{capitalised(name)} is for local access only."
-        if any(key not in config for key in ("vehicle_width_m", "vehicle_height_m", "minimum_side_clearance_m")):
-            return FIT_UNKNOWN, f"The shuttle's size isn't on record, so it can't be cleared to use {name}."
-        problems = []
-        needed_width =float(config["vehicle_width_m"]) + 2 * float(config["minimum_side_clearance_m"])
-        if edge["width_m"] is None:
-            return FIT_UNKNOWN, f"No width is recorded for {name}, so the shuttle can't be cleared to use it."
-        if edge["width_m"] < needed_width:
-            problems.append(f"it is {edge['width_m']:.1f} m wide and the shuttle needs {needed_width:.1f} m")
-        if edge["height_m"] is None:
-            return FIT_UNKNOWN, f"No headroom is recorded for {name}, so the shuttle can't be cleared to pass under it."
-        if edge["height_m"] < float(config["vehicle_height_m"]):
-            problems.append(f"its height limit is {edge['height_m']:.1f} m and the shuttle is {float(config['vehicle_height_m']):.1f} m tall")
-        if problems:
-            return DOES_NOT_FIT, f"The shuttle doesn't fit on {name}: {' and '.join(problems)}."
-        return FITS, f"The shuttle fits on {name}."
+        return road_fit(self.edges[edge_id], self.road_name(edge_id), config)
 
     def fit_status(self, edge_id: str, config: dict) -> str:
         return self.fit(edge_id, config)[0]

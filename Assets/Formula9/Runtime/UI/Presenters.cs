@@ -320,14 +320,17 @@ namespace Formula9.UI
         //
         // Returns:
         //     bool: True when a detour must be approved first.
-        public static bool AssignedRouteIsClosed(FullSnapshot snapshot)
+        public static bool AssignedRouteIsClosed(FullSnapshot snapshot) => ClosedRouteVehicles(snapshot).Any();
+
+        // The shuttles whose own route crosses a road closed now, in snapshot order.
+        public static IEnumerable<string> ClosedRouteVehicles(FullSnapshot snapshot)
         {
             var closed = new HashSet<string>(snapshot.Disruptions
                 .Where(d => d.ActiveFromTick <= snapshot.Tick && (d.ActiveUntilTick == null || snapshot.Tick < d.ActiveUntilTick))
                 .SelectMany(d => d.AffectedEdgeIds));
             var routes = snapshot.Routes.ToDictionary(r => r.RouteId);
-            return snapshot.Vehicles.Any(v => v.RouteId != null && routes.TryGetValue(v.RouteId, out var route)
-                                              && route.DirectedEdgeIds.Any(closed.Contains));
+            return snapshot.Vehicles.Where(v => v.RouteId != null && routes.TryGetValue(v.RouteId, out var route)
+                                                && route.DirectedEdgeIds.Any(closed.Contains)).Select(v => v.VehicleId);
         }
 
         // -----------------------------------------------------------------------------------
@@ -497,9 +500,9 @@ namespace Formula9.UI
         // Function: IncidentLine
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function writes a line for a shuttle's open incidents: the selected incident
-        //     when it is on this shuttle, otherwise the most recent one, with a count of the
-        //     others.
+        //     This function writes a line for a shuttle's open incidents, those that name it or
+        //     that it will reach: the selected incident when it is one of them, otherwise the
+        //     most recent one, with a count of the others. One it will reach says when.
         //
         // Args:
         //     snapshot (FullSnapshot): The accepted snapshot.
@@ -510,13 +513,122 @@ namespace Formula9.UI
         //     string: The line, or null when the shuttle has no open incident.
         private static string IncidentLine(FullSnapshot snapshot, string vehicleId, string selected)
         {
-            var open = snapshot.Incidents.Where(i => i.VehicleId == vehicleId && i.State != "RESOLVED").ToList();
+            var open = snapshot.Incidents.Where(i => i.Involves(vehicleId) && i.State != "RESOLVED").ToList();
             if (open.Count == 0) return null;
             var shown = open.FirstOrDefault(i => i.IncidentId == selected) ?? open.OrderByDescending(i => i.DetectedTick).First();
             var state = shown.State.ToLowerInvariant().Replace('_', ' ');
             var text = $"! Incident {shown.IncidentId} · {char.ToUpperInvariant(state[0])}{state.Substring(1)}";
+            var reach = shown.ExposureOf(vehicleId);
+            if (reach != null) text += reach.EtaS < 0.5 ? " · reaching it now" : $" · reaches it in ~{Math.Round(reach.EtaS)} s";
             if (open.Count > 1) text += $" (+{open.Count - 1} more)";
             return shown.IncidentId == selected ? text + " · selected" : text;
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: IncidentName
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function names what an incident is, in capitals: "COLLISION", or the kind an
+        //     older backend's incident ID gives when it has no world event.
+        //
+        // Args:
+        //     incident (Incident): The incident.
+        //
+        // Returns:
+        //     string: The name.
+        public static string IncidentName(Incident incident) =>
+            World.IncidentRecord.Name(incident.EventType,
+                incident.IncidentId.Contains("road_accident") ? World.IncidentSimulation.Accident : World.IncidentSimulation.Block).ToUpperInvariant();
+
+        // -----------------------------------------------------------------------------------
+        // Function: IncidentDescription
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function describes an incident: what and where it is, its state, which
+        //     shuttles will reach it and when, and what was decided. Reports → Incidents shows it;
+        //     it asks nothing of the operator, whose decisions are made on Route Planning.
+        //
+        // Args:
+        //     incident (Incident): The incident.
+        //
+        // Returns:
+        //     string: The text.
+        public static string IncidentDescription(Incident incident)
+        {
+            var name = IncidentName(incident);
+            var road = incident.Location?.RoadName != null ? $" on {incident.Location.RoadName}" : "";
+            var reach = World.IncidentRecord.Reach(incident.Exposures, 5);
+            var exposure = reach == null ? "No shuttle reaches it before it clears." : $"Shuttles reaching it: {reach}.";
+            var owner = incident.VehicleId == null ? "It belongs to no shuttle. " : "";
+            var decided = Responses(incident);
+            return $"{name}{road} | {incident.State}\n{owner}{exposure}{(decided == null ? "" : $"\nDecided: {decided}.")}";
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: ActionLabel
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function names an incident option or decision for people.
+        //
+        // Args:
+        //     action (string): The contract's action.
+        //
+        // Returns:
+        //     string: Its name.
+        public static string ActionLabel(string action)
+        {
+            switch (action)
+            {
+                case "KEEP_ROUTE": case "WAIT": return "Keep route";
+                case "ROAD_DETOUR": return "Road detour";
+                case "ESCALATE": return "Request assistance";
+                case "HOLD_AT_STOP": return "Hold at stop";
+                case "NO_DECISION": return "No decision";
+                default: return action;
+            }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: Responses
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function lists what was decided for each shuttle about an incident: "shuttle-03
+        //     request assistance, shuttle-01 no decision (late)".
+        //
+        // Args:
+        //     incident (Incident): The incident.
+        //
+        // Returns:
+        //     string: The list, or null when nothing has been decided.
+        public static string Responses(Incident incident)
+        {
+            var responses = incident?.Responses ?? new List<IncidentResponse>();
+            if (responses.Count == 0) return null;
+            return string.Join(", ", responses.Select(r =>
+                $"{r.VehicleId} {ActionLabel(r.Action).ToLowerInvariant()}{(r.BeforeArrival || r.Action == "NO_DECISION" ? "" : " (late)")}"));
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: IncidentHeadline
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function words the message shown when an incident a shuttle will reach is
+        //     detected, or when another shuttle comes to be exposed to it. The backend writes the
+        //     headline; other events, and an incident nobody reaches, show nothing.
+        //
+        // Args:
+        //     e (Event): A live training event.
+        //
+        // Returns:
+        //     string: The message, or null for none.
+        public static string IncidentHeadline(Event e)
+        {
+            if (e?.EntityType != "INCIDENT" || e.Data == null) return null;
+            var headline = e.Data.Value<string>("headline");
+            if (string.IsNullOrEmpty(headline)) return null;
+            if (e.EventType == "INCIDENT_DETECTED" && e.Data.Value<bool?>("alert") == true) return headline;
+            if (e.EventType == "INCIDENT_EXPOSURE_CHANGED" && (e.Data["added_vehicle_ids"] as Newtonsoft.Json.Linq.JArray)?.Count > 0) return headline;
+            return null;
         }
 
         // -----------------------------------------------------------------------------------

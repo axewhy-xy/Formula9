@@ -85,7 +85,7 @@ def test_the_area_network_has_both_ways_of_two_way_roads_and_the_lights_stop_lin
         for approach in junction["approaches"]:
             for direction in (1, -1):
                 r = network.by_key.get(f"{approach['road']}|{direction}")
-                for at, offset, phase in (r.stops if r else ()):
+                for at, offset, phase, _ in (r.stops if r else ()):
                     x, y, tx, ty = r.sample(at, 0.0)
                     heading = math.radians(approach["heading_deg"])
                     assert tx * math.cos(heading) + ty * math.sin(heading) >= 0.5
@@ -272,6 +272,9 @@ def test_shuttles_queue_behind_the_traffic_and_never_run_a_red_or_touch_a_vehicl
     actor = IntegratedSessionActor(0, session_id="traffic-test")
     actor.is_paused = False
     actor.modes = {s.ID: "IN_SERVICE" for s in actor.shuttles}
+    # Only the lights and the traffic: an incident's closure or wreck stops a shuttle as long as it lasts
+    # (test_traffic_events)
+    actor.incident_due_tick = 10**12
     junctions = route_signals.junctions("toa-payoh")
     known, stalled, queued = {}, {s.ID: 0 for s in actor.shuttles}, 0
     distance = {s.ID: 0.0 for s in actor.shuttles}
@@ -291,7 +294,7 @@ def test_shuttles_queue_behind_the_traffic_and_never_run_a_red_or_touch_a_vehicl
             # Standing behind a car that is itself waiting at a red light: the queue the 3D view draws
             if moved == 0 and record.in_traffic and any(
                     any(signal_cycle.phase_state(actor.timestamp_second, o, p)["color"] != "green"
-                        and 0 <= at - (v.distance + v.half) < 30 for at, o, p in v.road.stops)
+                        and 0 <= at - (v.distance + v.half) < 30 for at, o, p, _ in v.road.stops)
                     for v in waiting_for):
                 queued += 1
     report = actor.traffic.report()
@@ -363,12 +366,12 @@ def test_a_recovered_session_drives_its_traffic_on_exactly(tmp_path, monkeypatch
             store.create_session(actor.generate_snapshot(), runtime_state=checkpoint(actor))
             service = TrainingSessionService(store)
             await service.initialize()
-            # The authored main road is closed: the shuttle needs an approved bypass before the start
+            # A pre-trip route approval for shuttle-01, then the start
             draft = actor.definition.routes.preview(store.snapshot(actor.session_id), RouteEditRequest(
-                route_id="route-m2-detour", expected_route_revision=1, draft_revision=1))
+                route_id="route-peer-a", expected_route_revision=1, draft_revision=1))
             approved = await service.approve_route("operator", actor.session_id, RouteApprovalRequest(
                 preview_id=draft.preview_id, preview_revision=draft.preview_revision, command_id="route",
-                idempotency_key="route", target_vehicle_ids=["shuttle-01"], reason="Pre-trip bypass"))
+                idempotency_key="route", target_vehicle_ids=["shuttle-01"], reason="Pre-trip route"))
             assert approved.status == "APPLIED"
             snapshot = store.snapshot(actor.session_id)
             start = await service.submit("operator", DispatcherCommand(contract_version="2.0", command_id="start",
@@ -397,12 +400,12 @@ def test_a_recovered_session_drives_its_traffic_on_exactly(tmp_path, monkeypatch
 
 
 async def _start(service, store, actor):
-    """Approves the bypass the closed main road needs and starts the session."""
+    """Approves a pre-trip route for shuttle-01 and starts the session."""
     draft = actor.definition.routes.preview(store.snapshot(actor.session_id), RouteEditRequest(
-        route_id="route-m2-detour", expected_route_revision=1, draft_revision=1))
+        route_id="route-peer-a", expected_route_revision=1, draft_revision=1))
     approved = await service.approve_route("operator", actor.session_id, RouteApprovalRequest(
         preview_id=draft.preview_id, preview_revision=draft.preview_revision, command_id="route",
-        idempotency_key="route", target_vehicle_ids=["shuttle-01"], reason="Pre-trip bypass"))
+        idempotency_key="route", target_vehicle_ids=["shuttle-01"], reason="Pre-trip route"))
     assert approved.status == "APPLIED"
     snapshot = store.snapshot(actor.session_id)
     start = await service.submit("operator", DispatcherCommand(contract_version="2.0", command_id="start",
@@ -641,10 +644,10 @@ async def _started(store, actor):
     service = TrainingSessionService(store)
     await service.initialize()
     draft = actor.definition.routes.preview(store.snapshot(actor.session_id), RouteEditRequest(
-        route_id="route-m2-detour", expected_route_revision=1, draft_revision=1))
+        route_id="route-peer-a", expected_route_revision=1, draft_revision=1))
     approved = await service.approve_route("operator", actor.session_id, RouteApprovalRequest(
         preview_id=draft.preview_id, preview_revision=draft.preview_revision, command_id="route",
-        idempotency_key="route", target_vehicle_ids=["shuttle-01"], reason="Pre-trip bypass"))
+        idempotency_key="route", target_vehicle_ids=["shuttle-01"], reason="Pre-trip route"))
     assert approved.status == "APPLIED"
     snapshot = store.snapshot(actor.session_id)
     start = await service.submit("operator", DispatcherCommand(contract_version="2.0", command_id="start",

@@ -1,10 +1,14 @@
-"""What a live incident closes to the background traffic: the scene on its road, and the queue backing up.
+"""What a live world event closes to the background traffic, and what it holds up.
 
-Ported from the Unity client's IncidentSimulation, which draws the same incident: a road block closes its
-whole road, an accident the stretch either side of the wrecks, both ways; and the queue grows back along
-the roads leading to it, at GROWTH_MPS up to REACH_M, one way. The background traffic keeps off all of
-it (src.traffic.city_traffic.CityTraffic.set_hazards), so it stops behind the queue the client draws, and
-a vehicle the queue reaches leaves the road: its place is one of the queue's own cars.
+A road block closes its whole road and an accident the stretch either side of the wrecks, both ways: the
+background traffic keeps off that scene (src.traffic.city_traffic.CityTraffic.set_hazards) from when the
+event starts until it clears (event_window). Nothing more is scripted: the traffic queues behind the scene
+(or behind a breakdown's pinned vehicle, or at a faulted junction's red lights) of its own accord.
+
+The queue the Unity client draws for a session without the backend's traffic grows back along the roads
+leading to the scene, at GROWTH_MPS up to REACH_M, one way (plan and hazards, ported from its
+IncidentSimulation). That fully grown queue is still each event's footprint: the stretches of road a
+shuttle meets it on, which the session's exposure check uses (footprint, signal_footprint).
 
 The roads are the session's operating network (the route editor's), by edge id, as the incident's map
 marker names them.
@@ -12,9 +16,15 @@ marker names them.
 
 from __future__ import annotations
 
+from src.traffic import route_signals
 from src.traffic.city_traffic import line_at, line_length
 
-BLOCK, ACCIDENT = "ROAD_BLOCK", "ROAD_ACCIDENT"
+BLOCK, ACCIDENT, SIGNAL_FAULT = "ROAD_BLOCK", "ROAD_ACCIDENT", "SIGNAL_FAULT"
+# A record that never triggers
+NEVER = 10**12
+# A signalled junction's approaches are looked for among the roads with a point this close to it
+JUNCTION_REACH_M = 250.0
+LEAVES_LINE_M = 1.0
 REACH_M, GROWTH_MPS = 140.0, 5.0
 # An accident's traffic stops this far short of the middle of its road
 WRECK_CLEAR_M = 12.0
@@ -45,11 +55,16 @@ class IncidentPlan:
         self.kind = kind
         self.road = road
         self.lanes: list[tuple[list[tuple[float, float]], float, float]] = []
+        # Where each lane lies on its road: (edge id, from m, to m) along the road the way it runs
+        self.spans: list[tuple[str, float, float]] = []
 
-    def add_lane(self, points: list[tuple[float, float]], start_m: float) -> None:
+    def add_lane(self, points: list[tuple[float, float]], start_m: float,
+                 span: tuple[str, float, float] | None = None) -> None:
         length = line_length(points)
         if length > 0.01:
             self.lanes.append((points, start_m, length))
+            if span is not None:
+                self.spans.append(span)
 
 
 def plan(kind: str, edge_id: str, edges: dict[str, dict], closed: set[str],
@@ -63,7 +78,7 @@ def plan(kind: str, edge_id: str, edges: dict[str, dict], closed: set[str],
     # A closure stops traffic where the road begins; an accident part way along it
     head = 0.0 if kind == BLOCK else max(0.0, length / 2 - WRECK_CLEAR_M)
     if head > 0:
-        result.add_lane(between(points, 0.0, head)[::-1], 0.0)
+        result.add_lane(between(points, 0.0, head)[::-1], 0.0, (edge_id, 0.0, head) if edge else None)
     if edge is None:
         return result
     # Breadth first up the roads whose traffic flows into this one, until the queue's reach runs out
@@ -85,7 +100,8 @@ def plan(kind: str, edge_id: str, edges: dict[str, dict], closed: set[str],
             seen.add(feeder_id)
             path = [tuple(p) for p in feeder["path"]]
             feeder_length = line_length(path)
-            result.add_lane(between(path, max(0.0, feeder_length - (REACH_M - start_m)), feeder_length)[::-1], start_m)
+            tail = max(0.0, feeder_length - (REACH_M - start_m))
+            result.add_lane(between(path, tail, feeder_length)[::-1], start_m, (feeder_id, tail, feeder_length))
             if start_m + feeder_length < REACH_M:
                 pending.append((feeder_id, start_m + feeder_length))
     return result
@@ -106,36 +122,94 @@ def hazards(incident: IncidentPlan, elapsed_s: float) -> list[tuple[list[tuple[f
     return found
 
 
-def live_hazards(selections: list[dict], snapshot, edges: dict[str, dict], step_s: float, tick: int) -> list:
-    """Every live incident's hazards at a tick, from the session's incident selections and its latest
-    snapshot, as the client's CityIncidents works them out from the incidents' events.
+def footprint(kind: str, edge_id: str, edges: dict[str, dict], closed: set[str]) -> tuple[tuple[str, float, float], ...]:
+    """Every stretch of road an incident on this edge holds up once its queue has fully formed: the
+    scene (a closed road whole; an accident's wrecks, both ways) and the queue's lanes, each as (edge id,
+    from m, to m) along that road the way it runs. A shuttle whose route crosses one of them meets it."""
+    edge = edges.get(edge_id)
+    if edge is None:
+        return ()
+    points = [tuple(p) for p in edge["path"]]
+    length = line_length(points)
+    found = list(plan(kind, edge_id, edges, closed, (points[0], points[-1])).spans)
+    if kind == BLOCK:
+        found.append((edge_id, 0.0, length))
+    else:
+        found.append((edge_id, max(0.0, length / 2 - SCENE_REACH_M), min(length, length / 2 + SCENE_REACH_M)))
+        # The wrecks reach across the road: its other direction passes the same scene
+        for other_id, other in edges.items():
+            if other["source"] == edge["target"] and other["target"] == edge["source"] and other_id != edge_id:
+                other_length = line_length([tuple(p) for p in other["path"]])
+                found.append((other_id, max(0.0, other_length / 2 - SCENE_REACH_M),
+                              min(other_length, other_length / 2 + SCENE_REACH_M)))
+    return tuple(found)
 
-    An incident is live from when it is detected. A road block lasts while its closure does (an
-    informational one until its time runs out); an accident until it is settled or its time runs out.
-    """
-    if not selections:
-        return []
-    closed = {edge for d in snapshot.disruptions if d.active_from_tick <= tick
-              and (d.active_until_tick is None or tick < d.active_until_tick) for edge in d.affected_edge_ids}
+
+def event_type(record: dict) -> str:
+    """The world event type of an incident record; one from before world events has its kind's."""
+    event = record.get("event") or {}
+    return event.get("event_type") or ("ROAD_CLOSURE" if record.get("kind") == BLOCK else "COLLISION")
+
+
+def event_window(record: dict, disruptions, incidents=()) -> tuple[int, int]:
+    """The ticks a world event is on the road: from when it starts, which may be before it is detected,
+    until it clears. A closure clears when its disruption ends, which an escalation may have brought
+    forward; anything else when its record says, or sooner when an escalation brought its incident's
+    clears_at_tick forward (incidents, the snapshot's)."""
+    trigger = record.get("trigger_tick", NEVER)
+    start = min((record.get("event") or {}).get("start_tick", trigger), trigger)
+    until = trigger + record.get("clear_after_ticks", 0)
+    closure = next((d for d in disruptions if d.disruption_id == record.get("disruption_id")), None)
+    if closure is not None and closure.active_until_tick is not None:
+        until = closure.active_until_tick
+    incident = next((i for i in incidents if i.incident_id == record.get("incident_id")), None)
+    if incident is not None and incident.clears_at_tick is not None:
+        until = min(until, incident.clears_at_tick)
+    return start, until
+
+
+def scene(kind: str, road: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """The stretch of an incident's road its scene covers: a closed road whole, an accident's wrecks."""
+    if kind == BLOCK:
+        return road
+    length = line_length(road)
+    return between(road, max(0.0, length / 2 - SCENE_REACH_M), min(length, length / 2 + SCENE_REACH_M))
+
+
+def live_hazards(records: list[dict], snapshot, edges: dict[str, dict], tick: int) -> list:
+    """Every live world event's scene at a tick, both ways, from the session's incident records and its
+    latest snapshot: what the background traffic keeps off. A breakdown has no scene, only its pinned
+    vehicle, and a signal fault only its red lights; no event has a drawn queue, since the traffic forms
+    its own behind the scene."""
     found = []
-    for selection in selections:
-        marker = selection.get("map_marker")
-        incident = next((i for i in snapshot.incidents if i.incident_id == selection.get("incident_id")), None)
-        if not marker or incident is None:
+    for record in records:
+        start, until = event_window(record, snapshot.disruptions, getattr(snapshot, "incidents", ()))
+        kind = record.get("kind")
+        if not start <= tick < until or kind not in (BLOCK, ACCIDENT) or event_type(record) == "BREAKDOWN":
             continue
-        edge_id = marker.get("edge_id") or ""
-        kind = selection.get("kind") or ""
-        until = None if selection.get("requires_guidance") else incident.detected_tick + selection.get("clear_after_ticks", 0)
-        closure = next((d for d in snapshot.disruptions
-                        if edge_id in d.affected_edge_ids and d.active_from_tick >= incident.detected_tick), None)
-        if kind == BLOCK:
-            clears = closure.active_until_tick if closure is not None and closure.active_until_tick is not None else until
-            live = tick < clears if clears is not None else closure is not None
+        marker = record.get("map_marker") or {}
+        edge = edges.get(marker.get("edge_id") or "")
+        if edge is not None:
+            road = [tuple(p) for p in edge["path"]]
         else:
-            live = incident.state not in ("RESOLVED", "UNRESOLVED") and (until is None or tick < until)
-        if not live:
-            continue
-        start, end = marker.get("start") or {}, marker.get("end") or {}
-        ends = ((start.get("x_m", 0.0), start.get("y_m", 0.0)), (end.get("x_m", 0.0), end.get("y_m", 0.0)))
-        found.extend(hazards(plan(kind, edge_id, edges, closed, ends), (tick - incident.detected_tick) * step_s))
+            ends = marker.get("start") or {}, marker.get("end") or {}
+            road = [(end.get("x_m", 0.0), end.get("y_m", 0.0)) for end in ends]
+        found.append((scene(kind, road), True))
     return found
+
+
+def signal_footprint(junction: dict, edges: dict[str, dict]) -> tuple[tuple[str, float, float], ...]:
+    """Every stretch of road a signal fault at this junction holds up: each operating-network edge that
+    crosses one of its stop lines, going its way, from REACH_M short of the line up to it, as (edge id,
+    from m, to m) along that road the way it runs."""
+    found = []
+    x, y = junction["x_m"], junction["y_m"]
+    for edge_id in sorted(edges):
+        path = [tuple(p) for p in edges[edge_id]["path"]]
+        if not any((px - x) ** 2 + (py - y) ** 2 <= JUNCTION_REACH_M ** 2 for px, py in path):
+            continue
+        for line in route_signals.stop_lines(path, [junction]):
+            # A line at the very start of a road is behind it: that road leaves the junction
+            if line.progress_m >= LEAVES_LINE_M:
+                found.append((edge_id, max(0.0, line.progress_m - REACH_M), line.progress_m))
+    return tuple(found)

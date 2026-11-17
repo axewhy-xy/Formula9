@@ -554,7 +554,11 @@ namespace Formula9.World
                     YellowS = (int)first.YL_duration,
                     AllRedS = (int)first.RL_duration,
                 });
-                if (traffic != null) TrafficLightManager.Instance.SetClock(() => traffic.SignalClockS);
+                if (traffic != null)
+                {
+                    TrafficLightManager.Instance.SetClock(() => traffic.SignalClockS);
+                    TrafficLightManager.Instance.SetFaults(junction => traffic.SignalFaulted(junction));
+                }
             }
 
             var trafficLightsContainer = new GameObject("TrafficLights");
@@ -950,6 +954,8 @@ namespace Formula9.World
                 else if (motion.Sample(pair.Key, now, out var position, out var rotation))
                     pair.Value.SetPositionAndRotation(position, rotation);
             }
+            // The backend's traffic queues behind an incident of its own accord: no queue is drawn over it
+            incidents.DrawQueues = !FollowsBackendTraffic;
             incidents.Tick(now, id => shuttles.TryGetValue(id, out var shuttle) ? shuttle : null);
         }
 

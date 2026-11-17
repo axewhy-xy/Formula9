@@ -241,7 +241,9 @@ def run(output: Path, *, ticks=None, validation_samples=None, reconnect_samples=
     if output.exists() and any(output.iterdir()):
         raise ValueError("Output directory must be new or empty; existing evidence is never overwritten")
     output.mkdir(parents=True, exist_ok=True)
-    trace = TrainingTrace(capacity=65536)
+    # Room for every span of the run: about 90 000 records, most of them per tick, while the low-battery
+    # shuttle's trip in to its charger is the longest phase
+    trace = TrainingTrace(capacity=131072)
     checks, integration = [], []
     database = output / "runtime.sqlite"
     previous_overrides = dict(app.dependency_overrides)
@@ -331,6 +333,11 @@ def run(output: Path, *, ticks=None, validation_samples=None, reconnect_samples=
     def write(name, value):
         (output/name).write_text(json.dumps(value, indent=2, sort_keys=True)+"\n", encoding="utf-8")
 
+    # The benchmark measures the hold at the scenario's tutorial road block on shuttle-01, which new
+    # sessions only open with when the scenario turns it on
+    opening = get_workflow_definition().incidents.simulated_catalog.policy["tutorial_opening"]
+    opening_enabled = opening["enabled"]
+    opening["enabled"] = True
     try:
         try:
             metadata = source_metadata()
@@ -354,18 +361,14 @@ def run(output: Path, *, ticks=None, validation_samples=None, reconnect_samples=
                     check("one_integrated_runtime", store.runtime_ids() == [session_id]
                           and len(app.state.training_services[store].sessions) == 1
                           and len(initial.vehicles) == 5 and len(initial.routes) == 5 and len(initial.chargers) == 4 and len(initial.depots) == 2)
-                    blocked = send(client, initial, command(initial, "START"))
-                    check("closed_route_prevents_start", blocked["status"] == "REJECTED"
-                          and store.snapshot(session_id).session.status == "READY")
-
                     for index in range(validation_samples):
                         preview = request(client, "POST", path+"/route-previews", json={
-                            "route_id": "route-m2-detour", "expected_route_revision": 1, "draft_revision": index+1})
+                            "route_id": "route-peer-a", "expected_route_revision": 1, "draft_revision": index+1})
                         check("curated_detour_validated", preview["approvable"] and preview["validation"] == "PASS")
                     approval = request(client, "POST", path+"/route-approvals", json={
                         "preview_id": preview["preview_id"], "preview_revision": preview["preview_revision"],
                         "command_id": uuid4().hex, "idempotency_key": "benchmark-route-approval",
-                        "reason": "Avoid the authored permanent closure", "target_vehicle_ids": ["shuttle-01"]})
+                        "reason": "Pre-trip route approval","target_vehicle_ids": ["shuttle-01"]})
                     check("route_approval_durable", approval["status"] == "APPLIED"
                           and store.snapshot(session_id).vehicles[0].route_revision == 2)
                     integration.append({"phase": "command", "command_type": "APPROVE_ROUTE",
@@ -393,11 +396,15 @@ def run(output: Path, *, ticks=None, validation_samples=None, reconnect_samples=
                     # Random incidents fire mid-route, so the hold is measured from detection.
                     held = wait_for(client, store, session_id, lambda s: any(a.position != b.position
                         for a, b in zip(s.vehicles[1:], detected.vehicles[1:])), "incident_hold_observed")
-                    check("incident_stops_only_affected_vehicle", detected.vehicles[0].service_state == "AWAITING_GUIDANCE"
-                          and held.vehicles[0].service_state == "AWAITING_GUIDANCE"
+                    # Without background traffic the affected shuttle is held where the incident was detected;
+                    # with it, it is not held there but drives on until the closure stops it
+                    holds = app.state.training_services[store].sessions[session_id].actor.traffic is None
+                    check("incident_stops_only_affected_vehicle", detected.vehicles[1].position != initial.vehicles[1].position
                           and detected.vehicles[0].position != initial.vehicles[0].position
-                          and held.vehicles[0].position == detected.vehicles[0].position
-                          and detected.vehicles[1].position != initial.vehicles[1].position)
+                          and (detected.vehicles[0].service_state == "AWAITING_GUIDANCE"
+                               and held.vehicles[0].service_state == "AWAITING_GUIDANCE"
+                               and held.vehicles[0].position == detected.vehicles[0].position if holds
+                               else held.vehicles[0].service_state != "AWAITING_GUIDANCE"))
                     check("depot_return_executes", detected.vehicles[4].service_state == "RETURNING_TO_DEPOT"
                           and detected.vehicles[4].position != initial.vehicles[4].position)
                     incident = detected.incidents[0]
@@ -407,7 +414,7 @@ def run(output: Path, *, ticks=None, validation_samples=None, reconnect_samples=
                     current = store.snapshot(session_id)
                     incident = current.incidents[0]
                     # WAIT would hold for the first random closure's full 300 s.
-                    option = next(c for c in current.candidates if c.action == "ESCALATE")
+                    option = next(c for c in current.candidates if c.action == "ESCALATE" and c.incident_id == incident.incident_id)
                     decision = command(current, "APPROVE_INCIDENT_OPTION", target_type="INCIDENT",
                         target_id=incident.incident_id, revision=incident.aggregate_revision,
                         payload={"candidate_id": option.candidate_id})
@@ -572,6 +579,8 @@ def run(output: Path, *, ticks=None, validation_samples=None, reconnect_samples=
         write("failure.json", {"diagnostic_status": "FAIL", "acceptance_status": "BLOCKED",
             "error_code": getattr(error, "code", type(error).__name__), "checks": checks})
         raise
+    finally:
+        opening["enabled"] = opening_enabled
 
 
 def main():

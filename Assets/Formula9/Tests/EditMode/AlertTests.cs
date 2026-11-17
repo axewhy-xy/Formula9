@@ -110,14 +110,14 @@ namespace Formula9.Tests
         // Function: EveryDefaultCueIsReachableAndCoversM2AttentionEvents
         // -----------------------------------------------------------------------------------
         // Description:
-        //     The default cue table is exactly the four M2 attention events, and each one plays its
-        //     cue.
+        //     The default cue table is exactly the M2 attention events, and each one plays its cue.
         [Test]
         public void EveryDefaultCueIsReachableAndCoversM2AttentionEvents()
         {
             var expected = new Dictionary<string, string>
             {
                 ["INCIDENT/OPTIONS_READY"] = "incident_alert",
+                ["INCIDENT/INCIDENT_DETECTED"] = "incident_alert",
                 ["COMMAND/COMMAND_REJECTED"] = "command_rejected",
                 ["COMMAND/COMMAND_NEEDS_RECONFIRMATION"] = "needs_reconfirmation",
                 ["SESSION/SESSION_RECOVERED"] = "session_recovered",
@@ -239,6 +239,39 @@ namespace Formula9.Tests
             alerts.OnEvents(replay.Events, true);
             alerts.OnEvents(replay.Events, true);
             CollectionAssert.AreEqual(new[] { "incident_alert" }, played);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: AnIncidentNoShuttleReachesStaysSilent
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A detected incident alerts only when the backend says a shuttle will reach it.
+        [Test]
+        public void AnIncidentNoShuttleReachesStaysSilent()
+        {
+            var gate = new AlertGate();
+            var quiet = E("q", "INCIDENT", "INCIDENT_DETECTED"); quiet.Data = new JObject { ["alert"] = false };
+            var loud = E("l", "INCIDENT", "INCIDENT_DETECTED"); loud.Data = new JObject { ["alert"] = true };
+            Assert.IsNull(gate.OnEvent(quiet, true));
+            Assert.AreEqual("incident_alert", gate.OnEvent(loud, true));
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: EachLiveEventIsReportedOnceEvenWhenMuted
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The screen hears of each live event once, muted or not, and never of history.
+        [Test]
+        public void EachLiveEventIsReportedOnceEvenWhenMuted()
+        {
+            var played = new List<string>();
+            var fresh = new List<string>();
+            var alerts = new TrainingAlerts(played.Add) { Muted = true, Fresh = e => fresh.Add(e.EventId) };
+            alerts.OnEvents(new[] { Incident("1") }, false);
+            alerts.OnEvents(new[] { Incident("1"), Incident("2") }, true);
+            alerts.OnEvents(new[] { Incident("2") }, true);
+            CollectionAssert.AreEqual(new[] { "1", "2" }, fresh);
+            Assert.IsEmpty(played);
         }
 
         // -----------------------------------------------------------------------------------

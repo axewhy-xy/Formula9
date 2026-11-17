@@ -12,9 +12,9 @@
   "step_s": 0.05,
   "history_ticks": 200,
   "maximum_history_gap_ticks": 2,
-  "reference_acceptable_actions": ["WAIT", "ESCALATE", "ROAD_DETOUR"],
-  "rubric_revision": "m2-incident-provisional-r1",
-  "rubric": {"safety_compliance": 40, "response_time": 20, "attempts": 10, "service_coverage": 20, "route_efficiency": 10},
+  "reference_acceptable_actions": ["KEEP_ROUTE", "ROAD_DETOUR", "ESCALATE", "HOLD_AT_STOP"],
+  "rubric_revision": "m2-incident-provisional-r2",
+  "rubric": {"safety_compliance": 40, "response_time": 20, "attempts": 10, "service_coverage": 20, "delay_avoided": 10},
   "full_time_credit_s": 30.0,
   "zero_time_credit_s": 60.0,
   "assumptions": [
@@ -22,8 +22,9 @@
     "The actor supplies a fixed 50 ms simulation clock and committed samples at least every 100 ms.",
     "The affected shuttle is at the curated route entrance when the obstruction is triggered.",
     "The obstruction clears ten simulated seconds after detection; simulated assistance clears it within five seconds of escalation.",
-    "All three responses are acceptable when current validation passes and all required stops remain served.",
-    "Response points use simulation time, excluding shared pauses; server wall time is recorded separately.",
+    "Each shuttle that will reach the incident may keep its route, take a validated road detour, hold at a stop before it, or (once per incident) request assistance; every option is acceptable when current validation passes and all required stops remain served.",
+    "Response points use simulation time, excluding shared pauses, and need the decision before the shuttle reaches the incident for full credit; server wall time is recorded separately.",
+    "Delay avoided compares each option's estimated delay with keeping the route: the queue's length at the speed in it, or the wait for the obstruction to clear. It is an estimate, not a simulated branch.",
     "Service and energy consequences are estimates from the road fixture; actual battery integration belongs to the energy actor.",
     "Local lane passing is unavailable; this fixture only validates road-network detours."
   ]

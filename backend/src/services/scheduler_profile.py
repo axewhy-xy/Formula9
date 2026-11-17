@@ -152,7 +152,7 @@ def actor_case(directory, trace, count, factory):
                                status=201, headers={"Idempotency-Key": "scheduler-profile"})
                 session_id = created["session_id"]
                 path = f"/api/v2/sessions/{session_id}"
-                preview = post(path+"/route-previews", {"route_id": "route-m2-detour",
+                preview = post(path+"/route-previews", {"route_id": "route-peer-a",
                     "expected_route_revision": 1, "draft_revision": 1})
                 approval = post(path+"/route-approvals", {"preview_id": preview["preview_id"],
                     "preview_revision": preview["preview_revision"], "command_id": uuid4().hex,

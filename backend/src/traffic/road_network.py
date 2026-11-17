@@ -115,8 +115,8 @@ class Road:
         self.length = along[-1]
         self.sx, self.sy = _unit(points[1][0] - points[0][0], points[1][1] - points[0][1])
         self.ex, self.ey = _unit(points[-1][0] - points[-2][0], points[-1][1] - points[-2][1])
-        # (metres along, junction offset, phase) of each light's stop line on it
-        self.stops: list[tuple[float, int, int]] = []
+        # (metres along, junction offset, phase, junction id) of each light's stop line on it
+        self.stops: list[tuple[float, int, int, str]] = []
         self.rank = class_rank(self.cls)
 
     def lane_offset(self, lane: int) -> float:
@@ -187,7 +187,7 @@ class RoadNetwork:
                     # The road's other way runs past the same place, and has no light here
                     if tx * travel[0] + ty * travel[1] < STOP_ALIGN:
                         continue
-                    road.stops.append((along, int(junction["offset_s"]), int(approach["phase"])))
+                    road.stops.append((along, int(junction["offset_s"]), int(approach["phase"]), str(junction["id"])))
         for road in self.roads:
             if road.stops:
                 road.rank += SIGNAL_RANK

@@ -287,7 +287,7 @@ class TrainingStore:
                 try:
                     state = json.loads(runtime["checkpoint_json"])
                     # Repair pre-trip attempts paused by earlier recovery code.
-                    pretrip = (state.get("version") == 3 and state.get("tick") == 0
+                    pretrip = (state.get("version") in (3, 4) and state.get("tick") == 0
                                and state.get("workflow", {}).get("domain", {}).get("session", {}).get("status") == "READY")
                 except (ValueError, TypeError, AttributeError):
                     # Private actor recovery will fail this attempt separately;

@@ -676,7 +676,7 @@
     white-space: normal;
 }
 
-/* Full-width pages: Route Planning, Incident Monitor, Charging, Reports, Scenarios */
+/* Full-width pages: Route Planning, Charging, Reports, Scenarios */
 .page-title { font-size: 22px; -unity-font-style: bold; margin-bottom: 10px; flex-shrink: 0; }
 .tabs { flex-direction: row; flex-shrink: 0; margin-bottom: 10px; }
 
@@ -741,6 +741,94 @@
 .route-stage-done { color: rgb(15, 76, 92); background-color: rgb(209, 232, 226); }
 .route-stage-current { color: rgb(255, 255, 255); -unity-font-style: bold; background-color: rgb(15, 76, 92); }
 
+/* Every shuttle waiting for a decision, soonest first; a click opens that shuttle. */
+.route-pending { flex-shrink: 0; flex-direction: row; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.route-pending-title { -unity-font-style: bold; margin-right: 8px; color: rgb(190, 42, 44); }
+.route-pending-items { flex-direction: row; flex-wrap: wrap; }
+.app Button.route-pending-item {
+    height: 26px;
+    margin: 0 6px 4px 0;
+    padding: 0 10px;
+    font-size: 12px;
+    border-radius: 13px;
+    border-color: rgb(214, 48, 49);
+    background-color: rgb(253, 236, 236);
+}
+.app Button.route-pending-item-selected { color: rgb(255, 255, 255); background-color: rgb(190, 42, 44); }
+
+/* Incident notifications: a stack over the map's top-right corner; right is set from code. */
+.notifications { position: absolute; top: 10px; right: 10px; width: 320px; max-width: 60%; }
+.notifications-list { flex-direction: column; }
+.notification {
+    flex-shrink: 0;
+    margin-bottom: 8px;
+    padding: 10px 12px 8px 12px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-left-width: 5px;
+    border-color: rgb(232, 196, 196);
+    border-left-color: rgb(214, 48, 49);
+    background-color: rgba(255, 255, 255, 0.97);
+}
+.notification-options { border-left-color: rgb(31, 122, 122); }
+.notification-tag { font-size: 11px; -unity-font-style: bold; color: rgb(190, 42, 44); margin: 0 0 2px 0; padding: 0; }
+.notification-options .notification-tag { color: rgb(15, 76, 92); }
+.notification-title { font-size: 14px; -unity-font-style: bold; white-space: normal; color: rgb(30, 42, 46); margin: 0; padding: 0; }
+.notification-body { font-size: 12px; white-space: normal; color: rgb(52, 70, 74); margin: 2px 0 0 0; padding: 0; }
+.notification-actions { flex-direction: row; justify-content: flex-end; align-items: center; margin-top: 6px; }
+.app Button.notification-decide {
+    height: 28px;
+    margin: 0 6px 0 0;
+    padding: 0 12px;
+    font-size: 12px;
+    -unity-font-style: bold;
+    color: rgb(255, 255, 255);
+    border-width: 0;
+    border-radius: 14px;
+    background-color: rgb(190, 42, 44);
+}
+.app Button.notification-decide:hover { background-color: rgb(160, 32, 34); }
+.app Button.notification-close {
+    width: 28px;
+    height: 28px;
+    margin: 0;
+    padding: 0;
+    font-size: 16px;
+    color: rgb(74, 93, 97);
+    border-width: 0;
+    border-radius: 14px;
+    background-color: rgba(0, 0, 0, 0);
+}
+.app Button.notification-close:hover { background-color: rgb(236, 240, 240); }
+.app Button.notification-more {
+    align-self: flex-end;
+    height: 26px;
+    margin: 0;
+    padding: 0 12px;
+    font-size: 12px;
+    border-radius: 13px;
+    border-color: rgb(214, 48, 49);
+    background-color: rgb(253, 236, 236);
+}
+
+/* How many shuttles need a decision, on the Route Planning nav item; it stays when the panel collapses. */
+.nav-item .nav-badge {
+    position: absolute;
+    right: 8px;
+    top: 12px;
+    min-width: 20px;
+    height: 20px;
+    margin: 0;
+    padding: 0 6px;
+    border-radius: 10px;
+    font-size: 11px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-center;
+    color: rgb(255, 255, 255);
+    background-color: rgb(214, 48, 49);
+}
+.nav-panel.collapsed .nav-item .nav-badge { display: flex; opacity: 1; right: 2px; top: 2px; min-width: 16px; height: 16px; padding: 0 4px; font-size: 10px; }
+
 .route-card {
     flex-shrink: 0;
     margin-bottom: 10px;
@@ -757,6 +845,24 @@
 .route-verdict-good { color: rgb(24, 122, 76); }
 .route-verdict-bad { color: rgb(190, 42, 44); }
 .app Button.route-link { align-self: flex-start; height: 26px; margin: 0; padding: 0 10px; font-size: 12px; }
+/* Show on map, and how long the shuttle's options stand, at the far end. */
+.route-problem-actions { flex-direction: row; align-items: center; min-height: 26px; }
+.route-options-expiry { flex-grow: 1; -unity-text-align: middle-right; font-size: 12px; color: rgb(110, 120, 120); }
+
+/* One button per option the backend offers the shuttle; one it does not offer is greyed out, with why as its tooltip. */
+.route-card-options { border-left-width: 4px; border-left-color: rgb(15, 76, 92); }
+.route-option-buttons { flex-direction: row; flex-wrap: wrap; flex-shrink: 0; margin-bottom: 4px; }
+.app Button.route-option { height: 32px; margin: 0 6px 6px 0; padding: 0 12px; }
+.app Button.route-option.segment-selected, .app Button.route-option.segment-selected:hover {
+    color: rgb(255, 255, 255);
+    background-color: rgb(15, 76, 92);
+    border-color: rgb(15, 76, 92);
+}
+.route-options-hint { font-size: 12px; color: rgb(110, 120, 120); }
+.route-confirm { flex-shrink: 0; margin-top: 4px; padding-top: 8px; border-top-width: 1px; border-top-color: rgb(220, 230, 230); }
+.route-confirm-note { margin-top: 4px; color: rgb(110, 120, 120); }
+.route-confirm-refused { color: rgb(190, 42, 44); }
+.route-decide-head { flex-direction: row; align-items: center; justify-content: space-between; }
 
 .route-waypoints { flex-shrink: 0; margin-bottom: 6px; }
 .route-waypoint { flex-direction: row; align-items: center; margin-bottom: 4px; }

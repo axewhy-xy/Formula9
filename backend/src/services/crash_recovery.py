@@ -108,10 +108,20 @@ def prepare(output, phases):
     from src.app import app
     from src.persistence.training_store import TrainingStore
     from src.services.training_benchmark import _ManualSessionService
-    from src.services.integrated_actor import SCENARIO_SELECTOR
+    from src.services.integrated_actor import SCENARIO_SELECTOR, IntegratedSessionActor, get_workflow_definition
 
     previous = dict(app.dependency_overrides)
     seeds = {}
+    # The drill holds its shuttle at the scenario's tutorial road block, which new sessions only open
+    # with when the scenario turns it on
+    opening = get_workflow_definition().incidents.simulated_catalog.policy["tutorial_opening"]
+    opening_enabled = opening["enabled"]
+    opening["enabled"] = True
+    # It holds the shuttle where the incident was detected, which a session does only without background
+    # traffic: with it, the shuttle drives on until the closure stops it. A restored session keeps the
+    # traffic its checkpoint has, none.
+    traffic = IntegratedSessionActor.TRAFFIC
+    IntegratedSessionActor.TRAFFIC = False
     try:
         with TrainingStore(output/"preparation.sqlite") as store:
             app.dependency_overrides[get_training_store] = lambda: store
@@ -151,7 +161,7 @@ def prepare(output, phases):
                     write(output/(phase.lower()+"-seed.json"), seeds[phase])
 
                 preview = request(client, "POST", path+"/route-previews", json={
-                    "route_id": "route-m2-detour", "expected_route_revision": 1, "draft_revision": 1})
+                    "route_id": "route-peer-a", "expected_route_revision": 1, "draft_revision": 1})
                 approval = {"preview_id": preview["preview_id"], "preview_revision": preview["preview_revision"],
                     "command_id": uuid4().hex, "idempotency_key": "crash-route",
                     "target_vehicle_ids": ["shuttle-01"], "reason": "Authored crash drill bypass"}
@@ -168,7 +178,7 @@ def prepare(output, phases):
                 client.portal.call(advance_until, lambda s: bool(s["incidents"]))
                 current = snapshot()
                 incident = current["incidents"][0]
-                candidate = next(c for c in current["candidates"] if c["action"] == "WAIT")
+                candidate = next(c for c in current["candidates"] if c["action"] == "KEEP_ROUTE" and c["incident_id"] == incident["incident_id"])
                 wait = command(current, "APPROVE_INCIDENT_OPTION")
                 wait.update(target_type="INCIDENT", target_id=incident["incident_id"],
                     expected_revision=incident["aggregate_revision"], payload={"candidate_id": candidate["candidate_id"]})
@@ -182,6 +192,8 @@ def prepare(output, phases):
                     client.portal.call(advance_until, lambda s: s["tick"] >= target_tick, 40)
                     save("CHARGING")
     finally:
+        opening["enabled"] = opening_enabled
+        IntegratedSessionActor.TRAFFIC = traffic
         app.dependency_overrides.clear()
         app.dependency_overrides.update(previous)
     return seeds

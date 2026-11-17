@@ -24,7 +24,8 @@ from src.core.training_telemetry import SessionProgress, boundary
 from src.schemas.shuttle_data import Shuttle
 from src.services.asset_loader import load_routes_from_json
 from src.services.session_actor import SessionActor
-from src.services.integrated_actor import IntegratedSessionActor, SCENARIO_SELECTOR, SIGNAL_AREA, get_workflow_definition
+from src.services.integrated_actor import (IntegratedSessionActor, SCENARIO_SELECTOR, SIGNAL_AREA, get_workflow_definition,
+                                            upgrade_v3_workflow)
 from src.services.training_workflow import approve_workflow_route, publish_workflow, submit_workflow
 from src.services.spatial_session_actor import MotionLimits, SpatialSessionActor
 from src.services.training_scene import SceneValidationError
@@ -138,8 +139,9 @@ def checkpoint(actor: SessionActor, *, traffic: bool = True) -> dict:
                      spatial_work=actor.spatial_work)
     elif isinstance(actor, IntegratedSessionActor):
         # The traffic goes in only when its own checkpoint is due (about once a second), and the store
-        # keeps it apart, so the publications in between leave out its 65-100 KB
-        state.update(version=3, workflow=actor.workflow_state(traffic=False))
+        # keeps it apart, so the publications in between leave out its 65-100 KB. Version 4 holds each
+        # incident's world event and the scenario timeline's place; version 3 is converted on restore.
+        state.update(version=4, workflow=actor.workflow_state(traffic=False))
         saved = actor.traffic_checkpoint() if traffic else None
         if saved is not None:
             state["traffic"] = saved
@@ -254,8 +256,11 @@ class TrainingSessionService:
     def _restore_session(snapshot: FullSnapshot, state: dict) -> LiveSession:
         if any(type(state[key]) is not int or state[key] < 0 for key in ("tick", "command_tick")):
             raise TrainingStoreError("CORRUPT_CHECKPOINT", "Actor clocks must be nonnegative integers")
-        if state["version"] == 3 and snapshot.spatial is None:
+        if state["version"] in (3, 4) and snapshot.spatial is None:
             actor = IntegratedSessionActor(seed=state["seed"], session_id=snapshot.session_id)
+            if state["version"] == 3:
+                state = {**state, "workflow": upgrade_v3_workflow(state["workflow"], state["tick"], actor.STEP_S,
+                                                                  actor.incident_catalog.timeline)}
         elif state["version"] == 2:
             actor = SpatialSessionActor(seed=state["seed"], session_id=snapshot.session_id,
                                         surface_ids=tuple(state["surface_ids"]), vehicle_ids=tuple(state["vehicle_ids"]),
@@ -584,6 +589,14 @@ class TrainingSessionService:
         if session.actor.traffic is None:
             raise TrainingStoreError("INVALID_REFERENCE", "This training session has no traffic")
         return session
+
+    def signal_state(self, session_id: str) -> dict:
+        """A live integrated session's traffic lights now, on its own clock, with the junctions a signal
+        fault has stuck on red: what its shuttles and its traffic obey, for a 3D view to draw."""
+        session = self.sessions.get(session_id)
+        if session is None or session.failed or not isinstance(session.actor, IntegratedSessionActor):
+            raise TrainingStoreError("INVALID_REFERENCE", "No live signals for this training session")
+        return {"session_id": session_id, **session.actor.signal_state()}
 
     def traffic(self, session_id: str, after_tick: int) -> list[str]:
         """The latest traffic frames of a live session after a tick, oldest first, as JSON: at most

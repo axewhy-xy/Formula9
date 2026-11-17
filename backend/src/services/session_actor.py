@@ -233,6 +233,16 @@ class SessionActor:
                 return True
         return False
 
+    def _gap_ahead(self, shuttle: Shuttle, other: Shuttle) -> float | None:
+        """How far along its path another shuttle is ahead of this one, which keeps its headway to it; None
+        when it is not on this one's path. Shuttles on one route follow one another round it."""
+        if other.route_ID != shuttle.route_ID:
+            return None
+        gap = shuttle.direction * (other.progress - shuttle.progress)
+        if self._is_closed(shuttle):
+            gap %= self._routes[shuttle.route_ID]["total_length"]
+        return gap
+
     def _resolve_motion(self, proposed: dict[int, float]) -> tuple[dict[int, float], set[int]]:
         """Gather every constraint; stopping one peer can only add restrictions."""
         blocked = set()
@@ -241,11 +251,9 @@ class SessionActor:
                 continue
             threshold = self.RELEASE_M if shuttle.state == ShuttleState.BLOCKED else self.HEADWAY_M
             for other in self.shuttles:
-                if other.ID == shuttle.ID or other.route_ID != shuttle.route_ID:
+                gap = self._gap_ahead(shuttle, other) if other.ID != shuttle.ID else None
+                if gap is None:
                     continue
-                gap = shuttle.direction * (other.progress - shuttle.progress)
-                if self._is_closed(shuttle):
-                    gap %= self._routes[shuttle.route_ID]["total_length"]
                 if 0 <= gap < threshold:
                     proposed[shuttle.ID] = shuttle.progress
                     blocked.add(shuttle.ID)

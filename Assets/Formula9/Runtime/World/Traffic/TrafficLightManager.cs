@@ -47,6 +47,8 @@ namespace Formula9
 
         private CitySignalTiming timing = new CitySignalTiming();
         private Func<double> clock = () => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+        // Whether a junction's lights are stuck on red by a signal fault the backend plays out
+        private Func<string, bool> faulted = _ => false;
 
         public void InitializeTiming(CitySignalTiming signalTiming)
         {
@@ -56,6 +58,9 @@ namespace Formula9
 
         // The lights show what traffic obeys, so they read the clock traffic runs on
         public void SetClock(Func<double> signalClock) => clock = signalClock;
+
+        // A faulted junction shows red on every light until its fault clears
+        public void SetFaults(Func<string, bool> signalFaulted) => faulted = signalFaulted ?? (_ => false);
 
         void Awake()
         {
@@ -99,7 +104,7 @@ namespace Formula9
                 registeredLights.RemoveAll(item => item.lightScript == null);
                 foreach (var item in registeredLights)
                 {
-                    var color = timing.ColorAt(currentTime, item.offsetS, item.phase);
+                    var color = faulted(item.junctionId) ? SignalColor.Red : timing.ColorAt(currentTime, item.offsetS, item.phase);
                     item.lightScript.OnLightStateChanged(color == SignalColor.Red, color == SignalColor.Yellow, color == SignalColor.Green);
                 }
 

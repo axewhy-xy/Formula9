@@ -14,6 +14,12 @@ in the kerb lane of the road its route runs along, its body as the bus model the
 vehicles keep clear of a shuttle, follow it, queue behind it at a light and give way to it where it gives
 way to them, as they did in the Unity client.
 
+World events play out in it (src.services.incident_scenarios.world_events): a breakdown or a collision
+pins vehicles dead in their lane (pin_vehicle), and a signal fault sticks a junction's lights on red
+(set_signal_fault). Nothing scripts the jam either causes: the traffic behind queues of its own accord,
+and a shuttle meets the queue as any vehicle does. The usual jam release still applies, except to the
+pinned vehicles themselves, which stay until their event clears.
+
 Everything is deterministic: the same session from the same state drives the same way, and state() and
 from_state() carry it through a checkpoint exactly. Unity's float arithmetic is not reproduced, so the
 two never ran in lockstep; the client now draws this traffic instead of driving its own.
@@ -89,6 +95,12 @@ SHUTTLE_FOLLOW_EXTRA_M, SHUTTLE_SWING_M = 4.0, 2.0
 TOUCH_M = 0.1
 # What stands in for "no limit" in a checkpoint, which JSON cannot hold as infinity
 NO_LIMIT = 1e9
+# A world event pins vehicles where it happens (pin_vehicle): one from its lane within this far of the
+# place stops there, else one comes from outside the area; a collision's second stands this close behind
+# the first
+PIN_PICK_M, PIN_TOUCH_M = 30.0, 0.3
+# A shuttle squeezes past a pinned vehicle beside its way, not in it, no faster than this
+PINNED_PASS_MPS = 2.5
 # One vehicle of a frame, little-endian: its index in the area's sample (uint16), x and y in centimetres
 # (int32), its heading in tenths of a degree anticlockwise from east (int16) and its speed in cm/s
 # (uint16). Packed, a frame of the whole sample is 14 bytes a vehicle, which the 3D view reads without
@@ -107,8 +119,11 @@ def krauss(speed: float, gap: float, leader_speed: float, reaction: float = REAC
     return max(0.0, leader_speed + (gap - leader_speed * reaction) / ((speed + leader_speed) / (2 * COMFORT_BRAKE) + reaction))
 
 
-def light(time_s: float, offset_s: int, phase: int) -> int:
-    """0 green, 1 yellow, 2 red: signal_cycle.phase_state's colour, without building a dict."""
+def light(time_s: float, offset_s: int, phase: int, fault_until_s: float | None = None) -> int:
+    """0 green, 1 yellow, 2 red: signal_cycle.phase_state's colour, without building a dict. A junction
+    faulted until fault_until_s is red until then."""
+    if fault_until_s is not None and time_s < fault_until_s:
+        return 2
     into = (time_s + offset_s - phase * _PHASE_S) % _CYCLE_S
     return 0 if into < _GREEN_S else 1 if into < _AMBER_S else 2
 
@@ -357,6 +372,12 @@ class CityTraffic:
         self.shuttles: dict[str, Shuttle] = {}
         # Road index -> (from, to) spans a hazard closes, in the order they were found
         self.hazards: dict[int, list[tuple[float, float]]] = {}
+        # World events played out in the traffic: the vehicles each pins where it happened (event key ->
+        # (their slots, when it clears)), and the junctions whose lights are stuck on red (junction id ->
+        # when it clears). Both clear on the traffic's own clock, so a checkpoint replays them exactly.
+        self.pins: dict[str, tuple[tuple[int, ...], float]] = {}
+        self.signal_faults: dict[str, float] = {}
+        self._pinned: set[int] = set()
         self.red_light_runs = 0
         self._claims_by_node: dict[int, list[Claim]] = {}
         self._lanes: dict[int, list[list[Vehicle]]] = {}
@@ -433,6 +454,7 @@ class CityTraffic:
         self._owns_vehicles = copy._owns_vehicles = False
         copy.shuttles = {key: shuttle.clone() for key, shuttle in self.shuttles.items()}
         copy.hazards = {road: spans[:] for road, spans in self.hazards.items()}
+        copy.pins, copy.signal_faults, copy._pinned = dict(self.pins), dict(self.signal_faults), set(self._pinned)
         copy._lanes, copy._filled, copy._requests, copy._asked, copy._look, copy._bodies = {}, [], {}, [], [], []
         # Keyed by the actor's own waypoint lists, which the same deepcopy copies: keep them the same objects
         copy._shuttle_routes = {key: (deepcopy(waypoints, memo), route)
@@ -467,6 +489,8 @@ class CityTraffic:
                           sorted(s.gives_way_to), s.wait_s, s.stops_within_m, int(s.in_traffic), s.aside,
                           s.target_aside, int(s.placed), s.along, s.route_sig] for s in self.shuttles.values()],
             "hazards": [[road, [list(span) for span in spans]] for road, spans in self.hazards.items()],
+            "pins": [[key, list(slots), until] for key, (slots, until) in self.pins.items()],
+            "signal_faults": [[junction, until] for junction, until in self.signal_faults.items()],
         }
 
     @classmethod
@@ -502,6 +526,14 @@ class CityTraffic:
                 float(aside), float(target_aside), bool(placed), float(along)
             shuttle.route_sig = route_sig
         traffic.hazards = {int(road): [tuple(span) for span in spans] for road, spans in state["hazards"]}
+        # A checkpoint from before world events were played out in the traffic has neither
+        count = len(traffic.vehicles)
+        for key, slots, until in state.get("pins", ()):
+            if not isinstance(key, str) or not all(type(slot) is int and 0 <= slot < count for slot in slots):
+                raise ValueError("Traffic checkpoint pins a vehicle it does not have")
+            traffic.pins[key] = (tuple(slots), float(until))
+            traffic._pinned.update(slots)
+        traffic.signal_faults = {str(junction): float(until) for junction, until in state.get("signal_faults", ())}
         return traffic
 
     # ---------------------------------------------------------------- hazards
@@ -547,6 +579,113 @@ class CityTraffic:
                     del vehicle.ahead[i:]
                     break
 
+    # ---------------------------------------------------------------- world events
+
+    def locate(self, points) -> tuple[Road, float] | None:
+        """The road under the middle of a line (an operating-network edge's path), running its way, and
+        how far along that road the middle is; None where no road of the traffic lies under it."""
+        if len(points) < 2:
+            return None
+        x, y, hx, hy = line_at(points, line_length(points) / 2)
+        road, _ = self.network.road_under(x, y, hx, hy, HAZARD_PARALLEL)
+        if road is None:
+            return None
+        return road, road.project(x, y)[1]
+
+    def pin_vehicle(self, key: str, road: Road, distance: float, lane: int, until_s: float, count: int = 1) -> bool:
+        """Stops count vehicles dead in a lane of a road, the first with its middle this far along and
+        each next one right behind it, until the traffic's clock reaches until_s: a breakdown (one) or a
+        collision (two). Whatever queues behind them does so of its own accord, and other lanes pass.
+
+        Each is the vehicle of that lane nearest its place, within PIN_PICK_M, else one waiting outside
+        the area, else the first free one of the sample; any other vehicle under it leaves the area. When
+        the event clears they are towed away: they leave the area, as a jammed vehicle does. Returns
+        whether the event's vehicles are pinned: False, to try again later, while a shuttle stands where
+        one would go. Pinning an event already pinned changes nothing."""
+        if key in self.pins:
+            return True
+        if until_s <= self.time_s or count < 1:
+            return False
+        self._own_vehicles()
+        self._fill_lanes()
+        lane = road.lane_from(lane)
+        queue = self._lane(road, lane)
+        chosen: list[Vehicle] = []
+        places: list[float] = []
+        front = min(max(distance, 0.0), road.length)
+        for _ in range(count):
+            taken = self._pinned.union(v.slot for v in chosen)
+            near = [v for v in queue if v.slot not in taken and abs(v.distance - front) <= PIN_PICK_M]
+            pick = min(near, key=lambda v: (abs(v.distance - front), v.slot)) if near else next(
+                (v for v in self.vehicles if v.outside and v.slot not in taken),
+                next((v for v in self.vehicles if v.slot not in taken), None))
+            if pick is None:
+                return False
+            if chosen:
+                front -= chosen[-1].half + PIN_TOUCH_M + pick.half
+            at = min(max(front, pick.half), road.length)
+            x, y, fx, fy = road.sample(at, road.lane_offset(lane))
+            for shuttle in self.shuttles.values():
+                if shuttle.placed and overlap(shuttle.x, shuttle.y, shuttle.fx, shuttle.fy, shuttle.half_length + MIN_GAP_M,
+                                              shuttle.half_width, x, y, fx, fy, pick.half, pick.half_width):
+                    return False
+            chosen.append(pick)
+            places.append(at)
+        for vehicle, at in zip(chosen, places):
+            self._release_all_claims(vehicle)
+            vehicle.ahead = []
+            vehicle.outside = False
+            vehicle.road, vehicle.lane, vehicle.distance = road, lane, at
+            vehicle.speed = vehicle.target_speed = vehicle.stopped_s = vehicle.wait_s = 0.0
+            vehicle.aside = vehicle.target_aside = 0.0
+            self._pose(vehicle)
+        slots = tuple(vehicle.slot for vehicle in chosen)
+        self.pins[key] = (slots, float(until_s))
+        self._pinned.update(slots)
+        # Nothing else stands where they now do
+        for vehicle in self.vehicles:
+            if not vehicle.placed or vehicle.slot in self._pinned:
+                continue
+            for pinned in chosen:
+                if (abs(vehicle.x - pinned.x) < SHUTTLE_BODY_REACH_M and abs(vehicle.y - pinned.y) < SHUTTLE_BODY_REACH_M
+                        and overlap(pinned.x, pinned.y, pinned.fx, pinned.fy, pinned.half + MIN_GAP_M / 2, pinned.half_width,
+                                    vehicle.x, vehicle.y, vehicle.fx, vehicle.fy, vehicle.half, vehicle.half_width)):
+                    self._enter(vehicle)
+                    self._pose(vehicle)
+                    break
+        return True
+
+    def pin_until(self, key: str, until_s: float) -> None:
+        """Moves when a pinned event clears, as when the operator's escalation brings help sooner."""
+        known = self.pins.get(key)
+        if known is not None and known[1] != until_s:
+            self.pins[key] = (known[0], float(until_s))
+
+    def set_signal_fault(self, junction_id: str, until_s: float) -> None:
+        """Sticks a junction's lights on red on every approach until the traffic's clock reaches until_s
+        (signal_cycle). Vehicles that hold the junction already drive on through it; the rest queue, and
+        the jam spills back as far as it goes. A later call moves when it clears."""
+        if until_s > self.time_s:
+            self.signal_faults[junction_id] = float(until_s)
+
+    def _clear_events(self) -> None:
+        """Ends the world events whose time is up: their pinned vehicles are towed away and their lights
+        work again."""
+        for key in [key for key, (_, until) in self.pins.items() if until <= self.time_s]:
+            slots, _ = self.pins.pop(key)
+            for slot in slots:
+                self._pinned.discard(slot)
+                vehicle = self.vehicles[slot]
+                if not vehicle.outside:
+                    self._enter(vehicle)
+        for junction in [junction for junction, until in self.signal_faults.items() if until <= self.time_s]:
+            del self.signal_faults[junction]
+
+    def _fault(self, junction: str) -> float | None:
+        """When a junction's fault clears, while its lights are stuck; else None."""
+        until = self.signal_faults.get(junction) if self.signal_faults else None
+        return until if until is not None and self.time_s < until else None
+
     # ---------------------------------------------------------------- driving
 
     def step(self, dt: float, time_s: float) -> None:
@@ -556,13 +695,17 @@ class CityTraffic:
         # The shuttles' bodies, which no vehicle drives or comes in on top of this step
         self._bodies = [(s.x, s.y, s.fx, s.fy, s.half_length, s.half_width) for s in self.shuttles.values() if s.placed]
         self._fill_lanes()
+        if self.pins or self.signal_faults:
+            self._clear_events()
+        # A pinned vehicle stands where its event happened, whatever closes the road around it
+        pinned = self._pinned
         for vehicle in self.vehicles:
-            if vehicle.outside or self._caught(vehicle):
+            if vehicle.outside or (self._caught(vehicle) and vehicle.slot not in pinned):
                 self._enter(vehicle)
         self._clear_shuttle_jams()
         self._fill_lanes()
         for vehicle in self.vehicles:
-            if vehicle.outside:
+            if vehicle.outside or (pinned and vehicle.slot in pinned):
                 continue
             self._release_claims(vehicle)
             self._plan_ahead(vehicle)
@@ -570,10 +713,14 @@ class CityTraffic:
         self._answer_junctions(dt)
         for vehicle in self.vehicles:
             if not vehicle.outside:
-                vehicle.target_speed = self._safe_speed(vehicle)
+                vehicle.target_speed = 0.0 if pinned and vehicle.slot in pinned else self._safe_speed(vehicle)
         for vehicle in self.vehicles:
-            if not vehicle.outside:
-                self._move(vehicle, dt)
+            if vehicle.outside:
+                continue
+            if pinned and vehicle.slot in pinned:
+                vehicle.speed = 0.0
+                continue
+            self._move(vehicle, dt)
         self._bodies = []
         for vehicle in self.vehicles:
             self._pose(vehicle)
@@ -673,19 +820,19 @@ class CityTraffic:
             self._claims_by_node[claim.node].remove(claim)
         vehicle.claims = []
 
-    def _must_stop(self, at: float, offset: int, phase: int, front_to_line: float, speed: float) -> bool:
+    def _must_stop(self, offset: int, phase: int, junction: str, front_to_line: float, speed: float) -> bool:
         """Whether a light tells a vehicle with its front this far short of its line to stop."""
         if front_to_line < -PAST_LINE_M:
             return False
-        colour = light(self.time_s, offset, phase)
+        colour = light(self.time_s, offset, phase, self._fault(junction) if self.signal_faults else None)
         if colour == 0:
             return False
         # Too close to stop for a yellow: carry on through it
         return colour == 2 or speed * speed / (2 * YELLOW_BRAKE) <= front_to_line
 
     def _light_holds(self, vehicle: Vehicle, road: Road, road_start: float) -> bool:
-        for at, offset, phase in road.stops:
-            if self._must_stop(at, offset, phase, road_start + at - vehicle.half, vehicle.speed):
+        for at, offset, phase, junction in road.stops:
+            if self._must_stop(offset, phase, junction, road_start + at - vehicle.half, vehicle.speed):
                 return True
         return False
 
@@ -825,8 +972,8 @@ class CityTraffic:
                 for start, _ in spans:
                     if road_start + start > 0:
                         limit = min(limit, krauss(speed, road_start + start - half - STOP_MARGIN_M, 0.0))
-            for at, offset, phase in road.stops:
-                if self._must_stop(at, offset, phase, road_start + at - half, speed):
+            for at, offset, phase, junction in road.stops:
+                if self._must_stop(offset, phase, junction, road_start + at - half, speed):
                     limit = min(limit, krauss(speed, road_start + at - half - STOP_MARGIN_M, 0.0))
             # On past any leader, which may turn off and leave this vehicle facing what lies beyond
             if i >= len(ahead):
@@ -921,9 +1068,10 @@ class CityTraffic:
             return
         before = vehicle.distance
         vehicle.distance += vehicle.speed * dt
-        for at, offset, phase in vehicle.road.stops:
+        for at, offset, phase, junction in vehicle.road.stops:
+            # A fault that struck too late to stop for, with no yellow first, is not running a red
             if (before + vehicle.half <= at < vehicle.distance + vehicle.half
-                    and light(self.time_s, offset, phase) == 2):
+                    and light(self.time_s, offset, phase) == 2 and not (self.signal_faults and self._fault(junction))):
                 self.red_light_runs += 1
         safety = 0
         while vehicle.distance > vehicle.road.length and safety < 6:
@@ -1000,20 +1148,22 @@ class CityTraffic:
 
     def _clear_shuttle_jams(self) -> None:
         """A shuttle kept waiting so long that what it waits for must be stuck has that traffic leave the
-        area, as a vehicle stuck in a jam does."""
+        area, as a vehicle stuck in a jam does. A vehicle a world event pinned is the event itself, not a
+        jam: it stays until the event clears, and the shuttle waits behind it (pin_vehicle)."""
+        pinned = self._pinned
         for shuttle in self.shuttles.values():
             if not shuttle.driven or shuttle.wait_s < SHUTTLE_GIVE_UP_S:
                 continue
             for slot in sorted(shuttle.gives_way_to):
                 vehicle = self.vehicles[slot]
-                if not vehicle.outside and vehicle.speed < STOPPED_MPS:
+                if not vehicle.outside and vehicle.speed < STOPPED_MPS and slot not in pinned:
                     self._enter(vehicle)
             # And whatever stands where its body would go next
             for _ in range(4):
                 if shuttle.route is None:
                     break
                 blocker = self.body_blocker(shuttle, shuttle.route, shuttle.along + SHUTTLE_LOOK_STEP_M)
-                if not isinstance(blocker, Vehicle) or blocker.speed >= STOPPED_MPS:
+                if not isinstance(blocker, Vehicle) or blocker.speed >= STOPPED_MPS or blocker.slot in pinned:
                     break
                 self._enter(blocker)
                 self._pose(blocker)
@@ -1066,6 +1216,7 @@ class CityTraffic:
                 break
             d = min(d + SHUTTLE_LOOK_STEP_M, look)
         stops_within = NO_LIMIT
+        pinned = self._pinned
         if len(points) >= 2:
             reach = look + SHUTTLE_LOOK_STEP_M + shuttle.half_length
             ox, oy = shuttle.x, shuttle.y
@@ -1089,6 +1240,12 @@ class CityTraffic:
                 if along_m <= 0:
                     continue
                 across = abs(facing_x * ty - facing_y * tx)
+                if pinned and vehicle.slot in pinned and side >= (shuttle.half_width + across * vehicle.half
+                                                                  + abs(alike) * vehicle.half_width + SHUTTLE_ONCOMING_ROOM_M):
+                    # A breakdown or a wreck beside its way, not in it: it squeezes past at a crawl
+                    to_it = max(0.0, along_m - vehicle.half - shuttle.half_length)
+                    plan.limit_mps = min(plan.limit_mps, math.sqrt(PINNED_PASS_MPS * PINNED_PASS_MPS + 2 * COMFORT_BRAKE * to_it))
+                    continue
                 room = SHUTTLE_ONCOMING_ROOM_M if alike < -0.5 else SHUTTLE_SIDE_ROOM_M
                 if side >= shuttle.half_width + across * vehicle.half + abs(alike) * vehicle.half_width + room:
                     continue
@@ -1337,6 +1494,9 @@ class CityTraffic:
             if not shuttle.placed:
                 continue
             for vehicle in self.vehicles:
+                # A pinned vehicle is a world event's: it stays where the event happened
+                if vehicle.slot in self._pinned:
+                    continue
                 if vehicle.placed and overlap(shuttle.x, shuttle.y, shuttle.fx, shuttle.fy, shuttle.half_length + MIN_GAP_M,
                                               shuttle.half_width + SHUTTLE_SIDE_ROOM_M, vehicle.x, vehicle.y, vehicle.fx,
                                               vehicle.fy, vehicle.half, vehicle.half_width):
