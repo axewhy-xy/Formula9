@@ -178,11 +178,10 @@ class LiveSession:
 class TrainingSessionService:
     MAX_SESSIONS = 16
     # Of those, sessions that drive the background traffic. Every session ticks on one core (the GIL),
-    # and one with traffic costs several times one without: some 5 ms of each 50 ms tick on a desktop
-    # (about 2.8 ms without traffic), so six running at once take about two thirds of a core and keep
-    # up. A slow laptop took 14.5 ms, so there fewer keep up: past a core, MAX_TICK_BACKLOG_S lets the
-    # missed ticks go. Recovery restores whatever was admitted; only new sessions are refused.
-    MAX_TRAFFIC_SESSIONS = 6
+    # and one with traffic costs several times one without. For local 3D testing we allow more live
+    # traffic sessions before forcing archive, so repeated test runs do not block on QUEUE_FULL.
+    # Recovery restores whatever was admitted; only new sessions are refused.
+    MAX_TRAFFIC_SESSIONS = 16
     FAILURE_RETRY_S = 0.25
 
     def __init__(self, store: TrainingStore, *, retention_keep_latest: int | None = None):
