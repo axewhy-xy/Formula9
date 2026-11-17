@@ -476,6 +476,101 @@ The full backend regression after the profiling additions passed **808 tests,
 with 4 skips**. Its JUnit result is `test-results.xml` beside the timer-profile
 summary. The new profiler's file header names **Nur Syazliyarni Binte Zazali**.
 
+## Multi-session scaling
+
+Every live session ticks, publishes and answers HTTP in the one backend process,
+so under the GIL they share about one core. This baseline (Phase 0 of the
+multi-core sessions plan) measures how many integrated sessions keep 1x on a
+machine and where each tick's time goes as the count grows. Run it from the
+repository root, with nothing else heavy running:
+
+```powershell
+$env:PYTHONPATH = 'backend;.'
+& .\backend\.venv\Scripts\python.exe -m src.services.session_scaling run --output .tools/scaling-baseline --traffic both --client both
+```
+
+For each session count (default 1, 2, 4, 6, 8, 12, 16) and each traffic/client
+mode, it starts a fresh Python process, as a server would be. Run in one long
+process, later cases inherited the heap and memory of earlier ones and measured
+slower than the same case run alone; `--in-process` keeps that mode for
+debugging only. The process creates that many integrated sessions in a fresh SQLite store, starts
+them, warms up for 5 s, then measures a window in which every session advances at
+least 600 ticks (`--ticks`). Shorter windows miss the first random incident at
+about tick 214. The admission caps (`MAX_SESSIONS`, `MAX_TRAFFIC_SESSIONS`) are
+raised for the case and restored afterwards. With `--client on`, one client polls
+one session's snapshot once a second and long-polls its traffic, as the Unity
+client does. That client runs in the same process, so its own work also takes
+GIL time, which makes client cases slightly pessimistic.
+
+`report.md` gives, per mode, the last session count at which every session kept
+1x (real-time factor ≥ 0.99) and the first at which one fell behind. Then, per
+case: the slowest and median session's real-time factor, tick lateness
+p50/p95/p99, missed deadlines, tick work per session tick (`tick.compute`,
+`snapshot.build`, `snapshot.commit` and `traffic.frame`; `snapshot.commit`
+includes waiting for the writer's fsync), process CPU in cores, the client's
+traffic frames per second (10 is 1x), the cost split by span with each span's
+share of one core, and request handling per route. `summary.json` has the same
+data plus per-session results, the case process's memory (which includes the
+in-memory trace, so it overstates the server's) and host details (physical
+cores, power source). `--keep-raw` also writes each case's trace records.
+
+Laptop timing can drift 2x between runs, so compare a change only with
+interleaved rounds. `ab` runs the sweep alternately on a clean copy of a git ref
+and on this checkout, each side in its own process with the same copy of the
+harness, reversing the order every round, and writes `ab-report.md` with
+medians and the work ratio:
+
+```powershell
+& .\backend\.venv\Scripts\python.exe -m src.services.session_scaling ab --output .tools/scaling-ab --baseline-ref HEAD --rounds 3 --sessions 1,4,8
+```
+
+Record the laptop plugged in and on battery separately; the manifest records the
+power source.
+
+### Local baseline, 17 November 2026
+
+One round, one process per case, on an Intel Core Ultra 5 125H laptop (14 cores,
+18 threads) on AC power, Windows 11, Python 3.12.10, source 62c5cdf plus this
+harness. Evidence: `.tools/scaling-baseline-20261117-isolated/`. Every case had
+zero trace loss.
+
+| Sessions | Traffic, client on | Traffic, client off | No traffic, client on | No traffic, client off |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 1.000 | 1.000 | 1.000 | 1.000 |
+| 2 | 0.999 | 0.999 | 1.000 | 1.000 |
+| 4 | **0.726** | **0.821** | 1.000 | 1.000 |
+| 6 | 0.457 | 0.504 | 0.999 | 1.000 |
+| 8 | 0.317 | 0.349 | 1.000 | **0.911** |
+| 12 | 0.180 | 0.199 | **0.708** | 0.536 |
+| 16 | 0.123 | 0.127 | 0.385 | 0.390 |
+
+Slowest session's real-time factor; bold is the first count below 0.99.
+
+- **With traffic only two sessions keep 1x on this machine.** The current
+  `MAX_TRAFFIC_SESSIONS = 6` admits sessions that run here at about 0.46x. A
+  session with traffic costs about 15 ms per tick: `tick.actor` about 9 ms, plus
+  every second tick about 3 ms to build and 5 ms to commit its snapshot. That is
+  about 2.8 times a session without traffic (about 5.4 ms, most of it publication).
+- **Past one core, everything waits on the writer.** Once process CPU reaches 1.0
+  core, `writer.transaction` is busy for the whole window and `snapshot.commit`
+  grows from 5 ms to 100–750 ms, because ticks queue for the one writer thread.
+  Its parsing and validation need the GIL that the ticks are holding. Phase 1.2
+  and 1.3 reduce this, and the gateway's single writer in Phase 2 must be sized
+  against it.
+- **Request handling is small.** One client's `/snapshot` polls took 4–6 ms
+  each at one session and 40–50 ms under load, at most about 5% of a core. The
+  client received exactly the slowed traffic frame rate (7.3 frames a second at
+  0.73x), which is the slow motion users see.
+- Lateness p95 stays at about 15 ms while sessions keep up (Windows timer
+  granularity, see Scheduler profiling) and is pinned at the 250 ms backlog
+  limit once they don't.
+
+The no-traffic counts at 8 differ between the client-on and client-off columns
+(1.00 against 0.91). A same-day run in one long process measured 0.84 for the
+same client-off case. That is within run-to-run variation on this laptop, so
+compare changes with `--rounds` or `ab`, not with one run. Desktop and
+battery-power baselines are not yet recorded.
+
 ## Process-crash recovery
 
 Run the isolated BE-M2-06 crash drill from the repository root:
