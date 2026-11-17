@@ -117,10 +117,11 @@ namespace Formula9.World
             var barDistances = new List<Vector2>();
             var layers = Enumerable.Range(0, LayerCount).Select(_ => new List<int>()).ToArray();
 
-            int AddVertex(Vector2 point, Vector4 lane = default, Vector4 bounds = default, Vector2 bars = default)
+            int AddVertex(Vector2 point, Vector4 lane = default, Vector4 bounds = default, Vector2 bars = default,
+                float height = SurfaceY)
             {
                 int index = vertices.Count;
-                vertices.Add(new Vector3(point.x, SurfaceY, point.y));
+                vertices.Add(new Vector3(point.x, height, point.y));
                 laneUV.Add(lane);
                 paintBounds.Add(bounds);
                 barDistances.Add(bars);
@@ -245,12 +246,14 @@ namespace Formula9.World
 
             foreach (var median in FindMedianStrips(paths))
             {
-                int layer = median.Width >= PlantingGapM ? GreenMedianLayer : ConcreteMedianLayer;
-                // The divider sits flush with the asphalt, above the ground tiles.
-                int a = AddVertex(median.A);
-                int b = AddVertex(median.B);
-                int c = AddVertex(median.C);
-                int d = AddVertex(median.D);
+                int layer = median.Width >= PlantingGapM ? GreenMedianLayer :
+                    median.Width >= ConcreteMedianGapM ? ConcreteMedianLayer : AsphaltLayer;
+                // A recessed strip can tuck under both road edges without fighting their paint.
+                const float medianSurfaceY = SurfaceY - 0.04f;
+                int a = AddVertex(median.A, height: medianSurfaceY);
+                int b = AddVertex(median.B, height: medianSurfaceY);
+                int c = AddVertex(median.C, height: medianSurfaceY);
+                int d = AddVertex(median.D, height: medianSurfaceY);
                 AddQuad(a, b, c, d, layer);
             }
 

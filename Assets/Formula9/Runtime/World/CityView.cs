@@ -235,32 +235,62 @@ namespace Formula9.World
                     throw new InvalidOperationException("Formula9/CityRoadAsh shader is unavailable.");
 
                 var grain = Own(AsphaltGrain());
-                var roadTexture = Resources.Load<Texture2D>("Formula9/Textures/road_lane_texture");
+                const string roadTextureFolder = "Formula9/Textures/";
+                var asphaltColorMap = LoadRoadTexture(roadTextureFolder + "asphalt_02", TextureWrapMode.Mirror);
+                if (asphaltColorMap != null) asphaltColorMap.anisoLevel = 16;
                 var textureShader = Shader.Find("Formula9/CityRoadTexture");
                 bool hasTextureShader = textureShader != null && textureShader.isSupported;
-                bool useAtlas = hasTextureShader && roadTexture != null;
+                bool useAsphaltMaps = asphaltColorMap != null;
+                var atlas = !useAsphaltMaps ? LoadRoadTexture(roadTextureFolder + "road_lane_texture") : null;
+                bool useAtlas = hasTextureShader && atlas != null;
                 if (!hasTextureShader)
                     Debug.LogWarning("[CityView] CityRoadTexture shader unavailable. " +
-                        "Using fallback ash-grey asphalt.");
-                if (roadTexture != null)
-                {
-                    roadTexture.wrapMode = TextureWrapMode.Repeat;
-                    roadTexture.filterMode = FilterMode.Bilinear;
-                    roadTexture.anisoLevel = 8;
-                }
+                        "Using the fallback road surface material.");
                 var materials = new Material[RoadMesh.LayerCount];
                 materials[RoadMesh.KerbLayer] = Own(new Material(surface) { name = "City kerbs", color = KerbColor, mainTexture = grain });
                 materials[RoadMesh.AsphaltLayer] = Own(new Material(hasTextureShader ? textureShader : surface)
                 {
                     name = "Ash-grey asphalt",
-                    color = useAtlas ? new Color(1.34f, 1.36f, 1.39f, 1f) : AsphaltColor,
-                    mainTexture = useAtlas ? roadTexture : grain
+                    color = useAsphaltMaps ? Color.white : useAtlas ? new Color(1.34f, 1.36f, 1.39f, 1f) : AsphaltColor,
+                    mainTexture = asphaltColorMap != null ? asphaltColorMap : useAtlas ? atlas : grain
                 });
                 if (hasTextureShader)
-                    materials[RoadMesh.AsphaltLayer].SetFloat("_UseRoadAtlas", useAtlas ? 1f : 0f);
+                {
+                    var asphalt = materials[RoadMesh.AsphaltLayer];
+                    asphalt.SetFloat("_UseRoadAtlas", useAtlas ? 1f : 0f);
+                    if (asphalt.HasProperty("_UseAsphaltMaps"))
+                    {
+                        asphalt.SetFloat("_UseAsphaltMaps", useAsphaltMaps ? 1f : 0f);
+                        if (useAsphaltMaps)
+                        {
+                            var sun = RenderSettings.sun;
+                            if (sun != null && sun.isActiveAndEnabled && sun.type == LightType.Directional &&
+                                asphalt.HasProperty("_AsphaltLightDirection"))
+                            {
+                                var directionToSun = -sun.transform.forward;
+                                asphalt.SetVector("_AsphaltLightDirection",
+                                    new Vector4(directionToSun.x, directionToSun.y, directionToSun.z, 0f));
+                            }
+                            var normalMap = LoadRoadTexture(roadTextureFolder + "asphalt_02_normal", TextureWrapMode.Mirror);
+                            var heightMap = LoadRoadTexture(roadTextureFolder + "asphalt_02_height", TextureWrapMode.Mirror);
+                            if (normalMap != null) asphalt.SetTexture("_BumpMap", normalMap);
+                            if (heightMap != null) asphalt.SetTexture("_HeightMap", heightMap);
+                            asphalt.SetFloat("_NormalStrength", normalMap != null ? 0.25f : 0f);
+                            asphalt.SetFloat("_HeightScale", heightMap != null ? 0.0005f : 0f);
+                        }
+                    }
+                    else if (useAsphaltMaps)
+                    {
+                        Debug.LogWarning("[CityView] Install the updated CityRoadTexture shader to enable asphalt detail maps.");
+                    }
+                }
 
                 materials[RoadMesh.MarkingLayer] = Own(new Material(surface)
                     { name = "Unused legacy paint submesh", color = Color.clear });
+                materials[RoadMesh.ConcreteMedianLayer] = Own(new Material(surface)
+                    { name = "Concrete road medians", color = new Color(0.52f, 0.51f, 0.48f), mainTexture = grain });
+                materials[RoadMesh.GreenMedianLayer] = Own(new Material(surface)
+                    { name = "Planted road medians", color = new Color(0.31f, 0.36f, 0.25f), mainTexture = grain });
                 materials[RoadMesh.KerbLayer].renderQueue = (int)RenderQueue.Geometry + 1;
                 materials[RoadMesh.AsphaltLayer].renderQueue = (int)RenderQueue.Geometry + 2;
 
@@ -284,10 +314,10 @@ namespace Formula9.World
                 renderer.sharedMaterials = materials;
                 renderer.shadowCastingMode = ShadowCastingMode.Off;
                 renderer.receiveShadows = false;
-                if (roadTexture == null)
-                    Debug.LogWarning("[CityView] Missing Resources/Formula9/Textures/road_lane_texture. Using generated asphalt grain.");
+                if (!useAsphaltMaps && !useAtlas)
+                    Debug.LogWarning("[CityView] No asphalt texture found. Using generated asphalt grain.");
                 Debug.Log($"[CityView] RoadMesh built {RoadCount} backend roads; " +
-                    $"asphalt triangles clipped={clippedTriangles}; originalTexture={useAtlas}");
+                    $"asphalt triangles clipped={clippedTriangles}; asphaltTexture={useAsphaltMaps}; originalTexture={useAtlas}");
 
             }
             catch (Exception error) when (!(error is OperationCanceledException))
@@ -554,11 +584,7 @@ namespace Formula9.World
                     YellowS = (int)first.YL_duration,
                     AllRedS = (int)first.RL_duration,
                 });
-                if (traffic != null)
-                {
-                    TrafficLightManager.Instance.SetClock(() => traffic.SignalClockS);
-                    TrafficLightManager.Instance.SetFaults(junction => traffic.SignalFaulted(junction));
-                }
+                if (traffic != null) TrafficLightManager.Instance.SetClock(() => traffic.SignalClockS);
             }
 
             var trafficLightsContainer = new GameObject("TrafficLights");
@@ -598,6 +624,16 @@ namespace Formula9.World
             Debug.LogWarning(filteredSignals.Count < signals.Count
             ? $"Successfully rendered {TrafficLightCount} unique traffic lights (filtered out {signals.Count - TrafficLightCount} duplicates)."
             : $"Successfully rendered {TrafficLightCount} traffic lights into the 3D map.");
+        }
+
+        private static Texture2D LoadRoadTexture(string path, TextureWrapMode wrap = TextureWrapMode.Repeat)
+        {
+            var texture = Resources.Load<Texture2D>(path);
+            if (texture == null) return null;
+            texture.wrapMode = wrap;
+            texture.filterMode = FilterMode.Trilinear;
+            texture.anisoLevel = 8;
+            return texture;
         }
 
         // Pale speckle that the road colours tint. Its mipmaps average out to flat colour far away.
@@ -954,8 +990,6 @@ namespace Formula9.World
                 else if (motion.Sample(pair.Key, now, out var position, out var rotation))
                     pair.Value.SetPositionAndRotation(position, rotation);
             }
-            // The backend's traffic queues behind an incident of its own accord: no queue is drawn over it
-            incidents.DrawQueues = !FollowsBackendTraffic;
             incidents.Tick(now, id => shuttles.TryGetValue(id, out var shuttle) ? shuttle : null);
         }
 

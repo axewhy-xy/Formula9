@@ -6,7 +6,9 @@ namespace Formula9.World
     public static partial class RoadMesh
     {
         private const float MedianStepM = 2f;
-        private const float MinMedianGapM = 0.45f;
+        private const float MinMedianGapM = 0.02f;
+        private const float ConcreteMedianGapM = 0.45f;
+        private const float MedianEdgeOverlapM = 0.08f;
         private const float MaxMedianGapM = 8f;
         private const float PlantingGapM = 2.5f;
 
@@ -174,12 +176,12 @@ namespace Formula9.World
                     candidate.Path.PaintLength - otherStation < MedianEndClearance(candidate.Path.Finish, candidate.Path))
                     continue;
 
-                // Leave a narrow clearance from both paved edges.
+                // Cover the join with a small overlap under both paved edges.
                 result = new MedianProbe
                 {
                     Opposite = candidate.Path,
-                    InnerEdge = inner + inward * .08f,
-                    OppositeEdge = inner + inward * (gap - .08f),
+                    InnerEdge = inner - inward * MedianEdgeOverlapM,
+                    OppositeEdge = inner + inward * (gap + MedianEdgeOverlapM),
                     Gap = gap
                 };
                 best = gap;
