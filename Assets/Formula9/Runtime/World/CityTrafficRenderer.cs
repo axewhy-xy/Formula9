@@ -180,27 +180,10 @@ namespace Formula9.World
                     if (built != null) made.Add(built);
                 }
             }
-            if (made.Count == 0 && modelId == "motorcycle" && catalog?.entries != null)
-            {
-                foreach (var proxy in catalog.entries.Where(e => e != null && e.modelId == "car" && e.prefab != null).Take(2))
-                {
-                    var standIn = new TrafficVehicleCatalog.Entry
-                    {
-                        modelId = "motorcycle",
-                        prefab = proxy.prefab,
-                        yawDegrees = proxy.yawDegrees,
-                        paintable = proxy.paintable,
-                        material = proxy.material,
-                    };
-                    var built = ModelRenderData.FromPrefab(standIn, Mathf.Max(1.8f, model.LengthM), CopyOf);
-                    if (built != null) made.Add(built);
-                }
-                if (made.Count > 0)
-                    Debug.LogWarning("No motorcycle prefab in TrafficVehicleCatalog; using scaled textured car stand-ins for motorcycles.");
-            }
             if (made.Count == 0)
             {
-                if (catalog != null)
+                // The project has no motorcycle asset, so its built shape is the intended one.
+                if (catalog != null && modelId != "motorcycle")
                     Debug.LogWarning("No imported vehicle for '" + modelId + "', so that traffic is still a plain block.");
                 made.Add(ModelRenderData.FromMesh(BuildMesh(modelId, model), blockMaterial));
             }

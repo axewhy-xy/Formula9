@@ -13,6 +13,7 @@ from datetime import datetime
 import hashlib
 import json
 import logging
+import os
 import sqlite3
 from typing import Any, TypeVar
 from uuid import uuid4
@@ -52,6 +53,17 @@ TRAFFIC_REPLY_FRAMES = 10
 MAX_TICK_BACKLOG_S = 0.25
 # Fixed English month names, so the id does not depend on the server's locale.
 _MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
+
+
+def _int_env(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+        return parsed if parsed > 0 else default
+    except ValueError:
+        return default
 
 
 def readable_session_id(scenario_revision_id: str, number: int, when: datetime | None = None) -> str:
@@ -178,10 +190,12 @@ class LiveSession:
 class TrainingSessionService:
     MAX_SESSIONS = 16
     # Of those, sessions that drive the background traffic. Every session ticks on one core (the GIL),
-    # and one with traffic costs several times one without. For local 3D testing we allow more live
-    # traffic sessions before forcing archive, so repeated test runs do not block on QUEUE_FULL.
-    # Recovery restores whatever was admitted; only new sessions are refused.
-    MAX_TRAFFIC_SESSIONS = 16
+    # and one with traffic costs several times one without: some 5 ms of each 50 ms tick on a desktop
+    # (about 2.8 ms without traffic), so six running at once take about two thirds of a core and keep
+    # up. A slow laptop took 14.5 ms, so there fewer keep up: past a core, MAX_TICK_BACKLOG_S lets the
+    # missed ticks go. Recovery restores whatever was admitted; only new sessions are refused. Local
+    # experiments can raise this with FORMULA9_MAX_TRAFFIC_SESSIONS without changing source defaults.
+    MAX_TRAFFIC_SESSIONS = _int_env("FORMULA9_MAX_TRAFFIC_SESSIONS", 6)
     FAILURE_RETRY_S = 0.25
 
     def __init__(self, store: TrainingStore, *, retention_keep_latest: int | None = None):
