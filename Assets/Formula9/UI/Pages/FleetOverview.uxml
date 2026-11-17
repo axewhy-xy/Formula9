@@ -1,6 +1,6 @@
 <ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:f9="Formula9.World" xmlns:f9ui="Formula9.UI">
     <Style src="project://database/Assets/Formula9/UI/Formula9App.uss" />
-    <ui:VisualElement class="workspace-page fleet-overview-container">
+    <ui:VisualElement name="fleet-panel" class="workspace-page fleet-overview-container">
         <ui:VisualElement class="row fleet-panel-header" style="justify-content: space-between; align-items: center; margin-bottom: 8px;">
             <ui:VisualElement style="flex-direction: row; align-items: center;">
                 <ui:Button name="fleet-toggle-btn" class="fleet-toggle-btn" tooltip="Toggle Fleet Panel">
@@ -14,6 +14,15 @@
                 <ui:Button name="fleet-cameras" text="Cameras" style="height: 30px; font-size: 11px; margin-right: 4px;" />
                 <ui:Button name="camera-overview" text="Overview" style="height: 30px; font-size: 11px; margin-right: 0;" />
             </ui:VisualElement>
+        </ui:VisualElement>
+        <ui:VisualElement name="fleet-table-header" class="fleet-table-header" style="display: none;">
+            <ui:VisualElement class="fleet-th-icon" />
+            <ui:Label text="Shuttle" class="fleet-th fleet-col fleet-col-id" />
+            <ui:Label text="Status" class="fleet-th fleet-col fleet-col-status" />
+            <ui:Label text="Battery" class="fleet-th fleet-col fleet-col-battery" />
+            <ui:Label text="Route / next stop" class="fleet-th fleet-col fleet-col-route" />
+            <ui:Label text="ETA" class="fleet-th fleet-col fleet-col-eta" />
+            <ui:Label text="Incident" class="fleet-th fleet-col fleet-col-incident" />
         </ui:VisualElement>
         <ui:ScrollView name="fleet" class="fleet" />
         <ui:VisualElement name="fleet-empty" class="fleet-empty">

@@ -59,7 +59,7 @@ namespace Formula9.UI
 
         private VisualElement loginScreen, trainingScreen, fleet, confirmRow, fleetPanel, sessionPlayback;
         private TextField fleetSearch;
-        private VisualElement fleetEmpty;
+        private VisualElement fleetEmpty, fleetHeader;
         private Label fleetTitle;
         private Toggle remember;
         private Button viewMap, viewWorld;
@@ -389,6 +389,7 @@ namespace Formula9.UI
             fleetPanel = root.Q("fleet-panel");
             fleetTitle = root.Q<Label>("fleet-title");
             fleetEmpty = root.Q("fleet-empty");
+            fleetHeader = root.Q("fleet-table-header");
             fleet.style.display = DisplayStyle.None;
             fleetSearch = root.Q<TextField>("fleet-search");
             fleetSearch.textEdition.placeholder = "Search shuttle…";
@@ -461,16 +462,34 @@ namespace Formula9.UI
                 isCollapsed = !isCollapsed;
                 navPanel?.EnableInClassList("collapsed", isCollapsed);
             };
-            //toggle fleet
+            // toggle fleet
             var fleetToggleBtn = root.Q<Button>("fleet-toggle-btn");
-            fleetPanel = root.Q<VisualElement>("fleet-panel");
-            if (fleetToggleBtn != null && fleetPanel != null)
+            if (fleetToggleBtn != null)
             {
                 fleetToggleBtn.clicked += () =>
                 {
-                    fleetPanel.ToggleInClassList("collapsed");
+                    if (fleetPanel != null)
+                    {
+                        fleetPanel.ToggleInClassList("collapsed");
+                        SyncFleetPanelCollapse();
+                    }
                 };
             }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: SyncFleetPanelCollapse
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function shrinks the shared fleet panel to its header, but only while the Fleet
+        //     page is both showing and collapsed. Every other page gets the full panel.
+        //     TrainingWorkspace.ShowPage calls it after it switches pages.
+        public void SyncFleetPanelCollapse()
+        {
+            var fleetPage = trainingScreen?.Q("page-fleet");
+            bool isFleetPageActive = fleetPage != null && fleetPage.style.display != DisplayStyle.None && fleetPage.resolvedStyle.display != DisplayStyle.None;
+            bool isCollapsed = fleetPanel != null && fleetPanel.ClassListContains("collapsed");
+            fleetPanel?.EnableInClassList("fleet-panel-collapsed", isFleetPageActive && isCollapsed);
         }
 
         // -----------------------------------------------------------------------------------
@@ -890,6 +909,7 @@ namespace Formula9.UI
                 fleetTitle.text = "Fleet List (0)";
                 fleet.Clear();
                 fleet.style.display = DisplayStyle.None;
+                fleetHeader.style.display = DisplayStyle.None;
                 fleetEmpty.style.display = DisplayStyle.Flex;
                 return;
             }
@@ -926,14 +946,15 @@ namespace Formula9.UI
         //     snapshot (FullSnapshot): The accepted snapshot.
         private void RenderFleet(FullSnapshot snapshot)
         {
-            if (snapshot == null || fleet == null) return;
+            if (snapshot == null) return;
             world?.SetIncidentEvents(session.Store.Events);
             fleet.Clear();
             var rows = TrainingPresenter.Fleet(snapshot, workspace?.SelectedIncident);
-            if (fleetEmpty != null) fleetEmpty.style.display = rows.Count == 0 ? DisplayStyle.Flex : DisplayStyle.None;
-            if (fleet != null) fleet.style.display = rows.Count == 0 ? DisplayStyle.None : DisplayStyle.Flex;
-            if (fleetTitle != null) fleetTitle.text = $"Fleet List ({rows.Count})";
-            var search = fleetSearch != null ? fleetSearch.value.Trim() : "";
+            fleetEmpty.style.display = rows.Count == 0 ? DisplayStyle.Flex : DisplayStyle.None;
+            fleet.style.display = rows.Count == 0 ? DisplayStyle.None : DisplayStyle.Flex;
+            fleetHeader.style.display = rows.Count == 0 ? DisplayStyle.None : DisplayStyle.Flex;
+            fleetTitle.text = $"Fleet List ({rows.Count})";
+            var search = fleetSearch.value.Trim();
 
             foreach (var row in rows)
             {
@@ -955,21 +976,23 @@ namespace Formula9.UI
                 // 2. Info Columns container
                 var contentRow = new VisualElement { style = { flexDirection = FlexDirection.Row, flexGrow = 1, alignItems = Align.Center, minWidth = 0 } };
 
-                // Shuttle ID Column (Clean, no incident text here)
-                var idCol = new VisualElement { style = { width = 95, flexShrink = 0 } };
+                // Widths live in USS (.fleet-col-*), shared with the header row.
+                // Shuttle ID
+                var idCol = Column("fleet-col-id");
                 idCol.Add(CardLabel(id, "fleet-card-id"));
                 contentRow.Add(idCol);
 
-                // Status Column
-                var statusCol = new VisualElement { style = { flexDirection = FlexDirection.Row, alignItems = Align.Center, width = 120, flexShrink = 0 } };
-                var dot = new VisualElement { style = { width = 8, height = 8, backgroundColor = StatusColor(row.State), marginRight = 5 } };
+                // Status
+                var statusCol = Column("fleet-col-status");
+                var dot = new VisualElement { style = { backgroundColor = StatusColor(row.State) } };
                 dot.AddToClassList("status-dot");
                 statusCol.Add(dot);
                 statusCol.Add(new Label(row.Status) { style = { fontSize = 12 } });
                 contentRow.Add(statusCol);
 
-                // Battery Gauge Column
-                var battCol = new VisualElement { style = { flexDirection = FlexDirection.Row, alignItems = Align.Center, width = 90, flexShrink = 0 } };
+                // Battery gauge
+                var battCol = Column("fleet-col-battery");
+                battCol.tooltip = row.Battery;
                 var gauge = new VisualElement();
                 gauge.AddToClassList("battery-gauge");
                 var fill = new VisualElement();
@@ -982,31 +1005,44 @@ namespace Formula9.UI
                 battCol.Add(new Label($"{row.BatteryPercent:0}%") { style = { fontSize = 11 } });
                 contentRow.Add(battCol);
 
-                // Route & Next Stop Column
-                var routeCol = new VisualElement { style = { flexGrow = 1, flexBasis = 0, minWidth = 100, paddingLeft = 8, paddingRight = 8 } };
+                // Route and next stop
+                var routeCol = Column("fleet-col-route");
                 routeCol.Add(CardLabel(row.RouteLine, "fleet-card-line"));
                 routeCol.Add(CardLabel(row.NextStop, "fleet-card-line"));
                 contentRow.Add(routeCol);
 
-                // ETA Column
-                var etaCol = new VisualElement { style = { flexGrow = 1, flexBasis = 0, minWidth = 100, paddingLeft = 8, paddingRight = 8 } };
+                // ETA
+                var etaCol = Column("fleet-col-eta");
                 etaCol.Add(CardLabel(row.Eta, "fleet-card-line"));
                 contentRow.Add(etaCol);
 
-                // Incident Column
-                var incidentCol = new VisualElement { style = { width = 180, flexShrink = 0, paddingLeft = 8 } };
-                if (row.Incident != null)
-                {
-                    var incidentLabel = CardLabel(row.Incident, "fleet-incident");
-                    incidentLabel.style.whiteSpace = WhiteSpace.Normal;
-                    incidentLabel.style.fontSize = 11;
-                    incidentCol.Add(incidentLabel);
-                }
+                // Incident
+                var incidentCol = Column("fleet-col-incident");
+                if (row.Incident != null) incidentCol.Add(CardLabel(row.Incident, "fleet-incident"));
                 contentRow.Add(incidentCol);
 
                 card.Add(contentRow);
                 fleet.Add(card);
             }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: Column
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function makes one column of a fleet row. Its width comes from the USS class.
+        //
+        // Args:
+        //     className (string): The column's USS class, such as fleet-col-id.
+        //
+        // Returns:
+        //     VisualElement: The column.
+        private static VisualElement Column(string className)
+        {
+            var col = new VisualElement();
+            col.AddToClassList("fleet-col");
+            col.AddToClassList(className);
+            return col;
         }
 
         // -----------------------------------------------------------------------------------

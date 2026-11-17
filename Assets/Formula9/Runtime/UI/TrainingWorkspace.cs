@@ -27,7 +27,7 @@ namespace Formula9.UI
         private readonly VisualElement routePending, routePendingItems;
         private readonly Label routePendingTitle, routeBadge;
         private readonly TextField routeReason;
-        private readonly Label routeProblem, routeOptionsExpiry, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes, selection;
+        private readonly Label routeProblem, routeOptionsExpiry, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes;
         private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowProblem, routeCameras, fleetCameras, approve, routeStart, routeWatch;
         private readonly VisualElement routeStages, routeWaypoints, routeIssues, routeMetrics, routeDecide, routeFeedback, routeApply, routeOutcomePanel, routeOutcomeRows, fleetTable;
         private readonly List<VisualElement> operationalViews;
@@ -113,7 +113,6 @@ namespace Formula9.UI
                 navButtons.Add(button);
                 if (button != null) button.clicked+= () => {ShowPage(index); Render();};
             }
-            selection = root.Q<Label>("fleet-selection");
             Bind(root, "follow-selected", () => world.FollowSelected());
             fleetCameras = Bind(root, "fleet-cameras", ToggleSelectedCameras);
             Bind(root, "camera-overview", () => world.Overview());
@@ -200,7 +199,7 @@ namespace Formula9.UI
                 SetConfirmNote("The backend refused it: " + (message.StartsWith(prefix) ? message.Substring(prefix.Length) : message), true);
             };
             // The Cameras buttons depend on which shuttle is selected
-            world.EntitySelected += id => { selection.text = "Selected: " + id; UpdateActions(); };
+            world.EntitySelected += _ => UpdateActions();
             world.RouteNodeSelected += AppendNode;
             world.RoadClicked += AddRoad;
             world.WaypointClicked += RemoveWaypoint;
@@ -208,14 +207,13 @@ namespace Formula9.UI
             ShowPage(FleetPage);
         }
 
-        public void SelectVehicle(string id) { world.SelectEntity(id); selection.text = "Selected: " + id; }
+        public void SelectVehicle(string id) => world.SelectEntity(id);
 
         // The operator picking a shuttle in the fleet table or the Fleet List. Open cameras move to it,
         // except on Route Planning to a shuttle other than the one it is for: they stay on that one.
         public void PickVehicle(string id)
         {
             if (shownPage == RoutePage && id != selectedVehicle) world.SelectEntity(id); else world.PickShuttle(id);
-            selection.text = "Selected: " + id;
         }
 
         // Opens Route Planning on a shuttle's decision and frames the incident: from a notification's
@@ -668,7 +666,6 @@ namespace Formula9.UI
             var vehicle = RouteVehicle() ?? outcome?.VehicleId;
             if (vehicle == null) return;
             world.WatchShuttle(vehicle);
-            selection.text = "Selected: " + vehicle;
         }
 
         private void AddRoad(DraftRoad road, Vector2 at)
@@ -1033,13 +1030,15 @@ namespace Formula9.UI
             ShowDraftInViews();
             RenderWaypoints();
             RenderFeedback();
-            // The Fleet List button may have hidden the panel these pages live in.
-            pages[index].parent.style.display = DisplayStyle.Flex;
             for (var i = 0; i < pages.Count; i++)
             {
                 pages[i].style.display = i == index ? DisplayStyle.Flex : DisplayStyle.None;
                 navButtons[i]?.EnableInClassList("nav-item-selected", i == index);
             }
+            // Only the Fleet page can be collapsed; every other page gets the whole panel.
+            var fleetContainer = pages[FleetPage].Q(className: "fleet-overview-container");
+            pages[index].parent.EnableInClassList("fleet-panel-collapsed",
+                index == FleetPage && fleetContainer != null && fleetContainer.ClassListContains("collapsed"));
             // The top menu shows the page's section: Reports and Scenarios, or everything else
             SectionChanged?.Invoke(index == ReportsPageIndex ? "reports" : index == ScenariosPageIndex ? "scenarios" : "operations");
         }

@@ -447,12 +447,11 @@
     border-radius: 20px;
 }
 
-.body { flex-grow: 1; flex-direction: row;flex-direction:column; min-height: 0; }
+.body { flex-grow: 1;flex-direction:column; min-height: 0; }
 
 .world {
     flex-grow: 3;
     flex-shrink:1;
-    height:420px;
     flex-basis: 0;
     margin-right: 0px;
     border-radius: 8px;
@@ -464,27 +463,25 @@
 }
 
 .fleet-panel {
-    position: relative;
-    bottom: auto;
-    left: auto;
-    right: auto;
-    height: 290px;
+    flex-grow: 1;
+    flex-basis: 0;
+    min-height: 0;
     padding: 12px;
-    margin-top:8px;
+    margin-top: 8px;
     border-width: 1px;
     border-radius: 8px;
     border-color: rgb(220, 230, 230);
     background-color: rgba(255, 255, 255, 0.95);
-    min-width: 0;
 }
 
 .fleet-table-header {
     flex-direction: row;
-    background-color: rgb(15, 76, 92);
-    border-top-left-radius: 6px;
-    border-top-right-radius: 6px;
-    padding: 6px 10px;
+    align-items: center;
     flex-shrink: 0;
+    margin-bottom: 4px;
+    padding: 6px 11px; /* matches a card's 10px padding + 1px border so the columns line up */
+    border-radius: 6px;
+    background-color: rgb(15, 76, 92);
 }
 
 .fleet-th {
@@ -493,18 +490,28 @@
     font-size: 12px;
 }
 
-.fleet-card {
-    flex-direction: row;
-    align-items: center;
-    flex-shrink: 0;
-    padding: 4px 12px;
-    margin-bottom: 6px;
-    border-width: 1px;
-    border-radius: 6px;
-    border-color: rgb(228, 232, 236);
-    background-color: rgb(255, 255, 255);
-}
+/* The icon column of a card is 28px wide plus 12px margin. */
+.fleet-th-icon { width: 40px; flex-shrink: 0; }
 
+/* Column widths shared by the header and every row. The route and ETA columns share what is
+   left; the incident column gives way first when the window is narrow. */
+.fleet-col { min-width: 0; }
+.fleet-col-id { width: 95px; flex-shrink: 0; }
+.fleet-col-status { width: 120px; flex-shrink: 0; flex-direction: row; align-items: center; }
+.fleet-col-battery { width: 90px; flex-shrink: 0; flex-direction: row; align-items: center; }
+.fleet-col-route, .fleet-col-eta { flex-grow: 1; flex-basis: 0; min-width: 100px; padding-left: 8px; padding-right: 8px; }
+.fleet-col-incident { flex-grow: 0; flex-shrink: 1; flex-basis: 180px; min-width: 60px; padding-left: 8px; }
+
+/* The Fleet page is collapsed: the panel shrinks to its header so the map gets the room back. */
+.fleet-panel.fleet-panel-collapsed {
+    flex-grow: 0;
+    flex-shrink: 0;
+    flex-basis: 48px;
+    height: 48px;
+    min-height: 48px;
+    max-height: 48px;
+    overflow: hidden;
+}
 .workspace-page { flex-grow: 1; min-height: 0; }
 .reports-help { white-space: normal; color: rgb(92, 107, 112); margin-bottom: 12px; }
 .reports-filters { flex-direction: row; flex-wrap: wrap; align-items: flex-end; margin-bottom: 8px; }
@@ -549,7 +556,7 @@
 
 .panel-title { font-size: 17px; -unity-font-style: bold; margin-bottom: 8px; flex-shrink: 0; }
 .fleet-search { flex-shrink: 0; margin: 0 0 8px 0; }
-.fleet { flex-grow: 1; min-height: 0; }
+.fleet { flex-grow: 1;flex-basis:0; min-height: 0; }
 
 .map-controls { position: absolute; right: 8px; bottom: 8px; width: 38px; }
 
@@ -629,6 +636,7 @@
 
 .fleet-card {
     flex-direction: row;
+    align-items: center;
     flex-shrink: 0;
     padding: 8px 10px;
     margin-bottom: 6px;
@@ -654,20 +662,6 @@
     flex-shrink: 0;
 }
 
-.fleet-card-text {
-    flex-grow: 1;
-    flex-basis: 0;
-    min-width: 0;
-    flex-direction:row;
-    align-items:center;
-    justify-content:space-between;
-}
-
-.fleet-card-top {
-    flex-direction: row;
-    align-items: center;
-}
-
 .fleet-card-id {
     flex-grow: 1;
     -unity-font-style: bold;
@@ -685,11 +679,6 @@
 
 .battery-fill {
     height: 100%;
-}
-
-.fleet-card-status {
-    flex-direction: row;
-    align-items: center;
 }
 
 .status-dot {
@@ -741,18 +730,30 @@
     transition: rotate 0.2s ease;
 }
 
-/* Collapsed state for the panel */
-.fleet-panel.collapsed {
-    height: 48px; /* Shrinks to just show the header bar */
+/* Fleet Overview Container Scoped Collapse (Only affects the Fleet page) */
+.workspace-page.fleet-overview-container {
+    flex-grow: 1;
+    flex-basis: 0;
+    min-height: 0;
+}
+
+.workspace-page.fleet-overview-container.collapsed {
+    flex-grow: 0;
+    flex-shrink: 0;
+    flex-basis: 48px;
+    height: 48px;
+    min-height: 48px;
+    max-height: 48px;
     overflow: hidden;
 }
 
-.fleet-panel.collapsed .fleet-toggle-icon {
-    rotate: 135deg; /* Points right/up when collapsed */
+.workspace-page.fleet-overview-container.collapsed .fleet-toggle-icon {
+    rotate: 135deg;
 }
 
-.fleet-panel.collapsed .fleet,
-.fleet-panel.collapsed .fleet-empty {
+.workspace-page.fleet-overview-container.collapsed .fleet,
+.workspace-page.fleet-overview-container.collapsed .fleet-empty,
+.workspace-page.fleet-overview-container.collapsed .fleet-table-header {
     display: none;
 }
 
