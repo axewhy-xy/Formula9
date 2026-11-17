@@ -93,7 +93,6 @@
                     <ui:Button name="view-map" text="2D Map" class="segment" />
                     <ui:Button name="view-world" text="3D View" class="segment" />
                     <ui:Label name="world-notice" class="world-notice" />
-                    <ui:Button name="toggle-fleet" text="Fleet List" class="segment-round" />
                 </ui:VisualElement>
 
                 <ui:VisualElement class="body">

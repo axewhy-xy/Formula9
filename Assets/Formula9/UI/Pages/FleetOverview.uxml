@@ -1,19 +1,25 @@
 <ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:f9="Formula9.World" xmlns:f9ui="Formula9.UI">
     <Style src="project://database/Assets/Formula9/UI/Formula9App.uss" />
-    <ui:VisualElement class="workspace-page">
-        <ui:Label name="fleet-title" text="Fleet List (0)" class="panel-title" />
-        <ui:TextField name="fleet-search" class="fleet-search" />
+    <ui:VisualElement class="workspace-page fleet-overview-container">
+        <ui:VisualElement class="row fleet-panel-header" style="justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <ui:VisualElement style="flex-direction: row; align-items: center;">
+                <ui:Button name="fleet-toggle-btn" class="fleet-toggle-btn" tooltip="Toggle Fleet Panel">
+                    <ui:VisualElement class="fleet-toggle-icon" />
+                </ui:Button>
+                <ui:Label name="fleet-title" text="Fleet List (0)" class="panel-title" style="margin-bottom: 0; margin-left: 8px;" />
+            </ui:VisualElement>
+            <ui:VisualElement style="flex-direction: row; align-items: center; flex-grow: 1; justify-content: flex-end;">
+                <ui:TextField name="fleet-search" class="fleet-search" placeholder-text="Search fleet…" style="width: 200px; margin-bottom: 0; margin-right: 8px;" />
+                <ui:Button name="follow-selected" text="Follow selected" style="height: 30px; font-size: 11px; margin-right: 4px;" />
+                <ui:Button name="fleet-cameras" text="Cameras" style="height: 30px; font-size: 11px; margin-right: 4px;" />
+                <ui:Button name="camera-overview" text="Overview" style="height: 30px; font-size: 11px; margin-right: 0;" />
+            </ui:VisualElement>
+        </ui:VisualElement>
         <ui:ScrollView name="fleet" class="fleet" />
         <ui:VisualElement name="fleet-empty" class="fleet-empty">
             <ui:VisualElement class="fleet-empty-icon"><f9:Glyph kind="Bus" tint="#0F4C5C" size="56" /></ui:VisualElement>
             <ui:Label text="No shuttles available" class="fleet-empty-title" />
             <ui:Label text="Join a training session to see its fleet." />
-        </ui:VisualElement>
-        <ui:Label name="fleet-selection" text="Select a shuttle in the fleet or map." class="workspace-text" />
-        <ui:VisualElement class="row">
-            <ui:Button name="follow-selected" text="Follow selected" />
-            <ui:Button name="fleet-cameras" text="Cameras" tooltip="Watch the selected shuttle through its blind-spot cameras: front, rear and sides." />
-            <ui:Button name="camera-overview" text="Overview" />
         </ui:VisualElement>
     </ui:VisualElement>
 </ui:UXML>

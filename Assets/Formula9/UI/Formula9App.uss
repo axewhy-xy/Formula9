@@ -447,12 +447,14 @@
     border-radius: 20px;
 }
 
-.body { flex-grow: 1; flex-direction: row; min-height: 0; }
+.body { flex-grow: 1; flex-direction: row;flex-direction:column; min-height: 0; }
 
 .world {
     flex-grow: 3;
+    flex-shrink:1;
+    height:420px;
     flex-basis: 0;
-    margin-right: 8px;
+    margin-right: 0px;
     border-radius: 8px;
     background-color: rgb(26, 26, 30);
     align-items: center;
@@ -462,15 +464,45 @@
 }
 
 .fleet-panel {
-    flex-grow: 2;
-    flex-basis: 0;
+    position: relative;
+    bottom: auto;
+    left: auto;
+    right: auto;
+    height: 290px;
     padding: 12px;
+    margin-top:8px;
     border-width: 1px;
     border-radius: 8px;
     border-color: rgb(220, 230, 230);
+    background-color: rgba(255, 255, 255, 0.95);
+    min-width: 0;
+}
+
+.fleet-table-header {
+    flex-direction: row;
+    background-color: rgb(15, 76, 92);
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    padding: 6px 10px;
+    flex-shrink: 0;
+}
+
+.fleet-th {
+    color: rgb(255, 255, 255);
+    -unity-font-style: bold;
+    font-size: 12px;
+}
+
+.fleet-card {
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+    padding: 4px 12px;
+    margin-bottom: 6px;
+    border-width: 1px;
+    border-radius: 6px;
+    border-color: rgb(228, 232, 236);
     background-color: rgb(255, 255, 255);
-    min-width: 340px;
-    min-height: 0;
 }
 
 .workspace-page { flex-grow: 1; min-height: 0; }
@@ -517,7 +549,7 @@
 
 .panel-title { font-size: 17px; -unity-font-style: bold; margin-bottom: 8px; flex-shrink: 0; }
 .fleet-search { flex-shrink: 0; margin: 0 0 8px 0; }
-.fleet { flex-grow: 1; min-height: 240px; }
+.fleet { flex-grow: 1; min-height: 0; }
 
 .map-controls { position: absolute; right: 8px; bottom: 8px; width: 38px; }
 
@@ -616,9 +648,9 @@
 }
 
 .bus-icon {
-    width: 36px;
-    height: 36px;
-    margin-right: 10px;
+    width: 28px;
+    height: 28px;
+    margin-right: 12px;
     flex-shrink: 0;
 }
 
@@ -626,6 +658,9 @@
     flex-grow: 1;
     flex-basis: 0;
     min-width: 0;
+    flex-direction:row;
+    align-items:center;
+    justify-content:space-between;
 }
 
 .fleet-card-top {
@@ -665,8 +700,10 @@
 }
 
 .fleet-card-line {
-    font-size: 12px;
-    white-space: normal;
+    font-size: 11px;
+    white-space: nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
     color: rgb(96, 106, 116);
 }
 
@@ -674,6 +711,49 @@
     color: rgb(214, 48, 49);
     font-size: 12px;
     white-space: normal;
+}
+
+/* Fleet Panel Toggle Button */
+.app Button.fleet-toggle-btn {
+    width: 28px;
+    height: 28px;
+    margin: 0;
+    padding: 0;
+    background-color: rgba(0, 0, 0, 0);
+    border-width: 0;
+    border-radius: 4px;
+    align-items: center;
+    justify-content: center;
+}
+
+.app Button.fleet-toggle-btn:hover {
+    background-color: rgb(228, 238, 238);
+}
+
+/* Arrow Icon representation using unicode / chevron styling */
+.fleet-toggle-icon {
+    width: 12px;
+    height: 12px;
+    border-top-width: 2px;
+    border-right-width: 2px;
+    border-color: rgb(15, 76, 92);
+    rotate: -45deg; /* Points down by default */
+    transition: rotate 0.2s ease;
+}
+
+/* Collapsed state for the panel */
+.fleet-panel.collapsed {
+    height: 48px; /* Shrinks to just show the header bar */
+    overflow: hidden;
+}
+
+.fleet-panel.collapsed .fleet-toggle-icon {
+    rotate: 135deg; /* Points right/up when collapsed */
+}
+
+.fleet-panel.collapsed .fleet,
+.fleet-panel.collapsed .fleet-empty {
+    display: none;
 }
 
 /* Full-width pages: Route Planning, Charging, Reports, Scenarios */

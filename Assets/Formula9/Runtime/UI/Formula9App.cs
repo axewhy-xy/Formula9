@@ -404,8 +404,6 @@ namespace Formula9.UI
                 if (world.ShowingMap) ShowMessage(world.Diagnostic);
                 Render();
             };
-            root.Q<Button>("toggle-fleet").clicked += () =>
-                fleetPanel.style.display = fleetPanel.resolvedStyle.display == DisplayStyle.None ? DisplayStyle.Flex : DisplayStyle.None;
 
             scenario.choices = TrainingPresenter.Scenarios.Select(s => s.Label).ToList();
             scenario.index = 0;
@@ -453,6 +451,8 @@ namespace Formula9.UI
             clock.schedule.Execute(() => clock.text = DateTime.Now.ToString("d MMM yyyy    HH:mm", CultureInfo.InvariantCulture)).Every(10000);
             clock.text = DateTime.Now.ToString("d MMM yyyy    HH:mm", CultureInfo.InvariantCulture);
             Render();
+
+            //toggle sidebar
             var toggleBtn = root.Q<Button>("nav-toggle-btn");
             var navPanel = root.Q("nav-panel");
             bool isCollapsed = false;
@@ -461,6 +461,16 @@ namespace Formula9.UI
                 isCollapsed = !isCollapsed;
                 navPanel?.EnableInClassList("collapsed", isCollapsed);
             };
+            //toggle fleet
+            var fleetToggleBtn = root.Q<Button>("fleet-toggle-btn");
+            fleetPanel = root.Q<VisualElement>("fleet-panel");
+            if (fleetToggleBtn != null && fleetPanel != null)
+            {
+                fleetToggleBtn.clicked += () =>
+                {
+                    fleetPanel.ToggleInClassList("collapsed");
+                };
+            }
         }
 
         // -----------------------------------------------------------------------------------
@@ -916,13 +926,15 @@ namespace Formula9.UI
         //     snapshot (FullSnapshot): The accepted snapshot.
         private void RenderFleet(FullSnapshot snapshot)
         {
-            world.SetIncidentEvents(session.Store.Events);
+            if (snapshot == null || fleet == null) return;
+            world?.SetIncidentEvents(session.Store.Events);
             fleet.Clear();
             var rows = TrainingPresenter.Fleet(snapshot, workspace?.SelectedIncident);
-            fleetEmpty.style.display = rows.Count == 0 ? DisplayStyle.Flex : DisplayStyle.None;
-            fleet.style.display = rows.Count == 0 ? DisplayStyle.None : DisplayStyle.Flex;
-            fleetTitle.text = $"Fleet List ({rows.Count})";
-            var search = fleetSearch.value.Trim();
+            if (fleetEmpty != null) fleetEmpty.style.display = rows.Count == 0 ? DisplayStyle.Flex : DisplayStyle.None;
+            if (fleet != null) fleet.style.display = rows.Count == 0 ? DisplayStyle.None : DisplayStyle.Flex;
+            if (fleetTitle != null) fleetTitle.text = $"Fleet List ({rows.Count})";
+            var search = fleetSearch != null ? fleetSearch.value.Trim() : "";
+
             foreach (var row in rows)
             {
                 if (search.Length > 0 && row.ShuttleId.IndexOf(search, StringComparison.OrdinalIgnoreCase) < 0) continue;
@@ -933,44 +945,66 @@ namespace Formula9.UI
                 card.EnableInClassList("fleet-card-incident", row.Incident != null);
                 card.RegisterCallback<ClickEvent>(_ => workspace?.PickVehicle(id));
 
+                // 1. Bus Icon
                 var icon = new VisualElement { pickingMode = PickingMode.Ignore };
                 icon.AddToClassList("bus-icon");
                 var color = world != null && world.Offline ? FleetMap.FrozenColor : FleetMap.ShuttleColor(row.Index);
-                icon.generateVisualContent += mesh => Glyph.DrawBus(mesh.painter2D, new Vector2(18, 18), 36, color);
+                icon.generateVisualContent += mesh => Glyph.DrawBus(mesh.painter2D, new Vector2(14, 14), 28, color);
                 card.Add(icon);
 
-                var text = new VisualElement();
-                text.AddToClassList("fleet-card-text");
-                var top = new VisualElement();
-                top.AddToClassList("fleet-card-top");
-                top.Add(CardLabel(id, "fleet-card-id"));
+                // 2. Info Columns container
+                var contentRow = new VisualElement { style = { flexDirection = FlexDirection.Row, flexGrow = 1, alignItems = Align.Center, minWidth = 0 } };
+
+                // Shuttle ID Column (Clean, no incident text here)
+                var idCol = new VisualElement { style = { width = 95, flexShrink = 0 } };
+                idCol.Add(CardLabel(id, "fleet-card-id"));
+                contentRow.Add(idCol);
+
+                // Status Column
+                var statusCol = new VisualElement { style = { flexDirection = FlexDirection.Row, alignItems = Align.Center, width = 120, flexShrink = 0 } };
+                var dot = new VisualElement { style = { width = 8, height = 8, backgroundColor = StatusColor(row.State), marginRight = 5 } };
+                dot.AddToClassList("status-dot");
+                statusCol.Add(dot);
+                statusCol.Add(new Label(row.Status) { style = { fontSize = 12 } });
+                contentRow.Add(statusCol);
+
+                // Battery Gauge Column
+                var battCol = new VisualElement { style = { flexDirection = FlexDirection.Row, alignItems = Align.Center, width = 90, flexShrink = 0 } };
                 var gauge = new VisualElement();
                 gauge.AddToClassList("battery-gauge");
                 var fill = new VisualElement();
                 fill.AddToClassList("battery-fill");
                 fill.style.width = Length.Percent((float)row.BatteryPercent);
-                // Amber below 50 %, red below 20 %
                 fill.style.backgroundColor = row.BatteryPercent < 20 ? new Color(0.839f, 0.188f, 0.192f)
                     : row.BatteryPercent < 50 ? new Color(0.949f, 0.6f, 0.29f) : new Color(0.153f, 0.682f, 0.376f);
                 gauge.Add(fill);
-                top.Add(gauge);
-                top.Add(new Label($"{row.BatteryPercent:0}%") { tooltip = row.Battery });
-                text.Add(top);
+                battCol.Add(gauge);
+                battCol.Add(new Label($"{row.BatteryPercent:0}%") { style = { fontSize = 11 } });
+                contentRow.Add(battCol);
 
-                var status = new VisualElement();
-                status.AddToClassList("fleet-card-status");
-                var dot = new VisualElement();
-                dot.AddToClassList("status-dot");
-                dot.style.backgroundColor = StatusColor(row.State);
-                status.Add(dot);
-                status.Add(new Label(row.Status));
-                text.Add(status);
+                // Route & Next Stop Column
+                var routeCol = new VisualElement { style = { flexGrow = 1, flexBasis = 0, minWidth = 100, paddingLeft = 8, paddingRight = 8 } };
+                routeCol.Add(CardLabel(row.RouteLine, "fleet-card-line"));
+                routeCol.Add(CardLabel(row.NextStop, "fleet-card-line"));
+                contentRow.Add(routeCol);
 
-                if (row.Incident != null) text.Add(CardLabel(row.Incident, "fleet-incident"));
-                text.Add(CardLabel(row.RouteLine, "fleet-card-line"));
-                text.Add(CardLabel(row.NextStop, "fleet-card-line"));
-                text.Add(CardLabel(row.Eta, "fleet-card-line"));
-                card.Add(text);
+                // ETA Column
+                var etaCol = new VisualElement { style = { flexGrow = 1, flexBasis = 0, minWidth = 100, paddingLeft = 8, paddingRight = 8 } };
+                etaCol.Add(CardLabel(row.Eta, "fleet-card-line"));
+                contentRow.Add(etaCol);
+
+                // Incident Column
+                var incidentCol = new VisualElement { style = { width = 180, flexShrink = 0, paddingLeft = 8 } };
+                if (row.Incident != null)
+                {
+                    var incidentLabel = CardLabel(row.Incident, "fleet-incident");
+                    incidentLabel.style.whiteSpace = WhiteSpace.Normal;
+                    incidentLabel.style.fontSize = 11;
+                    incidentCol.Add(incidentLabel);
+                }
+                contentRow.Add(incidentCol);
+
+                card.Add(contentRow);
                 fleet.Add(card);
             }
         }
