@@ -24,6 +24,7 @@ from src.core.training_telemetry import SessionProgress, boundary
 from src.schemas.shuttle_data import Shuttle
 from src.services.asset_loader import load_routes_from_json
 from src.services.session_actor import SessionActor
+from src.services.session_stream import SnapshotFeed
 from src.services.integrated_actor import (IntegratedSessionActor, SCENARIO_SELECTOR, SIGNAL_AREA, get_workflow_definition,
                                             upgrade_v3_workflow)
 from src.services.training_workflow import approve_workflow_route, publish_workflow, submit_workflow
@@ -221,6 +222,7 @@ class SessionServiceBase:
         self._initialize_lock = asyncio.Lock()
         self._creation_lock = asyncio.Lock()
         self._operations: set[asyncio.Task] = set()
+        self._snapshot_feed: SnapshotFeed | None = None
 
     async def _complete(self, operation: Coroutine[Any, Any, T]) -> T:
         # A disconnected caller must not cancel work between its durable commit
@@ -346,47 +348,81 @@ class SessionServiceBase:
             self._check_available(session_id)
         return raw
 
+    def live_snapshot_json(self, session_id: str) -> str | None:
+        """As snapshot_json, but only from memory: None for a session whose snapshot is not kept there
+        (one ended, or not live). Never blocks; a stream checks with it between commits."""
+        self._check_available(session_id)
+        return self.store.published_snapshot_json(session_id)
+
     def _traffic_session(self, session_id: str):
         raise NotImplementedError
 
-    def _current_frame(self, session, after_tick: int) -> str | None:
-        """A frame of where the traffic stands now, for a session with none kept, if after after_tick."""
+    def _current_frame(self, session, after_tick: int) -> tuple[int, str] | None:
+        """(tick, JSON) of where the traffic stands now, for a session with none kept, if after after_tick."""
         return None
 
-    def traffic(self, session_id: str, after_tick: int) -> list[str]:
-        """The latest traffic frames of a live session after a tick, oldest first, as JSON: at most
-        TRAFFIC_REPLY_FRAMES, the newest.
+    def traffic_entries(self, session_id: str, after_tick: int) -> list[tuple[int, str]]:
+        """The latest traffic frames of a live session after a tick, oldest first, as (tick, JSON): at
+        most TRAFFIC_REPLY_FRAMES, the newest.
 
         A session that has published none since this process started (one paused, or just recovered)
         gives its current frame, so a 3D view can draw where the traffic stands. Presentation only:
         the frames are not durable, and a session without traffic, or not live here, has none.
         """
         session = self._traffic_session(session_id)
-        frames = [frame for tick, frame in session.frames if tick > after_tick][-TRAFFIC_REPLY_FRAMES:]
+        entries = [entry for entry in session.frames if entry[0] > after_tick][-TRAFFIC_REPLY_FRAMES:]
         if not session.frames:
             current = self._current_frame(session, after_tick)
             if current is not None:
-                frames.append(current)
-        return frames
+                entries.append(current)
+        return entries
 
-    async def wait_for_traffic(self, session_id: str, after_tick: int, wait_s: float) -> list[str]:
-        """As traffic, but with no frame after after_tick yet, waits up to wait_s for the next one.
+    def traffic(self, session_id: str, after_tick: int) -> list[str]:
+        """As traffic_entries, the frames' JSON alone."""
+        return [frame for _, frame in self.traffic_entries(session_id, after_tick)]
+
+    def newest_traffic_tick(self, session_id: str) -> int | None:
+        """The tick of the newest traffic frame a live session keeps, None with none kept. A stream
+        whose cursor is past it is on an older run of the session's clock (one before a recovery)."""
+        frames = self._traffic_session(session_id).frames
+        return frames[-1][0] if frames else None
+
+    async def wait_for_traffic_entries(self, session_id: str, after_tick: int,
+                                       wait_s: float) -> list[tuple[int, str]]:
+        """As traffic_entries, but with no frame after after_tick yet, waits up to wait_s for the next one.
 
         A 3D view asks again as soon as each reply comes, so it hears of every frame as it is made,
         rather than up to a polling interval late: what it draws then needs less of a lead over the
         newest frame to never run out. A reply after wait_s with no frames means none came, as while
-        the session is paused.
+        the session is paused; one sooner with none, that the session's frames were cleared or it
+        ended.
         """
-        frames = self.traffic(session_id, after_tick)
-        if frames or wait_s <= 0:
-            return frames
+        entries = self.traffic_entries(session_id, after_tick)
+        if entries or wait_s <= 0:
+            return entries
         # Taken in the same turn of the event loop as the check above, so no frame can come between
         signal = self.sessions[session_id].frame_signal
         try:
             await asyncio.wait_for(signal.wait(), wait_s)
         except (TimeoutError, asyncio.TimeoutError):
             pass
-        return self.traffic(session_id, after_tick)
+        return self.traffic_entries(session_id, after_tick)
+
+    async def wait_for_traffic(self, session_id: str, after_tick: int, wait_s: float) -> list[str]:
+        """As wait_for_traffic_entries, the frames' JSON alone: what GET /traffic sends."""
+        return [frame for _, frame in await self.wait_for_traffic_entries(session_id, after_tick, wait_s)]
+
+    def snapshot_feed(self) -> SnapshotFeed:
+        """Wakes a live stream as each of a session's snapshots is committed (session_stream). Made on
+        first use, on the running event loop; close() ends it."""
+        if self._snapshot_feed is None:
+            self._snapshot_feed = SnapshotFeed(self.store, asyncio.get_running_loop())
+        return self._snapshot_feed
+
+    def _close_snapshot_feed(self) -> None:
+        """At close: the streams still open hear that no more snapshots will come."""
+        if self._snapshot_feed is not None:
+            self._snapshot_feed.close()
 
 
 class TrainingSessionService(SessionServiceBase):
@@ -738,8 +774,11 @@ class TrainingSessionService(SessionServiceBase):
             raise TrainingStoreError("INVALID_REFERENCE", "No live signals for this training session")
         return {"session_id": session_id, **session.actor.signal_state()}
 
-    def _current_frame(self, session: LiveSession, after_tick: int) -> str | None:
-        return self._frame_json(session.actor) if session.actor.current_tick > after_tick else None
+    def _current_frame(self, session: LiveSession, after_tick: int) -> tuple[int, str] | None:
+        if session.actor.current_tick <= after_tick:
+            return None
+        frame = self._frame_json(session.actor)
+        return None if frame is None else (session.actor.current_tick, frame)
 
     # Where a worker process (session_worker.WorkerRuntime) tells the gateway what its sessions do; in
     # one process there is nobody to tell.
@@ -828,5 +867,6 @@ class TrainingSessionService(SessionServiceBase):
             session.progress.observe(self.store.trace, session.actor, running=False)
             # No more frames will come: a 3D view waiting for one hears so now
             session.wake_frame_waiters()
+        self._close_snapshot_feed()
 
 SessionRuntime = TrainingSessionService

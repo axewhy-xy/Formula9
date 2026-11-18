@@ -9,6 +9,7 @@ from pydantic import TypeAdapter
 from contracts.v2.models import ChargeSchedulePreview, ChargeScheduleRequest, DispatcherCommand, Message, parse_message
 from contracts.v2.route_edit import RouteApprovalRequest, RouteEditPreview, RouteEditRequest, RouteEditorContext, RouteOutcome
 from contracts.v2.sessions import CreateSessionRequest, SessionListResponse
+from contracts.v2.stream import StreamMessage, StreamTrafficControl, stream_message_schema
 
 ROOT = Path(__file__).parent
 FIXTURES = ROOT / "fixtures"
@@ -271,3 +272,26 @@ route_approval = {"contract_version": "2.0", "preview_id": "preview-m2-1",
                   "idempotency_key": "route-key-1", "reason": "Avoid closure",
                   "target_vehicle_ids": [f"shuttle-{index:02}" for index in range(1, 6)]}
 save("route_approval.json", RouteApprovalRequest.model_validate(route_approval).model_dump(mode="json"))
+
+# The live session stream (stream.py): one message of each type, and a client's traffic control
+stream_schema = stream_message_schema()
+stream_schema["$id"] = "https://formula9.local/contracts/v2/stream_message.schema.json"
+stream_schema["title"] = "Formula 9 training session stream message v2"
+(ROOT / "stream_message.schema.json").write_text(json.dumps(stream_schema, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+stream_adapter = TypeAdapter(StreamMessage)
+stream_frame = {"tick": 200, "simulation_time_s": 10.0, "vehicle_count": 1,
+                "vehicles": "AwCwBAAAPv7//4QD6AM=",
+                "shuttles": [{"vehicle_id": "shuttle-01", "x_m": 1.5, "y_m": -2.0, "heading_deg": 90.0, "speed_mps": 4.2}],
+                "signal_faults": [{"junction_id": "junction-1", "mode": "STUCK_RED", "until_s": 40.0}]}
+stream_messages = [
+    {"type": "snapshot", "session_id": "session-001", "snapshot": snapshot},
+    {"type": "traffic", "session_id": "session-001", "frames": [stream_frame]},
+    {"type": "heartbeat", "session_id": "session-001"},
+    {"type": "error", "session_id": "session-001",
+     "error": {"code": "SESSION_RECOVERING", "message": "Training runtime is unavailable", "retryable": True}},
+]
+for message in stream_messages:
+    stream_adapter.validate_python(message)
+traffic_control = {"type": "traffic", "enabled": True, "after_tick": 198}
+StreamTrafficControl.model_validate(traffic_control)
+save("stream_messages.json", {"messages": stream_messages, "traffic_control": traffic_control})

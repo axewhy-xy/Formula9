@@ -122,9 +122,25 @@ namespace Formula9.Contracts
         // Throws:
         //     ContractException: If the JSON is invalid, of an unknown message type, or breaks the
         //         contract.
-        public static IContractMessage ParseMessage(string json)
+        public static IContractMessage ParseMessage(string json) => ParseMessage(Read(json));
+
+        // -----------------------------------------------------------------------------------
+        // Function: ParseMessage (token)
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function works like ParseMessage on JSON already read with ReadJson, as the
+        //     snapshot inside a session stream message is.
+        //
+        // Args:
+        //     token (JToken): The message, read with ReadJson.
+        //
+        // Returns:
+        //     IContractMessage: The validated message.
+        //
+        // Throws:
+        //     ContractException: If it is of an unknown message type or breaks the contract.
+        public static IContractMessage ParseMessage(JToken token)
         {
-            var token = Read(json);
             if (!(token is JObject message) || !(message["message_type"] is JValue kind) || kind.Type != JTokenType.String
                 || !Messages.TryGetValue((string)kind, out var type))
                 throw new ContractException("$.message_type is not a known training message");
@@ -168,6 +184,23 @@ namespace Formula9.Contracts
             Validate(token, typeof(T));
             return token.ToString(Formatting.None);
         }
+
+        // -----------------------------------------------------------------------------------
+        // Function: ReadJson
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function reads JSON as the contract messages are read (see Read), for a
+        //     document that wraps one, such as a session stream message: timestamps stay strings.
+        //
+        // Args:
+        //     json (string): The text.
+        //
+        // Returns:
+        //     JToken: The parsed JSON.
+        //
+        // Throws:
+        //     ContractException: If the text is empty or not valid JSON.
+        public static JToken ReadJson(string json) => Read(json);
 
         // -----------------------------------------------------------------------------------
         // Function: Read

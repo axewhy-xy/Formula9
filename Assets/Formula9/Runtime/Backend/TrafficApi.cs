@@ -132,9 +132,32 @@ namespace Formula9.Backend
 
         public static List<TrafficFrame> ParseTrafficFrames(string json, string sessionId)
         {
+            JObject root;
+            try { root = JObject.Parse(json); }
+            catch (JsonException error) { throw new ContractException("Invalid traffic reply: " + error.Message); }
+            return ParseTrafficFrames(root, sessionId);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: ParseTrafficFrames (object)
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function reads the frames of a traffic reply, or of a session stream's traffic
+        //     message, which has the same session_id and frames.
+        //
+        // Args:
+        //     root (JObject): The reply or message.
+        //     sessionId (string): The session it must be for.
+        //
+        // Returns:
+        //     List<TrafficFrame>: The frames, oldest first.
+        //
+        // Throws:
+        //     ContractException: If it is malformed or for another session.
+        public static List<TrafficFrame> ParseTrafficFrames(JObject root, string sessionId)
+        {
             try
             {
-                var root = JObject.Parse(json);
                 if ((string)root["session_id"] != sessionId) throw new ContractException("Traffic is for another session");
                 var frames = new List<TrafficFrame>();
                 foreach (var item in root["frames"] as JArray ?? throw new ContractException("Traffic reply has no frames"))

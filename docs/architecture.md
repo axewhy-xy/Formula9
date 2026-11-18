@@ -85,15 +85,17 @@ flowchart LR
     Svc <-->|"pipe: commands, commits,<br/>frames, progress"| Runtime
     Runtime -.->|"read-only"| DB
 
-    Http <-->|"HTTP/JSON, Bearer token<br/>127.0.0.1:8000"| API
+    Http <-->|"HTTP/JSON and the session stream (WebSocket),<br/>Bearer token, 127.0.0.1:8000"| API
     Store --> DB[("state/training.sqlite<br/>WAL, synchronous=NORMAL")]
     API --> Mongo[("MongoDB<br/>accounts and login sessions")]
     Static --> Fix[("backend/fixtures<br/>map.db, transit.sqlite, toa-payoh.sqlite,<br/>traffic JSON, m2_scene")]
     Player -.->|"OSM tile server<br/>(FORMULA9_TILE_URL)"| Tiles[("Map tiles")]
 ```
 
-- The client talks to the backend over plain HTTP. It does not use the WebSocket: snapshots are polled
-  once a second, and traffic frames are long-polled (section 6.6).
+- The client keeps one WebSocket open to the joined session (`WS /api/v2/sessions/{id}/stream`,
+  section 4.7.1): the backend pushes its newer snapshots and its traffic frames as they are made.
+  Everything else is plain HTTP, and while the stream is down the client polls snapshots once a
+  second and long-polls traffic frames, as before (sections 6.4 and 6.6).
 - The backend binds to loopback by default. `FORMULA9_BACKEND_URL` points the client somewhere else.
 - **Development:** `run.bat` (or `python Tools/run_backend.py`) runs the backend from `backend/.venv`,
   and the Unity Editor connects to it.
@@ -119,6 +121,7 @@ session workers are not Uvicorn workers: they serve no HTTP and never write to t
 | `core/` | Settings (`config.py`, read from `backend/.env`), error envelope, per-request training trace telemetry |
 | `services/training_sessions.py` | `TrainingSessionService`: admission, lifecycle, ticking, commands, traffic frames, recovery, all in one process |
 | `services/session_gateway.py`, `session_worker.py`, `session_ipc.py` | The gateway that runs sessions in worker processes: placement, admission by load, forwarding, worker supervision and recovery; the worker's entry point; the pipe between them |
+| `services/session_stream.py`, `api/routes/training_stream.py` | The session stream: snapshots and traffic frames pushed to a client over a WebSocket as they are committed and made |
 | `services/session_actor.py` | Base planar fleet actor: five shuttles on loops, separation and motion |
 | `services/integrated_actor.py` | `IntegratedSessionActor`: the Toa Payoh exercise (route detour, incidents, depots, charging, traffic, signals) |
 | `services/spatial_session_actor.py`, `spatial_motion.py`, `training_scene.py` | Road-constrained 3D actor bound to the hash-pinned M2 scene package |
@@ -348,7 +351,7 @@ All routes are under `/api`. `/api/v2/sessions/*` requires a bearer token.
 | Accounts | `POST /auth/signup`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` |
 | Health | `GET /health` |
 | Training sessions | `GET/POST /v2/sessions`, `POST /v2/sessions/purge`, `POST /v2/sessions/compact`, `DELETE /v2/sessions/{id}` |
-| Session state | `GET …/{id}/snapshot`, `GET …/{id}/events?after=`, `GET …/{id}/traffic?after_tick=&wait_ms=` |
+| Session state | `GET …/{id}/snapshot`, `GET …/{id}/events?after=`, `GET …/{id}/traffic?after_tick=&wait_ms=`, `WS …/{id}/stream` |
 | Routes | `GET …/{id}/routes/{route}/editor`, `GET …/{id}/routes/{route}/outcome`, `POST …/{id}/route-previews`, `POST …/{id}/route-approvals` |
 | Decisions | `POST …/{id}/commands`, `GET …/{id}/commands/{key}`, `POST …/{id}/incident-previews`, `POST …/{id}/charge-schedule-previews` |
 | Incident review | `GET …/{id}/incidents/{incident}/history`, `GET …/{id}/incidents/{incident}/debrief` |
@@ -358,6 +361,31 @@ All routes are under `/api`. `/api/v2/sessions/*` requires a bearer token.
 | Legacy v1 | `POST /routes`, `GET /scenes/{id}`, `GET /scenes/{id}/chunks`, `/simulations`, `WS /ws/simulations/{id}` |
 
 The legacy v1 trajectory playback API is kept and tested, but the Unity client does not use it.
+
+### 4.7.1 Session stream
+
+`WS /api/v2/sessions/{id}/stream?traffic=&after_tick=&snapshot_interval_ms=`
+(`api/routes/training_stream.py`, `services/session_stream.py`; messages in
+`contracts/v2/stream.py`) pushes what a client used to poll for, from what the gateway already holds:
+
+- **Snapshots:** the first message is the session's committed snapshot, exactly as `GET /snapshot`
+  sends it. The store's writer tells a `SnapshotFeed` after each commit, which wakes that session's
+  streams on the event loop; each stream then sends the newest snapshot, at most one per
+  `snapshot_interval_ms` (100–5000, default 250; the Unity client asks for 250). Snapshots coalesce:
+  a stream skips them, never sends an older one after a newer, and never sends events. A client reads
+  events from `GET /events` when a snapshot's `event_sequence` is past its cursor.
+- **Traffic:** with `traffic=true`, every traffic frame after `after_tick` as it is made, in the
+  `/traffic` reply's shape. The client turns it on and off with `{"type": "traffic", "enabled": …,
+  "after_tick": …}` as the 3D city is shown or hidden.
+- **Heartbeat** after 5 s with nothing else, so a paused session is not a lost connection.
+- **Errors end the stream:** the session deleted or unknown (`INVALID_REFERENCE`, close 4404), no
+  login (`ROLE_DENIED`, 4403), the session recovering (`SESSION_RECOVERING`, 1013), the backend
+  stopping (1001). The client then polls over HTTP, which reports the state as before, and opens a new
+  stream later.
+
+The login is the bearer token on the upgrade request. Commands, route approvals and previews stay on
+HTTP. Streams work the same with and without session workers, since commits land in the gateway's
+writer and the workers push their frames there.
 
 ## 5. Shared contracts
 
@@ -457,7 +485,14 @@ There is no Incident Monitor page any more: incidents are decided where the shut
 
 - **Create:** keeps the creation key and its owner until the attempt is confirmed, so a lost reply
   never creates a second session.
-- **Poll:** asks for the snapshot every **1 s**, and replays events from the last committed cursor.
+- **Stream:** keeps a session stream open to the joined session (section 4.7.1), read and parsed off
+  the main thread (`Backend/SessionStream.cs`). Its snapshots go through the same checks as polled
+  ones; one no newer than the snapshot held is passed over. A stream that ends, or is silent for 15 s,
+  hands back to the poll at once, and the next is tried 2 s later, doubling up to 60 s while none
+  delivers.
+- **Poll:** asks for the snapshot every **1 s** while no stream delivers, and replays events from the
+  last committed cursor. While one delivers, the poll only confirms creations and commands and
+  catches up events a streamed snapshot announced.
 - **Epoch change:** fetches the events a recovery appended. If an event batch has a gap, it takes a
   fresh snapshot instead.
 - **Commands:** keeps at most one command open. A lost reply is confirmed by resending the same
@@ -504,8 +539,10 @@ Other parts of the world view:
 The backend drives the traffic (section 4.4). The client only draws it:
 
 1. `CityClient` loads `/api/traffic/{area}` once: the vehicle sample, models, sizes and road network.
-2. `SessionController` long-polls `GET /api/v2/sessions/{id}/traffic?after_tick=…&wait_ms=1000`. Each
-   reply carries the new frames, about ten per simulated second.
+2. While the city is shown, the session stream sends each frame as it is made (section 4.7.1);
+   without a stream, `SessionController` long-polls
+   `GET /api/v2/sessions/{id}/traffic?after_tick=…&wait_ms=1000`. Either way about ten frames arrive
+   per simulated second.
 3. `TrafficPlaybackClock` keeps the drawn time a little behind the newest frame and adapts to how
    quickly frames really arrive, so uneven delivery does not stutter.
 4. `CityTrafficFollow` interpolates vehicles and shuttle bodies between frames.
@@ -528,8 +565,9 @@ from training alerts and are not affected by Mute alerts.
 | --- | --- | --- |
 | Simulation tick | Actor | 20 Hz (50 ms) |
 | Committed presentation snapshot | Actor → `TrainingStore` | 10 Hz (every 2 ticks) |
-| Snapshot and event poll | `SessionController` → `/snapshot`, `/events` | 1 Hz |
-| Traffic frame | Actor → memory ring of 30 frames → long-poll | 10 Hz, at most 1 s per reply |
+| Snapshot push | `TrainingStore` → session stream → `SessionController` | Each commit, at most 4 Hz (250 ms) |
+| Snapshot and event poll | `SessionController` → `/snapshot`, `/events` | 1 Hz while no stream delivers; events when a snapshot has new ones |
+| Traffic frame | Actor → memory ring of 30 frames → session stream (or long-poll) | 10 Hz, each as it is made |
 | Traffic checkpoint | Actor → `session_traffic` | About 1 Hz |
 | Rendering | Unity | Every frame; motion interpolated |
 | Map tiles, buildings, roads, bus stops | Static services and tile server → client caches | On demand, cached in memory and on disk (tiles) |
@@ -568,8 +606,9 @@ for the end-to-end test).
 
 - **Single authority process.** Live sessions are in memory, so the backend runs one worker on one
   host. Scaling out would need session ownership and routing first.
-- **Polling transport.** Snapshots are polled at 1 Hz, so a decision can take up to a second to show.
-  The v2 WebSocket transport is not implemented, and the old v1 WebSocket is not used.
+- **Snapshot deltas.** The session stream sends whole snapshots (about 30 KB for the integrated
+  exercise) up to four times a second. Delta encoding would cut that further, but has not been needed on loopback. The old v1
+  WebSocket is not used.
 - **Local deployment only.** No TLS. Roles are not enforced beyond being logged in. CORS defaults to
   a development origin. Classroom LAN use would need HTTPS, roles and origin checks.
 - **Simulated signals and incidents.** Light timings, turning phases and incident behaviour are made

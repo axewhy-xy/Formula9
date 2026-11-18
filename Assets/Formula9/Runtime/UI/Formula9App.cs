@@ -5,7 +5,7 @@
  * Contributors: Rishika (page layout, fleet cards, map/3D switch),
  *     Lau Xiang Yang (training workspace, session list and cleanup, exit)
  * Date Created: 30/10/2026
- * Last Modified: 15/11/2026
+ * Last Modified: 18/11/2026
  *
  * Description:
  *     Part of the Unity client's UI. Wires the UI Toolkit screens to the login and session layers,
@@ -89,7 +89,8 @@ namespace Formula9.UI
             authClient = new AuthClient(transport, auth);
             // Parse polled replies off the main thread; nothing here ever blocks on those tasks
             api = new TrainingApi(transport, auth) { ParseInBackground = true };
-            session = new SessionController(api, auth);
+            // The joined session's snapshots and traffic come over its stream while it delivers
+            session = new SessionController(api, auth) { UseStream = true };
             auth.Ended += OnLoginEnded;
             session.SnapshotAccepted += (snapshot, reset) =>
             {
@@ -198,6 +199,7 @@ namespace Formula9.UI
             ShowLogin(null);
             StartCoroutine(Poll());
             StartCoroutine(PollTraffic());
+            StartCoroutine(PumpStream());
         }
 
         // -----------------------------------------------------------------------------------
@@ -262,7 +264,8 @@ namespace Formula9.UI
             var idle = new WaitForSecondsRealtime(0.05f);
             while (true)
             {
-                if (!auth.IsLoggedIn || world == null || !world.WantsTraffic)
+                // While the session's stream delivers, the traffic comes over it instead
+                if (!auth.IsLoggedIn || world == null || !world.WantsTraffic || session.Streaming)
                 {
                     yield return retry;
                     continue;
@@ -276,6 +279,26 @@ namespace Formula9.UI
                 }
                 else if (request.IsCanceled || request.Result < 0) yield return retry;
                 else if (request.Result == 0) yield return idle;
+            }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: PumpStream
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function keeps the joined session's stream every frame
+        //     (SessionController.PumpStream): the backend pushes the session's newer snapshots and,
+        //     while the 3D city is shown, its traffic frames, so neither waits for a poll. The
+        //     stream's messages are parsed off the main thread; here they are only handed on.
+        //
+        // Returns:
+        //     IEnumerator: The coroutine.
+        private IEnumerator PumpStream()
+        {
+            while (true)
+            {
+                session.PumpStream(world != null && world.WantsTraffic);
+                yield return null;
             }
         }
 

@@ -773,3 +773,4 @@ class GatewaySessionService(SessionServiceBase):
         for session in self.sessions.values():
             # No more frames will come: a 3D view waiting for one hears so now
             session.wake_frame_waiters()
+        self._close_snapshot_feed()

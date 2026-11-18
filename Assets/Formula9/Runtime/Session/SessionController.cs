@@ -2,9 +2,9 @@
  * Creates, joins and polls a training session, and sends its commands.
  *
  * Author: Choo Jian Wei
- * Contributors: Lau Xiang Yang (leaving a deleted session)
+ * Contributors: Lau Xiang Yang (leaving a deleted session, the session stream)
  * Date Created: 30/10/2026
- * Last Modified: 30/10/2026
+ * Last Modified: 18/11/2026
  *
  * Description:
  *     Part of the Unity client's session layer. A port of the training half of the Qt client's
@@ -15,6 +15,11 @@
  *     resending the same command, or by asking for its status after a recovery, backing off to at
  *     most 5 s, and the command waits for its own account across logins. Call it from Unity's main
  *     thread.
+ *
+ *     With UseStream on, PumpStream keeps a WebSocket stream of the joined session open
+ *     (Backend/SessionStream.cs): the backend pushes its newer snapshots and its traffic frames as
+ *     they are made, and the poll fetches no snapshot while the stream delivers. Anything the stream
+ *     cannot say ends it, and the poll takes over until a new stream delivers again.
  */
 
 using System;
@@ -98,6 +103,17 @@ namespace Formula9.Session
         // this far apart, before counting a session as still live
         private const int ArchiveChecks = 5;
         public static readonly TimeSpan ArchiveCheckInterval = TimeSpan.FromSeconds(0.5);
+        // The backend pushes the joined session's newer snapshots at most this often over its stream,
+        // instead of the 1 s poll: a quarter of a second keeps the panels current without redrawing
+        // them at the backend's ten commits a second
+        public static readonly TimeSpan StreamSnapshotInterval = TimeSpan.FromMilliseconds(250);
+        // After a stream ends, the next is tried this long later, doubling while none delivers up to
+        // MaxStreamRetryInterval: a backend without streams is polled, as before, at no extra cost
+        public static readonly TimeSpan StreamRetryInterval = TimeSpan.FromSeconds(2);
+        public static readonly TimeSpan MaxStreamRetryInterval = TimeSpan.FromSeconds(60);
+        // A stream heard nothing from for this long (the backend sends a heartbeat every 5 s) is taken
+        // as lost, so a connection that died silently does not stop the updates
+        public static readonly TimeSpan StreamSilenceLimit = TimeSpan.FromSeconds(15);
 
         // -----------------------------------------------------------------------------------
         // Class: PendingCommand
@@ -137,6 +153,16 @@ namespace Formula9.Session
         private DateTime noTrafficUntil;
         private string creationKey, creationOwner, creationScenario;
         private PendingCommand pending;
+        // The joined session's stream, the join it belongs to, whether it has delivered a snapshot and
+        // whether it was told to send traffic; when it was last heard from; when to try the next, and
+        // how long to wait after that one ends without delivering
+        private SessionStream stream;
+        private long streamGeneration;
+        private bool streamDelivered, streamTraffic;
+        private DateTime streamHeard, streamRetryAt;
+        private TimeSpan streamBackoff = StreamRetryInterval;
+        // Snapshots the stream delivered, so a poll reply that crossed one is not taken for a stale one
+        private long snapshotsPushed;
 
         public SessionStore Store { get; }
         public string SessionId { get; private set; }
@@ -146,6 +172,12 @@ namespace Formula9.Session
         public bool CreationPending => creationKey != null;
         // Scenario for the next creation; an unresolved creation keeps the one it started with.
         public string Scenario { get; set; } = IntegratedScenario;
+        // Whether PumpStream keeps a stream of the joined session open. Off by default, so a caller
+        // that never pumps polls exactly as before; the app turns it on.
+        public bool UseStream { get; set; }
+        // True while the joined session's stream delivers its snapshots (and traffic, if asked for):
+        // RefreshAsync then fetches no snapshot and the traffic is not polled.
+        public bool Streaming => stream != null && streamDelivered && !stream.Closed && stream.SessionId == SessionId;
 
         public event Action<FullSnapshot, bool> SnapshotAccepted;
         // The joined session's real-time factor, from the snapshots received while it runs.
@@ -203,6 +235,7 @@ namespace Formula9.Session
         public void Shutdown()
         {
             generation++;
+            CloseStream();
             lifetime.Cancel();
         }
 
@@ -307,6 +340,7 @@ namespace Formula9.Session
             if (pending != null) FinishPending(Unconfirmed("INVALID_REFERENCE"));
             joiningSessionId = null;
             snapshotRequest = eventsRequest = commandRequest = trafficRequest = null;
+            CloseStream();
             trafficKey = null;
             SessionId = null;
             Session = null;
@@ -324,14 +358,201 @@ namespace Formula9.Session
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function is one poll: it confirms a pending creation, refreshes the snapshot
-        //     (which catches up events) and reconciles a pending command.
+        //     (which catches up events) and reconciles a pending command. While the session's
+        //     stream delivers its snapshots, none is fetched; only events the stream's snapshots
+        //     announced and that are still missing are.
         public async Task RefreshAsync()
         {
             if (!auth.IsLoggedIn) return;
             if (creationKey != null && creationOwner == auth.Username) await CreateAsync();
-            if (SessionId != null) await RequestSnapshotAsync(SessionId);
+            if (SessionId != null && !Streaming) await RequestSnapshotAsync(SessionId);
+            else if (SessionId != null && eventCursor >= 0 && Store.Snapshot != null && Store.Snapshot.EventSequence > eventCursor) await RequestEventsAsync();
             if (pending != null && pending.Command.SessionId == SessionId) await RunPendingAsync(0);
         }
+
+        // -----------------------------------------------------------------------------------
+        // Function: PumpStream
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function keeps the joined session's stream: it opens one once a session is
+        //     joined (again after one ends, backing off while none delivers), closes it on leaving
+        //     or switching, tells it whether to send traffic, and takes what it delivered.
+        //     Snapshots go through the same checks as polled ones and are reported by
+        //     SnapshotAccepted; traffic frames by TrafficFramesAccepted. A stream that ends or goes
+        //     silent is dropped, and the 1 s poll, which never stopped confirming commands, takes
+        //     over the snapshot at once. Call it from the main thread every frame. Nothing happens
+        //     unless UseStream is on.
+        //
+        // Args:
+        //     wantTraffic (bool): Whether the traffic frames are wanted now.
+        public void PumpStream(bool wantTraffic)
+        {
+            if (!UseStream) return;
+            var joined = auth.IsLoggedIn && SessionId != null && joiningSessionId == null && Store.Snapshot != null;
+            if (stream != null && (!joined || stream.SessionId != SessionId || streamGeneration != generation))
+            {
+                // Left, switched or rejoined: the next session's stream may open at once
+                CloseStream();
+                streamRetryAt = default;
+                streamBackoff = StreamRetryInterval;
+            }
+            if (stream == null)
+            {
+                if (!joined || now() < streamRetryAt) return;
+                OpenStream(wantTraffic);
+                if (stream == null) return;
+            }
+            while (stream != null && stream.TryTake(out var message)) Take(message);
+            if (stream == null) return;
+            if (now() - streamHeard > StreamSilenceLimit)
+            {
+                EndStream();
+                return;
+            }
+            if (wantTraffic != streamTraffic)
+            {
+                stream.SetTraffic(wantTraffic, trafficKey == TrafficKey() ? trafficCursor : -1);
+                streamTraffic = wantTraffic;
+            }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: OpenStream
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function opens a stream of the joined session, its traffic from the newest
+        //     frame taken.
+        //
+        // Args:
+        //     wantTraffic (bool): Whether the traffic frames are wanted now.
+        private void OpenStream(bool wantTraffic)
+        {
+            var cursor = trafficKey == TrafficKey() ? trafficCursor : -1;
+            stream = api.OpenSessionStream(SessionId, wantTraffic, cursor, (int)StreamSnapshotInterval.TotalMilliseconds);
+            if (stream == null) return;
+            streamGeneration = generation;
+            streamTraffic = wantTraffic;
+            streamDelivered = false;
+            streamHeard = now();
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: Take
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function acts on one message of the stream. An error says why the stream is
+        //     about to end; its Closed message ends it.
+        //
+        // Args:
+        //     message (StreamMessage): The message.
+        private void Take(StreamMessage message)
+        {
+            streamHeard = now();
+            switch (message.Kind)
+            {
+                case StreamMessageKind.Snapshot:
+                    streamDelivered = true;
+                    streamBackoff = StreamRetryInterval;
+                    _ = AcceptStreamedSnapshotAsync(message.Snapshot);
+                    break;
+                case StreamMessageKind.Traffic:
+                    AcceptStreamedTraffic(message.Frames);
+                    break;
+                case StreamMessageKind.Closed:
+                    EndStream();
+                    break;
+            }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: EndStream
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function drops a stream that ended or went silent. The next is tried after the
+        //     backoff, which doubles while streams end without delivering. One that was
+        //     delivering is followed by a poll at once, which reports what the stream could not
+        //     (the session recovering or deleted, the login gone) as polling always has.
+        private void EndStream()
+        {
+            var delivered = streamDelivered;
+            CloseStream();
+            if (!delivered) streamBackoff = TimeSpan.FromTicks(Math.Min(streamBackoff.Ticks * 2, MaxStreamRetryInterval.Ticks));
+            streamRetryAt = now() + streamBackoff;
+            if (delivered) _ = RefreshAsync();
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: CloseStream
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function closes the stream, if any, dropping what it has not delivered.
+        private void CloseStream()
+        {
+            stream?.Dispose();
+            stream = null;
+            streamDelivered = false;
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: AcceptStreamedSnapshotAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function takes a snapshot the stream delivered, as a polled one. One no newer
+        //     than the snapshot held (the stream's first, or one a poll already brought) is passed
+        //     over without complaint; events are fetched only when it has new ones.
+        //
+        // Args:
+        //     snapshot (FullSnapshot): The snapshot.
+        private Task AcceptStreamedSnapshotAsync(FullSnapshot snapshot)
+        {
+            if (SessionId == null || snapshot.SessionId != SessionId || joiningSessionId != null || NotNewer(snapshot)) return Task.CompletedTask;
+            snapshotsPushed++;
+            return AcceptSnapshotAsync(SessionId, snapshot, streamed: true);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: AcceptStreamedTraffic
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function reports the traffic frames the stream delivered that are newer than
+        //     the newest taken. A new session or epoch starts over.
+        //
+        // Args:
+        //     frames (List<TrafficFrame>): The frames, oldest first.
+        private void AcceptStreamedTraffic(List<TrafficFrame> frames)
+        {
+            if (SessionId == null || frames == null) return;
+            var key = TrafficKey();
+            if (key != trafficKey) { trafficKey = key; trafficCursor = -1; }
+            var fresh = frames.Where(f => f.Tick > trafficCursor).ToList();
+            if (fresh.Count == 0) return;
+            trafficCursor = fresh[fresh.Count - 1].Tick;
+            TrafficFramesAccepted?.Invoke(fresh);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: NotNewer
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function tells whether a snapshot of the joined session adds nothing to the one
+        //     held: an older epoch, or the same epoch at no later point. Such a snapshot is not an
+        //     error when it crossed a newer one on its way.
+        //
+        // Args:
+        //     snapshot (FullSnapshot): The snapshot.
+        //
+        // Returns:
+        //     bool: True when it is no newer.
+        private bool NotNewer(FullSnapshot snapshot)
+        {
+            var current = Store.Snapshot;
+            if (current == null || current.SessionId != snapshot.SessionId) return false;
+            if (snapshot.SessionEpoch != current.SessionEpoch) return snapshot.SessionEpoch < current.SessionEpoch;
+            return snapshot.SnapshotId == current.SnapshotId || snapshot.EventSequence < current.EventSequence || snapshot.Tick < current.Tick
+                   || (snapshot.EventSequence == current.EventSequence && snapshot.Tick == current.Tick);
+        }
+
+        private string TrafficKey() => $"{SessionId}/{epoch}";
 
         // -----------------------------------------------------------------------------------
         // Function: RefreshTrafficAsync
@@ -353,7 +574,8 @@ namespace Formula9.Session
         public async Task<int> RefreshTrafficAsync(TimeSpan wait = default)
         {
             var sessionId = SessionId;
-            if (!auth.IsLoggedIn || sessionId == null || !Available || trafficRequest != null) return -1;
+            // The stream delivers the traffic it was asked for; a poll as well would only repeat it
+            if (!auth.IsLoggedIn || sessionId == null || !Available || trafficRequest != null || (Streaming && streamTraffic)) return -1;
             var key = $"{sessionId}/{epoch}";
             if (key == noTrafficKey && now() < noTrafficUntil) return -1;
             if (key != trafficKey) { trafficKey = key; trafficCursor = -1; }
@@ -580,11 +802,9 @@ namespace Formula9.Session
         // Function: RequestSnapshotAsync
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function loads a snapshot into the store, then catches up events. An expired
+        //     This function fetches a snapshot and takes it (AcceptSnapshotAsync). An expired
         //     login keeps the session for the next login; a session another client deleted is left.
-        //     On a new epoch of the same run it fetches the events recovery appended, which the
-        //     cursor jump would otherwise skip, and an open command is only confirmed, never
-        //     resent.
+        //     A reply no newer than a snapshot the stream delivered meanwhile is dropped.
         //
         // Args:
         //     sessionId (string): The session.
@@ -593,6 +813,7 @@ namespace Formula9.Session
             if (snapshotRequest != null) return;
             var token = snapshotRequest = new object();
             var started = generation;
+            var pushedBefore = snapshotsPushed;
             FullSnapshot snapshot;
             try
             {
@@ -621,7 +842,27 @@ namespace Formula9.Session
             if (snapshotRequest == token) snapshotRequest = null;
             if (started != generation) return;
             if (joiningSessionId == sessionId) joiningSessionId = null;
+            // The stream delivered a newer one while this reply was on its way: not a stale backend
+            if (snapshotsPushed != pushedBefore && NotNewer(snapshot)) return;
+            await AcceptSnapshotAsync(sessionId, snapshot, streamed: false);
+        }
 
+        // -----------------------------------------------------------------------------------
+        // Function: AcceptSnapshotAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function takes a snapshot of a session, polled or streamed, into the store,
+        //     then catches up events. On a new epoch of the same run it fetches the events
+        //     recovery appended, which the cursor jump would otherwise skip, and an open command
+        //     is only confirmed, never resent.
+        //
+        // Args:
+        //     sessionId (string): The session.
+        //     snapshot (FullSnapshot): The snapshot.
+        //     streamed (bool): True when the stream delivered it: events are then fetched only
+        //         when it has new ones, as most of its snapshots, a few a second, have none.
+        private async Task AcceptSnapshotAsync(string sessionId, FullSnapshot snapshot, bool streamed)
+        {
             var resetEvents = resyncPending;
             var refusal = Store.AcceptSnapshot(snapshot, resetEvents);
             if (refusal != null)
@@ -653,7 +894,7 @@ namespace Formula9.Session
             if (recovered) _ = RequestRecoveryEventsAsync(sessionId, recoveredAfter, snapshot.EventSequence);
             if (pending != null && pending.Command.SessionId == sessionId && pending.StatusOnly) _ = RunPendingAsync(0);
             // After a resync, the next poll resumes replay; a persistently bad reply must not loop.
-            if (!resetEvents) await RequestEventsAsync();
+            if (!resetEvents && (!streamed || snapshot.EventSequence > eventCursor)) await RequestEventsAsync();
         }
 
         // -----------------------------------------------------------------------------------

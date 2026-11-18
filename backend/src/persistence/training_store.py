@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import queue
 import sqlite3
@@ -36,6 +37,7 @@ from contracts.v2.models import (
 )
 
 T = TypeVar("T")
+logger = logging.getLogger(__name__)
 _MIGRATIONS = Path(__file__).with_name("migrations")
 _OCCUPIES_CAPACITY = (
     "(s.status IN ('READY', 'PAUSED', 'RUNNING') AND"
@@ -215,6 +217,10 @@ class TrainingStore:
         # commit is durable: GET /snapshot and snapshot() read it instead of the database. Only the
         # writer changes it, so it is never older than the row it stands for.
         self._published: dict[str, str] = {}
+        # Called on the writer, with the session's ID, after each change to _published: how a live
+        # stream (session_stream.SnapshotFeed) hears of a commit without polling. A listener must not
+        # block, since every commit waits for it.
+        self._publish_listeners: list[Callable[[str], None]] = []
         self.trace = trace if trace is not None else TrainingTrace()
         self.path = Path(path).resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -373,6 +379,20 @@ class TrainingStore:
             self._published.pop(session_id, None)
         else:
             self._published[session_id] = encoded.raw
+        for listener in tuple(self._publish_listeners):
+            try:
+                listener(session_id)
+            except Exception:  # A listener's fault must not fail a commit that is already durable
+                logger.exception("Snapshot publication listener failed")
+
+    def add_publish_listener(self, listener: Callable[[str], None]) -> None:
+        """Calls listener(session_id) on the writer thread after each commit changes what
+        published_snapshot_json gives for that session (or ends it). It must return at once."""
+        self._publish_listeners = [*self._publish_listeners, listener]
+
+    def remove_publish_listener(self, listener: Callable[[str], None]) -> None:
+        # Equality, not identity: each bound method looked up is a new object
+        self._publish_listeners = [item for item in self._publish_listeners if item != listener]
 
     @staticmethod
     def _event(snapshot: FullSnapshot, sequence: int, event_type: str, entity_type: str,
