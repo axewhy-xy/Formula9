@@ -21,6 +21,11 @@ Description:
     diagnostics do. The polling client's own request and JSON work shares the GIL with the sessions here,
     where the real client runs in another process, so client-load cases are slightly pessimistic.
 
+    With --workers N (Phase 2) the sessions tick in N session worker processes behind the gateway, as
+    F9_SESSION_WORKERS=N runs them (auto as the backend chooses); 0, the default, keeps every session in
+    the one process, as Phase 0 measured. The trace, CPU and memory then cover every process; admission
+    by load is lifted for the case, as the session caps are.
+
     The `ab` command runs the same sweep alternately against two source trees (by default this checkout
     and a clean copy of a git ref), so a change can be compared on a laptop whose speed drifts between
     runs. Each side runs as its own process with a copy of this harness.
@@ -279,7 +284,35 @@ def analyse(records, *, session_ids, start_ns, end_ns, step_s, cpu_s=None):
         "spans": spans, "http": requests, "per_session": per_session}
 
 
-def run_case(directory, *, sessions, traffic, client_load, ticks, warmup_s, seed, timeout_s, keep_raw=False):
+def _gateway_class():
+    """The gateway's class where this source tree has one (an older tree, as an A/B baseline, has none)."""
+    try:
+        from src.services.session_gateway import GatewaySessionService
+    except ImportError:
+        return None
+    return GatewaySessionService
+
+
+def _processes(client, service):
+    """This process and each session worker's: CPU seconds used so far and memory."""
+    own = [{"index": None, "pid": os.getpid(), "cpu_s": process_time(), "memory": memory_mib()}]
+    status = getattr(service, "worker_status", None)
+    if status is None:
+        return own
+    return own + [{key: worker[key] for key in ("index", "pid", "cpu_s", "memory")}
+                  for worker in client.portal.call(status)]
+
+
+def _total_memory(processes):
+    current = [p["memory"]["working_set_mib"] for p in processes]
+    peak = [p["memory"]["peak_working_set_mib"] for p in processes]
+    return {"working_set_mib": sum(current) if None not in current else None,
+            "peak_working_set_mib": sum(peak) if None not in peak else None,
+            "processes": [{"worker": p["index"], "pid": p["pid"], **p["memory"]} for p in processes]}
+
+
+def run_case(directory, *, sessions, traffic, client_load, ticks, warmup_s, seed, timeout_s, keep_raw=False,
+             workers="0"):
     """Run N live integrated sessions in a fresh store and measure one window. Returns the case summary."""
     from fastapi.testclient import TestClient
 
@@ -299,13 +332,20 @@ def run_case(directory, *, sessions, traffic, client_load, ticks, warmup_s, seed
     previous = dict(app.dependency_overrides)
     caps = (TrainingSessionService.MAX_SESSIONS, TrainingSessionService.MAX_TRAFFIC_SESSIONS,
             IntegratedSessionActor.TRAFFIC)
+    gateway = _gateway_class()
+    budget = gateway.TICK_BUDGET_MS if gateway is not None else None
+    previous_workers = os.environ.get("F9_SESSION_WORKERS")
     session_ids, window, load, cpu_s, ticks_at = [], None, None, None, {}
     timings = {}
     try:
         # The admission caps are what this measures, so they must not refuse the sessions it asks for
         TrainingSessionService.MAX_SESSIONS = max(caps[0], sessions)
         TrainingSessionService.MAX_TRAFFIC_SESSIONS = max(caps[1], sessions)
+        if gateway is not None:
+            gateway.MAX_SESSIONS = max(caps[0], sessions)
+            gateway.TICK_BUDGET_MS = math.inf
         IntegratedSessionActor.TRAFFIC = traffic
+        os.environ["F9_SESSION_WORKERS"] = str(workers)
         with TrainingStore(directory / "runtime.sqlite", trace=trace) as store:
             app.dependency_overrides[get_training_store] = lambda: store
             app.dependency_overrides[get_actor_id] = lambda: "scaling-benchmark"
@@ -329,13 +369,18 @@ def run_case(directory, *, sessions, traffic, client_load, ticks, warmup_s, seed
                     if result["status"] != "APPLIED":
                         raise AssertionError(f"Session {session_id} did not start: {result['status']}")
                 traffic_live = service.traffic_sessions()
+                worker_count = getattr(service, "worker_count", 0)
 
                 def current_ticks():
-                    live = service.sessions
-                    failed = [sid for sid in session_ids if sid not in live or live[sid].failed]
+                    if hasattr(service, "live_ticks"):
+                        live = service.live_ticks()
+                    else:
+                        live = {sid: None if session.failed else session.actor.current_tick
+                                for sid, session in service.sessions.items()}
+                    failed = [sid for sid in session_ids if live.get(sid) is None]
                     if failed:
                         raise AssertionError(f"Sessions stopped during the run: {failed}")
-                    return {sid: live[sid].actor.current_tick for sid in session_ids}
+                    return {sid: live[sid] for sid in session_ids}
 
                 load = ClientLoad(client, session_ids[0], traffic=traffic_live > 0) if client_load else None
                 if load is not None:
@@ -343,7 +388,8 @@ def run_case(directory, *, sessions, traffic, client_load, ticks, warmup_s, seed
                 try:
                     sleep(warmup_s)
                     ticks_at["start"] = current_ticks()
-                    cpu_started, wall_started = process_time(), monotonic()
+                    processes_started = _processes(client, service)
+                    wall_started = monotonic()
                     window = [trace.clock(), None]
                     complete = False
                     while monotonic() - wall_started < timeout_s:
@@ -353,14 +399,19 @@ def run_case(directory, *, sessions, traffic, client_load, ticks, warmup_s, seed
                             complete = True
                             break
                     window[1] = trace.clock()
-                    cpu_s = process_time() - cpu_started
+                    processes_ended = _processes(client, service)
+                    started_cpu = {p["pid"]: p["cpu_s"] for p in processes_started}
+                    # Every process's: a worker replaced during the window counts from zero
+                    cpu_s = sum(p["cpu_s"] - started_cpu.get(p["pid"], 0.0) for p in processes_ended)
                     ticks_at["end"] = current_ticks()
-                    memory = memory_mib()
+                    memory = _total_memory(processes_ended)
                 finally:
                     if load is not None:
                         load.__exit__(None, None, None)
                 incidents = {sid: len(store.snapshot(sid).incidents) for sid in session_ids}
-        exported = trace.export()
+                # Every process's trace, while the workers are still running
+                exported = (client.portal.call(service.export_trace) if hasattr(service, "export_trace")
+                            else trace.export())
         records = exported.pop("records")
         if keep_raw:
             with open(directory / "raw-timings.jsonl", "w", encoding="utf-8") as raw:
@@ -371,6 +422,7 @@ def run_case(directory, *, sessions, traffic, client_load, ticks, warmup_s, seed
             measured["per_session"][session_id]["incidents_at_end"] = incidents[session_id]
             measured["per_session"][session_id]["final_tick"] = ticks_at["end"][session_id]
         case = {"sessions": sessions, "traffic": traffic, "traffic_sessions_live": traffic_live,
+                "workers": worker_count,
                 "client_load": client_load, "seeds": [seed + i for i in range(sessions)],
                 "minimum_window_ticks": ticks, "warmup_s": warmup_s, "timeout_s": timeout_s,
                 "window_complete": complete, "timings": timings, "memory": memory,
@@ -386,9 +438,16 @@ def run_case(directory, *, sessions, traffic, client_load, ticks, warmup_s, seed
         app.dependency_overrides.update(previous)
         (TrainingSessionService.MAX_SESSIONS, TrainingSessionService.MAX_TRAFFIC_SESSIONS,
          IntegratedSessionActor.TRAFFIC) = caps
+        if gateway is not None:
+            gateway.MAX_SESSIONS, gateway.TICK_BUDGET_MS = caps[0], budget
+        if previous_workers is None:
+            os.environ.pop("F9_SESSION_WORKERS", None)
+        else:
+            os.environ["F9_SESSION_WORKERS"] = previous_workers
 
 
-def run_case_process(directory, *, sessions, traffic, client_load, ticks, warmup_s, seed, timeout_s, keep_raw=False):
+def run_case_process(directory, *, sessions, traffic, client_load, ticks, warmup_s, seed, timeout_s, keep_raw=False,
+                     workers="0"):
     """run_case in a fresh Python process with this one's interpreter and source tree."""
     import contracts
     import src
@@ -400,7 +459,8 @@ def run_case_process(directory, *, sessions, traffic, client_load, ticks, warmup
     subprocess.run([sys.executable, str(Path(__file__).resolve()), "case", "--output", str(directory),
                     "--sessions", str(sessions), "--traffic", "on" if traffic else "off",
                     "--client", "on" if client_load else "off", "--ticks", str(ticks), "--warmup", str(warmup_s),
-                    "--seed", str(seed), "--timeout", str(timeout_s), *(["--keep-raw"] if keep_raw else [])],
+                    "--seed", str(seed), "--timeout", str(timeout_s), "--workers", str(workers),
+                    *(["--keep-raw"] if keep_raw else [])],
                    env=environment, check=True)
     return json.loads((Path(directory) / "summary.json").read_bytes())
 
@@ -439,7 +499,8 @@ def report(result):
     lines = [f"# Session scaling baseline ({result['recorded_at_utc'][:16]} UTC)", "",
              f"Source {result.get('source_commit') or 'unknown'}{' (dirty)' if result.get('source_dirty') else ''}. "
              f"Host: {host.get('cpu')}, {host.get('physical_cores')} cores / {host.get('logical_cpu_count')} threads, "
-             f"power {host.get('power_source')}, Python {host.get('python')}.", "",
+             f"power {host.get('power_source')}, Python {host.get('python')}. "
+             f"Session workers: {result['parameters'].get('workers', '0')}.", "",
              f"Window: every session advances at least {result['parameters']['ticks']} ticks after "
              f"{result['parameters']['warmup_s']} s of warm-up. Real-time factor (RTF) below "
              f"{REFERENCE_FACTOR} means the session runs in slow motion.", "", "## Where sessions fall behind", "",
@@ -485,7 +546,7 @@ def _write(path, value):
 
 
 def run(output, *, session_counts=DEFAULT_SESSIONS, traffic="on", client="on", ticks=600, warmup_s=5.0,
-        rounds=1, seed=1000, timeout_s=None, keep_raw=False, isolate=True,
+        rounds=1, seed=1000, timeout_s=None, keep_raw=False, isolate=True, workers="0",
         progress=lambda line: print(line, flush=True)):
     """Sweep the session counts in each traffic/client mode, alternating their order between rounds so a
     machine's drift spreads across them, and write summary.json and report.md.
@@ -512,7 +573,7 @@ def run(output, *, session_counts=DEFAULT_SESSIONS, traffic="on", client="on", t
     harness = Path(__file__).read_bytes()
     host = host_details()
     parameters = {"session_counts": list(session_counts), "traffic": traffic, "client": client, "ticks": ticks,
-                  "warmup_s": warmup_s, "rounds": rounds, "seed": seed, "timeout_s": timeout_s,
+                  "warmup_s": warmup_s, "rounds": rounds, "seed": seed, "timeout_s": timeout_s, "workers": workers,
                   "transport": "IN_PROCESS_ASGI", "process_per_case": isolate, "harness_sha256": hashlib.sha256(harness).hexdigest(),
                   # Sessions open as the scenario sets them; the workflow benchmark forces this opener on
                   "tutorial_opening": get_workflow_definition().incidents.simulated_catalog.policy
@@ -532,7 +593,8 @@ def run(output, *, session_counts=DEFAULT_SESSIONS, traffic="on", client="on", t
                     for sessions in counts:
                         name = _case_name(round_index, sessions, traffic_on, client_on)
                         options = dict(sessions=sessions, traffic=traffic_on, client_load=client_on, ticks=ticks,
-                                       warmup_s=warmup_s, seed=seed, timeout_s=timeout_s, keep_raw=keep_raw)
+                                       warmup_s=warmup_s, seed=seed, timeout_s=timeout_s, keep_raw=keep_raw,
+                                       workers=workers)
                         measured = (run_case_process(output / name, **options) if isolate
                                     else run_case(output / name, **options))
                         case = {"case": name, "round": round_index + 1, **measured}
@@ -653,11 +715,13 @@ def _add_run_options(parser):
     parser.add_argument("--seed", type=int, default=1000)
     parser.add_argument("--timeout", type=float, help="Longest window in seconds (default ten times its 1x length)")
     parser.add_argument("--keep-raw", action="store_true", help="Also write each case's raw trace records")
+    parser.add_argument("--workers", default="0",
+                        help="Session worker processes, as F9_SESSION_WORKERS (default 0: every session in one process)")
 
 
 def _run_options(args):
     options = ["--sessions", args.sessions, "--ticks", str(args.ticks), "--warmup", str(args.warmup),
-               "--traffic", args.traffic, "--client", args.client, "--seed", str(args.seed)]
+               "--traffic", args.traffic, "--client", args.client, "--seed", str(args.seed), "--workers", args.workers]
     if args.timeout is not None:
         options += ["--timeout", str(args.timeout)]
     return options + (["--keep-raw"] if args.keep_raw else [])
@@ -693,7 +757,7 @@ def main(argv=None):
             parser.error("case takes one session count, on/off modes and a timeout")
         measured = run_case(args.output, sessions=counts[0], traffic=args.traffic == "on",
                             client_load=args.client == "on", ticks=args.ticks, warmup_s=args.warmup, seed=args.seed,
-                            timeout_s=args.timeout, keep_raw=args.keep_raw)
+                            timeout_s=args.timeout, keep_raw=args.keep_raw, workers=args.workers)
         _write(args.output / "summary.json", measured)
         return 0
     if args.command == "ab":
@@ -703,7 +767,7 @@ def main(argv=None):
         return 0 if rows else 1
     result = run(args.output, session_counts=counts, traffic=args.traffic, client=args.client, ticks=args.ticks,
                  warmup_s=args.warmup, rounds=args.rounds, seed=args.seed, timeout_s=args.timeout,
-                 keep_raw=args.keep_raw, isolate=not args.in_process)
+                 keep_raw=args.keep_raw, isolate=not args.in_process, workers=args.workers)
     print(json.dumps(result["breakpoints"], indent=2))
     return 0
 

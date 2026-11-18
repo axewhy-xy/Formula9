@@ -122,6 +122,25 @@ class _EncodedRuntime:
         return cls(state.get("tick"), raw, _hash(raw), saved)
 
 
+@dataclass(frozen=True)
+class EncodedCommit:
+    """A publication serialised before the writer takes it, as plain strings and numbers: the snapshot
+    with its new snapshot ID, its domain events as (sequence, event_id, tick, JSON) and the actor
+    checkpoint. A session worker process encodes it and the gateway's writer commits it
+    (TrainingStore.submit_commit), so neither Pydantic objects nor their parsing cross the pipe."""
+    session_id: str
+    snapshot_id: str
+    snapshot: _EncodedSnapshot
+    events: tuple[tuple[int, str, int, str], ...]
+    runtime: _EncodedRuntime | None
+    expected_snapshot_id: str | None
+
+
+def _encode_event(event: Event) -> tuple[int, str, int, str]:
+    """An event as its row stores it: (sequence, event_id, tick, JSON)."""
+    return event.event_sequence, event.event_id, event.tick, _json(event.model_dump(mode="json"))
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -250,6 +269,10 @@ class TrainingStore:
             connection.close()
 
     def _submit(self, operation: Callable[[sqlite3.Connection], T]) -> T:
+        return self._submit_async(operation).result()
+
+    def _submit_async(self, operation: Callable[[sqlite3.Connection], T]) -> Future[T]:
+        """Queue a writer job and return its future at once, without waiting for the transaction."""
         if self._lock_file.closed:
             raise TrainingStoreError("SESSION_OWNED", "Training store is closed")
         future: Future[T] = Future()
@@ -262,7 +285,7 @@ class TrainingStore:
             self.trace.record("writer.queue_rejected", now, now, outcome="ERROR", error_code="QUEUE_FULL",
                               queue_depth=self._jobs.maxsize)
             raise TrainingStoreError("QUEUE_FULL", "Training writer queue is full") from error
-        return future.result()
+        return future
 
     def close(self) -> None:
         if self._thread.is_alive():
@@ -309,27 +332,40 @@ class TrainingStore:
         snapshot already serialised (_EncodedSnapshot.of), so the writer does not do it again."""
         if encoded is None:
             encoded = _EncodedSnapshot.of(snapshot)
-        raw, digest = encoded.raw, encoded.digest
         if initial:
             connection.execute(
                 "INSERT INTO sessions (session_id, scenario_revision_id, epoch, status, tick, event_sequence,"
                 " base_sequence, snapshot_json, state_hash, boundary_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (snapshot.session_id, snapshot.session.scenario_revision_id, snapshot.session_epoch,
-                 snapshot.session.status, snapshot.tick, snapshot.event_sequence, snapshot.event_sequence, raw, digest,
-                 encoded.boundary_json),
+                 snapshot.session.status, snapshot.tick, snapshot.event_sequence, snapshot.event_sequence,
+                 encoded.raw, encoded.digest, encoded.boundary_json),
             )
+            TrainingStore._write_checkpoint(connection, snapshot.session_id, encoded)
         else:
-            connection.execute(
-                "UPDATE sessions SET epoch=?, status=?, tick=?, event_sequence=?, snapshot_json=?, state_hash=?,"
-                " boundary_json=? WHERE session_id=?",
-                (snapshot.session_epoch, snapshot.session.status, snapshot.tick, snapshot.event_sequence,
-                 raw, digest, encoded.boundary_json, snapshot.session_id),
-            )
+            TrainingStore._write_encoded(connection, snapshot.session_id, encoded)
+        return encoded
+
+    @staticmethod
+    def _write_encoded(connection: sqlite3.Connection, session_id: str, encoded: _EncodedSnapshot) -> None:
+        """Writes an encoded snapshot over the session's row, and as a checkpoint: from its JSON and
+        boundary alone, so the writer needs no snapshot object (submit_commit)."""
+        boundary = encoded.boundary
+        connection.execute(
+            "UPDATE sessions SET epoch=?, status=?, tick=?, event_sequence=?, snapshot_json=?, state_hash=?,"
+            " boundary_json=? WHERE session_id=?",
+            (boundary["session_epoch"], encoded.status, boundary["tick"], boundary["event_sequence"],
+             encoded.raw, encoded.digest, encoded.boundary_json, session_id),
+        )
+        TrainingStore._write_checkpoint(connection, session_id, encoded)
+
+    @staticmethod
+    def _write_checkpoint(connection: sqlite3.Connection, session_id: str, encoded: _EncodedSnapshot) -> None:
+        boundary = encoded.boundary
         connection.execute(
             "INSERT INTO checkpoints VALUES (?, ?, ?, ?, ?, ?)",
-            (snapshot.session_id, snapshot.event_sequence, snapshot.tick, snapshot.session_epoch, raw, digest),
+            (session_id, boundary["event_sequence"], boundary["tick"], boundary["session_epoch"],
+             encoded.raw, encoded.digest),
         )
-        return encoded
 
     def _publish(self, session_id: str, encoded: _EncodedSnapshot | None) -> None:
         """After a commit, on the writer: the session's snapshot JSON for reads, or none once it ends."""
@@ -347,8 +383,8 @@ class TrainingStore:
 
     @staticmethod
     def _append_event(connection: sqlite3.Connection, session_id: str, event: Event) -> None:
-        connection.execute("INSERT INTO events VALUES (?, ?, ?, ?)",
-                           (session_id, event.event_sequence, event.event_id, _json(event.model_dump(mode="json"))))
+        sequence, event_id, _, raw = _encode_event(event)
+        connection.execute("INSERT INTO events VALUES (?, ?, ?, ?)", (session_id, sequence, event_id, raw))
 
     def _recover(self, connection: sqlite3.Connection) -> None:
         rows = connection.execute("SELECT * FROM sessions WHERE status NOT IN ('COMPLETED', 'ARCHIVED', 'FAILED')").fetchall()
@@ -518,6 +554,11 @@ class TrainingStore:
                 " OR EXISTS (SELECT 1 FROM session_creations c WHERE c.session_id=s.session_id))",
             ).fetchall()
             return [row[0] for row in rows]
+
+    def traffic_runtime_ids(self) -> set[str]:
+        """Sessions with a traffic checkpoint: a hint, before restoring them, of which ones drive traffic."""
+        with self._reading() as connection:
+            return {row[0] for row in connection.execute("SELECT session_id FROM session_traffic").fetchall()}
 
     def runtime(self, session_id: str) -> tuple[FullSnapshot, dict]:
         with self._reading() as connection:
@@ -844,9 +885,14 @@ class TrainingStore:
 
     @staticmethod
     def _check_events(events: tuple[Event, ...], after: int, tick: int) -> None:
-        if [event.event_sequence for event in events] != list(range(after + 1, after + 1 + len(events))):
+        TrainingStore._check_event_order([(event.event_sequence, event.tick) for event in events], after, tick)
+
+    @staticmethod
+    def _check_event_order(events: list[tuple[int, int]], after: int, tick: int) -> None:
+        """events as (sequence, tick): they must follow after without a gap, all at tick."""
+        if [sequence for sequence, _ in events] != list(range(after + 1, after + 1 + len(events))):
             raise TrainingStoreError("STALE_REVISION", "Domain event sequence has a gap")
-        if any(event.tick != tick for event in events):
+        if any(event_tick != tick for _, event_tick in events):
             raise TrainingStoreError("INVALID_PAYLOAD", "Domain events must belong to the staged tick")
 
     def commit_snapshot(self, snapshot: FullSnapshot, domain_events: tuple[Event, ...] = (), *,
@@ -867,7 +913,17 @@ class TrainingStore:
         thread, and the writer checks it against the stored boundary (boundary_json) without parsing the
         stored snapshot. A refused or failed commit leaves it as it was.
         """
-        domain_events = tuple(Event.model_validate(event.model_dump(mode="json")) for event in domain_events)
+        commit = self.encode_commit(snapshot, domain_events, expected_snapshot_id=expected_snapshot_id,
+                                    runtime_state=runtime_state)
+        self.submit_commit(commit).result()
+        snapshot.snapshot_id = commit.snapshot_id
+        return snapshot
+
+    def encode_commit(self, snapshot: FullSnapshot, domain_events: tuple[Event, ...] = (), *,
+                      expected_snapshot_id: str | None = None, runtime_state: dict | None = None) -> EncodedCommit:
+        """The caller's half of commit_snapshot: validates the events and serialises the publication
+        under a new snapshot ID, leaving snapshot as it was. Needs no writer, so a worker process can do it."""
+        events = tuple(_encode_event(Event.model_validate(event.model_dump(mode="json"))) for event in domain_events)
         snapshot_id = str(uuid4())
         previous_id, snapshot.snapshot_id = snapshot.snapshot_id, snapshot_id
         try:
@@ -876,31 +932,51 @@ class TrainingStore:
             snapshot.snapshot_id = previous_id
         if self.validate_publications:
             FullSnapshot.model_validate_json(encoded.raw)
-        runtime = _EncodedRuntime.of(runtime_state)
-        proposed = encoded.boundary
+        return EncodedCommit(snapshot.session_id, snapshot_id, encoded, events, _EncodedRuntime.of(runtime_state),
+                             expected_snapshot_id)
+
+    def submit_commit(self, commit: EncodedCommit) -> Future[None]:
+        """The writer's half of commit_snapshot: queues the encoded publication and returns at once. The
+        future completes once it is durable (and published for reads), or fails, as with STALE_REVISION
+        when it no longer follows the committed boundary. Nothing here parses JSON or touches Pydantic."""
+        proposed = commit.snapshot.boundary
+        session_id = commit.session_id
         def write(connection: sqlite3.Connection) -> None:
             connection.execute("BEGIN IMMEDIATE")
-            previous = self._stored_boundary(connection, snapshot.session_id)
-            if ((expected_snapshot_id is not None and previous["snapshot_id"] != expected_snapshot_id) or
+            previous = self._stored_boundary(connection, session_id)
+            if ((commit.expected_snapshot_id is not None and previous["snapshot_id"] != commit.expected_snapshot_id) or
                 proposed["session_epoch"] != previous["session_epoch"] or
-                proposed["event_sequence"] != previous["event_sequence"] + len(domain_events) or
+                proposed["event_sequence"] != previous["event_sequence"] + len(commit.events) or
                 proposed["tick"] < previous["tick"] or
-                (proposed["tick"] == previous["tick"] and not domain_events) or
+                (proposed["tick"] == previous["tick"] and not commit.events) or
                 proposed["scene_revision"] != previous["scene_revision"] or
                 proposed["spatial"] != previous["spatial"] or
                 proposed["transform_revision"] != previous["transform_revision"] or
                 proposed["scenario_revision_id"] != previous["scenario_revision_id"]):
                 raise TrainingStoreError("STALE_REVISION", "Publication does not follow the committed boundary")
-            self._check_events(domain_events, previous["event_sequence"], proposed["tick"])
-            for event in domain_events:
-                self._append_event(connection, snapshot.session_id, event)
-            self._write_snapshot(connection, snapshot, encoded=encoded)
-            self._write_runtime(connection, snapshot.session_id, runtime)
+            self._check_event_order([(sequence, tick) for sequence, _, tick, _ in commit.events],
+                                    previous["event_sequence"], proposed["tick"])
+            for sequence, event_id, _, raw in commit.events:
+                connection.execute("INSERT INTO events VALUES (?, ?, ?, ?)", (session_id, sequence, event_id, raw))
+            self._write_encoded(connection, session_id, commit.snapshot)
+            self._write_runtime(connection, session_id, commit.runtime)
             connection.commit()
-            self._publish(snapshot.session_id, encoded)
+            self._publish(session_id, commit.snapshot)
+        return self._submit_async(write)
+
+    def recover_session(self, session_id: str) -> None:
+        """Recovers one session as opening the store recovers each (_recover_session): a new epoch, the
+        session paused (or still READY), queued commands marked for reconfirmation. For a session whose
+        worker process was lost: its actor goes back to the last committed checkpoint, so clients'
+        commands against the old epoch are refused rather than applied to state that no longer exists.
+        A terminal or missing session is left alone."""
+        def write(connection: sqlite3.Connection) -> None:
+            row = connection.execute("SELECT * FROM sessions WHERE session_id=?", (session_id,)).fetchone()
+            if row is None or row["status"] in _TERMINAL:
+                return
+            with self.trace.span("session.recovery", session_id=session_id) as fields:
+                self._publish(session_id, self._recover_session(connection, row, fields))
         self._submit(write)
-        snapshot.snapshot_id = snapshot_id
-        return snapshot
 
     @staticmethod
     def _stored_boundary(connection: sqlite3.Connection, session_id: str) -> dict:

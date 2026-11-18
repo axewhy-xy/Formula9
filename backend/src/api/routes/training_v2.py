@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
+import logging
 from threading import Lock
 
 from typing import Annotated
@@ -23,9 +25,11 @@ from src.services.charge_booking import BOOKING_COMMANDS, preview_slot
 from src.services.incidents import IncidentService, get_incident_service
 from src.services.route_edit import RouteEditService, get_route_edit_service
 from src.services.route_outcome import route_outcome
-from src.services.training_sessions import TrainingSessionService
+from src.services.session_gateway import WorkerStartError, create_session_service
+from src.services.training_sessions import SessionServiceBase, TrainingSessionService
 from src.services.integrated_actor import SCENARIO_ID, get_workflow_definition, services_for
 
+logger = logging.getLogger(__name__)
 _store: TrainingStore | None = None
 _store_lock = Lock()
 
@@ -64,25 +68,34 @@ def get_actor_id(request: Request) -> str:
     return str(actor_id)
 
 
-async def initialize_training_service(application: FastAPI, store: TrainingStore) -> TrainingSessionService:
+async def initialize_training_service(application: FastAPI, store: TrainingStore) -> SessionServiceBase:
+    """The application's session service for store: sessions in worker processes (F9_SESSION_WORKERS,
+    session_gateway) or in this one. If the workers cannot start, sessions run in this process."""
     services = getattr(application.state, "training_services", None)
     if services is None:
         services = application.state.training_services = {}
+    retention = get_settings().training_retention_keep_latest
     if store not in services:
-        services[store] = TrainingSessionService(store, retention_keep_latest=get_settings().training_retention_keep_latest)
+        services[store] = create_session_service(store, retention_keep_latest=retention)
     service = services[store]
-    await service.initialize()
+    try:
+        await service.initialize()
+    except WorkerStartError:
+        logger.exception("Session workers could not start; running training sessions in this process")
+        await service.close()
+        service = services[store] = TrainingSessionService(store, retention_keep_latest=retention)
+        await service.initialize()
     return service
 
 
-async def get_training_service(request: Request, store: TrainingStore = Depends(get_training_store)) -> TrainingSessionService:
+async def get_training_service(request: Request, store: TrainingStore = Depends(get_training_store)) -> SessionServiceBase:
     return await initialize_training_service(request.app, store)
 
 
 @router.get("", response_model=SessionListResponse)
 async def list_sessions(limit: Annotated[int, Query(ge=1, le=500)] = 100, offset: Annotated[int, Query(ge=0)] = 0,
                         actor_id: str = Depends(get_actor_id),
-                        service: TrainingSessionService = Depends(get_training_service)) -> dict:
+                        service: SessionServiceBase = Depends(get_training_service)) -> dict:
     page = await asyncio.to_thread(service.store.session_page, limit, offset)
     return {**page, "capacity": service.MAX_SESSIONS}
 
@@ -90,32 +103,32 @@ async def list_sessions(limit: Annotated[int, Query(ge=1, le=500)] = 100, offset
 @router.post("", response_model=TrainingSession, status_code=201)
 async def create_session(payload: CreateSessionRequest, idempotency_key: Annotated[Id, Header()],
                          actor_id: str = Depends(get_actor_id),
-                         service: TrainingSessionService = Depends(get_training_service)) -> TrainingSession:
+                         service: SessionServiceBase = Depends(get_training_service)) -> TrainingSession:
     return (await service.create(payload, actor_id, idempotency_key)).session
 
 
 @router.post("/purge")
 async def purge_sessions(keep_latest: Annotated[int, Query(ge=0)], actor_id: str = Depends(get_actor_id),
-                         service: TrainingSessionService = Depends(get_training_service)) -> dict:
+                         service: SessionServiceBase = Depends(get_training_service)) -> dict:
     return await service.purge(keep_latest)
 
 
 @router.post("/compact")
 async def compact_sessions(actor_id: str = Depends(get_actor_id),
-                           service: TrainingSessionService = Depends(get_training_service)) -> dict:
+                           service: SessionServiceBase = Depends(get_training_service)) -> dict:
     return await service.compact()
 
 
 @router.delete("/{session_id}", status_code=204)
 async def delete_session(session_id: str, actor_id: str = Depends(get_actor_id),
-                          service: TrainingSessionService = Depends(get_training_service)) -> Response:
+                          service: SessionServiceBase = Depends(get_training_service)) -> Response:
     await service.delete(session_id)
     return Response(status_code=204)
 
 
 @router.get("/{session_id}/snapshot")
 async def snapshot(session_id: str, actor_id: str = Depends(get_actor_id),
-                   service: TrainingSessionService = Depends(get_training_service)) -> Response:
+                   service: SessionServiceBase = Depends(get_training_service)) -> Response:
     # The committed JSON as it is: a live session's is kept in memory at each commit (TrainingStore),
     # so a poll neither reads SQLite nor parses and re-encodes the snapshot
     return Response(content=await service.snapshot_json(session_id), media_type="application/json")
@@ -125,7 +138,7 @@ async def snapshot(session_id: str, actor_id: str = Depends(get_actor_id),
 async def traffic(session_id: str, after_tick: Annotated[int, Query(ge=-1)] = -1,
                   wait_ms: Annotated[int, Query(ge=0, le=5000)] = 0,
                   actor_id: str = Depends(get_actor_id),
-                  service: TrainingSessionService = Depends(get_training_service)) -> Response:
+                  service: SessionServiceBase = Depends(get_training_service)) -> Response:
     """The background traffic and the shuttles' bodies as the backend drives them, for a 3D view to draw.
 
     Frames after after_tick, oldest first, one a traffic step (ten a second) while the session runs, at
@@ -145,11 +158,13 @@ async def traffic(session_id: str, after_tick: Annotated[int, Query(ge=-1)] = -1
 
 @router.get("/{session_id}/signals/state")
 async def signal_state(session_id: str, actor_id: str = Depends(get_actor_id),
-                       service: TrainingSessionService = Depends(get_training_service)) -> dict:
+                       service: SessionServiceBase = Depends(get_training_service)) -> dict:
     """Every signalled junction's colours now, on the session's simulation clock, as
     /api/road-features/{area}/signals/state gives them for any time, but with this session's signal
     faults: a faulted junction shows red on every phase and carries {"mode", "until_s"} under "fault"."""
-    return service.signal_state(session_id)
+    state = service.signal_state(session_id)
+    # A session in a worker process answers from there
+    return await state if inspect.isawaitable(state) else state
 
 
 @router.get("/{session_id}/routes/{route_id}/editor", response_model=RouteEditorContext)
@@ -189,7 +204,7 @@ async def approve_route(session_id: str, approval: RouteApprovalRequest,
                   actor_id: str = Depends(get_actor_id),
                   store: TrainingStore = Depends(get_training_store),
                   service: RouteEditService = Depends(get_route_edit_service),
-                  runtime: TrainingSessionService = Depends(get_training_service)) -> dict:
+                  runtime: SessionServiceBase = Depends(get_training_service)) -> dict:
     if runtime.owns(session_id):
         return (await runtime.approve_route(actor_id, session_id, approval)).model_dump(mode="json")
     baseline = await asyncio.to_thread(store.snapshot, session_id)
@@ -202,7 +217,7 @@ async def submit_command(session_id: str, command: DispatcherCommand,
                    actor_id: str = Depends(get_actor_id),
                    store: TrainingStore = Depends(get_training_store),
                    incidents: IncidentService = Depends(get_incident_service),
-                   service: TrainingSessionService = Depends(get_training_service)) -> dict:
+                   service: SessionServiceBase = Depends(get_training_service)) -> dict:
     if command.session_id != session_id:
         raise TrainingStoreError("INVALID_REFERENCE", "Command session does not match URL")
     if service.owns(session_id) and command.command_type != "APPROVE_ROUTE":
@@ -233,7 +248,7 @@ async def submit_command(session_id: str, command: DispatcherCommand,
 @router.post("/{session_id}/charge-schedule-previews", response_model=ChargeSchedulePreview)
 async def charge_schedule_preview(session_id: str, request: ChargeScheduleRequest,
                                   actor_id: str = Depends(get_actor_id),
-                                  service: TrainingSessionService = Depends(get_training_service)) -> ChargeSchedulePreview:
+                                  service: SessionServiceBase = Depends(get_training_service)) -> ChargeSchedulePreview:
     snapshot = await service.snapshot(session_id)
     if snapshot.scenario.scenario_id != SCENARIO_ID:
         raise TrainingStoreError("INVALID_TRANSITION", "This scenario does not run charging slots")

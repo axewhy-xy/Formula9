@@ -34,6 +34,9 @@ from backend.src.routing import graph_loader
 # publications once (TrainingStore.validate_publications): an actor that publishes an invalid
 # snapshot fails its tests rather than a later read.
 os.environ.setdefault("F9_VALIDATE_PUBLICATIONS", "1")
+# Sessions tick in the test's own process, where the tests reach into their actors; the tests of the
+# session worker processes (test_session_workers) start their own
+os.environ.setdefault("F9_SESSION_WORKERS", "0")
 
 os.environ.setdefault(
     graph_loader.ENV_OVERPASS_URL,

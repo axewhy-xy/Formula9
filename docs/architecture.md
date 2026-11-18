@@ -68,15 +68,22 @@ flowchart LR
         World --> Http
     end
 
-    subgraph Server["FastAPI process, one authority worker"]
+    subgraph Server["FastAPI process (gateway), one authority worker"]
         API["/api routes"]
-        Svc["TrainingSessionService<br/>one actor and asyncio task per live session"]
+        Svc["GatewaySessionService<br/>session registry, latest snapshot JSON and traffic frames"]
         Store["TrainingStore<br/>single SQLite writer thread"]
         Static["Static data services<br/>map, roads, buildings, road features, transit, scenes"]
         API --> Svc
         Svc --> Store
         API --> Static
     end
+
+    subgraph Workers["Session worker processes (F9_SESSION_WORKERS, one core each)"]
+        Runtime["WorkerRuntime<br/>one actor and asyncio task per live session placed here"]
+    end
+
+    Svc <-->|"pipe: commands, commits,<br/>frames, progress"| Runtime
+    Runtime -.->|"read-only"| DB
 
     Http <-->|"HTTP/JSON, Bearer token<br/>127.0.0.1:8000"| API
     Store --> DB[("state/training.sqlite<br/>WAL, synchronous=NORMAL")]
@@ -96,8 +103,10 @@ flowchart LR
   shuts down cleanly once the last player has closed (`Tools/bundled_backend.py`). If a backend is
   already listening on the port, the player uses it instead.
 
-Only one FastAPI worker may run against a database. Live sessions are held in that process's memory,
-so more Uvicorn workers would each claim the same sessions.
+Only one FastAPI worker may run against a database. Live sessions are held by that process (and the
+session worker processes it starts), so more Uvicorn workers would each claim the same sessions. The
+session workers are not Uvicorn workers: they serve no HTTP and never write to the database
+(section 4.3.1).
 
 ## 4. Backend
 
@@ -108,7 +117,8 @@ so more Uvicorn workers would each claim the same sessions.
 | `app.py`, `api/router.py`, `api/routes/` | Application assembly, middleware (auth, tracing, CORS), error handlers and route modules |
 | `auth/` | Sign-up, log-in and log-out. PBKDF2-SHA256 password hashes. Opaque bearer tokens valid for 12 hours, stored only as hashes. `MongoAccountStore` holds the data. |
 | `core/` | Settings (`config.py`, read from `backend/.env`), error envelope, per-request training trace telemetry |
-| `services/training_sessions.py` | `TrainingSessionService`: admission, lifecycle, ticking, commands, traffic frames, recovery |
+| `services/training_sessions.py` | `TrainingSessionService`: admission, lifecycle, ticking, commands, traffic frames, recovery, all in one process |
+| `services/session_gateway.py`, `session_worker.py`, `session_ipc.py` | The gateway that runs sessions in worker processes: placement, admission by load, forwarding, worker supervision and recovery; the worker's entry point; the pipe between them |
 | `services/session_actor.py` | Base planar fleet actor: five shuttles on loops, separation and motion |
 | `services/integrated_actor.py` | `IntegratedSessionActor`: the Toa Payoh exercise (route detour, incidents, depots, charging, traffic, signals) |
 | `services/spatial_session_actor.py`, `spatial_motion.py`, `training_scene.py` | Road-constrained 3D actor bound to the hash-pinned M2 scene package |
@@ -119,7 +129,7 @@ so more Uvicorn workers would each claim the same sessions.
 | `traffic/` | Road network, background traffic (`city_traffic.py`), signal cycle, incident hazards and the import scripts |
 | `routing/` | OSM road graph, operating network, map matcher, Singapore fixture and building importers |
 | `transit/` | LTA bus stop and service store, plus its OSM and DataMall importers |
-| `persistence/` | `TrainingStore` and its SQL migrations `0001`–`0004` |
+| `persistence/` | `TrainingStore` and its SQL migrations `0001`–`0005`; `StoreClient`, the store as a session worker sees it |
 | `datasets/`, `perception/`, `services/trajectory_stream.py`, `session_manager.py` | Legacy KITTI trajectory playback and optional perception helpers (v1 API) |
 
 ### 4.2 Scenarios
@@ -154,10 +164,13 @@ The integrated fixture (`backend/fixtures/m2_integrated.json`) is built by
 
 ### 4.3 Session service and ticking
 
-`TrainingSessionService` owns every live attempt:
+`TrainingSessionService` owns every live attempt when sessions run in the backend's own process
+(`F9_SESSION_WORKERS=0`); otherwise each session worker runs one for the sessions placed on it
+(section 4.3.1):
 
-- **Admission:** up to 16 live sessions, of which up to 6 can run background traffic. Past that, the
-  service answers `QUEUE_FULL`. `POST /api/v2/sessions` needs an `Idempotency-Key`, so a retried
+- **Admission:** up to 16 live sessions. In one process, up to 6 of them can run background traffic;
+  with session workers, each worker's measured load decides instead. Past that, the service answers
+  `QUEUE_FULL`. `POST /api/v2/sessions` needs an `Idempotency-Key`, so a retried
   create returns the same attempt. Session IDs are readable, for example `toa-payoh-007-10nov-1340`.
 - **Clock:** a running actor advances in fixed **50 ms ticks (20 Hz)**. Ticks are scheduled against
   high-resolution deadlines. A late tick does not delay the ones after it, and a backlog of up to
@@ -174,6 +187,44 @@ The integrated fixture (`backend/fixtures/m2_integrated.json`) is built by
   frees its slot and keeps its final snapshot, events and command receipts. `DELETE`, `purge` and
   `compact` remove old attempts and reclaim disk space (see
   [session creation](session_creation.md#permanent-deletion-and-disk-cleanup)).
+
+### 4.3.1 Session worker processes
+
+Under CPython's global interpreter lock, every session that ticks in one process shares one core. The
+backend therefore runs live sessions in **session worker processes** (`F9_SESSION_WORKERS`: `auto` by
+default, the physical cores less two within 1–8; `0` runs them all in the backend's process). The
+FastAPI process becomes the **gateway** (`GatewaySessionService`), with the same routes and replies:
+
+- **Gateway:** the session registry (session to worker), the only SQLite writer, each live session's
+  latest committed snapshot JSON, and each one's latest traffic frames with the long-poll waiters.
+  Commands, route approvals and the signal state are forwarded to the owning worker.
+- **Worker:** loads the scenario and road network once, freezes them out of full garbage collections,
+  and ticks its sessions exactly as `TrainingSessionService` does. Its store is a `StoreClient`: reads
+  use its own read-only SQLite connections, and writes are calls to the gateway's writer. A
+  publication is encoded in the worker (`TrainingStore.encode_commit`) and only written by the gateway
+  (`submit_commit`), so the gateway does no Pydantic work for it. The worker installs a staged actor and
+  pushes its traffic frame only after the gateway answers that the commit is durable.
+- **Placement and admission:** each worker reports each session's tick and mean cost per tick four
+  times a second. A new session goes to the least-loaded worker while that worker's load plus the new
+  session's estimate stays within 60% of a tick (30 ms); an empty worker takes any one session.
+  Estimates are the median measured cost of running sessions of the same kind, or 15 ms with traffic
+  and 5.4 ms without before any are measured.
+- **Failure:** a worker that exits, closes its pipe or stops reporting for 3 s is ended. Its sessions
+  answer `SESSION_RECOVERING` and are recovered from their last committed checkpoint onto the workers
+  still running (or its replacement), as at a backend restart: a new epoch, paused, queued commands
+  marked for reconfirmation. A replacement worker starts in the background. Workers watch the gateway's
+  process and exit when it is gone, so a killed backend leaves none behind.
+- **Ordering and determinism:** a session's ticks still run in order on one actor in one process, so
+  the number of workers changes no committed state (`test_session_workers.py` compares every committed
+  checkpoint with the in-process runtime's).
+- **Route previews** are kept by the process that made them, the gateway; a forwarded approval carries
+  the preview it approves.
+- **Logs:** workers log to the gateway's console. When the gateway writes to a file (the bundled
+  backend's log), each worker writes beside it, to `<log>.worker-N`.
+
+`Tools/run_backend.py --reload` sets `F9_SESSION_WORKERS=0` unless it is set, so reloading does not
+restart the workers each time. Tests run in one process too (`backend/tests/conftest.py`), except
+`test_session_workers.py`.
 
 ### 4.4 Integrated actor
 
@@ -257,8 +308,8 @@ the backend process and keeps the database consistent through anything; only a p
 crash can roll back the last few commits, which recovery treats like progress not yet committed.
 `FULL` cost one fsync per publication (ten a second per running session) on the one writer thread.
 
-A publication (`commit_snapshot`) is serialised once, on the calling thread, with Pydantic's own
-encoder. The writer checks it against the session's stored boundary (`boundary_json`: snapshot ID,
+A publication (`commit_snapshot`) is serialised once, on the calling thread (in a session worker,
+on the worker's side), with Pydantic's own encoder. The writer checks it against the session's stored boundary (`boundary_json`: snapshot ID,
 epoch, event sequence, tick, scene, transform and scenario revisions) instead of parsing the stored
 snapshot. The store keeps the latest committed snapshot JSON of every session not yet ended in
 memory, set once each commit is durable, and `GET …/snapshot` returns those bytes as they are, with

@@ -219,6 +219,28 @@ continues to be supported.
 Run one authority worker against the SQLite store. The service admits at most
 16 live attempts. RESET is explicitly rejected for this adapter; create a new
 attempt instead. Archive an old attempt before admitting another when full.
+
+### Session worker processes
+
+By default the backend ticks live sessions in **session worker processes**, so
+they are no longer limited to one core by the GIL. `F9_SESSION_WORKERS` sets how
+many: `auto` (the default) is the machine's physical cores less two, within 1–8;
+a number sets it exactly; `0` runs every session in the backend's own process,
+as before. Tests and `run_backend.py --reload` use `0` unless told otherwise. If
+the workers cannot start, the backend logs why and runs sessions in its own
+process.
+
+The backend process stays the only one that serves HTTP and writes SQLite. The
+HTTP API, the snapshots and the Unity client are unchanged. A new session goes
+to the least-loaded worker; when every worker's measured tick load would pass
+60% of a 50 ms tick with it, creation answers `QUEUE_FULL`, as the fixed limit
+of six sessions with traffic did before. If a worker process dies or stops
+responding, its sessions answer `SESSION_RECOVERING` briefly and come back
+**paused, in a new epoch, from their last committed checkpoint** on another
+worker, exactly as after a backend restart; commands already applied keep their
+single outcome. Sessions on other workers keep running. Each worker exits when
+the backend process is gone. With the bundled backend's log file, each worker
+writes its own `backend.worker-N.log` beside it.
 Scenario completion and assessment remain future work.
 
 The original `scenario-m2-r1` selector uses the existing five-shuttle **planar loop fixture**.
@@ -570,6 +592,57 @@ The no-traffic counts at 8 differ between the client-on and client-off columns
 same client-off case. That is within run-to-run variation on this laptop, so
 compare changes with `--rounds` or `ab`, not with one run. Desktop and
 battery-power baselines are not yet recorded.
+
+### Session workers, 18 November 2026
+
+`--workers N` runs the sessions in N session worker processes behind the
+gateway (as `F9_SESSION_WORKERS=N`; `auto` as the backend chooses); the default
+`0` keeps the Phase 0 single-process mode. Trace, CPU and memory then cover every
+process, and admission by load is lifted for the case.
+
+```powershell
+& .\backend\.venv\Scripts\python.exe -m src.services.session_scaling run --output .tools/scaling-workers --sessions 1,2,4,8,12,16 --workers auto
+```
+
+One round per worker count, traffic and client on, same laptop and power as the
+Phase 0 baseline, source 698dc1e plus Phase 2. Evidence:
+`.tools/scaling-phase2-20261118/`. Every case completed with zero trace loss.
+
+| Sessions | 0 workers | 2 workers | 4 workers | auto (8 workers) |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 1.000 | 0.999 | 1.001 | 1.000 |
+| 2 | 0.998 | 1.000 | 1.000 | 0.998 |
+| 4 | **0.776** | 0.998 | 0.999 | 1.000 |
+| 8 | 0.354 | **0.646** | **0.827** | 0.999 |
+| 12 | 0.226 | 0.414 | 0.616 | **0.625** |
+| 16 | 0.146 | 0.258 | 0.447 | 0.550 |
+
+Slowest session's real-time factor; bold is the first count below 0.99.
+
+- **Sessions with traffic kept at 1x went from 2 to 8.** Process CPU now
+  reaches the worker count (4.1 cores with 4 workers, 8.3 with 8) instead of
+  stopping at 1.0.
+- **It does not scale linearly on this laptop.** A session's work per tick rose
+  from about 14 ms alone to 25 ms at 8 sessions on 8 workers and 40 ms at 8 on 4
+  workers. The Core Ultra 5 125H has 4 performance cores and 10 efficiency
+  cores, and shares one power budget across all of them, so the fifth and later
+  busy workers run slower. Admission measures each session's cost, so it adapts
+  to that; the 15 ms default only applies until sessions are measured. A desktop
+  with uniform cores should come closer to the plan's estimate.
+- **The writer is no longer the ceiling.** `writer.transaction` was busy 100%
+  of the window in one process from 4 sessions on; with workers it was at most
+  22% (16 sessions on 8 workers), because publications arrive already encoded.
+- **Requests got faster under load.** A client's `/snapshot` p50 was 35–40 ms
+  in one process with 2 or more sessions, and 2–6 ms with workers.
+- **One session:** work per tick 13.7 ms in one process, 13.6–14.7 ms with
+  workers; `snapshot.commit` grows by about 0.5 ms for the round trip to the
+  gateway. These are single rounds, within this laptop's run-to-run drift;
+  confirm a regression bound with `ab` rounds.
+- **Memory:** about 110 MiB in one process, plus about 70 MiB per worker: 866
+  MiB for 8 workers with 16 sessions, within the 2 GiB backend budget.
+- Lateness p95 stays at about 15 ms while sessions keep up (Windows timer
+  granularity), above the 10 ms target, as in Phase 0. The auto, 2-session case
+  had p95 150 ms in this round (RTF 0.998); it was not seen at other counts.
 
 ## Process-crash recovery
 

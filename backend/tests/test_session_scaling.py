@@ -13,6 +13,7 @@ Description:
 """
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -162,6 +163,24 @@ def test_short_live_run_measures_a_real_session_and_its_client(tmp_path):
     assert IntegratedSessionActor.TRAFFIC
     with pytest.raises(ValueError, match="never overwritten"):
         run(tmp_path / "scaling", session_counts=(1,), ticks=20)
+
+
+@pytest.mark.traffic
+def test_a_live_run_with_session_workers_measures_every_process(tmp_path):
+    from src.services.session_gateway import GatewaySessionService
+    budget = GatewaySessionService.TICK_BUDGET_MS
+    result = run(tmp_path / "workers", session_counts=(2,), ticks=20, warmup_s=0.5, timeout_s=30, isolate=False,
+                 workers="2", progress=lambda line: None)
+    [measured] = result["cases"]
+    assert result["parameters"]["workers"] == "2" and measured["workers"] == 2
+    assert measured["window_complete"] and measured["trace"]["dropped_records"] == 0
+    # The sessions' progress and ticks come from the workers' traces, the requests from the gateway's
+    assert measured["real_time_factor"]["unmeasured_sessions"] == 0 and measured["running_ticks"] >= 38
+    assert {"tick.compute", "snapshot.commit", "writer.transaction", "traffic.frame"} <= measured["spans"].keys()
+    assert any(r["route"].endswith("/snapshot") for r in measured["http"])
+    assert len(measured["memory"]["processes"]) == 3 and measured["process_cpu_cores"] > 0
+    assert GatewaySessionService.TICK_BUDGET_MS == budget and "F9_SESSION_WORKERS" in os.environ
+    assert os.environ["F9_SESSION_WORKERS"] == "0"
 
 
 def test_each_case_can_run_in_a_process_of_its_own(tmp_path):

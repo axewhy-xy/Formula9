@@ -230,6 +230,9 @@ def main() -> int:
     command = [interpreter, "-m", "uvicorn", "src.app:app", "--host", args.host, "--port", str(args.port)]
     if args.reload:
         command += ["--reload", "--reload-dir", str(ROOT / "backend/src"), "--reload-dir", str(ROOT / "contracts")]
+        # Every reload would start the session worker processes again, each loading the road network:
+        # while editing, sessions run in the server's own process unless asked otherwise
+        environment.setdefault("F9_SESSION_WORKERS", "0")
     print(f"Repository: {ROOT}\nPython: {interpreter}\nBackend: {ROOT / 'backend'}", flush=True)
     return subprocess.call(command, cwd=ROOT, env=environment)
 
