@@ -507,7 +507,7 @@ GIL time, which makes client cases slightly pessimistic.
 case: the slowest and median session's real-time factor, tick lateness
 p50/p95/p99, missed deadlines, tick work per session tick (`tick.compute`,
 `snapshot.build`, `snapshot.commit` and `traffic.frame`; `snapshot.commit`
-includes waiting for the writer's fsync), process CPU in cores, the client's
+includes waiting for the writer), process CPU in cores, the client's
 traffic frames per second (10 is 1x), the cost split by span with each span's
 share of one core, and request handling per route. `summary.json` has the same
 data plus per-session results, the case process's memory (which includes the

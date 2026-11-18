@@ -115,8 +115,10 @@ async def delete_session(session_id: str, actor_id: str = Depends(get_actor_id),
 
 @router.get("/{session_id}/snapshot")
 async def snapshot(session_id: str, actor_id: str = Depends(get_actor_id),
-                   service: TrainingSessionService = Depends(get_training_service)) -> dict:
-    return (await service.snapshot(session_id)).model_dump(mode="json")
+                   service: TrainingSessionService = Depends(get_training_service)) -> Response:
+    # The committed JSON as it is: a live session's is kept in memory at each commit (TrainingStore),
+    # so a poll neither reads SQLite nor parses and re-encodes the snapshot
+    return Response(content=await service.snapshot_json(session_id), media_type="application/json")
 
 
 @router.get("/{session_id}/traffic")

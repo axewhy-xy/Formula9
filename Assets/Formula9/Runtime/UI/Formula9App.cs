@@ -87,7 +87,8 @@ namespace Formula9.UI
             var transport = new UnityHttpTransport();
             auth = new AuthSession();
             authClient = new AuthClient(transport, auth);
-            api = new TrainingApi(transport, auth);
+            // Parse polled replies off the main thread; nothing here ever blocks on those tasks
+            api = new TrainingApi(transport, auth) { ParseInBackground = true };
             session = new SessionController(api, auth);
             auth.Ended += OnLoginEnded;
             session.SnapshotAccepted += (snapshot, reset) =>
@@ -891,7 +892,7 @@ namespace Formula9.UI
         // Keep the operator's state readable: badge, tooltip and one-line summary.
         private void RenderSessionStatus(FullSnapshot snapshot)
         {
-            var view = sessionStatusPresenter.Present(snapshot, session.Available);
+            var view = sessionStatusPresenter.Present(snapshot, session.Available, session.Pace.Factor);
             if (sessionBadge.text != view.BadgeText) sessionBadge.text = view.BadgeText;
             if (sessionBadgeClass != view.BadgeClass)
             {
@@ -902,6 +903,7 @@ namespace Formula9.UI
             if (sessionBadge.tooltip != view.Tooltip) sessionBadge.tooltip = view.Tooltip;
             if (status.text != view.Summary) status.text = view.Summary;
             status.EnableInClassList("session-summary-offline", view.Offline);
+            status.EnableInClassList("session-summary-behind", view.Behind);
         }
 
         // -----------------------------------------------------------------------------------

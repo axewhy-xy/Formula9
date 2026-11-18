@@ -1,5 +1,6 @@
 """Durability and reconciliation cases for BE-M2-03."""
 
+import hashlib
 import json
 import sqlite3
 from pathlib import Path
@@ -230,3 +231,105 @@ def test_rest_status_and_replay_are_scoped_to_authenticated_actor(tmp_path: Path
                 assert client.get("/api/v2/sessions/session-001/snapshot").status_code == 403
         finally:
             app.dependency_overrides.clear()
+
+
+def progress(snapshot: FullSnapshot) -> FullSnapshot:
+    """The next publication after snapshot: one tick on, no events."""
+    result = snapshot.model_copy(deep=True)
+    result.tick += 1
+    result.simulation_time_s += 0.05
+    return result
+
+
+def test_publication_is_encoded_once_and_served_from_memory(tmp_path: Path) -> None:
+    with TrainingStore(tmp_path / "training.sqlite") as store:
+        before = store.create_session(initial())
+        proposed = progress(before)
+        committed = store.commit_snapshot(proposed, expected_snapshot_id=before.snapshot_id)
+        # The caller's snapshot is the committed one, with its new ID
+        assert committed is proposed and committed.snapshot_id != before.snapshot_id
+        raw = store.published_snapshot_json("session-001")
+        assert raw is not None and store.snapshot_json("session-001") == raw
+        # The same JSON the route sent when it parsed and re-encoded the row
+        assert json.loads(raw) == committed.model_dump(mode="json") == store.snapshot("session-001").model_dump(mode="json")
+        with sqlite3.connect(tmp_path / "training.sqlite") as connection:
+            assert connection.execute("SELECT snapshot_json FROM sessions").fetchone()[0] == raw
+        # Each read is the caller's own copy
+        store.snapshot("session-001").tick = 999
+        assert store.snapshot("session-001").tick == committed.tick
+
+
+def test_refused_publication_leaves_the_callers_snapshot_alone(tmp_path: Path) -> None:
+    with TrainingStore(tmp_path / "training.sqlite", validate_publications=True) as store:
+        before = store.create_session(initial())
+        store.commit_snapshot(progress(before), expected_snapshot_id=before.snapshot_id)
+        stale = progress(before)
+        with pytest.raises(TrainingStoreError) as error:
+            store.commit_snapshot(stale, expected_snapshot_id=before.snapshot_id)
+        assert error.value.code == "STALE_REVISION" and stale.snapshot_id == before.snapshot_id
+        invalid = progress(store.snapshot("session-001"))
+        invalid.tick = -1
+        with pytest.raises(ValueError):
+            store.commit_snapshot(invalid)
+        assert store.snapshot("session-001").tick == before.tick + 1
+
+
+@pytest.mark.parametrize("change", ["legacy", "edited"])
+def test_publication_follows_a_row_without_a_matching_boundary(tmp_path: Path, change: str) -> None:
+    """Rows from before boundary_json, or changed without it, are checked against the full snapshot."""
+    with TrainingStore(tmp_path / "training.sqlite") as store:
+        current = store.create_session(initial())
+        if change == "edited":
+            current.snapshot_id = "edited-snapshot"
+        raw = current.model_dump_json()
+        digest = hashlib.sha256(raw.encode()).hexdigest()
+
+        def write(connection: sqlite3.Connection) -> None:
+            if change == "legacy":
+                connection.execute("UPDATE sessions SET boundary_json=NULL")
+            else:
+                connection.execute("UPDATE sessions SET snapshot_json=?, state_hash=?", (raw, digest))
+            connection.commit()
+        store._submit(write)
+        with pytest.raises(TrainingStoreError, match="committed boundary"):
+            store.commit_snapshot(progress(current), expected_snapshot_id="some-other-snapshot")
+        moved = progress(current)
+        moved.event_sequence += 1  # with no event of its own
+        with pytest.raises(TrainingStoreError, match="committed boundary"):
+            store.commit_snapshot(moved)
+        assert store.commit_snapshot(progress(current), expected_snapshot_id=current.snapshot_id).tick == current.tick + 1
+
+
+def test_ended_and_deleted_sessions_leave_memory(tmp_path: Path) -> None:
+    with TrainingStore(tmp_path / "training.sqlite") as store:
+        before = store.create_session(initial())
+        ended = progress(before)
+        ended.session.status = "FAILED"
+        ended.session.aggregate_revision += 1
+        ended.event_sequence += 1
+        event = Event(event_id="failed-1", event_sequence=ended.event_sequence, tick=ended.tick,
+                      entity_type="SESSION", entity_id="session-001", entity_revision=ended.session.aggregate_revision,
+                      event_type="SESSION_FAILED", source=before.source, data={"status": "FAILED"})
+        store.commit_snapshot(ended, (event,), expected_snapshot_id=before.snapshot_id)
+        assert store.published_snapshot_json("session-001") is None
+        assert json.loads(store.snapshot_json("session-001"))["session"]["status"] == "FAILED"
+        store.delete_session("session-001")
+        with pytest.raises(TrainingStoreError, match="not found"):
+            store.snapshot_json("session-001")
+
+
+def test_recovered_sessions_are_served_from_memory(tmp_path: Path) -> None:
+    path = tmp_path / "training.sqlite"
+    with TrainingStore(path) as store:
+        store.create_session(initial())
+    with TrainingStore(path) as store:
+        raw = store.published_snapshot_json("session-001")
+        assert raw is not None and json.loads(raw)["session"]["status"] == "PAUSED"
+        assert json.loads(raw) == store.snapshot("session-001").model_dump(mode="json")
+
+
+def test_writer_commits_without_an_fsync_each(tmp_path: Path) -> None:
+    with TrainingStore(tmp_path / "training.sqlite") as store:
+        # 1 is NORMAL: in WAL mode, durable through a crash of the process, synced at checkpoints
+        assert store._submit(lambda connection: connection.execute("PRAGMA synchronous").fetchone()[0]) == 1
+        assert store._submit(lambda connection: connection.execute("PRAGMA journal_mode").fetchone()[0]) == "wal"

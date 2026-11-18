@@ -569,7 +569,8 @@ def ab(output, *, baseline_root=None, baseline_ref=None, candidate_root=None, ro
        python=sys.executable):
     """Run the sweep alternately on a baseline and a candidate source tree, each round in the other order,
     with the same copy of this harness, and compare the medians."""
-    output = Path(output)
+    # Absolute, because each side runs from its own root
+    output = Path(output).resolve()
     if output.exists() and any(output.iterdir()):
         raise ValueError("Output directory must be new or empty; existing evidence is never overwritten")
     if (baseline_root is None) == (baseline_ref is None) or type(rounds) is not int or not 1 <= rounds <= 10:

@@ -79,7 +79,7 @@ flowchart LR
     end
 
     Http <-->|"HTTP/JSON, Bearer token<br/>127.0.0.1:8000"| API
-    Store --> DB[("state/training.sqlite<br/>WAL, synchronous=FULL")]
+    Store --> DB[("state/training.sqlite<br/>WAL, synchronous=NORMAL")]
     API --> Mongo[("MongoDB<br/>accounts and login sessions")]
     Static --> Fix[("backend/fixtures<br/>map.db, transit.sqlite, toa-payoh.sqlite,<br/>traffic JSON, m2_scene")]
     Player -.->|"OSM tile server<br/>(FORMULA9_TILE_URL)"| Tiles[("Map tiles")]
@@ -252,7 +252,18 @@ and transitions not allowed by the state tables. Error codes include `STALE_REVI
 ### 4.6 Persistence and recovery
 
 `TrainingStore` is a single SQLite database with one writer thread. It runs with WAL,
-`synchronous=FULL` and foreign keys on.
+`synchronous=NORMAL` and foreign keys on. In WAL mode NORMAL keeps every commit through a crash of
+the backend process and keeps the database consistent through anything; only a power loss or OS
+crash can roll back the last few commits, which recovery treats like progress not yet committed.
+`FULL` cost one fsync per publication (ten a second per running session) on the one writer thread.
+
+A publication (`commit_snapshot`) is serialised once, on the calling thread, with Pydantic's own
+encoder. The writer checks it against the session's stored boundary (`boundary_json`: snapshot ID,
+epoch, event sequence, tick, scene, transform and scenario revisions) instead of parsing the stored
+snapshot. The store keeps the latest committed snapshot JSON of every session not yet ended in
+memory, set once each commit is durable, and `GET …/snapshot` returns those bytes as they are, with
+no database read and no parsing. Tests set `F9_VALIDATE_PUBLICATIONS=1` (in `backend/tests/conftest.py`)
+so every publication is still checked against the contract there.
 
 | Migration | Tables |
 | --- | --- |
@@ -260,6 +271,7 @@ and transitions not allowed by the state tables. Error codes include `STALE_REVI
 | `0002_live_sessions.sql` | `session_runtimes` (private actor checkpoints), `session_creations` (idempotent creation keys) |
 | `0003_session_numbers.sql` | `session_numbers` (the running number in readable IDs) |
 | `0004_session_traffic.sql` | `session_traffic` (traffic checkpoints, kept apart from the per-publication checkpoint) |
+| `0005_snapshot_boundary.sql` | `sessions.boundary_json` (what the next publication must follow) |
 
 Public snapshots, events, command outcomes and private actor state commit in one transaction. Private
 checkpoints are versioned: v1 planar, v2 spatial, v3 integrated. They hold shuttle progress, dwell,

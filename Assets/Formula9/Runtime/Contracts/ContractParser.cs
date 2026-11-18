@@ -102,7 +102,9 @@ namespace Formula9.Contracts
         };
 
         private static readonly JsonSerializer Serializer = JsonSerializer.Create(Settings);
-        private static readonly Dictionary<string, JObject> Documents = new Dictionary<string, JObject>();
+        // Every embedded schema, parsed once when the parser is first used and only read after, so
+        // replies can be parsed on any thread (TrainingApi.ParseInBackground)
+        private static readonly IReadOnlyDictionary<string, JObject> Documents = LoadDocuments();
 
         // -----------------------------------------------------------------------------------
         // Function: ParseMessage
@@ -255,22 +257,28 @@ namespace Formula9.Contracts
         // Function: Document
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function returns an embedded schema document, parsing it once and then caching
-        //     it.
+        //     This function returns an embedded schema document.
         //
         // Args:
         //     name (string): The schema file name.
         //
         // Returns:
         //     JObject: The schema document.
-        private static JObject Document(string name)
+        private static JObject Document(string name) => Documents[name];
+
+        // -----------------------------------------------------------------------------------
+        // Function: LoadDocuments
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function parses every embedded schema document.
+        //
+        // Returns:
+        //     IReadOnlyDictionary<string, JObject>: The documents by file name.
+        private static IReadOnlyDictionary<string, JObject> LoadDocuments()
         {
-            lock (Documents)
-            {
-                if (!Documents.TryGetValue(name, out var document))
-                    Documents[name] = document = JObject.Parse(ContractSchemas.Documents[name]);
-                return document;
-            }
+            var documents = new Dictionary<string, JObject>();
+            foreach (var entry in ContractSchemas.Documents) documents[entry.Key] = JObject.Parse(entry.Value);
+            return documents;
         }
 
         // -----------------------------------------------------------------------------------

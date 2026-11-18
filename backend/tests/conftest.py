@@ -30,6 +30,11 @@ import pytest
 
 from backend.src.routing import graph_loader
 
+# Have every TrainingStore check each publication against the contract, as it did before it encoded
+# publications once (TrainingStore.validate_publications): an actor that publishes an invalid
+# snapshot fails its tests rather than a later read.
+os.environ.setdefault("F9_VALIDATE_PUBLICATIONS", "1")
+
 os.environ.setdefault(
     graph_loader.ENV_OVERPASS_URL,
     ",".join(

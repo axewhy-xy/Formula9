@@ -126,7 +126,8 @@ namespace Formula9.Backend
             waitMs = Math.Max(0, Math.Min(5000, waitMs));
             var reply = await SendTrainingAsync("GET", $"/{Segment(id)}/traffic?after_tick={Math.Max(-1, afterTick)}&wait_ms={waitMs}", null, cancellation,
                 http => http.TimeoutSeconds += (waitMs + 999) / 1000);
-            return ParseTrafficFrames(reply, id);
+            // Base64 decoding and unpacking of every vehicle, ten times a second: off the main thread
+            return await ParseAsync(() => ParseTrafficFrames(reply, id));
         }
 
         public static List<TrafficFrame> ParseTrafficFrames(string json, string sessionId)

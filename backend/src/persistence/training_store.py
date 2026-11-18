@@ -15,6 +15,7 @@ import sqlite3
 from concurrent.futures import Future
 from contextlib import closing, contextmanager
 from contextvars import copy_context
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock, Thread, local
@@ -50,16 +51,75 @@ class TrainingStoreError(Exception):
         self.current_revision = current_revision
 
 
+_TERMINAL = frozenset({"COMPLETED", "ARCHIVED", "FAILED"})
+
+
 def _json(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 def _snapshot_json(snapshot: FullSnapshot) -> str:
-    return _json(snapshot.model_dump(mode="json"))
+    """The snapshot as stored and as GET /snapshot sends it: Pydantic's own encoder, in field order.
+
+    The same JSON as json.dumps of model_dump(mode="json"), a quarter of the time. Rows written before
+    used sorted keys; each row's state_hash is of its own text, so both kinds stay readable."""
+    return snapshot.model_dump_json()
 
 
 def _hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _boundary(snapshot: FullSnapshot) -> dict:
+    """What a following publication must follow or keep (see _commit_snapshot), as JSON values."""
+    return {
+        "snapshot_id": snapshot.snapshot_id, "session_epoch": snapshot.session_epoch,
+        "event_sequence": snapshot.event_sequence, "tick": snapshot.tick,
+        "scene_revision": snapshot.scene_revision, "transform_revision": snapshot.transform_revision,
+        "scenario_revision_id": snapshot.session.scenario_revision_id,
+        "spatial": None if snapshot.spatial is None else snapshot.spatial.model_dump(mode="json"),
+    }
+
+
+@dataclass(frozen=True)
+class _EncodedSnapshot:
+    """A snapshot serialised once, before the writer takes it: the row's JSON, its hash and boundary."""
+    raw: str
+    digest: str
+    boundary: dict
+    status: str
+
+    @classmethod
+    def of(cls, snapshot: FullSnapshot) -> "_EncodedSnapshot":
+        raw = _snapshot_json(snapshot)
+        return cls(raw, _hash(raw), _boundary(snapshot), snapshot.session.status)
+
+    @property
+    def boundary_json(self) -> str:
+        return _json({**self.boundary, "state_hash": self.digest})
+
+
+@dataclass(frozen=True)
+class _EncodedRuntime:
+    """An actor checkpoint serialised before the writer takes it; traffic is (tick, JSON, hash) when the
+    checkpoint carries the traffic's own (see TrainingStore._write_runtime)."""
+    tick: int | None
+    raw: str
+    digest: str
+    traffic: tuple[int, str, str] | None
+
+    @classmethod
+    def of(cls, state: "dict | _EncodedRuntime | None") -> "_EncodedRuntime | None":
+        if state is None or isinstance(state, _EncodedRuntime):
+            return state
+        traffic = state.get("traffic")
+        saved = None
+        if traffic is not None:
+            state = {key: value for key, value in state.items() if key != "traffic"}
+            raw = _json(traffic)
+            saved = (traffic["tick"], raw, _hash(raw))
+        raw = _json(state)
+        return cls(state.get("tick"), raw, _hash(raw), saved)
 
 
 def _now() -> str:
@@ -117,11 +177,25 @@ def _target_revision(snapshot: FullSnapshot, target_type: str, target_id: str) -
 
 
 class TrainingStore:
-    """Bounded synchronous command interface backed by one SQLite writer thread."""
+    """Bounded synchronous command interface backed by one SQLite writer thread.
 
-    def __init__(self, path: Path, *, queue_size: int = 128, trace: TrainingTrace | None = None):
+    validate_publications has commit_snapshot check each publication against the contract, as it did
+    by validating a copy before this store encoded publications once (the tests turn it on through
+    F9_VALIDATE_PUBLICATIONS). Off by default: a publication is built from committed, validated state,
+    and the check costs as much as encoding it.
+    """
+
+    def __init__(self, path: Path, *, queue_size: int = 128, trace: TrainingTrace | None = None,
+                 validate_publications: bool | None = None):
         if queue_size < 1:
             raise ValueError("queue_size must be positive")
+        if validate_publications is None:
+            validate_publications = os.environ.get("F9_VALIDATE_PUBLICATIONS", "") not in {"", "0"}
+        self.validate_publications = validate_publications
+        # The latest committed snapshot JSON of each session not terminal, set by the writer once a
+        # commit is durable: GET /snapshot and snapshot() read it instead of the database. Only the
+        # writer changes it, so it is never older than the row it stands for.
+        self._published: dict[str, str] = {}
         self.trace = trace if trace is not None else TrainingTrace()
         self.path = Path(path).resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -147,7 +221,13 @@ class TrainingStore:
             connection = sqlite3.connect(self.path, isolation_level=None, timeout=10)
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA journal_mode=WAL")
-            connection.execute("PRAGMA synchronous=FULL")
+            # NORMAL in WAL mode: a commit is durable once it reaches the log, without an fsync of its
+            # own; the log is synced when it is checkpointed into the database. A crash of this process
+            # loses nothing committed, and the database stays consistent through anything; only a power
+            # loss or an OS crash can roll back the last commits, which recovery treats like progress
+            # not yet committed. FULL took one fsync per publication, ten a second per live session, on
+            # the one writer thread.
+            connection.execute("PRAGMA synchronous=NORMAL")
             connection.execute("PRAGMA foreign_keys=ON")
             self._ready.set_result(None)
         except BaseException as error:
@@ -223,25 +303,40 @@ class TrainingStore:
         self._recover(connection)
 
     @staticmethod
-    def _write_snapshot(connection: sqlite3.Connection, snapshot: FullSnapshot, *, initial: bool = False) -> None:
-        raw = _snapshot_json(snapshot)
-        digest = _hash(raw)
+    def _write_snapshot(connection: sqlite3.Connection, snapshot: FullSnapshot, *, initial: bool = False,
+                        encoded: _EncodedSnapshot | None = None) -> _EncodedSnapshot:
+        """Writes the snapshot as the session's row and a checkpoint. encoded, when given, is the
+        snapshot already serialised (_EncodedSnapshot.of), so the writer does not do it again."""
+        if encoded is None:
+            encoded = _EncodedSnapshot.of(snapshot)
+        raw, digest = encoded.raw, encoded.digest
         if initial:
             connection.execute(
-                "INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO sessions (session_id, scenario_revision_id, epoch, status, tick, event_sequence,"
+                " base_sequence, snapshot_json, state_hash, boundary_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (snapshot.session_id, snapshot.session.scenario_revision_id, snapshot.session_epoch,
-                 snapshot.session.status, snapshot.tick, snapshot.event_sequence, snapshot.event_sequence, raw, digest),
+                 snapshot.session.status, snapshot.tick, snapshot.event_sequence, snapshot.event_sequence, raw, digest,
+                 encoded.boundary_json),
             )
         else:
             connection.execute(
-                "UPDATE sessions SET epoch=?, status=?, tick=?, event_sequence=?, snapshot_json=?, state_hash=? WHERE session_id=?",
+                "UPDATE sessions SET epoch=?, status=?, tick=?, event_sequence=?, snapshot_json=?, state_hash=?,"
+                " boundary_json=? WHERE session_id=?",
                 (snapshot.session_epoch, snapshot.session.status, snapshot.tick, snapshot.event_sequence,
-                 raw, digest, snapshot.session_id),
+                 raw, digest, encoded.boundary_json, snapshot.session_id),
             )
         connection.execute(
             "INSERT INTO checkpoints VALUES (?, ?, ?, ?, ?, ?)",
             (snapshot.session_id, snapshot.event_sequence, snapshot.tick, snapshot.session_epoch, raw, digest),
         )
+        return encoded
+
+    def _publish(self, session_id: str, encoded: _EncodedSnapshot | None) -> None:
+        """After a commit, on the writer: the session's snapshot JSON for reads, or none once it ends."""
+        if encoded is None or encoded.status in _TERMINAL:
+            self._published.pop(session_id, None)
+        else:
+            self._published[session_id] = encoded.raw
 
     @staticmethod
     def _event(snapshot: FullSnapshot, sequence: int, event_type: str, entity_type: str,
@@ -259,10 +354,10 @@ class TrainingStore:
         rows = connection.execute("SELECT * FROM sessions WHERE status NOT IN ('COMPLETED', 'ARCHIVED', 'FAILED')").fetchall()
         for row in rows:
             with self.trace.span("session.recovery", session_id=row["session_id"]) as fields:
-                self._recover_session(connection, row, fields)
+                self._publish(row["session_id"], self._recover_session(connection, row, fields))
 
     @staticmethod
-    def _recover_session(connection: sqlite3.Connection, row: sqlite3.Row, fields: dict) -> None:
+    def _recover_session(connection: sqlite3.Connection, row: sqlite3.Row, fields: dict) -> _EncodedSnapshot:
         snapshot = _load_snapshot(row)
         checkpoint = connection.execute(
             "SELECT state_hash FROM checkpoints WHERE session_id=? ORDER BY tick DESC, event_sequence DESC LIMIT 1",
@@ -309,31 +404,30 @@ class TrainingStore:
         TrainingStore._append_event(connection, snapshot.session_id,
             TrainingStore._event(snapshot, snapshot.event_sequence, "SESSION_RECOVERED", "SESSION",
                                  snapshot.session_id, snapshot.session.aggregate_revision, {"status": snapshot.session.status}))
-        TrainingStore._write_snapshot(connection, snapshot)
+        encoded = TrainingStore._write_snapshot(connection, snapshot)
         connection.commit()
         fields.update(**boundary(snapshot), snapshot_id=snapshot.snapshot_id,
                       reconfirmation_count=len(queued), outcome=snapshot.session.status)
+        return encoded
 
     @staticmethod
-    def _write_runtime(connection: sqlite3.Connection, session_id: str, state: dict | None) -> None:
-        """Upserts an actor checkpoint. Its "traffic", when it has one ({"tick", "state"}), is kept apart
-        in session_traffic: written only when the actor gives one, about once a second, and given back
-        with the rest by runtime."""
-        if state is not None:
-            traffic = state.get("traffic")
-            if traffic is not None:
-                state = {key: value for key, value in state.items() if key != "traffic"}
-                raw = _json(traffic)
+    def _write_runtime(connection: sqlite3.Connection, session_id: str,
+                       state: dict | _EncodedRuntime | None) -> None:
+        """Upserts an actor checkpoint, as a dict or already encoded (_EncodedRuntime.of). Its "traffic",
+        when it has one ({"tick", "state"}), is kept apart in session_traffic: written only when the
+        actor gives one, about once a second, and given back with the rest by runtime."""
+        encoded = _EncodedRuntime.of(state)
+        if encoded is not None:
+            if encoded.traffic is not None:
                 connection.execute(
                     "INSERT INTO session_traffic VALUES (?, ?, ?, ?) ON CONFLICT(session_id) "
                     "DO UPDATE SET tick=excluded.tick, traffic_json=excluded.traffic_json, state_hash=excluded.state_hash",
-                    (session_id, traffic["tick"], raw, _hash(raw)),
+                    (session_id, *encoded.traffic),
                 )
-            raw = _json(state)
             connection.execute(
                 "INSERT INTO session_runtimes VALUES (?, ?, ?) ON CONFLICT(session_id) "
                 "DO UPDATE SET checkpoint_json=excluded.checkpoint_json, state_hash=excluded.state_hash",
-                (session_id, raw, _hash(raw)),
+                (session_id, encoded.raw, encoded.digest),
             )
 
     def creation(self, actor_id: str, key: str, request_hash: str) -> FullSnapshot | None:
@@ -395,6 +489,7 @@ class TrainingStore:
                               "checkpoints", "sessions"):
                     connection.execute(f"DELETE FROM {table} WHERE session_id=?", (session_id,))
             connection.commit()
+            self._publish(session_id, None)
         self._submit(write)
 
     def compact(self) -> dict:
@@ -457,13 +552,15 @@ class TrainingStore:
     def create_session(self, snapshot: FullSnapshot, *, runtime_state: dict | None = None,
                        creation: tuple[str, str, str] | None = None) -> FullSnapshot:
         snapshot = FullSnapshot.model_validate(snapshot.model_dump(mode="json"))
+        runtime = _EncodedRuntime.of(runtime_state)
         def write(connection: sqlite3.Connection) -> FullSnapshot:
             connection.execute("BEGIN IMMEDIATE")
-            self._write_snapshot(connection, snapshot, initial=True)
-            self._write_runtime(connection, snapshot.session_id, runtime_state)
+            encoded = self._write_snapshot(connection, snapshot, initial=True)
+            self._write_runtime(connection, snapshot.session_id, runtime)
             if creation is not None:
                 connection.execute("INSERT INTO session_creations VALUES (?, ?, ?, ?)", (*creation, snapshot.session_id))
             connection.commit()
+            self._publish(snapshot.session_id, encoded)
             return snapshot
         return self._submit(write)
 
@@ -500,11 +597,30 @@ class TrainingStore:
                 connection.rollback()
 
     def snapshot(self, session_id: str) -> FullSnapshot:
+        """The session's latest committed snapshot, the caller's own to change."""
+        raw = self._published.get(session_id)
+        if raw is not None:
+            return FullSnapshot.model_validate_json(raw)
         with self._reading() as connection:
             row = connection.execute("SELECT * FROM sessions WHERE session_id=?", (session_id,)).fetchone()
             if row is None:
                 raise TrainingStoreError("INVALID_REFERENCE", "Training session was not found")
             return _load_snapshot(row)
+
+    def published_snapshot_json(self, session_id: str) -> str | None:
+        """The latest committed snapshot of a session not yet ended, as JSON, from memory: None when the
+        store holds none for it (snapshot_json then reads the database). Never blocks."""
+        return self._published.get(session_id)
+
+    def snapshot_json(self, session_id: str) -> str:
+        """The session's latest committed snapshot as the JSON GET /snapshot sends.
+
+        A live session's comes from memory, as committed. Any other's is read and parsed: a row written
+        by an older backend can need the contract's upgrades on the way out."""
+        raw = self._published.get(session_id)
+        if raw is not None:
+            return raw
+        return _snapshot_json(self.snapshot(session_id))
 
     @staticmethod
     def _status(row: sqlite3.Row, snapshot: FullSnapshot) -> CommandStatus:
@@ -625,6 +741,7 @@ class TrainingStore:
         if proposed is not None:
             proposed = FullSnapshot.model_validate(proposed.model_dump(mode="json"))
         domain_events = tuple(Event.model_validate(event.model_dump(mode="json")) for event in domain_events)
+        runtime = _EncodedRuntime.of(runtime_state)
         def write(connection: sqlite3.Connection) -> CommandStatus:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute("SELECT * FROM commands WHERE command_id=?", (command_id,)).fetchone()
@@ -711,9 +828,9 @@ class TrainingStore:
             event = self._event(result, result.event_sequence, f"COMMAND_{status}", "COMMAND",
                                 command_id, target_revision, {"status": status, "failure_code": code})
             self._append_event(connection, result.session_id, event)
-            self._write_snapshot(connection, result)
+            encoded = self._write_snapshot(connection, result)
             if status == "APPLIED":
-                self._write_runtime(connection, result.session_id, runtime_state)
+                self._write_runtime(connection, result.session_id, runtime)
             connection.execute(
                 "UPDATE commands SET status=?, finished_at_utc=?, applied_tick=?, result_event_id=?, failure_code=?, target_revision=? WHERE command_id=?",
                 (status, _now(), result.tick if status == "APPLIED" else None,
@@ -721,6 +838,7 @@ class TrainingStore:
             )
             row = connection.execute("SELECT * FROM commands WHERE command_id=?", (command_id,)).fetchone()
             connection.commit()
+            self._publish(result.session_id, encoded)
             return self._status(row, result)
         return self._submit(write)
 
@@ -742,34 +860,63 @@ class TrainingStore:
 
     def _commit_snapshot(self, snapshot: FullSnapshot, domain_events: tuple[Event, ...] = (), *,
                          expected_snapshot_id: str | None = None, runtime_state: dict | None = None) -> FullSnapshot:
-        """Persist an actor publication and its ordered events before visibility."""
-        snapshot = FullSnapshot.model_validate(snapshot.model_dump(mode="json"))
+        """Persist an actor publication and its ordered events before visibility.
+
+        The caller gives up snapshot: once committed it is returned, with its new snapshot ID, as the
+        committed snapshot, and must not be changed after. It is serialised once, here on the caller's
+        thread, and the writer checks it against the stored boundary (boundary_json) without parsing the
+        stored snapshot. A refused or failed commit leaves it as it was.
+        """
         domain_events = tuple(Event.model_validate(event.model_dump(mode="json")) for event in domain_events)
-        def write(connection: sqlite3.Connection) -> FullSnapshot:
+        snapshot_id = str(uuid4())
+        previous_id, snapshot.snapshot_id = snapshot.snapshot_id, snapshot_id
+        try:
+            encoded = _EncodedSnapshot.of(snapshot)
+        finally:
+            snapshot.snapshot_id = previous_id
+        if self.validate_publications:
+            FullSnapshot.model_validate_json(encoded.raw)
+        runtime = _EncodedRuntime.of(runtime_state)
+        proposed = encoded.boundary
+        def write(connection: sqlite3.Connection) -> None:
             connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute("SELECT * FROM sessions WHERE session_id=?", (snapshot.session_id,)).fetchone()
-            if row is None:
-                raise TrainingStoreError("INVALID_REFERENCE", "Training session was not found")
-            previous = _load_snapshot(row)
-            if ((expected_snapshot_id is not None and previous.snapshot_id != expected_snapshot_id) or
-                snapshot.session_epoch != previous.session_epoch or
-                snapshot.event_sequence != previous.event_sequence + len(domain_events) or
-                snapshot.tick < previous.tick or
-                (snapshot.tick == previous.tick and not domain_events) or
-                snapshot.scene_revision != previous.scene_revision or
-                snapshot.spatial != previous.spatial or
-                snapshot.transform_revision != previous.transform_revision or
-                snapshot.session.scenario_revision_id != previous.session.scenario_revision_id):
+            previous = self._stored_boundary(connection, snapshot.session_id)
+            if ((expected_snapshot_id is not None and previous["snapshot_id"] != expected_snapshot_id) or
+                proposed["session_epoch"] != previous["session_epoch"] or
+                proposed["event_sequence"] != previous["event_sequence"] + len(domain_events) or
+                proposed["tick"] < previous["tick"] or
+                (proposed["tick"] == previous["tick"] and not domain_events) or
+                proposed["scene_revision"] != previous["scene_revision"] or
+                proposed["spatial"] != previous["spatial"] or
+                proposed["transform_revision"] != previous["transform_revision"] or
+                proposed["scenario_revision_id"] != previous["scenario_revision_id"]):
                 raise TrainingStoreError("STALE_REVISION", "Publication does not follow the committed boundary")
-            self._check_events(domain_events, previous.event_sequence, snapshot.tick)
+            self._check_events(domain_events, previous["event_sequence"], proposed["tick"])
             for event in domain_events:
                 self._append_event(connection, snapshot.session_id, event)
-            snapshot.snapshot_id = str(uuid4())
-            self._write_snapshot(connection, snapshot)
-            self._write_runtime(connection, snapshot.session_id, runtime_state)
+            self._write_snapshot(connection, snapshot, encoded=encoded)
+            self._write_runtime(connection, snapshot.session_id, runtime)
             connection.commit()
-            return snapshot
-        return self._submit(write)
+            self._publish(snapshot.session_id, encoded)
+        self._submit(write)
+        snapshot.snapshot_id = snapshot_id
+        return snapshot
+
+    @staticmethod
+    def _stored_boundary(connection: sqlite3.Connection, session_id: str) -> dict:
+        """The committed boundary of a session (_boundary), from its small boundary_json when that was
+        written with the stored snapshot, else from the snapshot itself."""
+        row = connection.execute("SELECT boundary_json, state_hash FROM sessions WHERE session_id=?",
+                                 (session_id,)).fetchone()
+        if row is None:
+            raise TrainingStoreError("INVALID_REFERENCE", "Training session was not found")
+        if row["boundary_json"] is not None:
+            stored = json.loads(row["boundary_json"])
+            if stored.pop("state_hash", None) == row["state_hash"]:
+                return stored
+        # Written before boundary_json, or the row was changed without it
+        row = connection.execute("SELECT * FROM sessions WHERE session_id=?", (session_id,)).fetchone()
+        return _boundary(_load_snapshot(row))
 
     def history(self, session_id: str, start_tick: int, end_tick: int) -> list[FullSnapshot]:
         """One committed checkpoint per tick, bounded to ten seconds at 20 Hz."""

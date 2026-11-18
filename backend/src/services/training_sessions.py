@@ -396,6 +396,18 @@ class TrainingSessionService:
         self._check_available(session_id)
         return snapshot
 
+    async def snapshot_json(self, session_id: str) -> str:
+        """As snapshot, but the JSON GET /snapshot sends. A live session's comes from memory as it was
+        committed, with no database read and no parsing, so polling it costs this process next to
+        nothing; any other session's is read from the store on a thread."""
+        await self.initialize()
+        self._check_available(session_id)
+        raw = self.store.published_snapshot_json(session_id)
+        if raw is None:
+            raw = await asyncio.to_thread(self.store.snapshot_json, session_id)
+            self._check_available(session_id)
+        return raw
+
     @staticmethod
     def _snapshot(actor: SessionActor, baseline: FullSnapshot, status: str) -> FullSnapshot:
         snapshot = actor.generate_snapshot()

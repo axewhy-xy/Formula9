@@ -13,6 +13,7 @@ Description:
 """
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -121,6 +122,24 @@ def test_ab_comparison_takes_each_sides_median_and_the_work_ratio():
     assert row["baseline"]["work_ms_per_tick"] == 11.0 and row["candidate"]["work_ms_per_tick"] == 5.5
     assert row["work_ratio"] == pytest.approx(0.5) and row["candidate"]["rounds"] == 2
     assert "| 2 | on | on |" in session_scaling.ab_report([row], "HEAD")
+
+
+def test_ab_with_a_relative_output_gives_each_side_absolute_paths(tmp_path, monkeypatch):
+    # Each side runs from its own root, so paths relative to the caller's directory would miss
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "base").mkdir()
+    calls = []
+
+    def fake_run(command, cwd, env, check):
+        harness, target = Path(command[1]), Path(command[command.index("--output") + 1])
+        assert harness.is_absolute() and harness.is_file() and target.is_absolute()
+        calls.append(cwd)
+        target.mkdir()
+        (target / "summary.json").write_text(json.dumps({"cases": []}))
+
+    monkeypatch.setattr(session_scaling.subprocess, "run", fake_run)
+    session_scaling.ab("out", baseline_root="base", rounds=1)
+    assert len(calls) == 2 and (tmp_path / "out" / "ab-report.md").is_file()
 
 
 @pytest.mark.traffic

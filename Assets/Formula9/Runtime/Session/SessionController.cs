@@ -148,6 +148,8 @@ namespace Formula9.Session
         public string Scenario { get; set; } = IntegratedScenario;
 
         public event Action<FullSnapshot, bool> SnapshotAccepted;
+        // The joined session's real-time factor, from the snapshots received while it runs.
+        public BackendPace Pace { get; } = new BackendPace();
         // The backend's newest traffic frames for the joined session, oldest first: presentation only.
         public event Action<IReadOnlyList<TrafficFrame>> TrafficFramesAccepted;
         public event Action<IReadOnlyList<Event>> EventsAccepted;
@@ -311,6 +313,7 @@ namespace Formula9.Session
             epoch = eventCursor = -1;
             resyncPending = false;
             connectionLost = false;
+            Pace.Reset();
             Store.Select(null);
             SetAvailable(false);
             SessionLeft?.Invoke();
@@ -645,6 +648,7 @@ namespace Formula9.Session
             if (epochChanged && pending != null && pending.Command.SessionId == sessionId) pending.StatusOnly = true;
             SetAvailable(true);
             if (connectionLost) { connectionLost = false; ConnectionChanged?.Invoke(true); }
+            Pace.Observe(snapshot, now().Ticks / (double)TimeSpan.TicksPerSecond);
             SnapshotAccepted?.Invoke(snapshot, resetEvents);
             if (recovered) _ = RequestRecoveryEventsAsync(sessionId, recoveredAfter, snapshot.EventSequence);
             if (pending != null && pending.Command.SessionId == sessionId && pending.StatusOnly) _ = RunPendingAsync(0);
