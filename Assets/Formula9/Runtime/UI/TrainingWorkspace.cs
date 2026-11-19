@@ -101,7 +101,7 @@ namespace Formula9.UI
         {
             this.api = api; this.session = session; this.world = world; this.run = run;
             // The pages are laid out in UI/Pages/*.uxml; this binds their controls by name.
-            foreach (var (pageName, navName) in new[] { ("page-fleet", "nav-fleet"), ("page-route", "nav-route"), ("page-charging", "nav-charging"), ("page-reports", "nav-reports"), ("page-scenarios", null) })
+            foreach (var (pageName, navName) in new[] { ("page-fleet", "nav-fleet"), ("page-route", "nav-route"), ("page-charging", "nav-charging"), ("page-reports", "nav-reports"), ("page-scenarios", "nav-scenarios") })
             {
                 // A page the layout leaves out gets no index: its lookups give -1 and it is never shown
                 var page = root.Q(pageName);
@@ -1020,7 +1020,7 @@ namespace Formula9.UI
         private void ShowPage(int index)
         {
             if (index < 0) return;
-            // Fleet Overview and Route Planning have the map beside them; the others take the full width, as in Qt.
+            // Fleet Overview (list over the map) and Route Planning (beside it) show the map; the others take the full width, as in Qt.
             foreach (var view in operationalViews) view.style.display = index == FleetPage || index == RoutePage ? DisplayStyle.Flex : DisplayStyle.None;
             var entering = index == RoutePage && shownPage != RoutePage;
             shownPage = index;
@@ -1036,9 +1036,12 @@ namespace Formula9.UI
                 navButtons[i]?.EnableInClassList("nav-item-selected", i == index);
             }
             // Only the Fleet page can be collapsed; every other page gets the whole panel.
-            var fleetContainer = pages[FleetPage].Q(className: "fleet-overview-container");
-            pages[index].parent.EnableInClassList("fleet-panel-collapsed",
-                index == FleetPage && fleetContainer != null && fleetContainer.ClassListContains("collapsed"));
+            var panel=pages[index].parent;
+            var fleetContainer=FleetPage>=0?pages[FleetPage].Q("fleet-page"):null;
+            panel.EnableInClassList("fleet-panel-collapsed",
+                index==FleetPage&&fleetContainer!=null&&fleetContainer.ClassListContains("collapsed"));
+            //the Fleet List floats over the bottom of the map; Route Planning stays beside it
+            panel.parent?.EnableInClassList("body-stacked",index==FleetPage);
             // The top menu shows the page's section: Reports and Scenarios, or everything else
             SectionChanged?.Invoke(index == ReportsPageIndex ? "reports" : index == ScenariosPageIndex ? "scenarios" : "operations");
         }

@@ -3,7 +3,7 @@ using UnityEngine.UIElements;
 
 namespace Formula9.World
 {
-    public enum GlyphKind { Bus, Pin, Warning, Plug, Document, User, Lock, Eye, Fit, Compass, Info }
+    public enum GlyphKind { Bus, Pin, Warning, Plug, Document, User, Lock, Eye, Fit, Compass, Info, LogOut, Power }
 
     // A small line icon drawn in code, as the Qt client's AppShell glyphs are, so it stays sharp at
     // any scale and needs no image asset. It never takes clicks; whatever holds it does.
@@ -141,6 +141,17 @@ namespace Formula9.World
                     Circle(0.5f, 0.5f, 0.42f);
                     Lines(false, At(0.5f, 0.46f), At(0.5f, 0.72f));
                     Lines(false, At(0.5f, 0.28f), At(0.5f, 0.3f));
+                    break;
+                case GlyphKind.LogOut:
+                    //an open door frame with an arrow leaving it to the right
+                    Lines(false,At(0.5f,0.14f),At(0.18f,0.14f),At(0.18f,0.86f),At(0.5f,0.86f));
+                    Lines(false,At(0.38f,0.5f),At(0.9f,0.5f));
+                    Lines(false,At(0.74f,0.34f),At(0.9f,0.5f),At(0.74f,0.66f));
+                    break;
+                case GlyphKind.Power:
+                    //a power symbol: a ring open at the top with a line through the gap
+                    p.BeginPath();p.Arc(At(0.5f,0.54f),0.34f*s,-55,235);p.Stroke();
+                    Lines(false,At(0.5f,0.08f),At(0.5f,0.48f));
                     break;
             }
         }

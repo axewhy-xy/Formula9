@@ -1,10 +1,10 @@
 <ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:f9="Formula9.World" xmlns:f9ui="Formula9.UI">
     <Style src="project://database/Assets/Formula9/UI/Formula9App.uss" />
-    <ui:VisualElement name="fleet-panel" class="workspace-page fleet-overview-container">
-        <ui:VisualElement class="row fleet-panel-header" style="justify-content: space-between; align-items: center; margin-bottom: 8px;">
+    <ui:VisualElement name="fleet-page" class="workspace-page fleet-overview-container">
+        <ui:VisualElement class="row fleet-panel-header">
             <ui:VisualElement style="flex-direction: row; align-items: center;">
-                <ui:Button name="fleet-toggle-btn" class="fleet-toggle-btn" tooltip="Toggle Fleet Panel">
-                    <ui:VisualElement class="fleet-toggle-icon" />
+                <ui:Button name="fleet-toggle-btn" class="fleet-toggle-btn" tooltip="Collapse or expand the Fleet List">
+                    <ui:Label text="‹" class="fleet-toggle-icon" picking-mode="Ignore" />
                 </ui:Button>
                 <ui:Label name="fleet-title" text="Fleet List (0)" class="panel-title" style="margin-bottom: 0; margin-left: 8px;" />
             </ui:VisualElement>
@@ -15,20 +15,23 @@
                 <ui:Button name="camera-overview" text="Overview" style="height: 30px; font-size: 11px; margin-right: 0;" />
             </ui:VisualElement>
         </ui:VisualElement>
-        <ui:VisualElement name="fleet-table-header" class="fleet-table-header" style="display: none;">
-            <ui:VisualElement class="fleet-th-icon" />
-            <ui:Label text="Shuttle" class="fleet-th fleet-col fleet-col-id" />
-            <ui:Label text="Status" class="fleet-th fleet-col fleet-col-status" />
-            <ui:Label text="Battery" class="fleet-th fleet-col fleet-col-battery" />
-            <ui:Label text="Route / next stop" class="fleet-th fleet-col fleet-col-route" />
-            <ui:Label text="ETA" class="fleet-th fleet-col fleet-col-eta" />
-            <ui:Label text="Incident" class="fleet-th fleet-col fleet-col-incident" />
-        </ui:VisualElement>
-        <ui:ScrollView name="fleet" class="fleet" />
-        <ui:VisualElement name="fleet-empty" class="fleet-empty">
-            <ui:VisualElement class="fleet-empty-icon"><f9:Glyph kind="Bus" tint="#0F4C5C" size="56" /></ui:VisualElement>
-            <ui:Label text="No shuttles available" class="fleet-empty-title" />
-            <ui:Label text="Join a training session to see its fleet." />
+        <!-- Everything under the header; collapsing hides this wrapper, since the code sets its children's display itself -->
+        <ui:VisualElement name="fleet-body" class="fleet-body">
+            <ui:VisualElement name="fleet-table-header" class="fleet-table-header" style="display: none;">
+                <ui:VisualElement class="fleet-th-icon" />
+                <ui:Label text="Shuttle" class="fleet-th fleet-col fleet-col-id" />
+                <ui:Label text="Status" class="fleet-th fleet-col fleet-col-status" />
+                <ui:Label text="Battery" class="fleet-th fleet-col fleet-col-battery" />
+                <ui:Label text="Route / next stop" class="fleet-th fleet-col fleet-col-route" />
+                <ui:Label text="ETA" class="fleet-th fleet-col fleet-col-eta" />
+                <ui:Label text="Incident" class="fleet-th fleet-col fleet-col-incident" />
+            </ui:VisualElement>
+            <ui:ScrollView name="fleet" class="fleet" />
+            <ui:VisualElement name="fleet-empty" class="fleet-empty">
+                <ui:VisualElement class="fleet-empty-icon"><f9:Glyph kind="Bus" tint="#0F4C5C" size="56" /></ui:VisualElement>
+                <ui:Label text="No shuttles available" class="fleet-empty-title" />
+                <ui:Label text="Join a training session to see its fleet." />
+            </ui:VisualElement>
         </ui:VisualElement>
     </ui:VisualElement>
 </ui:UXML>

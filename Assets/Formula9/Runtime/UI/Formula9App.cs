@@ -137,13 +137,7 @@ namespace Formula9.UI
             world.EntitySelected += _ => { if (session.Store.Snapshot != null) RenderFleet(session.Store.Snapshot); };
             workspace = new TrainingWorkspace(GetComponent<UIDocument>().rootVisualElement, api, session, world, Run, text => ShowMessage(text));
             var rootElement = GetComponent<UIDocument>().rootVisualElement;
-            workspace.SectionChanged += section =>
-            {
-                foreach (var name in new[] { "operations", "scenarios", "reports" })
-                    rootElement.Q<Button>("section-" + name).EnableInClassList("section-item-selected", name == section);
-            };
-            foreach (var name in new[] { "operations", "scenarios", "reports" })
-                rootElement.Q<Button>("section-" + name).clicked += () => workspace.ShowSection(name);
+            //every page, Scenarios included, is opened from the sidebar, which marks the page shown
             workspace.ShowSection("operations");
             // A marker on the map opens Route Planning for the first shuttle still to be decided for there
             world.IncidentSelected += id => workspace.DecideForIncident(id);
@@ -384,8 +378,8 @@ namespace Formula9.UI
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function connects the training shell's controls: session create, join and list,
-        //     the session controls, the cleanup dialog, the fleet panel and the clock in the top
-        //     bar.
+        //     the session controls, the cleanup dialog, the fleet panel and the clock in the
+        //     sidebar.
         //
         // Args:
         //     root (VisualElement): The document's root.
@@ -471,10 +465,10 @@ namespace Formula9.UI
             resume.clicked += () => Run(session.SendControlAsync("RESUME"));
             archive.clicked += ConfirmArchive;
 
-            // The clock in the top bar, to the minute
+            // The clock under the user's name in the sidebar, to the minute
             var clock = root.Q<Label>("clock");
-            clock.schedule.Execute(() => clock.text = DateTime.Now.ToString("d MMM yyyy    HH:mm", CultureInfo.InvariantCulture)).Every(10000);
-            clock.text = DateTime.Now.ToString("d MMM yyyy    HH:mm", CultureInfo.InvariantCulture);
+            clock.schedule.Execute(() => clock.text = DateTime.Now.ToString("d MMM yyyy · HH:mm", CultureInfo.InvariantCulture)).Every(10000);
+            clock.text = DateTime.Now.ToString("d MMM yyyy · HH:mm", CultureInfo.InvariantCulture);
             Render();
 
             //toggle sidebar
@@ -486,17 +480,15 @@ namespace Formula9.UI
                 isCollapsed = !isCollapsed;
                 navPanel?.EnableInClassList("collapsed", isCollapsed);
             };
-            // toggle fleet
-            var fleetToggleBtn = root.Q<Button>("fleet-toggle-btn");
-            if (fleetToggleBtn != null)
+            //toggle fleet: the Fleet page itself remembers it is collapsed, so switching pages keeps it
+            var fleetToggleBtn=root.Q<Button>("fleet-toggle-btn");
+            var fleetPage=root.Q("fleet-page");
+            if(fleetToggleBtn!=null&&fleetPage!=null)
             {
-                fleetToggleBtn.clicked += () =>
+                fleetToggleBtn.clicked+=()=>
                 {
-                    if (fleetPanel != null)
-                    {
-                        fleetPanel.ToggleInClassList("collapsed");
-                        SyncFleetPanelCollapse();
-                    }
+                    fleetPage.ToggleInClassList("collapsed");
+                    SyncFleetPanelCollapse();
                 };
             }
         }
@@ -507,13 +499,13 @@ namespace Formula9.UI
         // Description:
         //     This function shrinks the shared fleet panel to its header, but only while the Fleet
         //     page is both showing and collapsed. Every other page gets the full panel.
-        //     TrainingWorkspace.ShowPage calls it after it switches pages.
+        //     TrainingWorkspace.ShowPage applies the same rule when it switches pages.
         public void SyncFleetPanelCollapse()
         {
-            var fleetPage = trainingScreen?.Q("page-fleet");
-            bool isFleetPageActive = fleetPage != null && fleetPage.style.display != DisplayStyle.None && fleetPage.resolvedStyle.display != DisplayStyle.None;
-            bool isCollapsed = fleetPanel != null && fleetPanel.ClassListContains("collapsed");
-            fleetPanel?.EnableInClassList("fleet-panel-collapsed", isFleetPageActive && isCollapsed);
+            var fleetHost=trainingScreen?.Q("page-fleet");
+            bool isFleetPageActive=fleetHost!=null&&fleetHost.style.display!=DisplayStyle.None;
+            bool isCollapsed=fleetHost?.Q("fleet-page")?.ClassListContains("collapsed")??false;
+            fleetPanel?.EnableInClassList("fleet-panel-collapsed",isFleetPageActive&&isCollapsed);
         }
 
         // -----------------------------------------------------------------------------------

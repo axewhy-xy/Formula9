@@ -164,6 +164,17 @@ namespace Formula9.World
             mainCameraLabel.AddToClassList("camera-label");
             mainCameraView.Add(mainCameraLabel);
             cameraPanel.Add(mainCameraView);
+            //thumbnails sit in a rail over the large view's right edge, which the operator can fold away
+            var rail=new VisualElement();
+            rail.AddToClassList("camera-rail");
+            var railToggle=new Button{text="Cameras ›",tooltip="Show or hide the camera thumbnails"};
+            railToggle.AddToClassList("camera-rail-toggle");
+            railToggle.clicked+=()=>
+            {
+                rail.ToggleInClassList("camera-rail-collapsed");
+                railToggle.text=rail.ClassListContains("camera-rail-collapsed")?"‹ Cameras":"Cameras ›";
+            };
+            rail.Add(railToggle);
             var strip = new VisualElement();
             strip.AddToClassList("camera-strip");
             for (var i = 0; i < shuttleCameras.Cameras.Count; i++)
@@ -179,7 +190,8 @@ namespace Formula9.World
                 strip.Add(tile);
                 cameraTiles.Add(tile);
             }
-            cameraPanel.Add(strip);
+            rail.Add(strip);
+            cameraPanel.Add(rail);
             cameraPanel.style.display = DisplayStyle.None;    // hidden until the button is pressed
             surface.Add(cameraPanel);
             SelectCamera(0);
