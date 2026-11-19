@@ -22,7 +22,9 @@ from typing import BinaryIO, Callable, Iterator, TypeVar
 from uuid import uuid4
 
 from src.core.training_telemetry import TrainingTrace, boundary, correlate
+from src.services.assessment import AssessmentPlan, finalize
 
+from contracts.v2.assessment import SessionAssessment
 from contracts.v2.models import (
     CommandStatus,
     DispatcherCommand,
@@ -370,16 +372,17 @@ class TrainingStore:
         return [{**dict(row), "occupies_capacity": bool(row["occupies_capacity"])} for row in rows]
 
     def expired_session_ids(self, keep_latest: int) -> list[str]:
-        """Terminal attempts older than the newest keep_latest, by creation order."""
+        """Find old practice attempts. Scored records require an explicit owner deletion."""
         with self._reading() as connection:
             rows = connection.execute(
                 "SELECT session_id FROM sessions WHERE status IN ('ARCHIVED', 'COMPLETED', 'FAILED')"
+                " AND session_id NOT IN (SELECT session_id FROM session_assessments)"
                 " ORDER BY rowid DESC LIMIT -1 OFFSET ?",
                 (keep_latest,),
             ).fetchall()
             return [row[0] for row in rows]
 
-    def delete_session(self, session_id: str) -> None:
+    def delete_session(self, session_id: str, *, actor_id: str | None = None) -> None:
         """Permanently remove a terminal attempt, including all of its history.
 
         Check the persisted lifecycle in the same writer transaction as deletion.
@@ -387,8 +390,11 @@ class TrainingStore:
         """
         def write(connection: sqlite3.Connection) -> None:
             connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute("SELECT status FROM sessions WHERE session_id=?", (session_id,)).fetchone()
+            row = connection.execute(
+                "SELECT s.status, a.trainee_id FROM sessions s LEFT JOIN session_assessments a USING(session_id)"
+                " WHERE s.session_id=?", (session_id,)).fetchone()
             if row is not None:
+                self._check_assessment_owner(row["trainee_id"], actor_id)
                 if row["status"] not in {"ARCHIVED", "COMPLETED", "FAILED"}:
                     raise TrainingStoreError("INVALID_TRANSITION", "Archive the session before permanently deleting it")
                 for table in ("session_creations", "session_runtimes", "session_traffic", "commands", "events",
@@ -455,7 +461,10 @@ class TrainingStore:
         return self._submit(write)
 
     def create_session(self, snapshot: FullSnapshot, *, runtime_state: dict | None = None,
-                       creation: tuple[str, str, str] | None = None) -> FullSnapshot:
+                       creation: tuple[str, str, str] | None = None,
+                       assessment_plan: AssessmentPlan | None = None) -> FullSnapshot:
+        if assessment_plan is not None and creation is None:
+            raise ValueError("Scored attempts require an authenticated creator")
         snapshot = FullSnapshot.model_validate(snapshot.model_dump(mode="json"))
         def write(connection: sqlite3.Connection) -> FullSnapshot:
             connection.execute("BEGIN IMMEDIATE")
@@ -463,9 +472,71 @@ class TrainingStore:
             self._write_runtime(connection, snapshot.session_id, runtime_state)
             if creation is not None:
                 connection.execute("INSERT INTO session_creations VALUES (?, ?, ?, ?)", (*creation, snapshot.session_id))
+            if assessment_plan is not None:
+                connection.execute("INSERT INTO session_assessments (session_id, trainee_id, plan_json) VALUES (?, ?, ?)",
+                                   (snapshot.session_id, creation[0], assessment_plan.model_dump_json()))
             connection.commit()
             return snapshot
         return self._submit(write)
+
+    @staticmethod
+    def _check_assessment_owner(trainee_id: str | None, actor_id: str | None) -> None:
+        """Use the authenticated owner for scored commands, result access and deletion."""
+        if trainee_id is not None and trainee_id != actor_id:
+            raise TrainingStoreError("ROLE_DENIED", "Only the assigned trainee can access this assessment or change its session")
+
+    def assessment(self, session_id: str, actor_id: str) -> SessionAssessment:
+        """Return assessment status or the saved immutable scoring breakdown."""
+        with self._reading() as connection:
+            record = connection.execute(
+                "SELECT s.scenario_revision_id, a.trainee_id, a.plan_json, a.result_json"
+                " FROM sessions s LEFT JOIN session_assessments a USING(session_id) WHERE s.session_id=?",
+                (session_id,)).fetchone()
+            if record is None:
+                raise TrainingStoreError("INVALID_REFERENCE", "Training session was not found")
+            self._check_assessment_owner(record["trainee_id"], actor_id)
+            if record["result_json"] is not None:
+                return SessionAssessment.model_validate_json(record["result_json"])
+            rubric = AssessmentPlan.model_validate_json(record["plan_json"]).rubric if record["plan_json"] is not None else None
+            return SessionAssessment(session_id=session_id, scenario_revision_id=record["scenario_revision_id"],
+                rubric_revision=rubric.revision if rubric else None, points=None, maximum=100 if rubric else None,
+                pass_mark=rubric.pass_mark if rubric else None, through_tick=None, through_event_sequence=None,
+                status="IN_PROGRESS" if rubric else "PRACTICE",
+                explanation=("The assessment is saved when this exercise ends." if rubric else "This is a practice session."))
+
+    @staticmethod
+    def _finalize_assessment(connection: sqlite3.Connection, snapshot: FullSnapshot) -> None:
+        """Freeze the result in the same transaction as the final snapshot and journal."""
+        row = connection.execute("SELECT plan_json FROM session_assessments WHERE session_id=? AND result_json IS NULL",
+                                 (snapshot.session_id,)).fetchone()
+        if row is None:
+            return
+        events = connection.execute("SELECT event_json FROM events WHERE session_id=? AND event_sequence<=?"
+                                    " ORDER BY event_sequence", (snapshot.session_id, snapshot.event_sequence))
+        result = finalize(AssessmentPlan.model_validate_json(row["plan_json"]), snapshot,
+                          (Event.model_validate_json(item[0]) for item in events))
+        connection.execute("UPDATE session_assessments SET result_json=? WHERE session_id=?",
+                           (result.model_dump_json(), snapshot.session_id))
+
+    @staticmethod
+    def _expire_pending(connection: sqlite3.Connection, snapshot: FullSnapshot, *, except_id: str = "") -> None:
+        """Settle accepted receipts before retiring their runtime."""
+        pending = connection.execute(
+            "SELECT command_id, target_revision FROM commands"
+            " WHERE session_id=? AND status='QUEUED' AND command_id<>? ORDER BY rowid",
+            (snapshot.session_id, except_id),
+        ).fetchall()
+        for waiting in pending:
+            snapshot.event_sequence += 1
+            event = TrainingStore._event(snapshot, snapshot.event_sequence, "COMMAND_EXPIRED", "COMMAND",
+                waiting["command_id"], waiting["target_revision"],
+                {"status": "EXPIRED", "failure_code": "INVALID_TRANSITION"})
+            TrainingStore._append_event(connection, snapshot.session_id, event)
+            connection.execute(
+                "UPDATE commands SET status='EXPIRED', finished_at_utc=?, result_event_id=?,"
+                " failure_code='INVALID_TRANSITION' WHERE command_id=?",
+                (_now(), event.event_id, waiting["command_id"]),
+            )
 
     def _read_connection(self, *, check_same_thread: bool = True) -> sqlite3.Connection:
         connection = sqlite3.connect(f"file:{self.path.as_posix()}?mode=ro", uri=True,
@@ -562,9 +633,12 @@ class TrainingStore:
         payload_hash = _hash(_json(command.model_dump(mode="json", exclude={"command_id", "idempotency_key"})))
         def write(connection: sqlite3.Connection) -> CommandStatus:
             connection.execute("BEGIN IMMEDIATE")
-            session = connection.execute("SELECT * FROM sessions WHERE session_id=?", (command.session_id,)).fetchone()
+            session = connection.execute(
+                "SELECT s.*, a.trainee_id FROM sessions s LEFT JOIN session_assessments a USING(session_id)"
+                " WHERE s.session_id=?", (command.session_id,)).fetchone()
             if session is None:
                 raise TrainingStoreError("INVALID_REFERENCE", "Training session was not found")
+            self._check_assessment_owner(session["trainee_id"], actor_id)
             snapshot = _load_snapshot(session)
             prior = connection.execute(
                 "SELECT * FROM commands WHERE actor_id=? AND session_id=? AND idempotency_key=?",
@@ -688,24 +762,7 @@ class TrainingStore:
             for domain_event in domain_events if status == "APPLIED" else ():
                 self._append_event(connection, result.session_id, domain_event)
             if status == "APPLIED" and command.command_type == "ARCHIVE":
-                # Another client may still be reconciling an accepted command.
-                # Retiring the actor must settle that receipt in this transaction.
-                pending = connection.execute(
-                    "SELECT command_id, target_revision FROM commands"
-                    " WHERE session_id=? AND status='QUEUED' AND command_id<>? ORDER BY rowid",
-                    (result.session_id, command_id),
-                ).fetchall()
-                for waiting in pending:
-                    result.event_sequence += 1
-                    expired = self._event(result, result.event_sequence, "COMMAND_EXPIRED", "COMMAND",
-                                          waiting["command_id"], waiting["target_revision"],
-                                          {"status": "EXPIRED", "failure_code": "INVALID_TRANSITION"})
-                    self._append_event(connection, result.session_id, expired)
-                    connection.execute(
-                        "UPDATE commands SET status='EXPIRED', finished_at_utc=?, result_event_id=?,"
-                        " failure_code='INVALID_TRANSITION' WHERE command_id=?",
-                        (_now(), expired.event_id, waiting["command_id"]),
-                    )
+                self._expire_pending(connection, result, except_id=command_id)
             result.event_sequence += 1
             result.snapshot_id = str(uuid4())
             event = self._event(result, result.event_sequence, f"COMMAND_{status}", "COMMAND",
@@ -719,6 +776,8 @@ class TrainingStore:
                 (status, _now(), result.tick if status == "APPLIED" else None,
                  event.event_id, code, target_revision, command_id),
             )
+            if status == "APPLIED" and result.session.status in {"COMPLETED", "ARCHIVED", "FAILED"}:
+                self._finalize_assessment(connection, result)
             row = connection.execute("SELECT * FROM commands WHERE command_id=?", (command_id,)).fetchone()
             connection.commit()
             return self._status(row, result)
@@ -764,9 +823,13 @@ class TrainingStore:
             self._check_events(domain_events, previous.event_sequence, snapshot.tick)
             for event in domain_events:
                 self._append_event(connection, snapshot.session_id, event)
+            if previous.session.status != "COMPLETED" and snapshot.session.status == "COMPLETED":
+                self._expire_pending(connection, snapshot)
             snapshot.snapshot_id = str(uuid4())
             self._write_snapshot(connection, snapshot)
             self._write_runtime(connection, snapshot.session_id, runtime_state)
+            if snapshot.session.status in {"COMPLETED", "ARCHIVED", "FAILED"}:
+                self._finalize_assessment(connection, snapshot)
             connection.commit()
             return snapshot
         return self._submit(write)

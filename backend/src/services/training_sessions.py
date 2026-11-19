@@ -23,6 +23,8 @@ from src.persistence.training_store import TrainingStore, TrainingStoreError
 from src.core.training_telemetry import SessionProgress, boundary
 from src.schemas.shuttle_data import Shuttle
 from src.services.asset_loader import load_routes_from_json
+from src.services.assessment import AssessmentPlan, SCORED_SCENARIO, load_rubric
+from src.services.scored_actor import Observations, ScoredSessionActor
 from src.services.session_actor import SessionActor
 from src.services.integrated_actor import (IntegratedSessionActor, SCENARIO_SELECTOR, SIGNAL_AREA, get_workflow_definition,
                                             upgrade_v3_workflow)
@@ -38,7 +40,8 @@ LIFECYCLE = {"START": "RUNNING", "PAUSE": "PAUSED", "RESUME": "RUNNING", "ARCHIV
 T = TypeVar("T")
 
 # The first part of a readable session id: where the exercise takes place.
-SESSION_PLACES = {SCENARIO_SELECTOR: "toa-payoh", SPATIAL_SCENARIO_REVISION: "fleet-3d", SCENARIO_REVISION: "fleet-loop"}
+SESSION_PLACES = {SCENARIO_SELECTOR: "toa-payoh", SCORED_SCENARIO: "toa-payoh-scored",
+                  SPATIAL_SCENARIO_REVISION: "fleet-3d", SCENARIO_REVISION: "fleet-loop"}
 # A live session keeps this many of its latest traffic frames, one a traffic step (ten a second), for a
 # 3D view that asks again as soon as each reply arrives (wait_for_traffic) and draws a little behind them
 TRAFFIC_FRAMES = 30
@@ -142,6 +145,9 @@ def checkpoint(actor: SessionActor, *, traffic: bool = True) -> dict:
         # keeps it apart, so the publications in between leave out its 65-100 KB. Version 4 holds each
         # incident's world event and the scenario timeline's place; version 3 is converted on restore.
         state.update(version=4, workflow=actor.workflow_state(traffic=False))
+        if isinstance(actor, ScoredSessionActor):
+            state.update(assessment_plan=actor.assessment_plan.model_dump(mode="json"),
+                         assessment_observations=asdict(actor.observations))
         saved = actor.traffic_checkpoint() if traffic else None
         if saved is not None:
             state["traffic"] = saved
@@ -257,7 +263,12 @@ class TrainingSessionService:
         if any(type(state[key]) is not int or state[key] < 0 for key in ("tick", "command_tick")):
             raise TrainingStoreError("CORRUPT_CHECKPOINT", "Actor clocks must be nonnegative integers")
         if state["version"] in (3, 4) and snapshot.spatial is None:
-            actor = IntegratedSessionActor(seed=state["seed"], session_id=snapshot.session_id)
+            if "assessment_plan" in state:
+                plan = AssessmentPlan.model_validate(state["assessment_plan"])
+                actor = ScoredSessionActor(plan.rubric, session_id=snapshot.session_id, plan=plan)
+                actor.observations = Observations(**state["assessment_observations"])
+            else:
+                actor = IntegratedSessionActor(seed=state["seed"], session_id=snapshot.session_id)
             if state["version"] == 3:
                 state = {**state, "workflow": upgrade_v3_workflow(state["workflow"], state["tick"], actor.STEP_S,
                                                                   actor.incident_catalog.timeline)}
@@ -310,11 +321,11 @@ class TrainingSessionService:
             prior = await asyncio.to_thread(self.store.creation, actor_id, key, digest)
             if prior is not None:
                 return prior
-            if request.scenario_revision_id not in {SCENARIO_REVISION, SPATIAL_SCENARIO_REVISION, SCENARIO_SELECTOR}:
+            if request.scenario_revision_id not in {SCENARIO_REVISION, SPATIAL_SCENARIO_REVISION, SCENARIO_SELECTOR, SCORED_SCENARIO}:
                 raise TrainingStoreError("INVALID_REFERENCE", "Scenario revision is not available")
             if self.closed or len(self.sessions) >= self.MAX_SESSIONS:
                 raise TrainingStoreError("QUEUE_FULL", "Training session capacity reached")
-            if (request.scenario_revision_id == SCENARIO_SELECTOR and IntegratedSessionActor.TRAFFIC
+            if (request.scenario_revision_id in {SCENARIO_SELECTOR, SCORED_SCENARIO} and IntegratedSessionActor.TRAFFIC
                     and self.traffic_sessions() >= self.MAX_TRAFFIC_SESSIONS):
                 raise TrainingStoreError("QUEUE_FULL", "Training capacity for sessions with traffic reached; "
                                                        "archive one to start another")
@@ -327,7 +338,10 @@ class TrainingSessionService:
     def _create_initial(self, request: CreateSessionRequest, actor_id: str, key: str,
                         digest: str) -> tuple[FullSnapshot, SessionActor]:
         session_id = readable_session_id(request.scenario_revision_id, self.store.next_session_number())
-        if request.scenario_revision_id == SCENARIO_SELECTOR:
+        if request.scenario_revision_id == SCORED_SCENARIO:
+            # The graded fixture pins its own seed so attempts share the same conditions.
+            actor = ScoredSessionActor(load_rubric(), session_id=session_id)
+        elif request.scenario_revision_id == SCENARIO_SELECTOR:
             actor = IntegratedSessionActor(seed=request.seed, session_id=session_id)
         elif request.scenario_revision_id == SPATIAL_SCENARIO_REVISION:
             actor = SpatialSessionActor(seed=request.seed, session_id=session_id)
@@ -336,7 +350,8 @@ class TrainingSessionService:
         actor.is_paused = True
         snapshot = actor.generate_snapshot()
         snapshot.session.status = "READY"
-        snapshot = self.store.create_session(snapshot, runtime_state=checkpoint(actor), creation=(actor_id, key, digest))
+        snapshot = self.store.create_session(snapshot, runtime_state=checkpoint(actor), creation=(actor_id, key, digest),
+            assessment_plan=actor.assessment_plan if isinstance(actor, ScoredSessionActor) else None)
         return snapshot, actor
 
     def traffic_sessions(self) -> int:
@@ -347,14 +362,14 @@ class TrainingSessionService:
     def owns(self, session_id: str) -> bool:
         return session_id in self.sessions
 
-    async def delete(self, session_id: str) -> None:
+    async def delete(self, session_id: str, actor_id: str) -> None:
         await self.initialize()
-        await self._complete(self._delete(session_id))
+        await self._complete(self._delete(session_id, actor_id))
 
-    async def _delete(self, session_id: str) -> None:
+    async def _delete(self, session_id: str, actor_id: str) -> None:
         if self.owns(session_id):
             raise TrainingStoreError("INVALID_TRANSITION", "Archive the session before permanently deleting it")
-        await asyncio.to_thread(self.store.delete_session, session_id)
+        await asyncio.to_thread(self.store.delete_session, session_id, actor_id=actor_id)
 
     async def purge(self, keep_latest: int) -> dict:
         await self.initialize()
@@ -394,6 +409,11 @@ class TrainingSessionService:
         self._check_available(session_id)
         snapshot = await asyncio.to_thread(self.store.snapshot, session_id)
         self._check_available(session_id)
+        # Earlier scored checkpoints lack the public deadline. Their live actor
+        # still has the pinned rubric, so a reconnect uses that attempt's clock.
+        live = self.sessions.get(session_id)
+        if snapshot.scenario.assessment_duration_s is None and live and isinstance(live.actor, ScoredSessionActor):
+            snapshot.scenario.assessment_duration_s = live.actor.assessment_plan.rubric.exercise_limit_s
         return snapshot
 
     @staticmethod
@@ -534,6 +554,10 @@ class TrainingSessionService:
             session.baseline = baseline
             session.progress.observe(self.store.trace, session.actor, committed=baseline,
                                      sample_ns=sample_ns if staged is not None else None)
+            if baseline is not None and baseline.session.status == "COMPLETED":
+                # Release capacity and wake viewers as soon as the graded boundary is durable.
+                self.sessions.pop(session.actor.session_id, None)
+                session.wake_frame_waiters()
 
     def _step_staged(self, actor: SessionActor, baseline: FullSnapshot | None, enqueued_ns: int | None = None
                      ) -> tuple[SessionActor | None, FullSnapshot | None, str | None]:
@@ -552,7 +576,7 @@ class TrainingSessionService:
         # publishes; it is taken once the tick is done, so it shows what the tick installs
         frame_due = (isinstance(staged, IntegratedSessionActor) and staged.current_tick != actor.current_tick
                      and staged.traffic_frame_due())
-        if staged.should_emit_snapshot():
+        if staged.should_emit_snapshot() or (isinstance(staged, ScoredSessionActor) and staged.assessment_due):
             if baseline is None:
                 baseline = self.store.snapshot(actor.session_id)
             if baseline.session.status != "RUNNING":
@@ -657,6 +681,8 @@ class TrainingSessionService:
                                             tick=session.actor.current_tick, running=running, lateness_ms=lateness / 1e6,
                                             boundary_ms=(end-start)/1e6,
                                             missed_deadlines=max(0, (end-deadline) // step_ns), **waiting)
+                if session.baseline is not None and session.baseline.session.status == "COMPLETED":
+                    return
                 deadline = next_deadline(deadline, self.store.trace.clock(), step_ns)
         except asyncio.CancelledError:
             raise

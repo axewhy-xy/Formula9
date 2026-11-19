@@ -42,9 +42,12 @@
                 <ui:VisualElement class="session-header">
                     <ui:VisualElement class="session-heading">
                         <ui:Label name="title" text="Fleet training" class="title session-title" />
+                        <ui:Label name="assessment-mode-badge" text="Assessment mode" class="assessment-mode-badge" style="display: none;" />
                         <ui:Label name="session-badge" text="No session" class="session-badge" />
+                        <ui:Label name="assessment-timer" class="assessment-timer" style="display: none;" />
                     </ui:VisualElement>
                     <ui:VisualElement class="session-utilities">
+                        <ui:Button name="assessment-mode" text="Assessment mode" class="session-button assessment-mode-button" tooltip="Create and join a timed scored exercise." />
                         <ui:Button name="session-toggle" text="Session options" class="session-button session-quiet" tooltip="Show or hide session creation, joining and deletion." style="display: none;" />
                         <ui:Toggle name="mute" label="Mute alerts" class="mute" tooltip="Mute training audio alerts" />
                     </ui:VisualElement>
@@ -58,7 +61,6 @@
 
                 <ui:VisualElement class="row session-tools session-setup-row">
                     <ui:VisualElement class="session-create-group">
-                        <ui:DropdownField name="scenario" class="scenario" />
                         <ui:Button name="create" text="Create training session" class="session-button session-primary" />
                     </ui:VisualElement>
                     <ui:VisualElement class="session-join-group">

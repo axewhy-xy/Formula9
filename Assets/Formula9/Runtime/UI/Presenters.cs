@@ -114,18 +114,6 @@ namespace Formula9.UI
     }
 
     // -----------------------------------------------------------------------------------
-    // Class: ScenarioChoice
-    // -----------------------------------------------------------------------------------
-    // Description:
-    //     This struct is one scenario the trainee can create: its label, scenario revision ID and
-    //     description.
-    public readonly struct ScenarioChoice
-    {
-        public readonly string Label, Id, Description;
-        public ScenarioChoice(string label, string id, string description) { Label = label; Id = id; Description = description; }
-    }
-
-    // -----------------------------------------------------------------------------------
     // Class: SessionControls
     // -----------------------------------------------------------------------------------
     // Description:
@@ -206,29 +194,40 @@ namespace Formula9.UI
     //     This class derives everything the training screen shows from the accepted snapshot. A
     //     port of the Qt TrainingWorkspace's refreshStatus, refreshViews and showCommandResult.
     //
-    //     Attributes: Scenarios lists what can be created; NoSession is shown when nothing is
+    //     Attributes: NoSession is shown when nothing is
     //     joined.
     public static class TrainingPresenter
     {
-        public static readonly IReadOnlyList<ScenarioChoice> Scenarios = new[]
+        /// <summary>Recognize the assessment deadline, with a revision fallback for older saved attempts.</summary>
+        public static bool IsAssessment(FullSnapshot snapshot) =>
+            snapshot?.Scenario?.AssessmentDurationS != null ||
+            snapshot?.Session?.ScenarioRevisionId?.StartsWith("scored-toa-payoh-", StringComparison.Ordinal) == true;
+
+        /// <summary>Recover the pinned duration for rubrics published before snapshots carried it.</summary>
+        internal static long? LegacyAssessmentDuration(string rubricRevision) => rubricRevision switch
         {
-            new ScenarioChoice("Singapore, real streets (2D)", SessionController.IntegratedScenario, "Real streets and LTA bus stops, shuttles running from a bus interchange, with incidents, detours and charging."),
+            "toa-payoh-rubric-r1" => 960,
+            "toa-payoh-rubric-r2" => 120,
+            _ => null,
         };
 
-        // -----------------------------------------------------------------------------------
-        // Function: ScenarioTitle
-        // -----------------------------------------------------------------------------------
-        // Description:
-        //     This function names a scenario for the screen header.
-        //
-        // Args:
-        //     scenarioId (string): The scenario revision ID.
-        //
-        // Returns:
-        //     string: The title.
-        public static string ScenarioTitle(string scenarioId) => scenarioId == SessionController.IntegratedScenario
-            ? "Singapore, real streets · incidents, detours, charging"
-            : "3D fleet exercise · road, ramp and obstruction";
+        /// <summary>Show the server's remaining simulation time, including paused or offline readings.</summary>
+        public static (string Text, bool Urgent) AssessmentClock(FullSnapshot snapshot, bool available,
+            long? legacyDurationS = null, bool loading = false)
+        {
+            if (!IsAssessment(snapshot)) return (null, false);
+            var state = snapshot.Session?.Status;
+            if (state == "COMPLETED") return ("Time’s up · 0:00", false);
+            if (state != "RUNNING" && state != "PAUSED" && state != "RECOVERING") return (null, false);
+            if (!((snapshot.Scenario?.AssessmentDurationS ?? legacyDurationS) is long limit))
+                return (loading ? "Loading timer…" : "Timer unavailable", false);
+
+            var seconds = (long)Math.Ceiling(Math.Max(0, limit - snapshot.SimulationTimeS));
+            var remaining = FormattableString.Invariant($"{seconds / 60}:{seconds % 60:00} left");
+            if (!available || state == "RECOVERING") return ($"Last seen · {remaining}", false);
+            if (state == "PAUSED") return ($"Paused · {remaining}", false);
+            return (remaining, seconds <= 30);
+        }
 
         public const string NoSession = "Create or join a training session to begin.";
 
@@ -276,9 +275,10 @@ namespace Formula9.UI
         //
         // Returns:
         //     string: The title.
-        public static string Title(FullSnapshot snapshot) => snapshot.Spatial != null
-            ? "3D fleet exercise · road, ramp and obstruction"
-            : "Singapore, real streets · incidents, detours, charging";
+        public static string Title(FullSnapshot snapshot) =>
+            IsAssessment(snapshot) ? "Toa Payoh · scored exercise" :
+            snapshot?.Spatial != null ? "3D fleet exercise · road, ramp and obstruction" :
+            "Singapore, real streets · incidents, detours, charging";
 
         // -----------------------------------------------------------------------------------
         // Function: Controls

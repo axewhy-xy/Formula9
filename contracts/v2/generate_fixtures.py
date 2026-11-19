@@ -6,6 +6,7 @@ from pathlib import Path
 
 from pydantic import TypeAdapter
 
+from contracts.v2.assessment import SessionAssessment
 from contracts.v2.models import ChargeSchedulePreview, ChargeScheduleRequest, DispatcherCommand, Message, parse_message
 from contracts.v2.route_edit import RouteApprovalRequest, RouteEditPreview, RouteEditRequest, RouteEditorContext, RouteOutcome
 from contracts.v2.sessions import CreateSessionRequest, SessionListResponse
@@ -45,10 +46,13 @@ for name, model in (("route_edit_request", RouteEditRequest),
                     ("route_edit_preview", RouteEditPreview),
                     ("route_approval", RouteApprovalRequest),
                     ("route_outcome", RouteOutcome),
+                    ("session_assessment", SessionAssessment),
                     ("charge_schedule_request", ChargeScheduleRequest),
                     ("charge_schedule_preview", ChargeSchedulePreview)):
     route_schema = model.model_json_schema()
     route_schema["$id"] = f"https://formula9.local/contracts/v2/{name}.schema.json"
+    if name == "session_assessment":
+        route_schema["$comment"] = "Author: Nur Syazliyarni Binte Zazali. Generated from assessment.py."
     (ROOT / f"{name}.schema.json").write_text(
         json.dumps(route_schema, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 

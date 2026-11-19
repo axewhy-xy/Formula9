@@ -21,6 +21,7 @@ from contracts.v2.models import Event
 from src.persistence.training_store import TrainingStoreError
 from src.services.battery_decision import submit_battery_decision
 from src.services.charge_booking import BOOKING_COMMANDS, submit_booking_command
+from src.services.scored_actor import ScoredSessionActor
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,8 @@ class ActorCommit:
         self.actor.note_decisions(events)
         result = self.actor.generate_snapshot(in_place=not copy_domain)
         result.snapshot_id = self.baseline.snapshot_id
+        if isinstance(self.actor, ScoredSessionActor):
+            self.actor.observe_publication(result, events)
         events = [*self.actor.pending_events, *events]
         ordered = tuple(event.model_copy(update={"event_sequence": self.baseline.event_sequence+index+1,
             "tick": result.tick}) for index, event in enumerate(events))
@@ -122,6 +125,14 @@ class ActorCommit:
         return result
 
     def commit_snapshot(self, proposed, domain_events=(), **kwargs):
+        # Let the incident service finish staging this tick before closing the exercise.
+        if isinstance(self.actor, ScoredSessionActor) and self.actor.assessment_due:
+            proposed.session.status = "COMPLETED"
+            proposed.session.aggregate_revision += 1
+            completed = Event(event_id=uuid4().hex, event_sequence=0, tick=proposed.tick,
+                entity_type="SESSION", entity_id=proposed.session_id, entity_revision=proposed.session.aggregate_revision,
+                event_type="SESSION_COMPLETED", source=proposed.source, data={"status": "COMPLETED"})
+            domain_events = (*domain_events, completed)
         proposed, domain_events = self._prepare(proposed, domain_events, copy_domain=False)
         kwargs.setdefault("expected_snapshot_id", self.baseline.snapshot_id)
         result = self.store.commit_snapshot(proposed, domain_events,

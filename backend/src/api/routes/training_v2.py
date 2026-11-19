@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, FastAPI, Header, Query, Request, Respons
 from fastapi.responses import JSONResponse
 from starlette.authentication import UnauthenticatedUser
 
+from contracts.v2.assessment import SessionAssessment
 from contracts.v2.models import ChargeSchedulePreview, ChargeScheduleRequest, DispatcherCommand, Id, TrainingSession
 from contracts.v2.sessions import CreateSessionRequest, SessionListResponse
 from contracts.v2.route_edit import RouteApprovalRequest, RouteEditPreview, RouteEditRequest, RouteEditorContext, RouteOutcome
@@ -109,7 +110,7 @@ async def compact_sessions(actor_id: str = Depends(get_actor_id),
 @router.delete("/{session_id}", status_code=204)
 async def delete_session(session_id: str, actor_id: str = Depends(get_actor_id),
                           service: TrainingSessionService = Depends(get_training_service)) -> Response:
-    await service.delete(session_id)
+    await service.delete(session_id, actor_id)
     return Response(status_code=204)
 
 
@@ -117,6 +118,13 @@ async def delete_session(session_id: str, actor_id: str = Depends(get_actor_id),
 async def snapshot(session_id: str, actor_id: str = Depends(get_actor_id),
                    service: TrainingSessionService = Depends(get_training_service)) -> dict:
     return (await service.snapshot(session_id)).model_dump(mode="json")
+
+
+@router.get("/{session_id}/assessment", response_model=SessionAssessment)
+def session_assessment(session_id: str, actor_id: str = Depends(get_actor_id),
+                       store: TrainingStore = Depends(get_training_store)) -> SessionAssessment:
+    """Read the practice, running or saved grading status for the assigned trainee."""
+    return store.assessment(session_id, actor_id)
 
 
 @router.get("/{session_id}/traffic")
@@ -223,6 +231,9 @@ async def submit_command(session_id: str, command: DispatcherCommand,
     if command.command_type in {"RESERVE_CHARGER", "CONTINUE_SERVICE"}:
         return (await asyncio.to_thread(submit_battery_decision, store, actor_id, command)).model_dump(mode="json")
     if command.command_type in BOOKING_COMMANDS:
+        # An ended scored attempt can still reconcile a booking receipt after a lost reply.
+        if (await asyncio.to_thread(store.snapshot, session_id)).session.status in {"COMPLETED", "ARCHIVED", "FAILED"}:
+            return (await asyncio.to_thread(store.accept, actor_id, command)).model_dump(mode="json")
         # Only the integrated scenario's actor starts a slot; one booked anywhere else would never run
         raise TrainingStoreError("INVALID_TRANSITION", "This scenario does not run charging slots")
     return (await asyncio.to_thread(store.accept, actor_id, command)).model_dump(mode="json")
