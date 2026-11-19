@@ -791,13 +791,17 @@ class TrainingStore:
     def _apply(self, command_id: str, proposed: FullSnapshot | None = None,
                domain_events: tuple[Event, ...] = (), *, rejection_code: str | None = None,
                expected_snapshot_id: str | None = None, runtime_state: dict | None = None,
-               trace_fields: dict) -> CommandStatus:
+               trace_fields: dict, published: dict | None = None) -> CommandStatus:
         """Commit one actor-staged boundary, rechecking preconditions in the writer.
 
         On a stale command or staged boundary, the proposed state is discarded
         and a durable REJECTED outcome is written. A valid command requires a
         revised target snapshot. An actor may supply rejection_code when its
         own revalidation finds a changed constraint after acceptance.
+
+        published, when given, gets "raw": what this commit published for the session (as
+        published_snapshot_json gave just after it, on the writer, before any later commit), or is
+        left empty when the command was already settled and nothing was written.
         """
         if proposed is not None:
             proposed = FullSnapshot.model_validate(proposed.model_dump(mode="json"))
@@ -900,6 +904,8 @@ class TrainingStore:
             row = connection.execute("SELECT * FROM commands WHERE command_id=?", (command_id,)).fetchone()
             connection.commit()
             self._publish(result.session_id, encoded)
+            if published is not None:
+                published["raw"] = self._published.get(result.session_id)
             return self._status(row, result)
         return self._submit(write)
 

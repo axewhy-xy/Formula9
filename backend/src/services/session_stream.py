@@ -29,7 +29,7 @@ from contextlib import contextmanager
 import json
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Iterator
 
 import anyio
 
@@ -48,6 +48,9 @@ MAX_SNAPSHOT_INTERVAL_MS = 5000
 HEARTBEAT_S = 5.0
 # How often a stream with no new snapshot checks that its session is still available
 AVAILABILITY_CHECK_S = 1.0
+# How often an open stream checks that its login is still valid (logged out, expired): each check is an
+# account lookup, so far less often than the availability check
+LOGIN_CHECK_S = 10.0
 # How long a stream waits for the next traffic frame before looking again
 TRAFFIC_WAIT_S = 1.0
 # How long a stream for a session with no traffic (none at all, or none while it recovers) waits
@@ -168,13 +171,20 @@ class SessionStream:
     """One client's stream of a session: the newest committed snapshot at most once an interval, the
     traffic frames as they are made (while the client wants them), a heartbeat while there is neither,
     and the client's traffic controls. The websocket is a Starlette WebSocket, already accepted; the
-    service a SessionServiceBase (training_sessions), in process or the gateway."""
+    service a SessionServiceBase (training_sessions), in process or the gateway.
+
+    login_check, when given, is asked every LOGIN_CHECK_S whether the login the stream was opened with
+    still holds: False ends the stream with ROLE_DENIED (close code 4403), as HTTP answers 401 once a
+    login is gone. A check that cannot tell (the account database unreachable) returns None, and the
+    stream goes on, as a request would be answered 503 rather than refused."""
 
     def __init__(self, websocket: Any, service: Any, session_id: str, *, traffic: bool = False,
-                 after_tick: int = -1, snapshot_interval_ms: int | None = None):
+                 after_tick: int = -1, snapshot_interval_ms: int | None = None,
+                 login_check: Callable[[], Awaitable[bool | None]] | None = None):
         self.websocket = websocket
         self.service = service
         self.session_id = session_id
+        self.login_check = login_check
         self.interval_s = clamp_interval_ms(snapshot_interval_ms) / 1000
         self.traffic_enabled = traffic
         self.traffic_cursor = max(-1, after_tick)
@@ -208,6 +218,8 @@ class SessionStream:
             tasks.start_soon(part, self._snapshots, name="stream-snapshots")
             tasks.start_soon(part, self._traffic, name="stream-traffic")
             tasks.start_soon(part, self._controls, name="stream-controls")
+            if self.login_check is not None:
+                tasks.start_soon(part, self._login, name="stream-login")
         if closed is not None and closed.code is not None:
             try:
                 await self.websocket.close(code=closed.code, reason=closed.reason[:120])
@@ -306,6 +318,13 @@ class SessionStream:
             elif newest is not None and newest < cursor:
                 # The session's clock went back (a recovery restored an earlier checkpoint): start over
                 self.traffic_cursor = -1
+
+    async def _login(self) -> None:
+        """Ends the stream once its login no longer holds."""
+        while True:
+            await asyncio.sleep(LOGIN_CHECK_S)
+            if await self.login_check() is False:
+                await self.fail("ROLE_DENIED", "Your login has expired. Log in again to continue.")
 
     async def _controls(self) -> None:
         """The client's messages: {"type": "traffic", "enabled": bool, "after_tick": int (optional)}."""

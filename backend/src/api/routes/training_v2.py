@@ -70,7 +70,12 @@ def get_actor_id(request: Request) -> str:
 
 async def initialize_training_service(application: FastAPI, store: TrainingStore) -> SessionServiceBase:
     """The application's session service for store: sessions in worker processes (F9_SESSION_WORKERS,
-    session_gateway) or in this one. If the workers cannot start, sessions run in this process."""
+    session_gateway) or in this one. If the workers cannot start, sessions run in this process.
+
+    Requests may wait on the gateway's start together. The gateway undoes a failed start before raising
+    and fails every later start at once, and only the first request to see the failure installs the
+    in-process service (before closing the gateway, so none in between finds the closed one); the
+    others use it. So no session is ever ticked by both, nor by two in-process services."""
     services = getattr(application.state, "training_services", None)
     if services is None:
         services = application.state.training_services = {}
@@ -81,9 +86,11 @@ async def initialize_training_service(application: FastAPI, store: TrainingStore
     try:
         await service.initialize()
     except WorkerStartError:
-        logger.exception("Session workers could not start; running training sessions in this process")
-        await service.close()
-        service = services[store] = TrainingSessionService(store, retention_keep_latest=retention)
+        if services.get(store) is service:
+            logger.exception("Session workers could not start; running training sessions in this process")
+            services[store] = TrainingSessionService(store, retention_keep_latest=retention)
+            await service.close()
+        service = services[store]
         await service.initialize()
     return service
 

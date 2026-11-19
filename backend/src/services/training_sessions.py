@@ -246,6 +246,13 @@ class SessionServiceBase:
         if not task.cancelled():
             task.exception()  # Also consume failures after the caller disconnects.
 
+    async def _drain_operations(self) -> None:
+        """Waits for every operation under way, including any started meanwhile. Only unfinished ones
+        are waited on: a finished one stays in _operations until its done callback runs, and awaiting
+        finished tasks never yields to the loop that would run it, so the drain would spin forever."""
+        while pending := [task for task in self._operations if not task.done()]:
+            await asyncio.wait(pending)
+
     async def initialize(self) -> None:
         if not self._initialized:
             await self._complete(self._initialize())
@@ -869,8 +876,7 @@ class TrainingSessionService(SessionServiceBase):
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        while self._operations:
-            await asyncio.gather(*tuple(self._operations), return_exceptions=True)
+        await self._drain_operations()
         for session in self.sessions.values():
             session.progress.observe(self.store.trace, session.actor, running=False)
             # No more frames will come: a 3D view waiting for one hears so now

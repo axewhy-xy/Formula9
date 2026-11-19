@@ -192,6 +192,48 @@ def test_a_stream_needs_a_login(http):
         assert closed.value.code == 4403
 
 
+def test_a_stream_ends_once_its_login_is_gone(http, monkeypatch):
+    from src.auth import service as auth_service
+    from src.auth.service import AccountsUnavailable, AuthService
+    from src.auth.store import MemoryAccountStore
+    from src.services import session_stream
+
+    client, store, service = http
+    accounts = AuthService(MemoryAccountStore())
+    monkeypatch.setattr(auth_service, "_service", accounts)
+    monkeypatch.setattr(session_stream, "LOGIN_CHECK_S", 0.2)
+    token = accounts.sign_up("stream-operator", "a long password")["token"]
+    # The real login on the connection, as the client sends it
+    del app.dependency_overrides[stream_actor_id]
+    session_id = create(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    with client.websocket_connect(f"/api/v2/sessions/{session_id}/stream", headers=headers) as socket:
+        first, _ = receive(socket)
+        assert first["type"] == "snapshot"
+        # The account database unreachable is not a login gone: the stream goes on
+        lookups, down = [], [True]
+        user_for_token = accounts.user_for_token
+
+        def lookup(token):
+            lookups.append(token)
+            if down[0]:
+                raise AccountsUnavailable("down")
+            return user_for_token(token)
+        monkeypatch.setattr(accounts, "user_for_token", lookup)
+        deadline = time.monotonic() + 5
+        while len(lookups) < 2:
+            assert time.monotonic() < deadline, "The login was not checked again"
+            time.sleep(0.05)
+        down[0] = False
+        accounts.log_out(token)
+        messages = collect(socket, lambda m: m and m[-1][0]["type"] == "error", timeout_s=5)
+        assert messages[-1][0]["error"]["code"] == "ROLE_DENIED"
+        with pytest.raises(WebSocketDisconnect) as closed:
+            while True:
+                socket.receive_text()
+        assert closed.value.code == 4403
+
+
 def test_the_store_wakes_a_feed_from_its_writer_thread(tmp_path):
     async def exercise():
         with TrainingStore(tmp_path / "feed.sqlite") as store:

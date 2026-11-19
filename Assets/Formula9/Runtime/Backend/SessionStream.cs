@@ -141,9 +141,14 @@ namespace Formula9.Backend
     {
         private readonly IStreamSocket socket;
         private readonly CancellationTokenSource lifetime = new CancellationTokenSource();
+        // Cancelled when a send fails: the reading then ends the stream, as a lost connection does
+        private readonly CancellationTokenSource broken = new CancellationTokenSource();
         private readonly ConcurrentQueue<StreamMessage> inbox = new ConcurrentQueue<StreamMessage>();
         private readonly object sendLock = new object();
-        private Task sending = Task.CompletedTask;
+        // Done once connected (cancelled if the connection could not be made): sends queue behind it,
+        // as a WebSocket refuses a send before it is open
+        private readonly TaskCompletionSource<bool> connected = new TaskCompletionSource<bool>();
+        private Task sending;
         private int closed;
 
         public string SessionId { get; }
@@ -167,6 +172,7 @@ namespace Formula9.Backend
         {
             this.socket = socket ?? throw new ArgumentNullException(nameof(socket));
             SessionId = sessionId;
+            sending = connected.Task;
             if (inBackground) Task.Run(() => RunAsync(url, headers));
             else _ = RunAsync(url, headers);
         }
@@ -189,7 +195,9 @@ namespace Formula9.Backend
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function tells the backend whether to send traffic frames, and after which
-        //     tick. A failure is left to the reading, which then ends the stream.
+        //     tick. Called before the stream has connected, it is sent once it has. A send that
+        //     fails ends the stream, so the caller goes back to polling rather than wait for
+        //     frames the backend was never asked for.
         //
         // Args:
         //     enabled (bool): Whether to send them.
@@ -204,8 +212,8 @@ namespace Formula9.Backend
         // Function: Send
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function queues a text message after any still being sent: a WebSocket takes
-        //     one send at a time.
+        //     This function queues a text message after the connection and any message still
+        //     being sent: a WebSocket takes one send at a time, and none before it is open.
         //
         // Args:
         //     text (string): The message.
@@ -219,10 +227,22 @@ namespace Formula9.Backend
         {
             try
             {
+                // Only the connection can fail here: an earlier send never throws
                 await previous.ConfigureAwait(false);
+            }
+            // Not connected: the reading has already ended the stream and said so
+            catch (Exception) { return; }
+            try
+            {
+                if (Closed) return;
                 await socket.SendAsync(text, lifetime.Token).ConfigureAwait(false);
             }
-            catch (Exception) { /* The reading ends the stream and says so */ }
+            catch (Exception)
+            {
+                // The backend may not have the message, and the stream no longer says what the
+                // caller asked for: end it, and the reading says so
+                broken.Cancel();
+            }
         }
 
         // -----------------------------------------------------------------------------------
@@ -238,21 +258,35 @@ namespace Formula9.Backend
         //     headers (IReadOnlyDictionary<string, string>): The upgrade request's headers.
         private async Task RunAsync(Uri url, IReadOnlyDictionary<string, string> headers)
         {
-            try
+            using (var reading = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token, broken.Token))
             {
-                await socket.ConnectAsync(url, headers, lifetime.Token).ConfigureAwait(false);
-                while (!lifetime.IsCancellationRequested)
+                try
                 {
-                    var text = await socket.ReceiveAsync(lifetime.Token).ConfigureAwait(false);
-                    if (text == null) break;
-                    var message = Parse(text, SessionId);
-                    // A message this client does not know is from a newer backend: skipped
-                    if (message != null) inbox.Enqueue(message);
+                    try
+                    {
+                        await socket.ConnectAsync(url, headers, lifetime.Token).ConfigureAwait(false);
+                    }
+                    catch (Exception)
+                    {
+                        // Cancelled rather than failed: a queued send that never waits on it leaves
+                        // no unobserved exception behind
+                        connected.TrySetCanceled();
+                        throw;
+                    }
+                    connected.TrySetResult(true);
+                    while (!reading.IsCancellationRequested)
+                    {
+                        var text = await socket.ReceiveAsync(reading.Token).ConfigureAwait(false);
+                        if (text == null) break;
+                        var message = Parse(text, SessionId);
+                        // A message this client does not know is from a newer backend: skipped
+                        if (message != null) inbox.Enqueue(message);
+                    }
                 }
+                // Connection refused or lost, a send that failed, a malformed message (the stream
+                // can no longer be trusted), or Dispose: the caller polls over HTTP again
+                catch (Exception) { }
             }
-            // Connection refused or lost, a malformed message (the stream can no longer be
-            // trusted), or Dispose: the caller polls over HTTP again
-            catch (Exception) { }
             int? status = null;
             try { status = socket.CloseStatus; } catch (Exception) { }
             Volatile.Write(ref closed, 1);

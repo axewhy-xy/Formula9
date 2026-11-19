@@ -90,7 +90,8 @@ class StoreClient(TrainingStore):
             "expected_snapshot_id": expected_snapshot_id, "runtime": _EncodedRuntime.of(runtime_state)})
         trace_fields.update(reply["trace"])
         result = CommandStatus.model_validate_json(reply["status"])
-        self._published_as(result.session_id, reply["published"])
+        if "published" in reply:  # Absent when the command was already settled: nothing was published
+            self._published_as(result.session_id, reply["published"])
         return result
 
     def _commit_snapshot(self, snapshot: FullSnapshot, domain_events: tuple[Event, ...] = (), *,
@@ -129,12 +130,17 @@ def serve_store_call(store: TrainingStore, kind: str, payload: Any) -> Any:
                              defer_preconditions=payload["defer_preconditions"]).model_dump_json()
     if kind == "apply":
         fields: dict = {}
+        # What the writer published for this apply, taken there: read here after it returned, a later
+        # commit of the session could already have replaced it, and the worker's copy would go back
+        published: dict = {}
         result = store._apply(payload["command_id"],
                               FullSnapshot.model_validate_json(payload["proposed"]) if payload["proposed"] else None,
                               tuple(Event.model_validate_json(event) for event in payload["events"]),
                               rejection_code=payload["rejection_code"],
                               expected_snapshot_id=payload["expected_snapshot_id"],
-                              runtime_state=payload["runtime"], trace_fields=fields)
-        return {"status": result.model_dump_json(), "trace": fields,
-                "published": store.published_snapshot_json(result.session_id)}
+                              runtime_state=payload["runtime"], trace_fields=fields, published=published)
+        reply = {"status": result.model_dump_json(), "trace": fields}
+        if "raw" in published:
+            reply["published"] = published["raw"]
+        return reply
     raise ValueError(f"Unknown store call {kind!r}")

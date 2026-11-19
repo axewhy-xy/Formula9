@@ -32,7 +32,16 @@ Description:
     replacement, if none is), through TrainingStore.recover_session: a new epoch, paused, queued
     commands marked for reconfirmation, as after a backend restart. Until then they answer
     SESSION_RECOVERING. Command outcomes are decided by the gateway's writer, so a command already
-    applied is not applied again.
+    applied is not applied again. A session no worker can take, whether its worker was lost or it was
+    left running when the backend last stopped, answers SESSION_RECOVERING and is tried again, waiting
+    longer each time; one still not restored after RECOVERY_GIVE_UP_S is committed FAILED, releasing
+    its slot.
+
+    A start that fails part way (a worker that cannot start, or a restore that raises) is undone before
+    the error reaches the caller: no worker, monitor or recovery is left running, and no session is
+    kept. A start that failed for want of workers fails the same way for every caller after it, so the
+    route that falls back to the in-process runtime (training_v2) never has two runtimes ticking one
+    session.
 
     F9_SESSION_WORKERS sets the number of workers: "auto" (the default) is the physical cores less two,
     for Unity's main and render threads and this process, within 1..8; 0 runs every session in this
@@ -88,6 +97,11 @@ REQUEST_TIMEOUT_S = 30.0
 PLACE_TIMEOUT_S = 120.0
 SHUTDOWN_TIMEOUT_S = 15.0
 RESTORE_ATTEMPTS = 3
+# A lost worker's session that no worker could restore is tried again after this long, doubling up to
+# RECOVERY_RETRY_MAX_S; past RECOVERY_GIVE_UP_S it is committed FAILED, so it no longer holds a slot
+RECOVERY_RETRY_S = 1.0
+RECOVERY_RETRY_MAX_S = 30.0
+RECOVERY_GIVE_UP_S = 300.0
 # The worker's StoreClient writes other than publications, run on a small pool here
 STORE_CALLS = frozenset({"next_session_number", "create_session", "accept", "apply"})
 
@@ -185,9 +199,10 @@ class WorkerHandle:
 
 @dataclass(eq=False)
 class GatewaySession(FrameFeed):
-    """What the gateway keeps of a live session that runs on a worker."""
+    """What the gateway keeps of a live session that runs on a worker. worker is None for a session
+    not yet restored on any (recovering)."""
     session_id: str
-    worker: WorkerHandle
+    worker: WorkerHandle | None
     integrated: bool
     traffic: bool
     tick: int | None = None
@@ -222,6 +237,10 @@ class GatewaySessionService(SessionServiceBase):
         self._monitor: asyncio.Task | None = None
         self._background: set[asyncio.Task] = set()
         self._replacing: dict[int, asyncio.Task] = {}
+        # Lost workers' sessions being recovered (_recover), each its own task
+        self._recoveries: set[asyncio.Task] = set()
+        # Why the workers could not start: every later start fails the same way at once
+        self._start_error: WorkerStartError | None = None
 
     # ---------------------------------------------------------------------------------------------
     # Workers
@@ -251,8 +270,7 @@ class GatewaySessionService(SessionServiceBase):
         handle.channel = Channel(parent, name=f"gateway-worker-{index}",
                                  on_message=lambda kind, request_id, payload: self._on_message(handle, kind,
                                                                                                request_id, payload),
-                                 on_closed=lambda: self._loop.call_soon_threadsafe(self._lost_soon, handle,
-                                                                                   "closed its pipe"))
+                                 on_closed=lambda: self._call_soon(self._lost_soon, handle, "closed its pipe"))
         try:
             ready = await asyncio.wait_for(asyncio.shield(handle.ready), START_TIMEOUT_S)
         except (Exception, asyncio.CancelledError) as error:
@@ -282,6 +300,13 @@ class GatewaySessionService(SessionServiceBase):
             handle.channel.close()
             handle.channel.join(5)
 
+    def _call_soon(self, callback, *args) -> None:
+        """callback(*args) on the event loop, from a channel's reader thread."""
+        try:
+            self._loop.call_soon_threadsafe(callback, *args)
+        except RuntimeError:
+            pass  # The event loop has closed: the gateway is gone
+
     def _ready_workers(self) -> list[WorkerHandle]:
         return [handle for handle in self.workers if handle is not None and handle.available]
 
@@ -302,10 +327,7 @@ class GatewaySessionService(SessionServiceBase):
                 return
             handle.channel.answer(request_id, future)
             return
-        try:
-            self._loop.call_soon_threadsafe(self._on_event, handle, kind, payload)
-        except RuntimeError:
-            pass  # The event loop has closed: the gateway is gone
+        self._call_soon(self._on_event, handle, kind, payload)
 
     def _owned(self, handle: WorkerHandle, session_id: str) -> GatewaySession | None:
         session = self.sessions.get(session_id)
@@ -424,21 +446,52 @@ class GatewaySessionService(SessionServiceBase):
             return
 
     async def _recover(self, session: GatewaySession, target: WorkerHandle | None = None) -> None:
-        """A session whose worker was lost: back to its last committed checkpoint, on another worker."""
-        with self.store.trace.span("runtime.session_recovery", session_id=session.session_id,
-                                   reason="WORKER_LOST") as fields:
-            try:
-                await asyncio.to_thread(self.store.recover_session, session.session_id)
-            except TrainingStoreError as error:
-                if error.code != "CORRUPT_CHECKPOINT":
-                    raise
-                logger.exception("Cannot recover training runtime for %s", session.session_id)
-                await asyncio.to_thread(commit_failure, self.store, session.session_id, reason="CORRUPT_CHECKPOINT")
+        """A session whose worker was lost: back to its last committed checkpoint, on another worker.
+        While no worker can take it, it is tried again, each wait longer (RECOVERY_RETRY_S doubling up
+        to RECOVERY_RETRY_MAX_S); one still not restored after RECOVERY_GIVE_UP_S is committed FAILED,
+        so it no longer answers SESSION_RECOVERING, holds a slot or blocks its deletion."""
+        task = asyncio.current_task()
+        self._recoveries.add(task)
+        try:
+            with self.store.trace.span("runtime.session_recovery", session_id=session.session_id,
+                                       reason="WORKER_LOST") as fields:
+                deadline = self._loop.time() + RECOVERY_GIVE_UP_S
+                delay, attempts = RECOVERY_RETRY_S, 0
+                while True:
+                    attempts += 1
+                    try:
+                        # Each attempt starts a new epoch, so nothing an earlier attempt's worker might
+                        # still commit is taken
+                        await asyncio.to_thread(self.store.recover_session, session.session_id)
+                    except TrainingStoreError as error:
+                        if error.code != "CORRUPT_CHECKPOINT":
+                            raise
+                        logger.exception("Cannot recover training runtime for %s", session.session_id)
+                        await asyncio.to_thread(commit_failure, self.store, session.session_id,
+                                                reason="CORRUPT_CHECKPOINT")
+                        self._remove(session)
+                        fields.update(outcome="FAILED", attempts=attempts)
+                        return
+                    if await self._restore(session.session_id, session.traffic, target):
+                        fields.update(outcome="RESTORED", attempts=attempts)
+                        return
+                    if self.closed or self.sessions.get(session.session_id) is not session:
+                        # Shutting down, or the session was settled some other way
+                        fields.update(outcome="UNAVAILABLE", attempts=attempts)
+                        return
+                    if self._loop.time() + delay > deadline:
+                        break
+                    logger.warning("No session worker could restore %s; trying again in %.0f s",
+                                   session.session_id, delay)
+                    await asyncio.sleep(delay)
+                    delay, target = min(delay * 2, RECOVERY_RETRY_MAX_S), None
+                logger.error("Training session %s was not restored on any worker in %.0f s; marking it failed",
+                             session.session_id, RECOVERY_GIVE_UP_S)
+                await asyncio.to_thread(commit_failure, self.store, session.session_id, reason="RECOVERY_FAILED")
                 self._remove(session)
-                fields.update(outcome="FAILED")
-                return
-            restored = await self._restore(session.session_id, session.traffic, target)
-            fields.update(outcome="RESTORED" if restored else "UNAVAILABLE")
+                fields.update(outcome="FAILED", attempts=attempts)
+        finally:
+            self._recoveries.discard(task)
 
     async def _restore(self, session_id: str, traffic: bool, handle: WorkerHandle | None = None) -> bool:
         """Restores a session from its last committed checkpoint on handle, or the least loaded worker.
@@ -459,6 +512,10 @@ class GatewaySessionService(SessionServiceBase):
                 handle = None
                 await asyncio.sleep(0.5)
                 continue
+            if self.closed or target.stopping:
+                # Restored on a worker being shut down (the gateway closing, or its start undone): that
+                # worker will not run it, and the next start restores it from the store
+                return False
             if reply.get("failed"):
                 # Committed FAILED by the worker: its slot is released
                 previous = self.sessions.pop(session_id, None)
@@ -487,8 +544,8 @@ class GatewaySessionService(SessionServiceBase):
             del self.sessions[session.session_id]
         session.wake_frame_waiters()
 
-    async def _request(self, handle: WorkerHandle, kind: str, payload: Any, timeout: float) -> Any:
-        if handle.lost or handle.channel is None:
+    async def _request(self, handle: WorkerHandle | None, kind: str, payload: Any, timeout: float) -> Any:
+        if handle is None or handle.lost or handle.channel is None:
             raise ChannelClosed("Session worker was replaced")
         future = handle.channel.request(kind, payload)
         try:
@@ -524,34 +581,57 @@ class GatewaySessionService(SessionServiceBase):
             native = False
         return NATIVE_TRAFFIC_COST_MS if native else TRAFFIC_COST_MS
 
+    def _estimator(self):
+        """estimate_ms for one decision, each kind worked out once: the sessions do not change during it."""
+        estimates: dict[bool, float] = {}
+
+        def estimate(traffic: bool) -> float:
+            if traffic not in estimates:
+                estimates[traffic] = self.estimate_ms(traffic)
+            return estimates[traffic]
+        return estimate
+
+    def _loads(self, estimate=None) -> dict[WorkerHandle, float]:
+        """Each ready worker's load_ms, in one pass over the sessions."""
+        estimate = estimate or self._estimator()
+        loads = {handle: 0.0 for handle in self._ready_workers()}
+        for session in self.sessions.values():
+            if session.worker in loads:
+                loads[session.worker] += session.cost_ms if self._measured(session) else estimate(session.traffic)
+        return loads
+
     def load_ms(self, handle: WorkerHandle) -> float:
         """The tick time a worker's sessions take, or will once running, in milliseconds a tick."""
-        return sum(session.cost_ms if self._measured(session) else self.estimate_ms(session.traffic)
+        estimate = self._estimator()
+        return sum(session.cost_ms if self._measured(session) else estimate(session.traffic)
                    for session in self.sessions.values() if session.worker is handle)
 
     def _plan(self, traffic: list[bool]) -> list[WorkerHandle | None]:
         """Workers for sessions about to be restored together, one each, spread by estimated load,
         heaviest first, before any of them is measured."""
-        planned = {handle: self.load_ms(handle) for handle in self._ready_workers()}
+        estimate = self._estimator()
+        planned = self._loads(estimate)
         targets: list[WorkerHandle | None] = [None] * len(traffic)
         if not planned:
             return targets
         for index in sorted(range(len(traffic)), key=lambda i: not traffic[i]):
             handle = min(planned, key=planned.get)
-            planned[handle] += self.estimate_ms(traffic[index])
+            planned[handle] += estimate(traffic[index])
             targets[index] = handle
         return targets
 
     def _least_loaded(self) -> WorkerHandle | None:
-        workers = self._ready_workers()
-        return min(workers, key=self.load_ms) if workers else None
+        loads = self._loads()
+        return min(loads, key=loads.get) if loads else None
 
     def _admit_worker(self, traffic: bool) -> WorkerHandle:
-        handle = self._least_loaded()
-        if handle is None:
+        estimate = self._estimator()
+        loads = self._loads(estimate)
+        if not loads:
             raise TrainingStoreError("QUEUE_FULL", "No session worker is running; try again shortly")
+        handle = min(loads, key=loads.get)
         empty = not any(session.worker is handle for session in self.sessions.values())
-        if not empty and self.load_ms(handle) + self.estimate_ms(traffic) > self.TICK_BUDGET_MS:
+        if not empty and loads[handle] + estimate(traffic) > self.TICK_BUDGET_MS:
             raise TrainingStoreError("QUEUE_FULL", "Training capacity reached: every session worker is busy; "
                                                    "archive a session to start another")
         return handle
@@ -564,34 +644,84 @@ class GatewaySessionService(SessionServiceBase):
         async with self._initialize_lock:
             if self._initialized:
                 return
+            if self._start_error is not None:
+                # The workers could not start: callers that waited on this lock fail as the first did,
+                # rather than start workers beside the in-process runtime that replaces this gateway
+                raise self._start_error
+            if self.closed:
+                raise TrainingStoreError("SESSION_RECOVERING", "Training runtime is shutting down")
             self._loop = asyncio.get_running_loop()
             # The gateway still validates previews and serves the static scenario, and its garbage
             # collector gains from the freeze as a worker's does
             await asyncio.to_thread(freeze_static_heap)
             self._settings = session_worker.runtime_settings()
-            spawned = await asyncio.gather(*(self._spawn(index) for index in range(self.worker_count)),
-                                           return_exceptions=True)
-            self.workers = [handle if isinstance(handle, WorkerHandle) else None for handle in spawned]
-            failure = next((error for error in spawned if isinstance(error, BaseException)), None)
-            if failure is not None:
-                await self._shutdown_workers()
-                raise failure
-            self._monitor = asyncio.create_task(self._watch_workers())
-            with self.store.trace.span("runtime.recovery") as fields:
-                await self._restore_all()
-                fields.update(restored_sessions=len(self.sessions), workers=self.worker_count)
+            try:
+                spawned = await asyncio.gather(*(self._spawn(index) for index in range(self.worker_count)),
+                                               return_exceptions=True)
+                self.workers = [handle if isinstance(handle, WorkerHandle) else None for handle in spawned]
+                failure = next((error for error in spawned if isinstance(error, BaseException)), None)
+                if failure is not None:
+                    raise failure
+                self._monitor = asyncio.create_task(self._watch_workers())
+                with self.store.trace.span("runtime.recovery") as fields:
+                    await self._restore_all()
+                    fields.update(restored_sessions=len(self.sessions), workers=self.worker_count)
+            except BaseException as error:
+                await self._abandon_start()
+                if isinstance(error, WorkerStartError):
+                    self._start_error = error
+                raise
             self._initialized = True
             await self._retain()
+
+    async def _abandon_start(self) -> None:
+        """Undoes a start that failed part way: no monitor, replacement or recovery left running, no
+        worker process and no session kept, so the next start, or the in-process runtime that takes
+        over, restores every session from the store alone."""
+        tasks = [*self._background, *self._replacing.values(), *self._recoveries]
+        if self._monitor is not None:
+            tasks.append(self._monitor)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self._monitor = None
+        self._replacing.clear()
+        # A worker found lost before its supervision was cancelled may not have been ended yet
+        lost = [handle for handle in self.workers if handle is not None and handle.lost]
+        await asyncio.gather(*(asyncio.to_thread(self._stop_process, handle, kill=True) for handle in lost))
+        await self._shutdown_workers()
+        self.workers = [None] * self.worker_count
+        sessions, self.sessions = self.sessions, {}
+        for session in sessions.values():
+            session.wake_frame_waiters()
 
     async def _restore_all(self) -> None:
         session_ids = await asyncio.to_thread(self.store.runtime_ids)
         traffic_ids = await asyncio.to_thread(self.store.traffic_runtime_ids)
         traffic = [session_id in traffic_ids for session_id in session_ids]
         targets = self._plan(traffic)
-        await asyncio.gather(*(self._restore(session_id, kind, target)
-                               for session_id, kind, target in zip(session_ids, traffic, targets)))
+        restored = await asyncio.gather(*(self._restore(session_id, kind, target)
+                                          for session_id, kind, target in zip(session_ids, traffic, targets)))
+        for session_id, kind, done in zip(session_ids, traffic, restored):
+            if not done and session_id not in self.sessions:
+                # No worker took it now: it is kept, recovering, and tried again in the background as a
+                # lost worker's session is, rather than left out (no runtime, yet its commands accepted)
+                logger.warning("Training session %s was not restored at startup; trying again", session_id)
+                integrated = await asyncio.to_thread(self._integrated, session_id)
+                session = self.sessions[session_id] = GatewaySession(session_id, None, integrated=integrated,
+                                                                     traffic=kind, recovering=True)
+                self._background_task(self._recover(session))
         if len(self.sessions) > self.MAX_SESSIONS:
             raise TrainingStoreError("QUEUE_FULL", "Too many recoverable training sessions")
+
+    def _integrated(self, session_id: str) -> bool:
+        """Whether a session's checkpoint is of an integrated actor, as TrainingSessionService decides
+        when it restores one. False for one that cannot be read: its recovery then commits it FAILED."""
+        try:
+            snapshot, state = self.store.runtime(session_id)
+            return state["version"] in (3, 4) and snapshot.spatial is None
+        except (TrainingStoreError, KeyError, TypeError, ValueError):
+            return False
 
     async def _create(self, request: CreateSessionRequest, actor_id: str, key: str) -> FullSnapshot:
         async with self._creation_lock:
@@ -732,8 +862,10 @@ class GatewaySessionService(SessionServiceBase):
 
     async def worker_status(self) -> list[dict]:
         """Each running worker's index, process ID, CPU seconds used, memory and sessions."""
+        loads = self._loads()
+
         async def status(handle: WorkerHandle) -> dict:
-            return {"index": handle.index, "load_ms": self.load_ms(handle),
+            return {"index": handle.index, "load_ms": loads.get(handle, 0.0),
                     "max_lateness_ms": handle.max_lateness_ms, "missed_deadlines": handle.missed_deadlines,
                     **await self._request(handle, "status", None, REQUEST_TIMEOUT_S)}
         return list(await asyncio.gather(*(status(handle) for handle in self._ready_workers())))
@@ -771,14 +903,15 @@ class GatewaySessionService(SessionServiceBase):
         self.closed = True
         if self._monitor is not None:
             self._monitor.cancel()
-        for task in list(self._background) + list(self._replacing.values()):
+        # Recoveries too: one waiting to try again would otherwise hold up the drain below
+        tasks = [*self._background, *self._replacing.values(), *self._recoveries]
+        for task in tasks:
             task.cancel()
-        await asyncio.gather(*self._background, *self._replacing.values(), return_exceptions=True)
+        await asyncio.gather(*tasks, return_exceptions=True)
         # Each worker stops its loops and finishes the commits under way, which this process's writer
         # still takes; then it answers and exits
         await self._shutdown_workers()
-        while self._operations:
-            await asyncio.gather(*tuple(self._operations), return_exceptions=True)
+        await self._drain_operations()
         self._executor.shutdown(wait=True)
         for session in self.sessions.values():
             # No more frames will come: a 3D view waiting for one hears so now

@@ -376,3 +376,161 @@ def test_shutdown_leaves_no_worker_processes(tmp_path):
     processes = asyncio.run(exercise())
     assert processes and not any(process.is_alive() for process in processes)
     assert not [child for child in multiprocessing.active_children() if child.name.startswith("f9-session-worker")]
+
+
+def test_callers_waiting_on_a_failed_start_share_one_in_process_runtime(tmp_path, monkeypatch):
+    """Workers that cannot start: every request waiting on the gateway falls back to the same in-process
+    service, and no second start of workers is tried on the gateway that failed."""
+    from types import SimpleNamespace
+    from src.api.routes.training_v2 import initialize_training_service
+    from src.services.session_gateway import WorkerStartError
+
+    spawns = []
+
+    async def refuse(self, index):
+        spawns.append(index)
+        await asyncio.sleep(0.05)
+        raise WorkerStartError("No processes here")
+
+    monkeypatch.setenv("F9_SESSION_WORKERS", "1")
+    monkeypatch.setattr(GatewaySessionService, "_spawn", refuse)
+
+    async def exercise():
+        application = SimpleNamespace(state=SimpleNamespace())
+        with TrainingStore(tmp_path / "fallback.sqlite") as store:
+            services = await asyncio.gather(*(initialize_training_service(application, store) for _ in range(3)))
+            try:
+                assert all(isinstance(service, TrainingSessionService) for service in services)
+                assert services[0] is services[1] is services[2]
+                assert application.state.training_services[store] is services[0]
+                assert spawns == [0], "The failed gateway was started again"
+            finally:
+                await services[0].close()
+    asyncio.run(exercise())
+
+
+def test_a_start_that_fails_after_its_workers_are_up_leaves_nothing_running(tmp_path, monkeypatch):
+    path = tmp_path / "abandon.sqlite"
+
+    async def first():
+        async with gateway(path, workers=1) as (store, service):
+            created = await service.create(CreateSessionRequest(scenario_revision_id=SCENARIO_SELECTOR, seed=1000),
+                                           "operator", "abandon")
+            return created.session_id
+
+    session_id = asyncio.run(first())
+    restore_all = GatewaySessionService._restore_all
+
+    async def restore_then_fail(self):
+        await restore_all(self)
+        assert session_id in self.sessions
+        raise TrainingStoreError("QUEUE_FULL", "Too many recoverable training sessions")
+
+    async def second():
+        with TrainingStore(path) as store:
+            service = GatewaySessionService(store, workers=1)
+            try:
+                monkeypatch.setattr(GatewaySessionService, "_restore_all", restore_then_fail)
+                with pytest.raises(TrainingStoreError):
+                    await service.initialize()
+                monkeypatch.undo()
+                # The workers that restored the sessions are gone, and nothing watches or recovers them
+                assert service.workers == [None] and not service.sessions and service._monitor is None
+                assert not [child for child in multiprocessing.active_children()
+                            if child.name.startswith("f9-session-worker")]
+                # The next start restores the session once, on fresh workers
+                await service.initialize()
+                assert list(service.sessions) == [session_id]
+                assert service.sessions[session_id].worker.process.is_alive()
+            finally:
+                await service.close()
+    asyncio.run(second())
+
+
+def test_a_lost_session_no_worker_takes_is_tried_again_then_marked_failed(tmp_path, monkeypatch):
+    from src.services import session_gateway
+
+    monkeypatch.setattr(session_gateway, "RECOVERY_RETRY_S", 0.05)
+    monkeypatch.setattr(session_gateway, "RECOVERY_GIVE_UP_S", 0.5)
+
+    async def exercise():
+        async with gateway(tmp_path / "give-up.sqlite", workers=1) as (store, service):
+            ids = []
+            for index in range(2):
+                created = await service.create(
+                    CreateSessionRequest(scenario_revision_id=SCENARIO_SELECTOR, seed=1000 + index),
+                    "operator", f"give-up-{index}")
+                ids.append(created.session_id)
+            retried, abandoned = (service.sessions[session_id] for session_id in ids)
+            attempts = {session_id: 0 for session_id in ids}
+
+            async def unavailable(session_id, traffic, handle=None):
+                # The first session finds a worker on its third try; the second never does
+                attempts[session_id] += 1
+                return session_id == ids[0] and attempts[session_id] >= 3
+            monkeypatch.setattr(service, "_restore", unavailable)
+            for session in (retried, abandoned):
+                session.recovering = True
+            epoch = store.snapshot(ids[0]).session_epoch
+            await asyncio.gather(*(service._complete(service._recover(session)) for session in (retried, abandoned)))
+
+            assert attempts[ids[0]] == 3
+            assert service.sessions[ids[0]] is retried and store.snapshot(ids[0]).session.status != "FAILED"
+            # A new epoch for each try
+            assert store.snapshot(ids[0]).session_epoch == epoch + 3
+            # Given up on: committed FAILED, so it no longer holds a slot or answers SESSION_RECOVERING
+            assert attempts[ids[1]] > 1
+            assert ids[1] not in service.sessions and not service.owns(ids[1])
+            assert store.snapshot(ids[1]).session.status == "FAILED"
+            assert not service._recoveries
+    asyncio.run(exercise())
+
+
+def test_a_session_not_restored_at_startup_is_tried_again_rather_than_left_out(tmp_path, monkeypatch):
+    from src.services import session_gateway
+
+    path = tmp_path / "startup-retry.sqlite"
+
+    async def first():
+        async with gateway(path, workers=1) as (store, service):
+            created = await service.create(CreateSessionRequest(scenario_revision_id=SCENARIO_SELECTOR, seed=1000),
+                                           "operator", "startup-retry")
+            return created.session_id
+
+    session_id = asyncio.run(first())
+    monkeypatch.setattr(session_gateway, "RECOVERY_RETRY_S", 0.05)
+    restore = GatewaySessionService._restore
+    calls = []
+
+    async def exercise():
+        retry = asyncio.Event()
+
+        async def flaky(self, wanted, traffic, handle=None):
+            # No worker takes it at startup; the next try waits until the test has looked
+            calls.append(wanted)
+            if len(calls) == 1:
+                return False
+            await retry.wait()
+            return await restore(self, wanted, traffic, handle)
+        monkeypatch.setattr(GatewaySessionService, "_restore", flaky)
+
+        async with gateway(path, workers=1) as (store, service):
+            # Kept, not left out: it answers SESSION_RECOVERING, and no command is journalled against it
+            waiting = service.sessions[session_id]
+            assert waiting.recovering and waiting.worker is None and waiting.integrated
+            assert service.owns(session_id)
+            with pytest.raises(TrainingStoreError) as recovering:
+                await service.snapshot(session_id)
+            assert recovering.value.code == "SESSION_RECOVERING"
+            with pytest.raises(TrainingStoreError) as refused:
+                await service.submit("operator", command(store, session_id, "START", "start-while-recovering"))
+            assert refused.value.code == "SESSION_RECOVERING"
+
+            retry.set()
+            await until(lambda: service.sessions.get(session_id) not in (None, waiting), 30,
+                        "The session was not restored on a later try")
+            assert service.sessions[session_id].worker is service.workers[0]
+            assert (await service.submit("operator", command(store, session_id, "START"))).status == "APPLIED"
+            await until(lambda: store.snapshot(session_id).tick > 5, 10, "The restored session did not run")
+            assert calls == [session_id, session_id]
+    asyncio.run(exercise())

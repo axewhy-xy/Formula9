@@ -42,13 +42,17 @@ namespace Formula9.Tests
         //     before it returns.
         //
         //     Attributes: Url and Headers of the connection; Sent, the client's messages; Refuse
-        //     to fail the connection; Disposed once the client closed it.
+        //     to fail the connection; Hold to keep it connecting until FinishConnecting;
+        //     FailSends to fail every send; Disposed once the client closed it. As a real
+        //     WebSocket, it refuses a send before it has connected.
         private sealed class FakeStreamSocket : IStreamSocket
         {
             public Uri Url;
             public IReadOnlyDictionary<string, string> Headers;
             public readonly List<string> Sent = new List<string>();
-            public bool Refuse, Disposed;
+            public bool Refuse, Hold, FailSends, Disposed;
+            private bool open;
+            private readonly TaskCompletionSource<bool> connecting = new TaskCompletionSource<bool>();
             private readonly Queue<string> ready = new Queue<string>();
             private TaskCompletionSource<string> receiving;
 
@@ -58,11 +62,24 @@ namespace Formula9.Tests
             {
                 Url = url;
                 Headers = headers;
-                return Refuse ? Task.FromException(new WebSocketException("Connection refused")) : Task.CompletedTask;
+                if (Refuse) return Task.FromException(new WebSocketException("Connection refused"));
+                if (Hold) return ConnectLater();
+                open = true;
+                return Task.CompletedTask;
             }
+
+            private async Task ConnectLater()
+            {
+                await connecting.Task.ConfigureAwait(false);
+                open = true;
+            }
+
+            public void FinishConnecting() => WithoutContext(() => connecting.SetResult(true));
 
             public Task SendAsync(string text, CancellationToken cancellation)
             {
+                if (!open) throw new InvalidOperationException("The WebSocket is not connected");
+                if (FailSends) throw new WebSocketException("Connection lost");
                 Sent.Add(text);
                 return Task.CompletedTask;
             }
@@ -84,12 +101,7 @@ namespace Formula9.Tests
                     ready.Enqueue(text);
                     return;
                 }
-                // The stream's reading runs on at once only where no synchronisation context would
-                // have it wait for the main thread's next turn, which a test never gives it
-                var context = SynchronizationContext.Current;
-                SynchronizationContext.SetSynchronizationContext(null);
-                try { waiting.SetResult(text); }
-                finally { SynchronizationContext.SetSynchronizationContext(context); }
+                WithoutContext(() => waiting.SetResult(text));
             }
 
             public void Close(int status)
@@ -101,8 +113,26 @@ namespace Formula9.Tests
             public void Dispose() => Disposed = true;
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: WithoutContext
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function runs an action with no synchronisation context. The stream's reading
+        //     runs on at once only where no synchronisation context would have it wait for the
+        //     main thread's next turn, which a test never gives it.
+        //
+        // Args:
+        //     action (Action): What to run.
+        private static void WithoutContext(Action action)
+        {
+            var context = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+            try { action(); }
+            finally { SynchronizationContext.SetSynchronizationContext(context); }
+        }
+
         private List<FakeStreamSocket> sockets;
-        private bool refuseNextStream;
+        private bool refuseNextStream, holdNextStream;
 
         // -----------------------------------------------------------------------------------
         // Function: UseFakeStreams
@@ -114,7 +144,7 @@ namespace Formula9.Tests
             sockets = new List<FakeStreamSocket>();
             api.StreamSockets = () =>
             {
-                var socket = new FakeStreamSocket { Refuse = refuseNextStream };
+                var socket = new FakeStreamSocket { Refuse = refuseNextStream, Hold = holdNextStream };
                 sockets.Add(socket);
                 return socket;
             };
@@ -288,6 +318,67 @@ namespace Formula9.Tests
             Assert.AreEqual(2, socket.Sent.Count);
             Assert.AreEqual(true, (bool)JObject.Parse(socket.Sent.Last())["enabled"]);
             Assert.AreEqual(14L, (long)JObject.Parse(socket.Sent.Last())["after_tick"]);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: TrafficAskedForBeforeTheStreamConnectsIsSentOnceItHas
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The city shown while the stream is still connecting: the request for traffic
+        //     waits for the connection and is sent then, not dropped (which would leave neither
+        //     the stream nor the poll bringing traffic).
+        [Test]
+        public async Task TrafficAskedForBeforeTheStreamConnectsIsSentOnceItHas()
+        {
+            UseFakeStreams();
+            holdNextStream = true;
+            await controller.JoinAsync(SessionId);
+            controller.PumpStream(false);
+            holdNextStream = false;
+            var socket = sockets.Single();
+            controller.PumpStream(true);
+            Assert.IsEmpty(socket.Sent, "nothing is sent before the stream connects");
+
+            socket.FinishConnecting();
+            Assert.AreEqual(1, socket.Sent.Count);
+            Assert.AreEqual(true, (bool)JObject.Parse(socket.Sent.Single())["enabled"]);
+            socket.Push(SnapshotMessage(backend.Snapshot));
+            socket.Push(TrafficMessage(10));
+            var accepted = new List<IReadOnlyList<TrafficFrame>>();
+            controller.TrafficFramesAccepted += accepted.Add;
+            controller.PumpStream(true);
+            Assert.IsTrue(controller.Streaming);
+            CollectionAssert.AreEqual(new long[] { 10 }, accepted.SelectMany(f => f).Select(f => f.Tick).ToList());
+            Assert.AreEqual(1, socket.Sent.Count, "asked once");
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: AFailedSendEndsTheStream
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A traffic request the stream could not send ends the stream, and the poll takes
+        //     over at once, traffic included, rather than wait on frames never asked for.
+        [Test]
+        public async Task AFailedSendEndsTheStream()
+        {
+            UseFakeStreams();
+            await controller.JoinAsync(SessionId);
+            controller.PumpStream(false);
+            var socket = sockets.Single();
+            socket.Push(SnapshotMessage(backend.Snapshot));
+            controller.PumpStream(false);
+            Assert.IsTrue(controller.Streaming);
+            var polled = backend.To("/snapshot").Count();
+
+            socket.FailSends = true;
+            WithoutContext(() => controller.PumpStream(true));
+            controller.PumpStream(true);
+            Assert.IsFalse(controller.Streaming);
+            Assert.IsTrue(socket.Disposed);
+            Assert.AreEqual(polled + 1, backend.To("/snapshot").Count(), "the poll takes over at once");
+            backend.OnTraffic = _ => Json(backend.Traffic(10));
+            await controller.RefreshTrafficAsync(SessionController.TrafficWait);
+            Assert.IsNotEmpty(backend.To("/traffic"), "and polls the traffic");
         }
 
         // -----------------------------------------------------------------------------------
