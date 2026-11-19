@@ -156,23 +156,28 @@ namespace Formula9.UI
     public readonly struct SessionStatusView
     {
         public readonly string BadgeText, BadgeClass, Tooltip, Summary;
-        public readonly bool Offline;
-        public SessionStatusView(string badgeText, string badgeClass, string tooltip, string summary, bool offline)
-        { BadgeText = badgeText; BadgeClass = badgeClass; Tooltip = tooltip; Summary = summary; Offline = offline; }
+        // Behind: the backend runs the session slower than real time (BackendPace)
+        public readonly bool Offline, Behind;
+        public SessionStatusView(string badgeText, string badgeClass, string tooltip, string summary, bool offline,
+            bool behind = false)
+        { BadgeText = badgeText; BadgeClass = badgeClass; Tooltip = tooltip; Summary = summary; Offline = offline; Behind = behind; }
     }
 
     // Snapshot ticks change every poll; the operator's summary usually does not.
     public sealed class SessionStatusPresenter
     {
-        private (bool Joined, string Session, string State, bool Available)? statusKey;
+        private (bool Joined, string Session, string State, bool Available, double? Pace)? statusKey;
         private SessionStatusView status;
 
-        public SessionStatusView Present(FullSnapshot snapshot, bool available)
+        // pace: the session's real-time factor (BackendPace.Factor), or null while unknown
+        public SessionStatusView Present(FullSnapshot snapshot, bool available, double? pace = null)
         {
-            var key = (snapshot != null, snapshot?.SessionId, snapshot?.Session?.Status, snapshot != null && available);
+            // Only a pace shown changes the summary, to one decimal
+            var shown = pace < BackendPace.BehindBelow ? Math.Round(pace.Value, 1) : (double?)null;
+            var key = (snapshot != null, snapshot?.SessionId, snapshot?.Session?.Status, snapshot != null && available, shown);
             if (statusKey != key)
             {
-                status = TrainingPresenter.SessionStatus(snapshot, available);
+                status = TrainingPresenter.SessionStatus(snapshot, available, pace);
                 statusKey = key;
             }
             return status;
@@ -254,14 +259,25 @@ namespace Formula9.UI
             _ => ("Unknown", "session-badge-unknown"),
         };
 
-        public static SessionStatusView SessionStatus(FullSnapshot snapshot, bool available)
+        // pace is the session's real-time factor (BackendPace.Factor), or null while unknown. A
+        // running session below BackendPace.BehindBelow says so, as docs/performance.md section 5
+        // requires, rather than leaving its slow motion unexplained.
+        public static SessionStatusView SessionStatus(FullSnapshot snapshot, bool available, double? pace = null)
         {
             if (snapshot == null) return new SessionStatusView("No session", "session-badge-none", NoSession, NoSession, false);
             var known = SessionBadge(snapshot.Session?.Status);
             var offline = !available;
+            var behind = !offline && snapshot.Session?.Status == "RUNNING" && pace < BackendPace.BehindBelow;
+            var tooltip = (offline ? "Live updates unavailable. Last received simulation state: " : "Current simulation state: ") + known.Text.ToLowerInvariant() + ".";
+            var summary = $"Session: {snapshot.SessionId} · " + (offline ? "Offline · showing last received state" : "Connected");
+            if (behind)
+            {
+                var factor = pace.Value.ToString("0.0", CultureInfo.InvariantCulture);
+                summary += $" · Backend behind ({factor}x)";
+                tooltip += $" The backend is running this session at {factor}x real time, so the simulation and the 3D view move in slow motion. It has more running sessions than it can keep up with; archiving unused ones helps.";
+            }
             return new SessionStatusView(offline ? "Offline" : known.Text, offline ? "session-badge-offline" : known.Class,
-                (offline ? "Live updates unavailable. Last received simulation state: " : "Current simulation state: ") + known.Text.ToLowerInvariant() + ".",
-                $"Session: {snapshot.SessionId} · " + (offline ? "Offline · showing last received state" : "Connected"), offline);
+                tooltip, summary, offline, behind);
         }
 
         // -----------------------------------------------------------------------------------

@@ -46,7 +46,8 @@ from src.services.route_edit import RouteEditService
 from src.services.session_actor import SessionActor
 from src.traffic import incident_hazards, route_signals, signal_cycle
 from src.traffic.city_traffic import COMFORT_BRAKE, HARD_BRAKE, PINNED_PASS_MPS, PLAN_AHEAD_M, SHUTTLE_ACCEL, \
-    CityTraffic, fnv_hash, move_towards
+    fnv_hash, move_towards
+from src.traffic.native_traffic import engine as traffic_engine
 
 logger = logging.getLogger(__name__)
 
@@ -407,7 +408,8 @@ class IntegratedSessionActor(SessionActor):
         # The tick of the traffic's latest checkpoint; None before its first (see traffic_checkpoint)
         self.traffic_saved_tick = None
         if self.TRAFFIC:
-            self.traffic = CityTraffic.start(SIGNAL_AREA)
+            # Native when it is built, else the same traffic in Python (src.traffic.native_traffic)
+            self.traffic = traffic_engine().start(SIGNAL_AREA)
             if self.traffic is not None:
                 self._place_in_traffic({})
                 self.traffic.clear_shuttles()
@@ -2051,7 +2053,7 @@ class IntegratedSessionActor(SessionActor):
         # area's sample now, as a new session's does
         if "traffic" in state:
             try:
-                self.traffic = CityTraffic.from_state(state["traffic"]) if state["traffic"] is not None else None
+                self.traffic = traffic_engine().from_state(state["traffic"]) if state["traffic"] is not None else None
             except (ValueError, KeyError, TypeError, IndexError, AttributeError) as error:
                 raise TrainingStoreError("CORRUPT_CHECKPOINT", "Traffic checkpoint is invalid") from error
         self.traffic_saved_tick = saved_tick if self.traffic is not None else None

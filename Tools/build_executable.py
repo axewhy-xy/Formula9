@@ -36,6 +36,7 @@ import tempfile
 import time
 import urllib.request
 
+import build_native
 import run_backend
 
 ROOT = run_backend.ROOT
@@ -165,6 +166,7 @@ def bundle_backend(backend: Path, include_env: bool) -> None:
 
     source_cache = shutil.ignore_patterns("__pycache__", "*.pyc")
     shutil.copytree(ROOT / "backend" / "src", backend / "backend" / "src", ignore=source_cache)
+    bundle_native_traffic(backend)
     shutil.copytree(ROOT / "backend" / "fixtures", backend / "backend" / "fixtures", ignore=source_cache)
     if not include_env:
         print("Left out backend/.env (the team's MongoDB connection), so the build's account endpoints "
@@ -178,6 +180,36 @@ def bundle_backend(backend: Path, include_env: bool) -> None:
     shutil.copy2(Path(__file__).with_name("bundled_backend.py"), backend / "serve.py")
     (backend / "state").mkdir()
     precompile(backend)
+
+
+"""
+# -----------------------------------------------------------------------------------
+# Function: bundle_native_traffic
+# -----------------------------------------------------------------------------------
+Description:
+    This function keeps the native traffic engine in the bundle only if it is built from the current
+    source. The bundle carries no C++ source, so the backend could not tell a stale module from a current
+    one there: a stale or missing module is left out, and the bundled backend drives its traffic in
+    Python instead.
+
+Args:
+    backend (Path): The Backend folder, with the backend source already copied in.
+"""
+def bundle_native_traffic(backend: Path) -> None:
+    python = run_backend.environment_python()
+    if build_native.built_hash(python) != build_native.source_hash():
+        build_native.build(python)
+    folder = backend / "backend" / "src" / "traffic"
+    for path in folder.glob("_traffic_native*"):
+        path.unlink()
+    if build_native.built_hash(python) != build_native.source_hash():
+        print("The native traffic engine is not built (above), so the bundled backend drives its traffic in "
+              "Python, more slowly.", file=sys.stderr)
+        return
+    for path in build_native.TARGET.glob("_traffic_native*"):
+        if path.suffix in (".pyd", ".so"):
+            shutil.copy2(path, folder / path.name)
+    print("Bundled the native traffic engine.", flush=True)
 
 
 """

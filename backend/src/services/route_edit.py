@@ -479,11 +479,21 @@ class RouteEditService:
                                    edge_paths=self._edge_paths(ids) if nodes else [],
                                    service_impact=self._service_impact(snapshot, route.route_id, original, edited))
         if retain:
-            with self._lock:
-                self._previews[preview.preview_id] = (request.model_copy(deep=True), preview.model_copy(deep=True))
-                while len(self._previews) > 256:
-                    self._previews.popitem(last=False)
+            self.retain(request, preview)
         return preview
+
+    def retain(self, request: RouteEditRequest, preview: RouteEditPreview) -> None:
+        """Keeps a preview for approve, as preview does. Previews are kept per process: a session in a
+        worker process is approved there, so the gateway hands the worker the one it previewed (retained)."""
+        with self._lock:
+            self._previews[preview.preview_id] = (request.model_copy(deep=True), preview.model_copy(deep=True))
+            while len(self._previews) > 256:
+                self._previews.popitem(last=False)
+
+    def retained(self, preview_id: str) -> tuple[RouteEditRequest, RouteEditPreview] | None:
+        """The draft and preview kept under preview_id, if they are still kept."""
+        with self._lock:
+            return self._previews.get(preview_id)
 
     def _check_waypoints(self, request: RouteEditRequest) -> None:
         if not request.waypoint_edge_ids:
