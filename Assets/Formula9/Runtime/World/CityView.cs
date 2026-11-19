@@ -144,7 +144,7 @@ namespace Formula9.World
             traffic = new CityTrafficRenderer();
             if (EnablePedestrians)
             {
-                pedestrians = new CityPedestrianLiteRenderer(root);
+                pedestrians = new CityPedestrianLiteRenderer();
                 pedestrians.SetSignalClock(() => traffic != null ? traffic.SignalClockS : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0);
             }
             if (tiles != null) tiles.TileLoaded += RefreshTiles;
@@ -401,7 +401,7 @@ namespace Formula9.World
                 cancellation.ThrowIfCancellationRequested();
             }
             traffic?.Rebuild(roads, trafficData, signals);
-            pedestrians?.Rebuild(area, roads, signals);
+            pedestrians?.Rebuild(area, roads, signals, buildings);
         }
 
         // The same LTA client supplies FleetMap's 2D bus-stop dots. Here its

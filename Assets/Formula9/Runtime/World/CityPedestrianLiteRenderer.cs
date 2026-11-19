@@ -29,6 +29,9 @@ namespace Formula9.World
         private const float CrossingKerbEpsilonM = 1.0f;
         private const float CrossingReachM = 16f;
         private const float CrossingFarReachM = 40f;
+        // A crossing's end can sit a little inside the road it crosses, so the way to it is not judged
+        // for this last stretch
+        private const float CrossingEndSlackM = 3f;
         // A signal approach governs a crossing when its stop line is this close and it runs this nearly across
         private const float MatchSignalReachM = 45f;
         private const float MatchSignalMaxAlignment = 0.6f;
@@ -64,6 +67,9 @@ namespace Formula9.World
         private readonly List<int> scratchAll = new List<int>();
         private readonly List<int> scratchWalk = new List<int>();
         private readonly List<int> scratchCross = new List<int>();
+        private readonly List<(int Node, float Dist)> scratchNear = new List<(int Node, float Dist)>();
+        private readonly List<(Vector2 A, Vector2 B)> buildingSegments = new List<(Vector2 A, Vector2 B)>();
+        private readonly Dictionary<long, List<int>> buildingGrid = new Dictionary<long, List<int>>();
 
         private CitySignalData signalData;
         private Func<double> signalClock = () => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
@@ -143,15 +149,15 @@ namespace Formula9.World
             public Material[] Materials;
         }
 
-        public CityPedestrianLiteRenderer(Transform parent)
-        {
-            // Nothing is parented: people are drawn, not placed in the scene
-        }
+        // People are drawn, not placed in the scene, so there is nothing to parent
+        public CityPedestrianLiteRenderer() { }
 
         public void SetSignalClock(Func<double> clock) =>
             signalClock = clock ?? (() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0);
 
-        public void Rebuild(string area, IReadOnlyList<CityRoad> roads, CitySignalData signals)
+        // Buildings are only used to keep the long links to far-off crossings from running through them
+        public void Rebuild(string area, IReadOnlyList<CityRoad> roads, CitySignalData signals,
+            IReadOnlyList<CityBuilding> buildings = null)
         {
             signalData = signals;
             ClearAgents();
@@ -162,6 +168,8 @@ namespace Formula9.World
             walkEdges.Clear();
             roadSections.Clear();
             roadGrid.Clear();
+            buildingSegments.Clear();
+            buildingGrid.Clear();
             crossingEdgeCount = 0;
             unreachableCrossings = 0;
             unmatchedSignalCrossings = 0;
@@ -173,6 +181,7 @@ namespace Formula9.World
             }
 
             BuildRoadSections(roads);
+            BuildBuildingSegments(buildings);
             BuildPavements(roads);
             LinkDeadEnds();
             AttachCrossings(area);
@@ -244,6 +253,8 @@ namespace Formula9.World
             modelsLoaded = false;
             for (var i = 0; i < ownedObjects.Count; i++) DestroyObject(ownedObjects[i]);
             ownedObjects.Clear();
+            // Copies of the template that were just destroyed
+            instancedMaterials.Clear();
         }
 
         // Called once a frame, after the cameras are placed: draws everyone where Tick left them, for
@@ -510,8 +521,9 @@ namespace Formula9.World
                 int phase = 0, offset = 0;
                 var controlled = crossing.Signal && signalData != null &&
                     MatchSignal(crossing.A, crossing.B, signalData, out phase, out offset);
-                // A signalled crossing whose light cannot be told is left out, not left free to cross on any light
-                if (crossing.Signal && signalData != null && !controlled)
+                // A signalled crossing whose light cannot be told (including when no signals loaded) is left
+                // out, not left free to cross on any light
+                if (crossing.Signal && !controlled)
                 {
                     unmatchedSignalCrossings++;
                     continue;
@@ -526,35 +538,110 @@ namespace Formula9.World
         // The pavement node a crossing's end steps onto: close, and reached without crossing a road
         private int KerbNode(Vector2 end)
         {
-            var best = -1;
-            var bestDistance = float.MaxValue;
-            ForNodesNear(end, CrossingReachM, node =>
-            {
-                var distance = Vector2.Distance(nodes[node].Position, end);
-                if (distance >= bestDistance) return;
-                if (!OutsideRoad(nodes[node].Position, end, CrossingKerbEpsilonM)) return;
-                bestDistance = distance;
-                best = node;
-            });
-            if (best >= 0) return best;
+            CollectNodesNear(end, CrossingFarReachM, scratchNear);
+            scratchNear.Sort((a, b) => a.Dist.CompareTo(b.Dist));
+
+            // The nearest pavement close enough to step straight onto
+            for (var i = 0; i < scratchNear.Count && scratchNear[i].Dist <= CrossingReachM; i++)
+                if (ReachesKerb(nodes[scratchNear[i].Node].Position, end)) return scratchNear[i].Node;
 
             // No pavement close by (a crossing away from the roads' own pavements): the crossing's end gets a
             // node of its own, joined to the nearest pavements that can be walked to without crossing a road
-            var near = new List<(int Node, float Dist)>();
-            ForNodesNear(end, CrossingFarReachM, other =>
-                near.Add((other, Vector2.Distance(nodes[other].Position, end))));
-            near.Sort((a, b) => a.Dist.CompareTo(b.Dist));
+            // or running through a building
             var kerb = -1;
             var joined = 0;
-            foreach (var (other, _) in near)
+            for (var i = 0; i < scratchNear.Count && joined < 2; i++)
             {
-                if (joined >= 2) break;
-                if (!OutsideRoad(nodes[other].Position, end, CrossingKerbEpsilonM)) continue;
+                var other = scratchNear[i].Node;
+                var position = nodes[other].Position;
+                if (!ReachesKerb(position, end) || !ClearOfBuildings(position, end)) continue;
                 if (kerb < 0) kerb = NodeFor(end);
                 if (kerb != other && !Linked(kerb, other)) AddPair(kerb, other, false, false, 0, 0);
                 joined++;
             }
             return joined > 0 ? kerb : -1;
+        }
+
+        // Whether the way from a pavement node to a crossing's end stays off the asphalt. The end itself can
+        // sit inside the road it crosses, so the last CrossingEndSlackM before it are not looked at.
+        private bool ReachesKerb(Vector2 from, Vector2 end)
+        {
+            var steps = Mathf.Max(2, Mathf.CeilToInt(Vector2.Distance(from, end) / 1.5f));
+            for (var i = 1; i < steps; i++)
+            {
+                var at = Vector2.Lerp(from, end, i / (float)steps);
+                if (Vector2.Distance(at, end) < CrossingEndSlackM) continue;
+                if (DistanceToRoadEdge(at) < -CrossingKerbEpsilonM) return false;
+            }
+            return true;
+        }
+
+        // ---------------------------------------------------------------------------------------------
+        // Buildings: outlines in a grid, so a link can be checked for running through one
+
+        private void BuildBuildingSegments(IReadOnlyList<CityBuilding> buildings)
+        {
+            if (buildings == null) return;
+            foreach (var building in buildings)
+            {
+                if (building?.Rings == null) continue;
+                foreach (var ring in building.Rings)
+                {
+                    if (ring == null || ring.Count < 2) continue;
+                    for (var i = 0; i < ring.Count; i++)
+                    {
+                        var from = ring[i];
+                        var to = ring[(i + 1) % ring.Count];
+                        var a = new Vector2((float)from.X, (float)from.Y);
+                        var b = new Vector2((float)to.X, (float)to.Y);
+                        if ((b - a).sqrMagnitude < 0.01f) continue;
+                        var index = buildingSegments.Count;
+                        buildingSegments.Add((a, b));
+                        var minX = Mathf.FloorToInt(Mathf.Min(a.x, b.x) / RoadGridM);
+                        var maxX = Mathf.FloorToInt(Mathf.Max(a.x, b.x) / RoadGridM);
+                        var minY = Mathf.FloorToInt(Mathf.Min(a.y, b.y) / RoadGridM);
+                        var maxY = Mathf.FloorToInt(Mathf.Max(a.y, b.y) / RoadGridM);
+                        for (var x = minX; x <= maxX; x++)
+                            for (var y = minY; y <= maxY; y++)
+                            {
+                                var key = Pack(x, y);
+                                if (!buildingGrid.TryGetValue(key, out var list)) buildingGrid[key] = list = new List<int>();
+                                list.Add(index);
+                            }
+                    }
+                }
+            }
+        }
+
+        // False when the straight way from a to b crosses a building's wall; true when no buildings are known
+        private bool ClearOfBuildings(Vector2 a, Vector2 b)
+        {
+            if (buildingSegments.Count == 0) return true;
+            var steps = Mathf.Max(1, Mathf.CeilToInt(Vector2.Distance(a, b) / 5f));
+            for (var s = 0; s <= steps; s++)
+            {
+                var at = Vector2.Lerp(a, b, s / (float)steps);
+                if (!buildingGrid.TryGetValue(Pack(Mathf.FloorToInt(at.x / RoadGridM), Mathf.FloorToInt(at.y / RoadGridM)), out var list))
+                    continue;
+                for (var i = 0; i < list.Count; i++)
+                {
+                    var wall = buildingSegments[list[i]];
+                    if (SegmentsCross(a, b, wall.A, wall.B)) return false;
+                }
+            }
+            return true;
+        }
+
+        private static bool SegmentsCross(Vector2 a, Vector2 b, Vector2 c, Vector2 d)
+        {
+            var r = b - a;
+            var s = d - c;
+            var denominator = r.x * s.y - r.y * s.x;
+            if (Mathf.Abs(denominator) < 1e-6f) return false;
+            var offset = c - a;
+            var t = (offset.x * s.y - offset.y * s.x) / denominator;
+            var u = (offset.x * r.y - offset.y * r.x) / denominator;
+            return t >= 0 && t <= 1 && u >= 0 && u <= 1;
         }
 
         // ---------------------------------------------------------------------------------------------
@@ -981,6 +1068,25 @@ namespace Formula9.World
             if (!nodeGrid.TryGetValue(key, out var bucket)) nodeGrid[key] = bucket = new List<int>();
             bucket.Add(created);
             return created;
+        }
+
+        // The nodes within the radius and how far each is, into the list (cleared first)
+        private void CollectNodesNear(Vector2 at, float radius, List<(int Node, float Dist)> into)
+        {
+            into.Clear();
+            var span = Mathf.CeilToInt(radius / NodeGridM);
+            var cellX = Mathf.FloorToInt(at.x / NodeGridM);
+            var cellY = Mathf.FloorToInt(at.y / NodeGridM);
+            for (var dx = -span; dx <= span; dx++)
+                for (var dy = -span; dy <= span; dy++)
+                {
+                    if (!nodeGrid.TryGetValue(Pack(cellX + dx, cellY + dy), out var list)) continue;
+                    for (var i = 0; i < list.Count; i++)
+                    {
+                        var distance = Vector2.Distance(nodes[list[i]].Position, at);
+                        if (distance <= radius) into.Add((list[i], distance));
+                    }
+                }
         }
 
         private void ForNodesNear(Vector2 at, float radius, Action<int> visit)
