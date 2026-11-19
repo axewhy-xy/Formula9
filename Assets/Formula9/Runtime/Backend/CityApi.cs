@@ -79,11 +79,25 @@ namespace Formula9.Backend
 
         public SignalColor ColorAt(double timeS, int offsetS, int phase)
         {
+            var into = IntoCycleS(timeS, offsetS, phase);
+            return into < GreenS ? SignalColor.Green : into < GreenS + YellowS ? SignalColor.Yellow : SignalColor.Red;
+        }
+
+        // Seconds of red still to run for the approach; 0 when it is not red
+        public double RedRemainingS(double timeS, int offsetS, int phase)
+        {
+            var into = IntoCycleS(timeS, offsetS, phase);
+            return into < GreenS + YellowS ? 0 : Phases * (GreenS + YellowS + AllRedS) - into;
+        }
+
+        // How far into the approach's own cycle it is, where the green starts at 0
+        private double IntoCycleS(double timeS, int offsetS, int phase)
+        {
             var phaseS = GreenS + YellowS + AllRedS;
             var cycleS = Phases * phaseS;
             var into = (timeS + offsetS - phase * phaseS) % cycleS;
             if (into < 0) into += cycleS;
-            return into < GreenS ? SignalColor.Green : into < GreenS + YellowS ? SignalColor.Yellow : SignalColor.Red;
+            return into;
         }
     }
 

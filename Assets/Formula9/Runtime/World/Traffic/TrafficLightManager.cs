@@ -19,7 +19,11 @@ namespace Formula9
                 if (_instance == null)
                 {
                     // Automatically find an existing one in the scene
+#if UNITY_2023_1_OR_NEWER
+                    _instance = FindFirstObjectByType<TrafficLightManager>();
+#else
                     _instance = FindObjectOfType<TrafficLightManager>();
+#endif
 
                     // If still not found, create a new GameObject on the fly automatically!
                     if (_instance == null)
