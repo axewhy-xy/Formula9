@@ -129,7 +129,7 @@ session workers are not Uvicorn workers: they serve no HTTP and never write to t
 | `services/incidents.py`, `incident_scenarios/` | Incident lifecycle, candidates, history/debrief and the seeded random incident catalogue |
 | `services/battery_decision.py`, `charge_booking.py`, `energy/` | Energy model, forecasts, charge options, charger bookings and battery assessment |
 | `services/crash_recovery.py` | Process-crash recovery checks used by the session service |
-| `traffic/` | Road network, background traffic (`city_traffic.py`), signal cycle, incident hazards and the import scripts |
+| `traffic/` | Road network, background traffic (`city_traffic.py`), its native engine and the choice of engine (`native_traffic.py`), signal cycle, incident hazards and the import scripts |
 | `routing/` | OSM road graph, operating network, map matcher, Singapore fixture and building importers |
 | `transit/` | LTA bus stop and service store, plus its OSM and DataMall importers |
 | `persistence/` | `TrainingStore` and its SQL migrations `0001`–`0005`; `StoreClient`, the store as a session worker sees it |
@@ -248,6 +248,17 @@ Each tick, `IntegratedSessionActor` does the following:
   is drawn or scripted. It is deterministic and checkpointed (about once a second; the traffic state is
   65–100 KB), and a recovered session drives it on from its checkpoint to the session tick, replaying the
   same events.
+- **Traffic engine:** the traffic is about four fifths of a tick's work in Python, so sessions normally
+  drive it natively: `backend/native/traffic/traffic_core.cpp`, a nanobind module that
+  `Tools/build_native.py` builds into `traffic/_traffic_native`. It is `city_traffic.py` step for step,
+  with CPython's own rounding (its `math.hypot`, float `%`, `** 2` and `sum`), so both engines give
+  bit-identical state and continue each other's checkpoints; `city_traffic.py` stays the reference and
+  the fallback. `native_traffic.engine()` picks the engine: native when the module is built from the
+  current source, else Python (`F9_NATIVE_TRAFFIC`: `0` Python, `1` native or fail). The native engine
+  lets go of the GIL while it steps the traffic and plans, places and checks the shuttles, so the
+  sessions of one process (or one session worker) tick on several cores at once. A staged copy shares
+  the vehicles until one side steps, as the Python engine's does. Change the driving in both;
+  `test_native_traffic.py` holds them to each other, and the traffic tests run on both engines.
 - **Energy:** charges travel and auxiliary energy with energy model `ENERGY_R1`. It also issues
   `CONTINUE` and `CHARGE_NOW` offers, runs scheduled charger bookings, and sends a shuttle back to a
   depot when its reserve requires it.

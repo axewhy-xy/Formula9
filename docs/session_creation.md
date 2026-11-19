@@ -644,6 +644,81 @@ Slowest session's real-time factor; bold is the first count below 0.99.
   granularity), above the 10 ms target, as in Phase 0. The auto, 2-session case
   had p95 150 ms in this round (RTF 0.998); it was not seen at other counts.
 
+### Native traffic engine, 18 November 2026
+
+Phase 4 of the plan makes each tick cheaper. A profile of one integrated session showed the background
+traffic as about four fifths of `tick.actor`: `CityTraffic.step` 49%, `plan_shuttle` 26%, and placing
+and checking the shuttles most of the rest. The traffic now has a native engine,
+`backend/native/traffic/traffic_core.cpp` (nanobind, already a dependency), which drives exactly as
+`src/traffic/city_traffic.py` does:
+
+- **Bit-identical.** It reproduces CPython's own float arithmetic where that is not the C library's
+  (`math.hypot`'s correctly rounded norm, float `%`, `** 2`, `sum`'s compensated summation, `math.atan2`'s
+  special cases), uses the same UCRT as CPython for `pow`, `atan2` and `acos`, and is compiled without
+  fused multiply-adds. Both engines give the same `state()`, frames and snapshots, and continue each
+  other's checkpoints, so switching engines changes no session hash. `test_native_traffic.py` checks
+  the arithmetic on random and edge inputs, the area's traffic over minutes of steps, hazards, pins and
+  signal faults, a whole session staged tick by tick through its first incident, checkpoints crossing
+  engines and threads stepping at once. `test_city_traffic.py` and `test_traffic_events.py` run on
+  both engines. Longer local checks (five more seeds, 8,000 staged ticks each, 4–5 incidents per
+  session) were identical too.
+- **Without the GIL.** Stepping the traffic, planning and placing shuttles, body checks, clearing and
+  frame packing release the GIL, so sessions sharing a process (or a session worker) overlap there.
+- **Cheap staging.** A staged copy shares the vehicles until one side steps, as the Python engine's
+  does; a copy is a few pointers, and the first step clones the vehicle array.
+- **Chosen per process.** `F9_NATIVE_TRAFFIC`: `auto` (default) uses the module when it is built from
+  the current `traffic_core.cpp` and its tuning constants match `city_traffic.py`'s, else Python, with
+  a log line saying why; `0` forces Python; `1` makes sessions fail to start without it. A module
+  built from older source is never used. A network whose junction ids are not integers is driven in
+  Python.
+- **Building.** `python Tools/build_native.py` (CMake and Visual Studio's C++ tools). `run_backend.py
+  --setup` tries it and carries on without it. The module links the C++ runtime statically, so the
+  bundled build's portable Python loads it on a machine without the Visual C++ redistributable.
+  `build_executable.py` builds it if needed and leaves it out of the bundle unless it is current, so
+  a bundle never carries a stale module. The built `_traffic_native*.pyd` is not committed.
+
+Change the driving in `city_traffic.py` and `traffic_core.cpp` together, then rebuild: until then the
+backend falls back to Python, and the parity tests fail.
+
+Interleaved A/B, two rounds each, of HEAD (Python traffic) against this change, traffic and client on,
+300-tick windows, same laptop on AC power. Evidence: `.tools/scaling-phase4-inprocess-20261118/` and
+`.tools/scaling-phase4-workers-20261118/`. Medians over rounds:
+
+| Sessions | Workers | Slowest RTF, Python / native | Lateness p95 ms | Work ms per session tick |
+| ---: | --- | --- | --- | --- |
+| 1 | 0 | 1.000 / 1.000 | 16.1 / 16.6 | 13.78 / 5.23 |
+| 4 | 0 | **0.813** / 0.999 | 250.0 / 16.2 | 49.18 / 6.50 |
+| 8 | 0 | 0.356 / 0.999 | 250.0 / 23.4 | 125.20 / 15.65 |
+| 16 | 0 | 0.158 / **0.568** | 250.0 / 250.0 | 297.90 / 81.28 |
+| 8 | auto (8) | 0.998 / 1.000 | 15.2 / 15.1 | 16.00 / 5.01 |
+| 12 | auto (8) | 0.998 / 0.999 | 22.7 / 15.9 | 18.22 / 5.59 |
+| 16 | auto (8) | 0.993 / 0.999 | 147.3 / 17.1 | 26.82 / 6.39 |
+
+- **One session costs 2.6 times less** (13.8 to 5.2 ms a tick; a traffic step alone went from 6 ms to
+  0.2 ms, 32 times faster).
+- **One process now keeps 8 sessions with traffic at 1x** instead of 2–4. Past that it is still
+  bound by the GIL on the Python part of the tick: 16 in one process used 1.2 cores and ran at 0.57x.
+  `MAX_TRAFFIC_SESSIONS` (6, for `F9_SESSION_WORKERS=0`) is left as it is, now conservative.
+- **With workers, 16 sessions with traffic keep 1x with room to spare:** p95 lateness 17 ms (147 ms
+  before), 0–2 missed deadlines in the window (3,400–7,135 before), and the workers used 1.4–2.2 cores
+  in all, where they used 7–8. The 16-session product cap is now the limit on this laptop, as
+  the plan expected of a desktop. The gateway's default estimate for a traffic session before it is
+  measured is 7 ms with the native engine (15 ms with Python).
+- Memory is unchanged: about 850–900 MiB for the gateway and eight workers with 16 sessions.
+- What remains of a tick is mostly Python: under a profiler, copying the actor to stage each tick
+  (`deepcopy` of the domain's Pydantic models and the actor's dicts) is now over half of it, ahead of
+  the native traffic. That, not the traffic, is the next thing to make cheaper.
+
+**Free-threaded CPython spike.** The plan's gate is wheels for the whole lock file. Checked on PyPI on
+18 November: every compiled package at its pinned version has a `cp314t` Windows wheel (numpy, pandas,
+pydantic-core, shapely, pyproj, pyogrio, Pillow, httptools, PyYAML, pymongo, charset-normalizer,
+websockets) except `watchfiles` 1.2.0, which only uvicorn's `--reload` uses. The rest are pure Python. So
+the gate is open apart from reload. The native module is built `FREE_THREADED` and locks the one cache
+sessions share (junction conflicts), so it is ready for 3.14t. Running the backend on 3.14t (installing
+it, a second dependency set, auditing shared state that relies on the GIL, and comparing threads with
+worker processes) has not been done. Phase 2's workers already give the cores, and this phase made
+them cheaper, so it is only worth doing to replace process plumbing.
+
 ## Process-crash recovery
 
 Run the isolated BE-M2-06 crash drill from the repository root:

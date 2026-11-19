@@ -21,6 +21,9 @@ Description:
     diagnostics do. The polling client's own request and JSON work shares the GIL with the sessions here,
     where the real client runs in another process, so client-load cases are slightly pessimistic.
 
+    The traffic engine (Phase 4) is the backend's own choice, set as for the backend by F9_NATIVE_TRAFFIC
+    (0 for Python, 1 for native); the report names the one each run used.
+
     With --workers N (Phase 2) the sessions tick in N session worker processes behind the gateway, as
     F9_SESSION_WORKERS=N runs them (auto as the backend chooses); 0, the default, keeps every session in
     the one process, as Phase 0 measured. The trace, CPU and memory then cover every process; admission
@@ -75,6 +78,16 @@ def stats(values):
         return ordered[max(0, math.ceil(p * len(ordered)) - 1)]
     return {"samples": len(ordered), "mean": math.fsum(ordered) / len(ordered), "p50": rank(.50),
             "p95": rank(.95), "p99": rank(.99), "max": ordered[-1]}
+
+
+def traffic_engine() -> str:
+    """The background traffic engine sessions drive here (src.traffic.native_traffic, F9_NATIVE_TRAFFIC):
+    native or python, and python for a source tree from before the native engine (an ab baseline)."""
+    try:
+        from src.traffic import native_traffic
+    except ImportError:
+        return "python"
+    return native_traffic.engine_name()
 
 
 def host_details():
@@ -422,7 +435,7 @@ def run_case(directory, *, sessions, traffic, client_load, ticks, warmup_s, seed
             measured["per_session"][session_id]["incidents_at_end"] = incidents[session_id]
             measured["per_session"][session_id]["final_tick"] = ticks_at["end"][session_id]
         case = {"sessions": sessions, "traffic": traffic, "traffic_sessions_live": traffic_live,
-                "workers": worker_count,
+                "workers": worker_count, "traffic_engine": traffic_engine(),
                 "client_load": client_load, "seeds": [seed + i for i in range(sessions)],
                 "minimum_window_ticks": ticks, "warmup_s": warmup_s, "timeout_s": timeout_s,
                 "window_complete": complete, "timings": timings, "memory": memory,
@@ -500,7 +513,8 @@ def report(result):
              f"Source {result.get('source_commit') or 'unknown'}{' (dirty)' if result.get('source_dirty') else ''}. "
              f"Host: {host.get('cpu')}, {host.get('physical_cores')} cores / {host.get('logical_cpu_count')} threads, "
              f"power {host.get('power_source')}, Python {host.get('python')}. "
-             f"Session workers: {result['parameters'].get('workers', '0')}.", "",
+             f"Session workers: {result['parameters'].get('workers', '0')}. "
+             f"Traffic engine: {result['parameters'].get('traffic_engine', 'python')}.", "",
              f"Window: every session advances at least {result['parameters']['ticks']} ticks after "
              f"{result['parameters']['warmup_s']} s of warm-up. Real-time factor (RTF) below "
              f"{REFERENCE_FACTOR} means the session runs in slow motion.", "", "## Where sessions fall behind", "",
@@ -574,6 +588,7 @@ def run(output, *, session_counts=DEFAULT_SESSIONS, traffic="on", client="on", t
     host = host_details()
     parameters = {"session_counts": list(session_counts), "traffic": traffic, "client": client, "ticks": ticks,
                   "warmup_s": warmup_s, "rounds": rounds, "seed": seed, "timeout_s": timeout_s, "workers": workers,
+                  "traffic_engine": traffic_engine(),
                   "transport": "IN_PROCESS_ASGI", "process_per_case": isolate, "harness_sha256": hashlib.sha256(harness).hexdigest(),
                   # Sessions open as the scenario sets them; the workflow benchmark forces this opener on
                   "tutorial_opening": get_workflow_definition().incidents.simulated_catalog.policy

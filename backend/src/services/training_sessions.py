@@ -118,7 +118,15 @@ def freeze_static_heap() -> None:
         return
     _static_heap_frozen = True
     get_workflow_definition()
-    road_network(SIGNAL_AREA)
+    network = road_network(SIGNAL_AREA)
+    # And its native copy, when sessions drive the native traffic engine, so the first session does not
+    # build it (src.traffic.native_traffic)
+    from src.traffic import native_traffic
+    try:
+        if network is not None and native_traffic.engine() is native_traffic.NativeCityTraffic:
+            native_traffic.prepare(network)
+    except (RuntimeError, ValueError):
+        pass  # A misconfigured engine is reported when a session starts its traffic
     gc.collect()
     gc.freeze()
 

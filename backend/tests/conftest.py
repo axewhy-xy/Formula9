@@ -111,3 +111,27 @@ def fixed_charge_time(request):
     data["charge_time_scale"] = None
     yield
     data["charge_time_scale"] = saved
+
+
+@pytest.fixture(params=["python", "native"])
+def traffic_engine(request, monkeypatch):
+    """Runs a test once on each background traffic engine (src.traffic.native_traffic): the test module's
+    CityTraffic is that engine's class, and sessions the test creates drive that engine. The native run is
+    skipped where the native module is not built."""
+    from src.traffic import native_traffic
+    from src.traffic.city_traffic import CityTraffic
+    if request.param == "native":
+        usable, reason = native_traffic.status()
+        if not usable:
+            pytest.skip(f"native traffic engine unavailable: {reason}")
+        engine, setting = native_traffic.NativeCityTraffic, "1"
+    else:
+        engine, setting = CityTraffic, "0"
+    monkeypatch.setenv(native_traffic.ENGINE_VARIABLE, setting)
+    # The test's module, and the traffic test helpers it may import (test_city_traffic.traffic_on)
+    import sys
+    for name, module in list(sys.modules.items()):
+        if module is request.module or name.endswith("tests.test_city_traffic"):
+            if hasattr(module, "CityTraffic"):
+                monkeypatch.setattr(module, "CityTraffic", engine)
+    return request.param

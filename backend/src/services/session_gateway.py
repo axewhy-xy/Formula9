@@ -73,6 +73,9 @@ STEP_MS = SessionActor.STEP_S * 1000
 # Phase 0 baseline (docs/session_creation.md), so a new machine admits too few rather than too many
 TRAFFIC_COST_MS = 15.0
 SESSION_COST_MS = 5.4
+# The same for a session with traffic when sessions drive the native traffic engine
+# (src.traffic.native_traffic): 5-6.4 ms measured on that laptop with 8-16 sessions, rounded up
+NATIVE_TRAFFIC_COST_MS = 7.0
 # Ticks a session must have run before its own measured cost replaces the estimate
 MIN_COST_SAMPLES = 20
 # A worker loads the scenario and road network before it is ready
@@ -512,7 +515,14 @@ class GatewaySessionService(SessionServiceBase):
         measured = [s.cost_ms for s in self.sessions.values() if s.traffic == traffic and self._measured(s)]
         if measured:
             return statistics.median(measured)
-        return TRAFFIC_COST_MS if traffic else SESSION_COST_MS
+        if not traffic:
+            return SESSION_COST_MS
+        from src.traffic import native_traffic
+        try:
+            native = native_traffic.engine() is native_traffic.NativeCityTraffic
+        except (RuntimeError, ValueError):
+            native = False
+        return NATIVE_TRAFFIC_COST_MS if native else TRAFFIC_COST_MS
 
     def load_ms(self, handle: WorkerHandle) -> float:
         """The tick time a worker's sessions take, or will once running, in milliseconds a tick."""

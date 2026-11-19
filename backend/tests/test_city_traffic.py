@@ -31,6 +31,9 @@ from src.traffic import city_traffic, incident_hazards, route_signals, signal_cy
 from src.traffic.city_traffic import FRAME_RECORD, CityTraffic, ShuttleRoute, overlap, unpack_frame
 from src.traffic.road_network import RoadNetwork
 
+# Every test here runs on both traffic engines, which must drive identically (conftest.traffic_engine)
+pytestmark = pytest.mark.usefixtures("traffic_engine")
+
 MODELS = {"car": {"length_m": 4.5, "width_m": 1.8, "height_m": 1.5}}
 DT = 0.05
 
