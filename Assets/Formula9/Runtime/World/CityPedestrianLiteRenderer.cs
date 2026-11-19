@@ -28,6 +28,10 @@ namespace Formula9.World
         // The crossing's walking line ends at the kerb, which may sit a little inside the road's width
         private const float CrossingKerbEpsilonM = 1.0f;
         private const float CrossingReachM = 16f;
+        private const float CrossingFarReachM = 40f;
+        // A signal approach governs a crossing when its stop line is this close and it runs this nearly across
+        private const float MatchSignalReachM = 45f;
+        private const float MatchSignalMaxAlignment = 0.6f;
         private const float DeadEndLinkM = 18f;
         private const int TargetPedestrians = 1000;
         private const float CrossingSignalPollS = 0.25f;
@@ -36,6 +40,7 @@ namespace Formula9.World
         private const float RoadGridM = 40f;
         // Off: tall and short blue boxes. On: the character models in Assets/Animated Men Characters.
         private static readonly bool UseCharacterModels = false;
+        private const string CatalogPath = "Assets/Formula9/Pedestrians/PedestrianModelCatalog.asset";
         // Tall and short people
         private const float MinHeightM = 1.50f;
         private const float MaxHeightM = 1.90f;
@@ -63,6 +68,7 @@ namespace Formula9.World
         private CitySignalData signalData;
         private Func<double> signalClock = () => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
         private int crossingEdgeCount;
+        private int unreachableCrossings, unmatchedSignalCrossings;
 
         private readonly List<Model> models = new List<Model>();
         private readonly List<UnityEngine.Object> ownedObjects = new List<UnityEngine.Object>();
@@ -157,6 +163,8 @@ namespace Formula9.World
             roadSections.Clear();
             roadGrid.Clear();
             crossingEdgeCount = 0;
+            unreachableCrossings = 0;
+            unmatchedSignalCrossings = 0;
 
             if (roads == null || roads.Count == 0)
             {
@@ -171,7 +179,7 @@ namespace Formula9.World
             for (var i = 0; i < edges.Count; i++)
                 if (!edges[i].Crossing) walkEdges.Add(i);
             SpawnAgents();
-            Debug.Log($"[PedestriansLite] Rebuild area={area}, nodes={nodes.Count}, edges={edges.Count}, crossings={crossingEdgeCount / 2}, agents={agents.Count}");
+            Debug.Log($"[PedestriansLite] Rebuild area={area}, nodes={nodes.Count}, edges={edges.Count}, crossings={crossingEdgeCount / 2} (unreachable={unreachableCrossings}, no matching light={unmatchedSignalCrossings}), agents={agents.Count}");
         }
 
         public void Tick(float deltaTime)
@@ -186,10 +194,9 @@ namespace Formula9.World
 
                 if (agent.WaitS > 0)
                 {
+                    // Only ever set at a node: after arriving, or at the kerb waiting for a light
                     agent.WaitS = Mathf.Max(0, agent.WaitS - deltaTime);
-                    if (agent.Edge < 0) PlaceOnNode(agent, deltaTime);
-                    else if (agent.DistanceM > 0.001f) PlaceAlongEdge(agent, edges[agent.Edge], deltaTime);
-                    else PlaceOnNode(agent, deltaTime);
+                    PlaceOnNode(agent, deltaTime);
                     continue;
                 }
 
@@ -494,10 +501,21 @@ namespace Formula9.World
             {
                 var from = KerbNode(crossing.A);
                 var to = KerbNode(crossing.B);
-                if (from < 0 || to < 0 || from == to) continue;
+                if (from < 0 || to < 0 || from == to)
+                {
+                    unreachableCrossings++;
+                    continue;
+                }
 
                 int phase = 0, offset = 0;
-                var controlled = crossing.Signal && MatchSignal(crossing.A, crossing.B, signalData, out phase, out offset);
+                var controlled = crossing.Signal && signalData != null &&
+                    MatchSignal(crossing.A, crossing.B, signalData, out phase, out offset);
+                // A signalled crossing whose light cannot be told is left out, not left free to cross on any light
+                if (crossing.Signal && signalData != null && !controlled)
+                {
+                    unmatchedSignalCrossings++;
+                    continue;
+                }
 
                 AddEdge(from, to, new[] { nodes[from].Position, crossing.A, crossing.B, nodes[to].Position }, true, controlled, offset, phase);
                 AddEdge(to, from, new[] { nodes[to].Position, crossing.B, crossing.A, nodes[from].Position }, true, controlled, offset, phase);
@@ -518,7 +536,25 @@ namespace Formula9.World
                 bestDistance = distance;
                 best = node;
             });
-            return best;
+            if (best >= 0) return best;
+
+            // No pavement close by (a crossing away from the roads' own pavements): the crossing's end gets a
+            // node of its own, joined to the nearest pavements that can be walked to without crossing a road
+            var near = new List<(int Node, float Dist)>();
+            ForNodesNear(end, CrossingFarReachM, other =>
+                near.Add((other, Vector2.Distance(nodes[other].Position, end))));
+            near.Sort((a, b) => a.Dist.CompareTo(b.Dist));
+            var kerb = -1;
+            var joined = 0;
+            foreach (var (other, _) in near)
+            {
+                if (joined >= 2) break;
+                if (!OutsideRoad(nodes[other].Position, end, CrossingKerbEpsilonM)) continue;
+                if (kerb < 0) kerb = NodeFor(end);
+                if (kerb != other && !Linked(kerb, other)) AddPair(kerb, other, false, false, 0, 0);
+                joined++;
+            }
+            return joined > 0 ? kerb : -1;
         }
 
         // ---------------------------------------------------------------------------------------------
@@ -567,7 +603,11 @@ namespace Formula9.World
                 return;
             }
 
-            var catalog = Resources.Load<PedestrianModelCatalog>("Formula9/PedestrianModelCatalog");
+            // The catalog is kept out of Resources while the models are off, so a build does not ship the
+            // characters. To turn them on in a player build: move the catalog into Resources/Formula9, load it
+            // here with Resources.Load, and set walkClip on each entry (clips are only found in the editor).
+#if UNITY_EDITOR
+            var catalog = AssetDatabase.LoadAssetAtPath<PedestrianModelCatalog>(CatalogPath);
             if (catalog != null && catalog.entries != null)
             {
                 foreach (var entry in catalog.entries)
@@ -578,7 +618,6 @@ namespace Formula9.World
                     AddModel(BakeModel(entry.prefab, walk, idle));
                 }
             }
-#if UNITY_EDITOR
             if (models.Count == 0)
             {
                 foreach (var guid in AssetDatabase.FindAssets("t:Model", new[] { "Assets/Animated Men Characters" }))
@@ -735,7 +774,18 @@ namespace Formula9.World
             }
         }
 
-        // The model's own materials, copied with instancing switched on so a crowd draws in a few batches
+        // The traffic's material asset, saved with instancing on: a player build strips a shader's instancing
+        // variants unless some material asset uses them, and then instanced drawing shows nothing at all.
+        // Copies of it keep instancing.
+        private static Material InstancingTemplate()
+        {
+            var template = Resources.Load<Material>("Formula9/TrafficVehicle");
+            if (template == null)
+                Debug.LogError("[PedestriansLite] The TrafficVehicle material is missing, so no pedestrians are drawn.");
+            return template;
+        }
+
+        // The model's own materials, as copies of the instancing template so a crowd draws in a few batches
         private readonly Dictionary<Material, Material> instancedMaterials = new Dictionary<Material, Material>();
 
         private Material[] InstancedMaterials(Material[] source)
@@ -747,7 +797,11 @@ namespace Formula9.World
                 if (original == null) continue;
                 if (!instancedMaterials.TryGetValue(original, out var copy))
                 {
-                    copy = new Material(original) { name = original.name + " (pedestrian)", enableInstancing = true };
+                    var template = InstancingTemplate();
+                    if (template == null) continue;
+                    copy = new Material(template) { name = original.name + " (pedestrian)" };
+                    if (original.HasProperty("_MainTex")) copy.mainTexture = original.mainTexture;
+                    if (original.HasProperty("_Color")) copy.color = original.color;
                     instancedMaterials[original] = copy;
                     ownedObjects.Add(copy);
                 }
@@ -769,9 +823,9 @@ namespace Formula9.World
             mesh.vertices = vertices;
             mesh.RecalculateBounds();
 
-            var shader = Shader.Find("Standard") ?? Shader.Find("Unlit/Color") ?? Shader.Find("Sprites/Default");
-            if (shader == null) return null;
-            var material = new Material(shader) { color = new Color(0.22f, 0.45f, 0.95f, 1f), enableInstancing = true };
+            var template = InstancingTemplate();
+            if (template == null) return null;
+            var material = new Material(template) { name = "Pedestrian box", color = new Color(0.22f, 0.45f, 0.95f, 1f) };
             ownedObjects.Add(material);
             var model = new Model();
             model.Parts.Add(new Part { Poses = new[] { mesh }, Materials = new[] { material } });
@@ -822,16 +876,8 @@ namespace Formula9.World
         private bool CanStartCrossing(Edge edge, float speedMps, double timeS)
         {
             if (!edge.SignalControlled || signalData == null) return true;
-            var timing = signalData.Timing;
-            var phaseS = timing.GreenS + timing.YellowS + timing.AllRedS;
-            var cycleS = timing.Phases * phaseS;
-            if (phaseS <= 0 || cycleS <= 0) return true;
-            var into = (timeS + edge.OffsetS - edge.Phase * phaseS) % cycleS;
-            if (into < 0) into += cycleS;
-            if (timing.ColorAt(timeS, edge.OffsetS, edge.Phase) != SignalColor.Red) return false;
-            var timeLeftS = cycleS - into;
-            var needS = edge.Length / Mathf.Max(0.4f, speedMps) + SignalSafetyBufferS;
-            return timeLeftS >= needS;
+            var redLeftS = signalData.Timing.RedRemainingS(timeS, edge.OffsetS, edge.Phase);
+            return redLeftS >= edge.Length / Mathf.Max(0.4f, speedMps) + SignalSafetyBufferS;
         }
 
         private void PlaceOnNode(Agent agent, float dt)
@@ -989,30 +1035,26 @@ namespace Formula9.World
             var crossingDirection = (b - a).normalized;
             var best = float.MaxValue;
             var found = false;
-            // Strict pass first (traffic across the crossing); then any nearby approach, so a signalled
-            // crossing is never left free to cross whatever the lights show
-            for (var pass = 0; pass < 2 && !found; pass++)
+            // Only an approach that runs across the crossing counts: its traffic is what the people cut across.
+            // One running along the crossing is no use, even if it is the nearest.
+            for (var j = 0; j < signals.Junctions.Count; j++)
             {
-                for (var j = 0; j < signals.Junctions.Count; j++)
+                var junction = signals.Junctions[j];
+                if (junction?.Approaches == null) continue;
+                for (var k = 0; k < junction.Approaches.Count; k++)
                 {
-                    var junction = signals.Junctions[j];
-                    if (junction?.Approaches == null) continue;
-                    for (var k = 0; k < junction.Approaches.Count; k++)
-                    {
-                        var approach = junction.Approaches[k];
-                        var distance = Vector2.Distance(centre, new Vector2(approach.StopX, approach.StopY));
-                        var limit = pass == 0 ? 45f : 70f;
-                        if (distance > limit) continue;
-                        var heading = approach.HeadingDeg * Mathf.Deg2Rad;
-                        var alignment = Mathf.Abs(Vector2.Dot(new Vector2(Mathf.Cos(heading), Mathf.Sin(heading)), crossingDirection));
-                        if (pass == 0 && alignment > 0.6f) continue;
-                        var score = distance + (pass == 0 ? alignment * 25f : 0f);
-                        if (score >= best) continue;
-                        best = score;
-                        phase = approach.Phase;
-                        offset = junction.OffsetS;
-                        found = true;
-                    }
+                    var approach = junction.Approaches[k];
+                    var distance = Vector2.Distance(centre, new Vector2(approach.StopX, approach.StopY));
+                    if (distance > MatchSignalReachM) continue;
+                    var heading = approach.HeadingDeg * Mathf.Deg2Rad;
+                    var alignment = Mathf.Abs(Vector2.Dot(new Vector2(Mathf.Cos(heading), Mathf.Sin(heading)), crossingDirection));
+                    if (alignment > MatchSignalMaxAlignment) continue;
+                    var score = distance + alignment * 25f;
+                    if (score >= best) continue;
+                    best = score;
+                    phase = approach.Phase;
+                    offset = junction.OffsetS;
+                    found = true;
                 }
             }
             return found;

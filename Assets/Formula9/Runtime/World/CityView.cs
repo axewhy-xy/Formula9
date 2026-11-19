@@ -83,8 +83,8 @@ namespace Formula9.World
         private const float KerbGapM = 0.45f;
         private const float MaxAutomaticMoveM = 8f;
         private const float ShelterHalfDepthM = 1.3f * BusStopShelterFactory.ShelterScale;
-        // Temporary hard off-switch while profiling 3D-view performance.
-        private const bool EnablePedestrians = true;
+        // Off-switch for the pedestrians: when false none are made, and every call to them is skipped.
+        private static readonly bool EnablePedestrians = true;
         private List<CityBuilding> buildings;
         private Mesh buildingMesh;
         private CityTrafficRenderer traffic;
@@ -217,7 +217,7 @@ namespace Formula9.World
             {
                 Debug.LogWarning("No road surfaces, so the map's roads show instead: " + error.Message);
                 traffic?.Rebuild(Array.Empty<CityRoad>(), null);
-                if (EnablePedestrians) pedestrians?.Rebuild(area, Array.Empty<CityRoad>(), null);
+                pedestrians?.Rebuild(area, Array.Empty<CityRoad>(), null);
                 return;
             }
             cancellation.ThrowIfCancellationRequested();
@@ -401,7 +401,7 @@ namespace Formula9.World
                 cancellation.ThrowIfCancellationRequested();
             }
             traffic?.Rebuild(roads, trafficData, signals);
-            if (EnablePedestrians) pedestrians?.Rebuild(area, roads, signals);
+            pedestrians?.Rebuild(area, roads, signals);
         }
 
         // The same LTA client supplies FleetMap's 2D bus-stop dots. Here its
@@ -1007,7 +1007,7 @@ namespace Formula9.World
             {
                 // The backend keeps the traffic off its hazards and away from the shuttles
                 traffic.Advance(deltaTime);
-                if (EnablePedestrians) pedestrians?.Tick(pedestrianDelta);
+                pedestrians?.Tick(pedestrianDelta);
                 return;
             }
             deltaTime = running ? deltaTime : 0;
@@ -1024,7 +1024,7 @@ namespace Formula9.World
                     trafficObstacles.Add(new TrafficObstacle { Id = pair.Key, Position = pair.Value.position, Forward = pair.Value.forward, HalfLength = BodyHalfLength, HalfWidth = BodyHalfWidth });
             traffic.SetShuttles(trafficObstacles);
             traffic.Advance(deltaTime);
-            if (EnablePedestrians) pedestrians?.Tick(pedestrianDelta);
+            pedestrians?.Tick(pedestrianDelta);
         }
 
         // Called once a frame, after the cameras are placed: draws the traffic where AdvanceTraffic left
@@ -1032,7 +1032,7 @@ namespace Formula9.World
         public void DrawTraffic(IReadOnlyList<Camera> cameras)
         {
             traffic?.Draw(cameras);
-            if (EnablePedestrians) pedestrians?.Draw(cameras);
+            pedestrians?.Draw(cameras);
         }
 
         // Called each frame: a shuttle is where the backend's traffic frames put its body; without them,
@@ -1099,11 +1099,8 @@ namespace Formula9.World
             busStopShelters.Dispose();
             traffic?.Dispose();
             traffic = null;
-            if (EnablePedestrians)
-            {
-                pedestrians?.Dispose();
-                pedestrians = null;
-            }
+            pedestrians?.Dispose();
+            pedestrians = null;
             if (root != null) WorldBuilder.Remove(root.gameObject);
             trafficLightObjects.Clear();
             foreach (var item in owned)
