@@ -122,6 +122,177 @@ namespace Formula9.Backend
         public List<CitySignalJunction> Junctions = new List<CitySignalJunction>();
     }
 
+    // One 250 m square of sidewalk from the walkways file (backend src.traffic.import_walkways). Corners are
+    // centimetres (x east, y north); triangles and edges index them. The arrays are flat, as they come.
+    public sealed class CityWalkwayTile
+    {
+        public int KeyX, KeyY;
+        // x, y of each corner, in centimetres
+        public int[] VerticesCm = Array.Empty<int>();
+        // Three corners per triangle, clockwise seen from above
+        public int[] Footpath = Array.Empty<int>(), KerbStone = Array.Empty<int>(), Verge = Array.Empty<int>();
+        // Four per ramp: the kerb's x and y in centimetres, and its unit direction away from the road in 1/10000ths
+        public int[] Ramps = Array.Empty<int>();
+        // Four per triangle: three corners and the ramp it slopes with
+        public int[] RampTriangles = Array.Empty<int>();
+        // Three per edge: from, to (the face looks out to the right of from->to) and its ramp, or -1
+        public int[] KerbEdges = Array.Empty<int>(), OuterEdges = Array.Empty<int>(), CheekEdges = Array.Empty<int>();
+    }
+
+    public sealed class CityWalkwayData
+    {
+        public string Area, SourceHash;
+        public int Version;
+        public float SurfaceY, KerbRiseM, KerbStoneM, RampDepthM;
+        public List<CityWalkwayTile> Tiles = new List<CityWalkwayTile>();
+
+        // Reads the file a token at a time, its long number lists straight into arrays, as it runs to a
+        // megabyte. Nothing here touches Unity, so it can run off the main thread.
+        public static CityWalkwayData Parse(string json)
+        {
+            try
+            {
+                using (var reader = new JsonTextReader(new System.IO.StringReader(json)))
+                {
+                    var data = new CityWalkwayData();
+                    var sawRender = false;
+                    Expect(reader, JsonToken.StartObject);
+                    while (reader.Read() && reader.TokenType == JsonToken.PropertyName)
+                    {
+                        var name = (string)reader.Value;
+                        reader.Read();
+                        switch (name)
+                        {
+                            case "area": data.Area = (string)reader.Value; break;
+                            case "version": data.Version = Convert.ToInt32(reader.Value); break;
+                            case "source_hash": data.SourceHash = (string)reader.Value; break;
+                            case "constants":
+                                var constants = JObject.Load(reader);
+                                data.SurfaceY = (float)constants["surface_y"];
+                                data.KerbRiseM = (float)constants["kerb_rise_m"];
+                                data.KerbStoneM = (float)constants["kerb_stone_m"];
+                                data.RampDepthM = (float)constants["ramp_depth_m"];
+                                break;
+                            case "render": ReadRender(reader, data.Tiles); sawRender = true; break;
+                            default: reader.Skip(); break;
+                        }
+                    }
+                    if (!sawRender) throw new ContractException("Walkways reply has no render data");
+                    if (data.KerbRiseM <= 0 || data.RampDepthM <= 0) throw new ContractException("Walkways reply has no kerb sizes");
+                    return data;
+                }
+            }
+            catch (Exception error) when (error is JsonException || error is InvalidCastException || error is FormatException || error is OverflowException || error is NullReferenceException)
+            {
+                throw new ContractException("Invalid walkways reply: " + error.Message);
+            }
+        }
+
+        private static void ReadRender(JsonTextReader reader, List<CityWalkwayTile> tiles)
+        {
+            if (reader.TokenType != JsonToken.StartObject) throw new ContractException("Walkways render data is not an object");
+            while (reader.Read() && reader.TokenType == JsonToken.PropertyName)
+            {
+                var name = (string)reader.Value;
+                reader.Read();
+                if (name != "tiles") { reader.Skip(); continue; }
+                if (reader.TokenType != JsonToken.StartArray) throw new ContractException("Walkways tiles are not a list");
+                while (reader.Read() && reader.TokenType == JsonToken.StartObject) tiles.Add(ReadTile(reader));
+            }
+        }
+
+        private static CityWalkwayTile ReadTile(JsonTextReader reader)
+        {
+            var tile = new CityWalkwayTile();
+            while (reader.Read() && reader.TokenType == JsonToken.PropertyName)
+            {
+                var name = (string)reader.Value;
+                reader.Read();
+                switch (name)
+                {
+                    case "key":
+                        var key = ReadInts(reader);
+                        if (key.Length != 2) throw new ContractException("A walkways tile's key is not two numbers");
+                        tile.KeyX = key[0]; tile.KeyY = key[1];
+                        break;
+                    case "vertices_cm": tile.VerticesCm = ReadInts(reader); break;
+                    case "zones":
+                        while (reader.Read() && reader.TokenType == JsonToken.PropertyName)
+                        {
+                            var zone = (string)reader.Value;
+                            reader.Read();
+                            var triangles = ReadInts(reader);
+                            if (zone == "footpath") tile.Footpath = triangles;
+                            else if (zone == "kerb_stone") tile.KerbStone = triangles;
+                            else if (zone == "verge") tile.Verge = triangles;
+                        }
+                        break;
+                    case "ramps": tile.Ramps = ReadInts(reader); break;
+                    case "ramp_triangles": tile.RampTriangles = ReadInts(reader); break;
+                    case "kerb_edges": tile.KerbEdges = ReadInts(reader); break;
+                    case "outer_edges": tile.OuterEdges = ReadInts(reader); break;
+                    case "cheek_edges": tile.CheekEdges = ReadInts(reader); break;
+                    default: reader.Skip(); break;
+                }
+            }
+            Check(tile);
+            return tile;
+        }
+
+        // A list of whole numbers, lists inside it flattened (the ramps come as one list each)
+        private static int[] ReadInts(JsonTextReader reader)
+        {
+            if (reader.TokenType != JsonToken.StartArray) throw new ContractException("Expected a list of numbers in the walkways");
+            var values = new List<int>();
+            var depth = 1;
+            while (depth > 0 && reader.Read())
+            {
+                switch (reader.TokenType)
+                {
+                    case JsonToken.StartArray: depth++; break;
+                    case JsonToken.EndArray: depth--; break;
+                    case JsonToken.Integer: values.Add(Convert.ToInt32(reader.Value)); break;
+                    default: throw new ContractException("Expected whole numbers in the walkways, not " + reader.TokenType);
+                }
+            }
+            return values.ToArray();
+        }
+
+        // Every index points at something, so a broken file fails here rather than in the mesh
+        private static void Check(CityWalkwayTile tile)
+        {
+            var vertices = tile.VerticesCm.Length / 2;
+            var ramps = tile.Ramps.Length / 4;
+            if (tile.VerticesCm.Length % 2 != 0 || tile.Ramps.Length % 4 != 0) throw new ContractException("A walkways tile's corners or ramps are cut short");
+            foreach (var triangles in new[] { tile.Footpath, tile.KerbStone, tile.Verge })
+            {
+                if (triangles.Length % 3 != 0) throw new ContractException("A walkways zone's triangles are cut short");
+                if (triangles.Any(i => i < 0 || i >= vertices)) throw new ContractException("A walkways triangle points past its tile's corners");
+            }
+            void Grouped(int[] values, int stride, string what)
+            {
+                if (values.Length % stride != 0) throw new ContractException($"A walkways tile's {what} are cut short");
+                for (var i = 0; i < values.Length; i += stride)
+                {
+                    for (var k = 0; k < stride - 1; k++)
+                        if (values[i + k] < 0 || values[i + k] >= vertices) throw new ContractException($"A walkways tile's {what} point past its corners");
+                    var ramp = values[i + stride - 1];
+                    if (ramp < -1 || ramp >= ramps) throw new ContractException($"A walkways tile's {what} name a ramp it does not have");
+                }
+            }
+            Grouped(tile.RampTriangles, 4, "ramp triangles");
+            if (tile.RampTriangles.Where((_, i) => i % 4 == 3).Any(ramp => ramp < 0)) throw new ContractException("A walkways ramp triangle has no ramp");
+            Grouped(tile.KerbEdges, 3, "kerb edges");
+            Grouped(tile.OuterEdges, 3, "outer edges");
+            Grouped(tile.CheekEdges, 3, "ramp sides");
+        }
+
+        private static void Expect(JsonTextReader reader, JsonToken token)
+        {
+            if (!reader.Read() || reader.TokenType != token) throw new ContractException("Walkways reply is not a JSON object");
+        }
+    }
+
     // /api/buildings and /api/roads: public map data, so no login is needed.
     public sealed class CityClient : BackendClientBase
     {
@@ -264,6 +435,16 @@ namespace Formula9.Backend
             {
                 throw new ContractException("Invalid traffic reply: " + error.Message);
             }
+        }
+
+        // Sidewalk triangles, kerbs and ramps. The reply is about a megabyte (a third of that gzipped), so it
+        // is read on a worker thread; the caller's await still comes back on its own thread.
+        public async Task<CityWalkwayData> GetWalkwaysAsync(string area, CancellationToken cancellation = default)
+        {
+            var request = Request("GET", "/api/road-features/" + Uri.EscapeDataString(area) + "/walkways");
+            request.TimeoutSeconds = 60;
+            var reply = await SendAsync(request, cancellation);
+            return await Task.Run(() => CityWalkwayData.Parse(reply), cancellation);
         }
 
         // The lights' places and cycle. Their colours follow from these, so they need no polling.

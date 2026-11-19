@@ -73,6 +73,7 @@ namespace Formula9.World
 
         private CitySignalData signalData;
         private Func<double> signalClock = () => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+        private Func<Vector2, float> groundHeight;
         private int crossingEdgeCount;
         private int unreachableCrossings, unmatchedSignalCrossings;
 
@@ -154,6 +155,10 @@ namespace Formula9.World
 
         public void SetSignalClock(Func<double> clock) =>
             signalClock = clock ?? (() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0);
+
+        // The ground's height under a point (x east, y north), once the sidewalks are in; until then people
+        // walk at the road's height
+        public void SetGroundHeight(Func<Vector2, float> height) => groundHeight = height;
 
         // Buildings are only used to keep the long links to far-off crossings from running through them
         public void Rebuild(string area, IReadOnlyList<CityRoad> roads, CitySignalData signals,
@@ -992,10 +997,10 @@ namespace Formula9.World
             Place(agent, at, agent.Facing, dt);
         }
 
-        private static void Place(Agent agent, Vector2 at, Vector2 direction, float dt)
+        private void Place(Agent agent, Vector2 at, Vector2 direction, float dt)
         {
-            // The model's feet are at its origin
-            agent.Position = new Vector3(at.x, PedestrianY, at.y);
+            // The model's feet are at its origin, on the raised sidewalk where there is one
+            agent.Position = new Vector3(at.x, groundHeight != null ? groundHeight(at) : PedestrianY, at.y);
             if (direction.sqrMagnitude < 1e-5f) return;
             var target = Quaternion.LookRotation(new Vector3(direction.x, 0, direction.y), Vector3.up);
             var share = dt > 0 ? 1f - Mathf.Exp(-agent.TurnLerp * dt) : 1f;

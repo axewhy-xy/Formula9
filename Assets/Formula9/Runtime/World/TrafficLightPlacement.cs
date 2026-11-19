@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Formula9.Backend;
@@ -16,7 +17,8 @@ namespace Formula9.World
         // Roads are drawn wider than some of LTA's kerbs are, so a pole can land on the road. It moves no further than this.
         private const float MaxShiftM = 24, ShiftStepM = 1;
         private const int ShiftDirections = 16;
-        // The pole's half width, kept clear of the asphalt
+        // The pole's half width, kept clear of the asphalt: twice the kerb stone, so a pole moved off the
+        // road stands just behind the kerb stone, in the verge or on the footpath
         private const float PoleClearanceM = 0.3f;
 
         public readonly struct Pose
@@ -44,7 +46,9 @@ namespace Formula9.World
             return kept;
         }
 
-        public static Pose Place(CitySignalTrafficLight signal, IReadOnlyList<CityRoad> roads)
+        // groundHeight gives the height under a point (x east, y north), such as the sidewalk's top; without
+        // it the pole stands on the ground.
+        public static Pose Place(CitySignalTrafficLight signal, IReadOnlyList<CityRoad> roads, Func<Vector2, float> groundHeight = null)
         {
             var heading = (float)signal.TrafficHeadingDeg * Mathf.Deg2Rad;
             var travel = new Vector2(Mathf.Cos(heading), Mathf.Sin(heading));
@@ -55,7 +59,8 @@ namespace Formula9.World
             // Traffic keeps left, so the arm reaches to the driver's right, unless this pole stands across the road from them
             var right = new Vector2(travel.y, -travel.x);
             var mirrored = !OnAsphalt(foot + right * ArmM, nearby, 0) && OnAsphalt(foot - right * ArmM, nearby, 0);
-            return new Pose(new Vector3(foot.x, 0, foot.y), Quaternion.LookRotation(new Vector3(travel.x, 0, travel.y)), mirrored);
+            var height = groundHeight != null ? groundHeight(foot) : 0;
+            return new Pose(new Vector3(foot.x, height, foot.y), Quaternion.LookRotation(new Vector3(travel.x, 0, travel.y)), mirrored);
         }
 
         // Only the sections that could matter, as a city has thousands of them and hundreds of lights
