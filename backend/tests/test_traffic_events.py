@@ -27,6 +27,9 @@ from src.services.training_sessions import TrainingSessionService, checkpoint
 from src.traffic import city_traffic, incident_hazards, route_signals, signal_cycle
 from src.traffic.city_traffic import CityTraffic, ShuttleRoute
 
+# Every test here runs on both traffic engines, which must drive identically (conftest.traffic_engine)
+pytestmark = pytest.mark.usefixtures("traffic_engine")
+
 # Two lanes each way of the east road, so one lane can be blocked while the other passes
 EAST_TWO = [road("east", [(0.0, 0.0), (600.0, 0.0)], 1, 2, lanes=2), road("on", [(600.0, 0.0), (900.0, 0.0)], 2, 3, lanes=2)]
 

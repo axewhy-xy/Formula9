@@ -1,0 +1,39 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6f7b9f5a9df84926b122f05884dab2a9, type: 3}
+  m_Name: PedestrianModelCatalog
+  m_EditorClassIdentifier: Formula9.Runtime::Formula9.World.PedestrianModelCatalog
+  entries:
+  - prefab: {fileID: 100100000, guid: b94dc8dc1ef1b244facd45d3929d3667, type: 3}
+    walkClip: {fileID: 0}
+    walkClipName: Walk
+  - prefab: {fileID: 100100000, guid: 1eafc20674086d0419ec13557a0b9044, type: 3}
+    walkClip: {fileID: 0}
+    walkClipName: Walk
+  - prefab: {fileID: 100100000, guid: e1d6adac7afcfe94ea924721e8141616, type: 3}
+    walkClip: {fileID: 0}
+    walkClipName: Walk
+  - prefab: {fileID: 100100000, guid: 5fcb390934ca73942b67ecf9f82b8157, type: 3}
+    walkClip: {fileID: 0}
+    walkClipName: Walk
+  - prefab: {fileID: 100100000, guid: 426996f28fcf5ea49b03716050dfa90c, type: 3}
+    walkClip: {fileID: 0}
+    walkClipName: Walk
+  - prefab: {fileID: 100100000, guid: 647b07bf81f6d944c86602710262cac6, type: 3}
+    walkClip: {fileID: 0}
+    walkClipName: Walk
+  - prefab: {fileID: 100100000, guid: 36885dad2ae2faa45b14525f74d19ddf, type: 3}
+    walkClip: {fileID: 0}
+    walkClipName: Walk
+  - prefab: {fileID: 100100000, guid: 674b45daa1206644b8ea96380f1fb989, type: 3}
+    walkClip: {fileID: 0}
+    walkClipName: Walk

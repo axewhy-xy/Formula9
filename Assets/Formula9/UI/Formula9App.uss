@@ -410,6 +410,7 @@
 .session-status-bar { flex-direction: row; flex-wrap: wrap; align-items: center; flex-shrink: 0; margin-bottom: 8px; }
 .session-summary { flex-grow: 1; flex-shrink: 1; flex-basis: 240px; margin: 0 12px 0 0; color: rgb(74, 93, 97); }
 .session-summary-offline { color: rgb(151, 57, 57); -unity-font-style: bold; }
+.session-summary-behind { color: rgb(150, 98, 18); -unity-font-style: bold; }
 .session-compact .session-header { padding-bottom: 0; margin-bottom: 8px; border-bottom-width: 0; }
 .session-compact .session-heading, .session-compact .session-utilities, .session-compact .session-playback,
 .session-compact .session-title, .session-compact .session-badge { margin-top: 0; margin-bottom: 0; }

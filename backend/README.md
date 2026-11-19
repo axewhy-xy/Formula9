@@ -15,6 +15,12 @@ python Tools/run_backend.py --test
 ```
 
 Windows shortcuts: `run.bat --setup`, `run.bat`, `run.bat --test`.
+
+Setup also builds the native background traffic engine when CMake and a C++ compiler (Visual
+Studio's "Desktop development with C++") are installed. Rebuild it after changing
+`backend/native/traffic/traffic_core.cpp` with `python Tools/build_native.py`. Without a current build the
+backend logs so and drives the same traffic in Python, about five times slower per session.
+`F9_NATIVE_TRAFFIC=0` forces Python; `=1` refuses to start sessions without the native engine.
 Python 3.12+ is required; the existing lock targets Python 3.12. `--reload` watches
 backend source and contracts. The default map is `backend/fixtures/map/map.db`;
 the default session database is ignored `state/training.sqlite`. Environment variables

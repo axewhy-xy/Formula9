@@ -219,6 +219,28 @@ continues to be supported.
 Run one authority worker against the SQLite store. The service admits at most
 16 live attempts. RESET is explicitly rejected for this adapter; create a new
 attempt instead. Archive an old attempt before admitting another when full.
+
+### Session worker processes
+
+By default the backend ticks live sessions in **session worker processes**, so
+they are no longer limited to one core by the GIL. `F9_SESSION_WORKERS` sets how
+many: `auto` (the default) is the machine's physical cores less two, within 1–8;
+a number sets it exactly; `0` runs every session in the backend's own process,
+as before. Tests and `run_backend.py --reload` use `0` unless told otherwise. If
+the workers cannot start, the backend logs why and runs sessions in its own
+process.
+
+The backend process stays the only one that serves HTTP and writes SQLite. The
+HTTP API, the snapshots and the Unity client are unchanged. A new session goes
+to the least-loaded worker; when every worker's measured tick load would pass
+60% of a 50 ms tick with it, creation answers `QUEUE_FULL`, as the fixed limit
+of six sessions with traffic did before. If a worker process dies or stops
+responding, its sessions answer `SESSION_RECOVERING` briefly and come back
+**paused, in a new epoch, from their last committed checkpoint** on another
+worker, exactly as after a backend restart; commands already applied keep their
+single outcome. Sessions on other workers keep running. Each worker exits when
+the backend process is gone. With the bundled backend's log file, each worker
+writes its own `backend.worker-N.log` beside it.
 Scenario completion and assessment remain future work.
 
 The original `scenario-m2-r1` selector uses the existing five-shuttle **planar loop fixture**.
@@ -475,6 +497,227 @@ remediation; application of the production policy remains open.
 The full backend regression after the profiling additions passed **808 tests,
 with 4 skips**. Its JUnit result is `test-results.xml` beside the timer-profile
 summary. The new profiler's file header names **Nur Syazliyarni Binte Zazali**.
+
+## Multi-session scaling
+
+Every live session ticks, publishes and answers HTTP in the one backend process,
+so under the GIL they share about one core. This baseline (Phase 0 of the
+multi-core sessions plan) measures how many integrated sessions keep 1x on a
+machine and where each tick's time goes as the count grows. Run it from the
+repository root, with nothing else heavy running:
+
+```powershell
+$env:PYTHONPATH = 'backend;.'
+& .\backend\.venv\Scripts\python.exe -m src.services.session_scaling run --output .tools/scaling-baseline --traffic both --client both
+```
+
+For each session count (default 1, 2, 4, 6, 8, 12, 16) and each traffic/client
+mode, it starts a fresh Python process, as a server would be. Run in one long
+process, later cases inherited the heap and memory of earlier ones and measured
+slower than the same case run alone; `--in-process` keeps that mode for
+debugging only. The process creates that many integrated sessions in a fresh SQLite store, starts
+them, warms up for 5 s, then measures a window in which every session advances at
+least 600 ticks (`--ticks`). Shorter windows miss the first random incident at
+about tick 214. The admission caps (`MAX_SESSIONS`, `MAX_TRAFFIC_SESSIONS`) are
+raised for the case and restored afterwards. With `--client on`, one client polls
+one session's snapshot once a second and long-polls its traffic, as the Unity
+client does. That client runs in the same process, so its own work also takes
+GIL time, which makes client cases slightly pessimistic.
+
+`report.md` gives, per mode, the last session count at which every session kept
+1x (real-time factor ≥ 0.99) and the first at which one fell behind. Then, per
+case: the slowest and median session's real-time factor, tick lateness
+p50/p95/p99, missed deadlines, tick work per session tick (`tick.compute`,
+`snapshot.build`, `snapshot.commit` and `traffic.frame`; `snapshot.commit`
+includes waiting for the writer), process CPU in cores, the client's
+traffic frames per second (10 is 1x), the cost split by span with each span's
+share of one core, and request handling per route. `summary.json` has the same
+data plus per-session results, the case process's memory (which includes the
+in-memory trace, so it overstates the server's) and host details (physical
+cores, power source). `--keep-raw` also writes each case's trace records.
+
+Laptop timing can drift 2x between runs, so compare a change only with
+interleaved rounds. `ab` runs the sweep alternately on a clean copy of a git ref
+and on this checkout, each side in its own process with the same copy of the
+harness, reversing the order every round, and writes `ab-report.md` with
+medians and the work ratio:
+
+```powershell
+& .\backend\.venv\Scripts\python.exe -m src.services.session_scaling ab --output .tools/scaling-ab --baseline-ref HEAD --rounds 3 --sessions 1,4,8
+```
+
+Record the laptop plugged in and on battery separately; the manifest records the
+power source.
+
+### Local baseline, 17 November 2026
+
+One round, one process per case, on an Intel Core Ultra 5 125H laptop (14 cores,
+18 threads) on AC power, Windows 11, Python 3.12.10, source 62c5cdf plus this
+harness. Evidence: `.tools/scaling-baseline-20261117-isolated/`. Every case had
+zero trace loss.
+
+| Sessions | Traffic, client on | Traffic, client off | No traffic, client on | No traffic, client off |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 1.000 | 1.000 | 1.000 | 1.000 |
+| 2 | 0.999 | 0.999 | 1.000 | 1.000 |
+| 4 | **0.726** | **0.821** | 1.000 | 1.000 |
+| 6 | 0.457 | 0.504 | 0.999 | 1.000 |
+| 8 | 0.317 | 0.349 | 1.000 | **0.911** |
+| 12 | 0.180 | 0.199 | **0.708** | 0.536 |
+| 16 | 0.123 | 0.127 | 0.385 | 0.390 |
+
+Slowest session's real-time factor; bold is the first count below 0.99.
+
+- **With traffic only two sessions keep 1x on this machine.** The current
+  `MAX_TRAFFIC_SESSIONS = 6` admits sessions that run here at about 0.46x. A
+  session with traffic costs about 15 ms per tick: `tick.actor` about 9 ms, plus
+  every second tick about 3 ms to build and 5 ms to commit its snapshot. That is
+  about 2.8 times a session without traffic (about 5.4 ms, most of it publication).
+- **Past one core, everything waits on the writer.** Once process CPU reaches 1.0
+  core, `writer.transaction` is busy for the whole window and `snapshot.commit`
+  grows from 5 ms to 100–750 ms, because ticks queue for the one writer thread.
+  Its parsing and validation need the GIL that the ticks are holding. Phase 1.2
+  and 1.3 reduce this, and the gateway's single writer in Phase 2 must be sized
+  against it.
+- **Request handling is small.** One client's `/snapshot` polls took 4–6 ms
+  each at one session and 40–50 ms under load, at most about 5% of a core. The
+  client received exactly the slowed traffic frame rate (7.3 frames a second at
+  0.73x), which is the slow motion users see.
+- Lateness p95 stays at about 15 ms while sessions keep up (Windows timer
+  granularity, see Scheduler profiling) and is pinned at the 250 ms backlog
+  limit once they don't.
+
+The no-traffic counts at 8 differ between the client-on and client-off columns
+(1.00 against 0.91). A same-day run in one long process measured 0.84 for the
+same client-off case. That is within run-to-run variation on this laptop, so
+compare changes with `--rounds` or `ab`, not with one run. Desktop and
+battery-power baselines are not yet recorded.
+
+### Session workers, 18 November 2026
+
+`--workers N` runs the sessions in N session worker processes behind the
+gateway (as `F9_SESSION_WORKERS=N`; `auto` as the backend chooses); the default
+`0` keeps the Phase 0 single-process mode. Trace, CPU and memory then cover every
+process, and admission by load is lifted for the case.
+
+```powershell
+& .\backend\.venv\Scripts\python.exe -m src.services.session_scaling run --output .tools/scaling-workers --sessions 1,2,4,8,12,16 --workers auto
+```
+
+One round per worker count, traffic and client on, same laptop and power as the
+Phase 0 baseline, source 698dc1e plus Phase 2. Evidence:
+`.tools/scaling-phase2-20261118/`. Every case completed with zero trace loss.
+
+| Sessions | 0 workers | 2 workers | 4 workers | auto (8 workers) |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 1.000 | 0.999 | 1.001 | 1.000 |
+| 2 | 0.998 | 1.000 | 1.000 | 0.998 |
+| 4 | **0.776** | 0.998 | 0.999 | 1.000 |
+| 8 | 0.354 | **0.646** | **0.827** | 0.999 |
+| 12 | 0.226 | 0.414 | 0.616 | **0.625** |
+| 16 | 0.146 | 0.258 | 0.447 | 0.550 |
+
+Slowest session's real-time factor; bold is the first count below 0.99.
+
+- **Sessions with traffic kept at 1x went from 2 to 8.** Process CPU now
+  reaches the worker count (4.1 cores with 4 workers, 8.3 with 8) instead of
+  stopping at 1.0.
+- **It does not scale linearly on this laptop.** A session's work per tick rose
+  from about 14 ms alone to 25 ms at 8 sessions on 8 workers and 40 ms at 8 on 4
+  workers. The Core Ultra 5 125H has 4 performance cores and 10 efficiency
+  cores, and shares one power budget across all of them, so the fifth and later
+  busy workers run slower. Admission measures each session's cost, so it adapts
+  to that; the 15 ms default only applies until sessions are measured. A desktop
+  with uniform cores should come closer to the plan's estimate.
+- **The writer is no longer the ceiling.** `writer.transaction` was busy 100%
+  of the window in one process from 4 sessions on; with workers it was at most
+  22% (16 sessions on 8 workers), because publications arrive already encoded.
+- **Requests got faster under load.** A client's `/snapshot` p50 was 35–40 ms
+  in one process with 2 or more sessions, and 2–6 ms with workers.
+- **One session:** work per tick 13.7 ms in one process, 13.6–14.7 ms with
+  workers; `snapshot.commit` grows by about 0.5 ms for the round trip to the
+  gateway. These are single rounds, within this laptop's run-to-run drift;
+  confirm a regression bound with `ab` rounds.
+- **Memory:** about 110 MiB in one process, plus about 70 MiB per worker: 866
+  MiB for 8 workers with 16 sessions, within the 2 GiB backend budget.
+- Lateness p95 stays at about 15 ms while sessions keep up (Windows timer
+  granularity), above the 10 ms target, as in Phase 0. The auto, 2-session case
+  had p95 150 ms in this round (RTF 0.998); it was not seen at other counts.
+
+### Native traffic engine, 18 November 2026
+
+Phase 4 of the plan makes each tick cheaper. A profile of one integrated session showed the background
+traffic as about four fifths of `tick.actor`: `CityTraffic.step` 49%, `plan_shuttle` 26%, and placing
+and checking the shuttles most of the rest. The traffic now has a native engine,
+`backend/native/traffic/traffic_core.cpp` (nanobind, already a dependency), which drives exactly as
+`src/traffic/city_traffic.py` does:
+
+- **Bit-identical.** It reproduces CPython's own float arithmetic where that is not the C library's
+  (`math.hypot`'s correctly rounded norm, float `%`, `** 2`, `sum`'s compensated summation, `math.atan2`'s
+  special cases), uses the same UCRT as CPython for `pow`, `atan2` and `acos`, and is compiled without
+  fused multiply-adds. Both engines give the same `state()`, frames and snapshots, and continue each
+  other's checkpoints, so switching engines changes no session hash. `test_native_traffic.py` checks
+  the arithmetic on random and edge inputs, the area's traffic over minutes of steps, hazards, pins and
+  signal faults, a whole session staged tick by tick through its first incident, checkpoints crossing
+  engines and threads stepping at once. `test_city_traffic.py` and `test_traffic_events.py` run on
+  both engines. Longer local checks (five more seeds, 8,000 staged ticks each, 4–5 incidents per
+  session) were identical too.
+- **Without the GIL.** Stepping the traffic, planning and placing shuttles, body checks, clearing and
+  frame packing release the GIL, so sessions sharing a process (or a session worker) overlap there.
+- **Cheap staging.** A staged copy shares the vehicles until one side steps, as the Python engine's
+  does; a copy is a few pointers, and the first step clones the vehicle array.
+- **Chosen per process.** `F9_NATIVE_TRAFFIC`: `auto` (default) uses the module when it is built from
+  the current `traffic_core.cpp` and its tuning constants match `city_traffic.py`'s, else Python, with
+  a log line saying why; `0` forces Python; `1` makes sessions fail to start without it. A module
+  built from older source is never used. A network whose junction ids are not integers is driven in
+  Python.
+- **Building.** `python Tools/build_native.py` (CMake and Visual Studio's C++ tools). `run_backend.py
+  --setup` tries it and carries on without it. The module links the C++ runtime statically, so the
+  bundled build's portable Python loads it on a machine without the Visual C++ redistributable.
+  `build_executable.py` builds it if needed and leaves it out of the bundle unless it is current, so
+  a bundle never carries a stale module. The built `_traffic_native*.pyd` is not committed.
+
+Change the driving in `city_traffic.py` and `traffic_core.cpp` together, then rebuild: until then the
+backend falls back to Python, and the parity tests fail.
+
+Interleaved A/B, two rounds each, of HEAD (Python traffic) against this change, traffic and client on,
+300-tick windows, same laptop on AC power. Evidence: `.tools/scaling-phase4-inprocess-20261118/` and
+`.tools/scaling-phase4-workers-20261118/`. Medians over rounds:
+
+| Sessions | Workers | Slowest RTF, Python / native | Lateness p95 ms | Work ms per session tick |
+| ---: | --- | --- | --- | --- |
+| 1 | 0 | 1.000 / 1.000 | 16.1 / 16.6 | 13.78 / 5.23 |
+| 4 | 0 | **0.813** / 0.999 | 250.0 / 16.2 | 49.18 / 6.50 |
+| 8 | 0 | 0.356 / 0.999 | 250.0 / 23.4 | 125.20 / 15.65 |
+| 16 | 0 | 0.158 / **0.568** | 250.0 / 250.0 | 297.90 / 81.28 |
+| 8 | auto (8) | 0.998 / 1.000 | 15.2 / 15.1 | 16.00 / 5.01 |
+| 12 | auto (8) | 0.998 / 0.999 | 22.7 / 15.9 | 18.22 / 5.59 |
+| 16 | auto (8) | 0.993 / 0.999 | 147.3 / 17.1 | 26.82 / 6.39 |
+
+- **One session costs 2.6 times less** (13.8 to 5.2 ms a tick; a traffic step alone went from 6 ms to
+  0.2 ms, 32 times faster).
+- **One process now keeps 8 sessions with traffic at 1x** instead of 2–4. Past that it is still
+  bound by the GIL on the Python part of the tick: 16 in one process used 1.2 cores and ran at 0.57x.
+  `MAX_TRAFFIC_SESSIONS` (6, for `F9_SESSION_WORKERS=0`) is left as it is, now conservative.
+- **With workers, 16 sessions with traffic keep 1x with room to spare:** p95 lateness 17 ms (147 ms
+  before), 0–2 missed deadlines in the window (3,400–7,135 before), and the workers used 1.4–2.2 cores
+  in all, where they used 7–8. The 16-session product cap is now the limit on this laptop, as
+  the plan expected of a desktop. The gateway's default estimate for a traffic session before it is
+  measured is 7 ms with the native engine (15 ms with Python).
+- Memory is unchanged: about 850–900 MiB for the gateway and eight workers with 16 sessions.
+- What remains of a tick is mostly Python: under a profiler, copying the actor to stage each tick
+  (`deepcopy` of the domain's Pydantic models and the actor's dicts) is now over half of it, ahead of
+  the native traffic. That, not the traffic, is the next thing to make cheaper.
+
+**Free-threaded CPython spike.** The plan's gate is wheels for the whole lock file. Checked on PyPI on
+18 November: every compiled package at its pinned version has a `cp314t` Windows wheel (numpy, pandas,
+pydantic-core, shapely, pyproj, pyogrio, Pillow, httptools, PyYAML, pymongo, charset-normalizer,
+websockets) except `watchfiles` 1.2.0, which only uvicorn's `--reload` uses. The rest are pure Python. So
+the gate is open apart from reload. The native module is built `FREE_THREADED` and locks the one cache
+sessions share (junction conflicts), so it is ready for 3.14t. Running the backend on 3.14t (installing
+it, a second dependency set, auditing shared state that relies on the GIL, and comparing threads with
+worker processes) has not been done. Phase 2's workers already give the cores, and this phase made
+them cheaper, so it is only worth doing to replace process plumbing.
 
 ## Process-crash recovery
 

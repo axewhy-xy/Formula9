@@ -28,6 +28,10 @@ This is the source of truth for how the traffic and the shuttles in it drive. Th
 CityTrafficDriving.cs and CityTrafficShuttles.cs remain only as a fallback, for a session whose backend
 sends no traffic frames: change the driving here, and port a change there only if the fallback should
 match.
+
+Sessions normally drive this same traffic natively (backend/native/traffic/traffic_core.cpp, chosen by
+src.traffic.native_traffic), which matches this module step for step and bit for bit: change the driving
+here and there together. tests/test_native_traffic.py fails until they agree again.
 """
 
 from __future__ import annotations
@@ -233,7 +237,7 @@ class Vehicle:
 class ShuttleRoute:
     """A shuttle's route as it drives it: its points, how far along each is, and its bends."""
 
-    __slots__ = ("points", "along", "length", "closed", "bends", "sig")
+    __slots__ = ("points", "along", "length", "closed", "bends", "sig", "native")
 
     def __init__(self, source):
         points = []
@@ -246,6 +250,8 @@ class ShuttleRoute:
         for a, b in zip(points, points[1:]):
             along.append(along[-1] + math.dist(a, b))
         self.points, self.along, self.length = points, along, along[-1]
+        # The native engine's copy of this geometry, made when that engine first drives on it
+        self.native = None
         self.closed = self.length > 0 and math.dist(points[0], points[-1]) < 1.0
         # Tells this geometry from another a route of the same name had, in a checkpoint as well
         self.sig = f"{len(points)}:{self.length!r}:{points[0]!r}:{points[-1]!r}"
@@ -257,6 +263,10 @@ class ShuttleRoute:
             degrees = angle_deg(bx - ax, by - ay, cx - bx, cy - by)
             if degrees >= SHUTTLE_BEND_DEG:
                 self.bends.append((along[i], degrees))
+
+    def __deepcopy__(self, memo) -> ShuttleRoute:
+        # Never changed once made, so a copy of a session shares it
+        return self
 
     def point(self, along: float) -> tuple[float, float]:
         if self.length <= 0:
@@ -542,36 +552,7 @@ class CityTraffic:
         """Replaces what traffic must keep off: (line, both ways) pairs, a one-way line running the way
         the traffic it holds up goes. Vehicles change their minds about roads they had not yet reached."""
         self._own_vehicles()
-        found: dict[int, list[tuple[float, float]]] = {}
-        for path, both_ways in hazards:
-            if len(path) < 2:
-                continue
-            overlaps: dict[Road, tuple[float, float]] = {}
-            length = line_length(path)
-            along = 0.0
-            while True:
-                x, y, hx, hy = line_at(path, along)
-                for road in self.network.near(x, y):
-                    distance, at, tx, ty = road.project(x, y)
-                    if distance > HAZARD_MATCH_M:
-                        continue
-                    alike = tx * hx + ty * hy
-                    if (abs(alike) if both_ways else alike) < HAZARD_PARALLEL:
-                        continue
-                    span = overlaps.get(road)
-                    overlaps[road] = (min(span[0], at), max(span[1], at)) if span else (at, at)
-                if along >= length:
-                    break
-                along = min(along + HAZARD_STEP_M, length)
-            for road, (start, end) in overlaps.items():
-                # Where a road only touches the line, as at a junction, it is not on it
-                if end - start < min(HAZARD_MIN_OVERLAP_M, min(road.length * 0.5, length * 0.8)):
-                    continue
-                if start < HAZARD_SNAP_M:
-                    start = 0.0
-                if road.length - end < HAZARD_SNAP_M:
-                    end = road.length
-                found.setdefault(road.index, []).append((start, end))
+        found = hazard_spans(self.network, hazards)
         self.hazards = found
         for vehicle in self.vehicles:
             for i, road in enumerate(vehicle.ahead):
@@ -1562,6 +1543,42 @@ class CityTraffic:
                         *body, vehicle.x, vehicle.y, vehicle.fx, vehicle.fy, vehicle.half, vehicle.half_width):
                     found.append((shuttle.id, vehicle.id))
         return found
+
+
+def hazard_spans(network: RoadNetwork, hazards: list[tuple[list[tuple[float, float]], bool]]) -> dict[int, list[tuple[float, float]]]:
+    """Where hazards (CityTraffic.set_hazards) close the network's roads: road index -> (from, to) spans
+    along it, in the order they were found."""
+    found: dict[int, list[tuple[float, float]]] = {}
+    for path, both_ways in hazards:
+        if len(path) < 2:
+            continue
+        overlaps: dict[Road, tuple[float, float]] = {}
+        length = line_length(path)
+        along = 0.0
+        while True:
+            x, y, hx, hy = line_at(path, along)
+            for road in network.near(x, y):
+                distance, at, tx, ty = road.project(x, y)
+                if distance > HAZARD_MATCH_M:
+                    continue
+                alike = tx * hx + ty * hy
+                if (abs(alike) if both_ways else alike) < HAZARD_PARALLEL:
+                    continue
+                span = overlaps.get(road)
+                overlaps[road] = (min(span[0], at), max(span[1], at)) if span else (at, at)
+            if along >= length:
+                break
+            along = min(along + HAZARD_STEP_M, length)
+        for road, (start, end) in overlaps.items():
+            # Where a road only touches the line, as at a junction, it is not on it
+            if end - start < min(HAZARD_MIN_OVERLAP_M, min(road.length * 0.5, length * 0.8)):
+                continue
+            if start < HAZARD_SNAP_M:
+                start = 0.0
+            if road.length - end < HAZARD_SNAP_M:
+                end = road.length
+            found.setdefault(road.index, []).append((start, end))
+    return found
 
 
 def unpack_frame(packed: bytes) -> list[tuple[int, int, int, int, int]]:

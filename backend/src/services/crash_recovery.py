@@ -237,7 +237,9 @@ def serve(database, output):
 
     def write_runtime(connection, sid, state):
         original_runtime(connection, sid, state)
-        if armed.get("fault") == "UNCOMMITTED_TICK" and state["tick"] > armed["tick"]:
+        # The store encodes a checkpoint before its writer takes it (training_store._EncodedRuntime)
+        tick = state["tick"] if isinstance(state, dict) else state.tick
+        if armed.get("fault") == "UNCOMMITTED_TICK" and tick > armed["tick"]:
             gate(transaction=connection)
 
     def apply(cid, *args, **kwargs):
