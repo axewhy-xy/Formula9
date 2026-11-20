@@ -75,6 +75,10 @@ namespace Formula9.UI
         private bool rerouting, awaitingError;
 
         private readonly List<Button> navButtons = new List<Button>();
+        // The Fleet List: its page (which remembers being collapsed), the panel it shares with the
+        // other pages, its header bar, and the map it floats over
+        private readonly VisualElement fleetPage, fleetPanel, fleetHeaderBar, mapArea;
+        private const float MapGapPoints = 8;
         // The incident last picked on the map; the Fleet List marks the shuttles it concerns
         public string SelectedIncident { get; private set; }
         public event Action IncidentSelected;
@@ -86,7 +90,6 @@ namespace Formula9.UI
             IncidentSelected?.Invoke();
         }
         private const int MaxLedgerEntries = 200;
-        public event Action <string> SectionChanged;
         // A page's index by its UXML name, or -1 when the layout leaves it out
         private int Page(string name) =>pageIndex.TryGetValue(name, out var index) ? index : -1;
         private int FleetPage => Page("page-fleet");
@@ -116,6 +119,15 @@ namespace Formula9.UI
             Bind(root, "follow-selected", () => world.FollowSelected());
             fleetCameras = Bind(root, "fleet-cameras", ToggleSelectedCameras);
             Bind(root, "camera-overview", () => world.Overview());
+            fleetPage = root.Q("fleet-page");
+            fleetPanel = root.Q("fleet-panel");
+            fleetHeaderBar = fleetPage?.Q(className: "fleet-panel-header");
+            mapArea = root.Q("world");
+            var fleetToggle = root.Q<Button>("fleet-toggle-btn");
+            if (fleetToggle != null) fleetToggle.clicked += ToggleFleetList;
+            // Whatever resizes the sheet or the map (the window, a header that wraps) fits them again
+            fleetPanel?.RegisterCallback<GeometryChangedEvent>(_ => FitMapToFleetList());
+            mapArea?.RegisterCallback<GeometryChangedEvent>(_ => FitMapToFleetList());
 
             shuttles = root.Q<DropdownField>("shuttles");
             shuttles.RegisterValueChangedCallback(change => { if (shuttleByChoice.TryGetValue(change.newValue ?? "", out var id)) ChooseShuttle(id); });
@@ -1035,15 +1047,48 @@ namespace Formula9.UI
                 pages[i].style.display = i == index ? DisplayStyle.Flex : DisplayStyle.None;
                 navButtons[i]?.EnableInClassList("nav-item-selected", i == index);
             }
-            // Only the Fleet page can be collapsed; every other page gets the whole panel.
-            var panel=pages[index].parent;
-            var fleetContainer=FleetPage>=0?pages[FleetPage].Q("fleet-page"):null;
-            panel.EnableInClassList("fleet-panel-collapsed",
-                index==FleetPage&&fleetContainer!=null&&fleetContainer.ClassListContains("collapsed"));
-            //the Fleet List floats over the bottom of the map; Route Planning stays beside it
-            panel.parent?.EnableInClassList("body-stacked",index==FleetPage);
-            // The top menu shows the page's section: Reports and Scenarios, or everything else
-            SectionChanged?.Invoke(index == ReportsPageIndex ? "reports" : index == ScenariosPageIndex ? "scenarios" : "operations");
+            LayOutFleetList();
+        }
+
+        // Collapses or expands the Fleet List. The Fleet page keeps the state, so it survives
+        // switching pages.
+        private void ToggleFleetList()
+        {
+            fleetPage?.ToggleInClassList("collapsed");
+            LayOutFleetList();
+        }
+
+        // The one place that decides where the Fleet List sits. On the Fleet page it floats over
+        // the bottom of the map and can be collapsed to its header bar; every other page gets the
+        // whole panel beside the map.
+        private void LayOutFleetList()
+        {
+            if (fleetPanel == null) return;
+            var onFleetPage = shownPage == FleetPage;
+            fleetPanel.EnableInClassList("fleet-panel-collapsed", onFleetPage && fleetPage != null && fleetPage.ClassListContains("collapsed"));
+            fleetPanel.parent?.EnableInClassList("body-stacked", onFleetPage);
+            FitMapToFleetList();
+        }
+
+        // Keeps the map usable under the Fleet List. The map ends just above the collapsed bar,
+        // measured rather than assumed, so a header that wraps on a narrow window still fits.
+        // While the list is expanded over the map, the map's bottom controls move up above it.
+        private void FitMapToFleetList()
+        {
+            if (fleetPanel == null || mapArea == null) return;
+            var stacked = fleetPanel.parent != null && fleetPanel.parent.ClassListContains("body-stacked");
+            if (!stacked)
+            {
+                mapArea.style.marginBottom = StyleKeyword.Null;
+                if (world != null) world.SetBottomInset(0);
+                return;
+            }
+            var panel = fleetPanel.resolvedStyle;
+            var bar = panel.paddingTop + panel.paddingBottom + panel.borderTopWidth + panel.borderBottomWidth + (fleetHeaderBar?.layout.height ?? 0);
+            if (!float.IsNaN(bar) && bar > 0) mapArea.style.marginBottom = bar + MapGapPoints;
+            // How far the sheet reaches up into the map; 0 or less while it is collapsed below it
+            var covered = mapArea.worldBound.yMax - fleetPanel.worldBound.yMin;
+            if (world != null) world.SetBottomInset(float.IsNaN(covered) ? 0 : covered);
         }
 
         // A refused start sends the trainee here to approve a detour first.

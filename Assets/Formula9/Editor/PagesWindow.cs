@@ -113,9 +113,11 @@ namespace Formula9.EditorTools
             var changed = Set(root.Q("login-host"), page.Host == null);
             changed |= Set(root.Q("training-host"), page.Host != null);
             foreach (var host in Hosts) changed |= Set(root.Q(host), host == page.Host);
-            // Only Fleet Overview has the map beside it; the other pages take the full width.
+            // Only Fleet Overview is previewed with the map; the other pages take the full width.
             changed |= Set(root.Q("view-bar"), page.Host == "page-fleet");
             changed |= Set(root.Q("world"), page.Host == "page-fleet");
+            // As at runtime, Fleet Overview's list floats over the bottom of the map
+            changed |= SetClass(root.Q(className: "body"), "body-stacked", page.Host == "page-fleet");
             foreach (var item in NavItems) root.Q(item)?.EnableInClassList("nav-item-selected", item == page.Nav);
             if (!changed) return;
             EditorApplication.QueuePlayerLoopUpdate();
@@ -127,6 +129,13 @@ namespace Formula9.EditorTools
             var display = visible ? DisplayStyle.Flex : DisplayStyle.None;
             if (element == null || element.style.display.value == display) return false;
             element.style.display = display;
+            return true;
+        }
+
+        private static bool SetClass(VisualElement element, string className, bool on)
+        {
+            if (element == null || element.ClassListContains(className) == on) return false;
+            element.EnableInClassList(className, on);
             return true;
         }
     }

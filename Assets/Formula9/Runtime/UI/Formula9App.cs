@@ -57,9 +57,9 @@ namespace Formula9.UI
         private Label dialogText;
         private Func<Task> dialogAction;
 
-        private VisualElement loginScreen, trainingScreen, fleet, confirmRow, fleetPanel, sessionPlayback;
+        private VisualElement loginScreen, trainingScreen, fleet, confirmRow, sessionPlayback;
         private TextField fleetSearch;
-        private VisualElement fleetEmpty, fleetHeader;
+        private VisualElement fleetEmpty, fleetHeader, fleetNoMatch;
         private Label fleetTitle;
         private Toggle remember;
         private Button viewMap, viewWorld;
@@ -137,8 +137,6 @@ namespace Formula9.UI
             world.EntitySelected += _ => { if (session.Store.Snapshot != null) RenderFleet(session.Store.Snapshot); };
             workspace = new TrainingWorkspace(GetComponent<UIDocument>().rootVisualElement, api, session, world, Run, text => ShowMessage(text));
             var rootElement = GetComponent<UIDocument>().rootVisualElement;
-            //every page, Scenarios included, is opened from the sidebar, which marks the page shown
-            workspace.ShowSection("operations");
             // A marker on the map opens Route Planning for the first shuttle still to be decided for there
             world.IncidentSelected += id => workspace.DecideForIncident(id);
             workspace.IncidentSelected += () => { if (session.Store.Snapshot != null) RenderFleet(session.Store.Snapshot); };
@@ -404,11 +402,15 @@ namespace Formula9.UI
             archive = root.Q<Button>("archive");
             sessionPlayback = root.Q("session-playback");
             refreshSessions = root.Q<Button>("refresh-sessions");
-            fleetPanel = root.Q("fleet-panel");
             fleetTitle = root.Q<Label>("fleet-title");
             fleetEmpty = root.Q("fleet-empty");
             fleetHeader = root.Q("fleet-table-header");
+            fleetNoMatch = root.Q("fleet-no-match");
             fleet.style.display = DisplayStyle.None;
+            // The list's scrollbar narrows the rows, so the column headings give up the same width
+            // on their right and stay over their columns
+            if (fleet is ScrollView fleetScroll)
+                fleetScroll.verticalScroller.RegisterCallback<GeometryChangedEvent>(_ => AlignFleetHeader(fleetScroll));
             fleetSearch = root.Q<TextField>("fleet-search");
             fleetSearch.textEdition.placeholder = "Search shuttle…";
             fleetSearch.RegisterValueChangedCallback(_ => { if (session.Store.Snapshot != null) RenderFleet(session.Store.Snapshot); });
@@ -471,41 +473,16 @@ namespace Formula9.UI
             clock.text = DateTime.Now.ToString("d MMM yyyy · HH:mm", CultureInfo.InvariantCulture);
             Render();
 
-            //toggle sidebar
+            // Toggle the sidebar between full width and icons only
             var toggleBtn = root.Q<Button>("nav-toggle-btn");
             var navPanel = root.Q("nav-panel");
             bool isCollapsed = false;
-            toggleBtn.clicked+=() =>
+            toggleBtn.clicked += () =>
             {
                 isCollapsed = !isCollapsed;
                 navPanel?.EnableInClassList("collapsed", isCollapsed);
             };
-            //toggle fleet: the Fleet page itself remembers it is collapsed, so switching pages keeps it
-            var fleetToggleBtn=root.Q<Button>("fleet-toggle-btn");
-            var fleetPage=root.Q("fleet-page");
-            if(fleetToggleBtn!=null&&fleetPage!=null)
-            {
-                fleetToggleBtn.clicked+=()=>
-                {
-                    fleetPage.ToggleInClassList("collapsed");
-                    SyncFleetPanelCollapse();
-                };
-            }
-        }
-
-        // -----------------------------------------------------------------------------------
-        // Function: SyncFleetPanelCollapse
-        // -----------------------------------------------------------------------------------
-        // Description:
-        //     This function shrinks the shared fleet panel to its header, but only while the Fleet
-        //     page is both showing and collapsed. Every other page gets the full panel.
-        //     TrainingWorkspace.ShowPage applies the same rule when it switches pages.
-        public void SyncFleetPanelCollapse()
-        {
-            var fleetHost=trainingScreen?.Q("page-fleet");
-            bool isFleetPageActive=fleetHost!=null&&fleetHost.style.display!=DisplayStyle.None;
-            bool isCollapsed=fleetHost?.Q("fleet-page")?.ClassListContains("collapsed")??false;
-            fleetPanel?.EnableInClassList("fleet-panel-collapsed",isFleetPageActive&&isCollapsed);
+            // The Fleet List's collapse toggle is TrainingWorkspace's, with the rest of its layout
         }
 
         // -----------------------------------------------------------------------------------
@@ -926,6 +903,7 @@ namespace Formula9.UI
                 fleet.Clear();
                 fleet.style.display = DisplayStyle.None;
                 fleetHeader.style.display = DisplayStyle.None;
+                fleetNoMatch.style.display = DisplayStyle.None;
                 fleetEmpty.style.display = DisplayStyle.Flex;
                 return;
             }
@@ -964,14 +942,14 @@ namespace Formula9.UI
         private void RenderFleet(FullSnapshot snapshot)
         {
             if (snapshot == null) return;
-            world?.SetIncidentEvents(session.Store.Events);
+            if (world != null) world.SetIncidentEvents(session.Store.Events);
             fleet.Clear();
             var rows = TrainingPresenter.Fleet(snapshot, workspace?.SelectedIncident);
             fleetEmpty.style.display = rows.Count == 0 ? DisplayStyle.Flex : DisplayStyle.None;
             fleet.style.display = rows.Count == 0 ? DisplayStyle.None : DisplayStyle.Flex;
-            fleetHeader.style.display = rows.Count == 0 ? DisplayStyle.None : DisplayStyle.Flex;
             fleetTitle.text = $"Fleet List ({rows.Count})";
             var search = fleetSearch.value.Trim();
+            var shown = 0;
 
             foreach (var row in rows)
             {
@@ -1040,7 +1018,27 @@ namespace Formula9.UI
 
                 card.Add(contentRow);
                 fleet.Add(card);
+                shown++;
             }
+            // The column header shows only over cards; a search that matches none says so instead
+            fleetHeader.style.display = shown > 0 ? DisplayStyle.Flex : DisplayStyle.None;
+            fleetNoMatch.style.display = rows.Count > 0 && shown == 0 ? DisplayStyle.Flex : DisplayStyle.None;
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: AlignFleetHeader
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function keeps the Fleet List's column headings over their columns: while the
+        //     list shows its scrollbar, the heading row is as much narrower as the rows are.
+        //
+        // Args:
+        //     list (ScrollView): The Fleet List.
+        private void AlignFleetHeader(ScrollView list)
+        {
+            var scroller = list.verticalScroller;
+            var width = scroller.resolvedStyle.display == DisplayStyle.None ? 0 : scroller.layout.width;
+            fleetHeader.style.marginRight = float.IsNaN(width) ? 0 : width;
         }
 
         // -----------------------------------------------------------------------------------

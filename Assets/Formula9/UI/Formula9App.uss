@@ -416,15 +416,6 @@
 /* 3D loading/failure notice; empty otherwise, it still pushes the Fleet List toggle to the right. */
 .world-notice { flex-grow: 1; flex-shrink: 1; min-width: 0; margin: 0 8px; white-space: normal; font-size: 12px; color: rgb(74, 93, 97); }
 
-.app Button.segment-round {
-    height: 40px;
-    margin: 0;
-    color: rgb(15, 76, 92);
-    background-color: rgb(232, 243, 243);
-    border-color: rgb(31, 122, 122);
-    border-radius: 20px;
-}
-
 /* Map and page side by side (Route Planning); on the Fleet page the list floats over the map (body-stacked). */
 .body { flex-grow: 1; flex-direction: row; min-height: 0; }
 .body.body-stacked { flex-direction: column; }
@@ -456,8 +447,8 @@
 
 /* Fleet page: the Fleet List is a sheet over the bottom of the map. Collapsed, it is just its bar,
    which sits in the space the map leaves below itself, so it hides nothing. Expanded, it rises over
-   the map. The map's bottom margin = the collapsed bar's height (12px padding x2 + 36px header +
-   2px border = 62px) + an 8px gap. */
+   the map, and the map's bottom controls move up above it. TrainingWorkspace.FitMapToFleetList
+   sets the map's bottom margin from the bar's measured height; 70px is only the starting value. */
 .body-stacked .world { margin-right: 0; margin-bottom: 70px; }
 .body-stacked .fleet-panel {
     position: absolute;
@@ -478,7 +469,7 @@
     align-items: center;
     flex-shrink: 0;
     margin-bottom: 4px;
-    padding: 6px 11px; /* matches a card's 10px padding + 1px border so the columns line up */
+    padding: 6px 15px; /* matches a card's 14px side padding + 1px border so the columns line up */
     border-radius: 6px;
     background-color: rgb(15, 76, 92);
 }
@@ -553,7 +544,9 @@
 .data-table .row { flex-wrap: nowrap; align-items: stretch; margin-bottom: 0; }
 
 .panel-title { font-size: 17px; -unity-font-style: bold; margin-bottom: 8px; flex-shrink: 0; }
-.fleet-search { flex-shrink: 0; margin: 0 0 8px 0; }
+/* The search box gives way first when the header is narrow, down to 100px */
+.fleet-search { flex-grow: 0; flex-shrink: 1; flex-basis: 200px; min-width: 100px; margin: 0 8px 0 0; }
+.fleet-no-match { padding: 16px 4px; color: rgb(92, 107, 112); }
 .fleet { flex-grow: 1;flex-basis:0; min-height: 0; }
 
 .map-controls { position: absolute; right: 8px; bottom: 8px; width: 38px; }
@@ -599,6 +592,9 @@
     border-width: 0;
     background-color: rgba(0, 0, 0, 0);
 }
+.app Button.map-legend-title { flex-shrink: 0; }
+/* The rows shrink to the legend's height and scroll when FleetMap.SetBottomInset caps it */
+.map-legend-rows { flex-shrink: 1; min-height: 0; }
 .map-legend-row { flex-direction: row; align-items: center; margin-bottom: 3px; }
 .map-legend-key { width: 26px; align-items: center; justify-content: center; }
 .map-legend-row Label { font-size: 12px; color: rgb(30, 42, 46); }
@@ -729,8 +725,12 @@
     transition: rotate 0.2s ease;
 }
 
-/* fixed height and no wrapping, so the collapsed bar is always the 62px the map leaves room for */
-.fleet-panel-header { justify-content: space-between; align-items: center; flex-wrap: nowrap; height: 36px; margin-bottom: 8px; }
+/* Title on the left, search and buttons on the right. On a narrow window the search box shrinks,
+   then the tools wrap onto a second line; the map's margin follows the bar's measured height. */
+.fleet-panel-header { justify-content: space-between; align-items: center; flex-wrap: wrap; min-height: 36px; margin-bottom: 8px; }
+.fleet-header-title { flex-direction: row; align-items: center; flex-shrink: 0; margin-right: 12px; }
+.fleet-header-tools { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-end; flex-grow: 1; flex-shrink: 1; min-width: 0; }
+.fleet-header-tools Button { flex-shrink: 0; height: 30px; font-size: 11px; margin: 2px 4px 2px 0; }
 
 /* Fleet Overview Container Scoped Collapse (Only affects the Fleet page) */
 .workspace-page.fleet-overview-container {
@@ -1006,7 +1006,7 @@
     background-color: rgba(15, 30, 38, 0.85);
 }
 /* Shuttle cameras: they cover the whole 3D view, one camera large with the rest as thumbnails in a
-   foldable rail over its top-right corner (kept high so the Fleet List sheet does not cover it). */
+   foldable rail over its top-left corner (kept high so the Fleet List sheet does not cover it). */
 .camera-panel {
     position: absolute;
     left: 0;
@@ -1020,11 +1020,13 @@
     flex-grow: 1;
     -unity-background-scale-mode: scale-and-crop;
 }
+/* Top-left, under the large camera's name label: incident notifications use the top-right corner */
 .camera-rail {
     position: absolute;
-    top: 10px;
-    right: 10px;
-    align-items: flex-end;
+    top: 44px;
+    left: 10px;
+    bottom: 10px; /* WorldView.SetBottomInset raises it above the expanded Fleet List */
+    align-items: flex-start;
 }
 .app Button.camera-rail-toggle {
     height: 28px;
@@ -1040,7 +1042,8 @@
 .app Button.camera-rail-toggle:hover { background-color: rgba(15, 76, 92, 0.95); }
 .camera-strip {
     flex-direction: column;
-    flex-shrink: 0;
+    flex-shrink: 1; /* shrinks to the rail's height and scrolls */
+    min-height: 0;
     padding: 6px 6px 0 6px;
     border-radius: 8px;
     background-color: rgba(15, 30, 38, 0.85);
