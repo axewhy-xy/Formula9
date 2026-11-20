@@ -1361,6 +1361,10 @@ namespace Formula9.Contracts
     /// <summary>One traffic step. vehicles is base64 of vehicle_count records of 14 bytes, little-endian: uint16</summary>
     public sealed partial class StreamTrafficFrame
     {
+        [JsonProperty("pedestrian_count", Required = Required.Default)]
+        public long PedestrianCount { get; set; } = 0;
+        [JsonProperty("pedestrians", Required = Required.Default)]
+        public string Pedestrians { get; set; } = "";
         [JsonProperty("shuttles", Required = Required.Always)]
         public List<StreamTrafficShuttle> Shuttles { get; set; }
         [JsonProperty("signal_faults", Required = Required.Default)]

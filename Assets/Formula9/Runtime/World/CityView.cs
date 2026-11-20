@@ -98,10 +98,13 @@ namespace Formula9.World
         private List<CityBuilding> buildings;
         private Mesh buildingMesh;
         private CityTrafficRenderer traffic;
-        // People walking the sidewalks: the walk network from the walkways file, walked here, and drawn as a crowd.
-        // The network comes with the sidewalks and the lights with the traffic, so the walkers start once both have.
+        // People walking the sidewalks, drawn as a crowd: where the backend's traffic frames put them while
+        // they carry any (the backend walks them, and its traffic gives way to them), otherwise walking the
+        // walk network from the walkways file here. The network comes with the sidewalks and the lights with
+        // the traffic, so the walkers here start once both have.
         private PedestrianCrowd pedestrianCrowd;
         private PedestrianLocalSim pedestrians;
+        private PedestrianFollow pedestrianFollow;
         private CityWalkwayData walkNetwork;
         private CitySignalData pedestrianSignals;
         private bool pedestrianSignalsKnown;
@@ -163,6 +166,7 @@ namespace Formula9.World
                 pedestrianCrowd = new PedestrianCrowd();
                 pedestrians = new PedestrianLocalSim();
                 pedestrians.SetSignalClock(() => traffic != null ? traffic.SignalClockS : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0);
+                pedestrianFollow = new PedestrianFollow();
             }
             if (tiles != null) tiles.TileLoaded += RefreshTiles;
         }
@@ -461,6 +465,7 @@ namespace Formula9.World
                 var surfaceBuild = Task.Run(() => SidewalkSurface.Build(data), cancellation);
                 // The walkers' network comes in the same file: nothing to work out here, only to read
                 walkNetwork = data;
+                pedestrianFollow?.SetSeeds(data);
                 RebuildPedestrians();
 
                 var materials = SidewalkMaterials(shader, grain);
@@ -499,6 +504,7 @@ namespace Formula9.World
                     light.transform.position = new Vector3(at.x, GroundAt(new Vector2(at.x, at.z)), at.z);
                 }
                 pedestrians?.SetGroundHeight(at => sidewalkSurface.HeightOr(at, RoadMesh.SurfaceY));
+                pedestrianFollow?.SetGroundHeight(at => sidewalkSurface.HeightOr(at, RoadMesh.SurfaceY));
                 Debug.Log($"[CityView] Sidewalks: {SidewalkTileCount} tiles, {surface.TriangleCount} paved triangles " +
                     $"(walkways {data.SourceHash}).");
             }
@@ -1158,7 +1164,9 @@ namespace Formula9.World
             {
                 // The backend keeps the traffic off its hazards and away from the shuttles
                 traffic.Advance(deltaTime);
-                pedestrians?.Tick(pedestrianDelta);
+                // And walks the pedestrians, if it sends any, on the same clock as the traffic
+                if (pedestrianFollow != null && pedestrianFollow.Active) pedestrianFollow.Advance(traffic.FollowedS);
+                else pedestrians?.Tick(pedestrianDelta);
                 return;
             }
             deltaTime = running ? deltaTime : 0;
@@ -1183,8 +1191,12 @@ namespace Formula9.World
         public void DrawTraffic(IReadOnlyList<Camera> cameras)
         {
             traffic?.Draw(cameras);
-            if (pedestrians != null) pedestrianCrowd?.Draw(pedestrians.Poses, cameras);
+            if (FollowsBackendPedestrians) pedestrianCrowd?.Draw(pedestrianFollow.Poses, cameras);
+            else if (pedestrians != null) pedestrianCrowd?.Draw(pedestrians.Poses, cameras);
         }
+
+        // True while the backend's traffic frames carry the pedestrians, and they are drawn from there.
+        public bool FollowsBackendPedestrians => pedestrianFollow != null && pedestrianFollow.Active && FollowsBackendTraffic;
 
         // Called each frame: a shuttle is where the backend's traffic frames put its body; without them,
         // one on its route is where the traffic here drove it, and any other glides between the
@@ -1210,11 +1222,19 @@ namespace Formula9.World
         public void ResetShuttles() => traffic?.ResetShuttles();
 
         // The backend's latest traffic frames, which then draw the traffic and the shuttles' bodies.
-        public void ShowTraffic(IReadOnlyList<TrafficFrame> frames) => traffic?.FollowBackend(frames);
+        public void ShowTraffic(IReadOnlyList<TrafficFrame> frames)
+        {
+            traffic?.FollowBackend(frames);
+            pedestrianFollow?.Add(frames);
+        }
 
         // Forgets the backend's traffic frames, as for another session: until more come, the traffic
-        // here drives itself.
-        public void ForgetTraffic() => traffic?.ForgetBackend();
+        // here drives itself, and the walkers here walk.
+        public void ForgetTraffic()
+        {
+            traffic?.ForgetBackend();
+            pedestrianFollow?.Forget();
+        }
 
         // True while the backend's traffic frames draw the traffic.
         public bool FollowsBackendTraffic => traffic != null && traffic.FollowsBackend;
@@ -1252,6 +1272,8 @@ namespace Formula9.World
             traffic = null;
             pedestrians?.Clear();
             pedestrians = null;
+            pedestrianFollow?.Forget();
+            pedestrianFollow = null;
             pedestrianCrowd?.Dispose();
             pedestrianCrowd = null;
             if (root != null) WorldBuilder.Remove(root.gameObject);

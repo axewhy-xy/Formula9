@@ -155,8 +155,12 @@ async def traffic(session_id: str, after_tick: Annotated[int, Query(ge=-1)] = -1
     index in /api/traffic/{area}'s vehicles, int32 x cm, int32 y cm, int16 heading in tenths of a degree
     anticlockwise from east, uint16 speed cm/s); each shuttle's body: its middle, heading and speed; and
     signal_faults, each junction a signal fault has stuck on red ({junction_id, mode, until_s}). A world
-    event's pinned vehicles are among the vehicles, standing still. Presentation only; the snapshot stays
-    the authority on where a shuttle is along its route.
+    event's pinned vehicles are among the vehicles, standing still. With pedestrians (F9_PEDESTRIANS),
+    pedestrian_count walkers, base64 of 14 bytes each, little-endian (uint16 index in the walkways file's
+    seeds, int32 x cm, int32 y cm, int16 heading in tenths of a degree, uint8 speed in 2 cm/s, uint8 flags:
+    1 waiting at a kerb, 2 on a crossing's road part, 4 on a kerb ramp, 8 standing a while); without, the
+    two are left out. Presentation only; the snapshot stays the authority on where a shuttle is along its
+    route.
     """
     frames = await service.wait_for_traffic(session_id, after_tick, wait_ms / 1000)
     return Response(content='{"session_id":%s,"frames":[%s]}' % (json.dumps(session_id), ",".join(frames)),

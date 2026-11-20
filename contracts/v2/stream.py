@@ -51,13 +51,20 @@ class StreamSignalFault(StreamModel):
 class StreamTrafficFrame(StreamModel):
     """One traffic step. vehicles is base64 of vehicle_count records of 14 bytes, little-endian: uint16
     index in /api/traffic/{area}'s vehicles, int32 x cm, int32 y cm, int16 heading in tenths of a degree
-    anticlockwise from east, uint16 speed cm/s. Presentation only; the snapshot is the authority."""
+    anticlockwise from east, uint16 speed cm/s. pedestrians (2.x, optional) is base64 of pedestrian_count
+    records of 14 bytes, little-endian: uint16 index in /api/road-features/{area}/walkways's seeds, int32 x
+    cm, int32 y cm, int16 heading in tenths of a degree anticlockwise from east, uint8 speed in units of
+    2 cm/s, uint8 flags (bit 0 waiting at a kerb, bit 1 on a crossing's road part, bit 2 on a kerb ramp,
+    bit 3 standing a while); a frame from a backend that walks none has neither. Presentation only; the
+    snapshot is the authority."""
     tick: Annotated[int, Field(ge=0)]
     simulation_time_s: FiniteFloat
     vehicle_count: Annotated[int, Field(ge=0)]
     vehicles: str
     shuttles: list[StreamTrafficShuttle]
     signal_faults: list[StreamSignalFault] = Field(default_factory=list)
+    pedestrian_count: Annotated[int, Field(ge=0)] = 0
+    pedestrians: str = ""
 
 
 class StreamSnapshot(StreamModel):

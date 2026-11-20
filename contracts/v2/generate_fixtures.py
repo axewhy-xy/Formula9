@@ -282,7 +282,9 @@ stream_adapter = TypeAdapter(StreamMessage)
 stream_frame = {"tick": 200, "simulation_time_s": 10.0, "vehicle_count": 1,
                 "vehicles": "AwCwBAAAPv7//4QD6AM=",
                 "shuttles": [{"vehicle_id": "shuttle-01", "x_m": 1.5, "y_m": -2.0, "heading_deg": 90.0, "speed_mps": 4.2}],
-                "signal_faults": [{"junction_id": "junction-1", "mode": "STUCK_RED", "until_s": 40.0}]}
+                "signal_faults": [{"junction_id": "junction-1", "mode": "STUCK_RED", "until_s": 40.0}],
+                # One walker: seed 3 at (12.34, -5.00) m heading 90 degrees at 1.3 m/s, waiting at a kerb
+                "pedestrian_count": 1, "pedestrians": "AwDSBAAADP7//4QDQQE="}
 stream_messages = [
     {"type": "snapshot", "session_id": "session-001", "snapshot": snapshot},
     {"type": "traffic", "session_id": "session-001", "frames": [stream_frame]},

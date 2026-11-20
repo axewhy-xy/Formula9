@@ -362,6 +362,8 @@
     {
       "frames": [
         {
+          "pedestrian_count": 1,
+          "pedestrians": "AwDSBAAADP7//4QDQQE=",
           "shuttles": [
             {
               "heading_deg": 90.0,

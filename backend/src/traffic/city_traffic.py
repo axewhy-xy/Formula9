@@ -20,6 +20,13 @@ pins vehicles dead in their lane (pin_vehicle), and a signal fault sticks a junc
 and a shuttle meets the queue as any vehicle does. The usual jam release still applies, except to the
 pinned vehicles themselves, which stay until their event clears.
 
+With F9_PEDESTRIANS on, pedestrians walk in it too (phase 3 of sidewalks_plan.md): the walkers of the
+area's walkways file, on the walk network src.traffic.walk_network reads from it. They step off a kerb
+only when they may (on the red of the traffic they cross, over a zebra, or into a gap where they have no
+priority) and never in front of anything that could not stop for them; the vehicles and the shuttles stop
+for a crossing a walker is on, and at a zebra for one waiting if they comfortably can. Only this engine
+walks them so far; src.traffic.native_traffic drives in Python while they are on.
+
 Everything is deterministic: the same session from the same state drives the same way, and state() and
 from_state() carry it through a checkpoint exactly. Unity's float arithmetic is not reproduced, so the
 two never ran in lockstep; the client now draws this traffic instead of driving its own.
@@ -41,9 +48,10 @@ import math
 import struct
 from copy import deepcopy
 
-from src.traffic import signal_cycle
+from src.traffic import signal_cycle, walk_network as walk_network_module
 from src.traffic.road_network import LANE_WIDTH_M, Road, RoadNetwork, angle_deg, class_weight, inverse_lerp, lerp, \
     road_network
+from src.traffic.walk_network import SIGNAL, UNCONTROLLED, WALKER_HALF_M, ZEBRA, Crossing, WalkNetwork, Walkway
 
 # How far ahead a vehicle has chosen its roads
 PLAN_AHEAD_M = 80.0
@@ -111,6 +119,54 @@ PINNED_PASS_MPS = 2.5
 # parsing thousands of JSON numbers ten times a second.
 FRAME_RECORD = struct.Struct("<HiihH")
 _INT32 = 2**31 - 1
+
+# ---- Pedestrians (src.traffic.walk_network), walked only while F9_PEDESTRIANS is on
+# How a walker speeds up and slows down, and how far behind the one in front of it it keeps
+WALKER_ACCEL, WALKER_DECEL = 1.0, 4.0
+WALKER_GAP_M, WALKER_REACTION_S = 0.8, 1.0
+# Walkers keep to sub-lanes this wide on their own (left) side of a walkway, clear of its edge, and move
+# across between them this fast
+SUBLANE_M, WALKWAY_EDGE_M, WALKER_ASIDE_MPS = 0.75, 0.2, 0.6
+# A walker this much slower than the one behind it, this close ahead, is passed in another sub-lane clear
+# this far either way
+OVERTAKE_SLOWER_MPS, OVERTAKE_NEAR_M, OVERTAKE_CLEAR_M = 0.2, 3.0, 2.0
+# How far ahead a walker has chosen its walkways
+WALK_PLAN_M, MAX_PLANNED_WALKWAYS = 15.0, 3
+# Now and then a walker stands for a while at a node
+PAUSE_CHANCE, PAUSE_MIN_S, PAUSE_MAX_S = 0.04, 0.8, 3.4
+# After a crossing, a walker walks this many sidewalks first before it wants another; with one to take
+# and a sidewalk too, it takes the crossing this often
+CROSSINGS_DUE_MIN, CROSSINGS_DUE_MAX, TAKE_CROSSING_CHANCE = 4, 12, 0.6
+# A walker waits this far short of the kerb, clear of the mirrors of the kerb lane, and makes up its mind
+# within this much of there; let on, it walks on until this far past the far kerb whoever is in its way
+KERB_WAIT_BACK_M, DECIDE_M, CLEAR_OF_ROAD_M = 0.6, 0.5, 1.0
+# Off the kerb on a red only with this much of it to spare after getting over
+SIGNAL_SAFETY_BUFFER_S = 0.45
+# No vehicle that cannot stop may reach the crossing until this long after the walker is over it
+WALK_CLEAR_S = 1.0
+# How far back along the roads leading to a crossing a walker looks for traffic coming
+WALKER_LOOK_M = 60.0
+# A vehicle held at a zebra this long has the walkers who have not stepped off yet hold back this long
+ZEBRA_COURTESY_S, ZEBRA_RELEASE_S = 8.0, 4.0
+# Kept waiting at a kerb this long, a walker gives up and turns back
+KERB_GIVE_UP_S = 120.0
+# A vehicle whose front is this far into a crossing's band goes on through it rather than stop on it
+CROSSING_ENTERED_M = 1.0
+# A vehicle standing this close short of a crossing that holds it is being held by it
+CROSSING_HELD_M = 5.0
+# A shuttle's body is stepped back this much at a time until it is short of a crossing it stops for
+SHUTTLE_BODY_STEP_M = 0.5
+# A walker this far either side of a kerb is on its ramp
+RAMP_DEPTH_M = 1.5
+# What a walker is doing: walking, waiting at a kerb, let onto a crossing, or standing a while
+WALKING, WAITING_AT_KERB, ON_CROSSING, PAUSED = 0, 1, 2, 3
+# Bits of a walker's flags in a frame
+WAITING_FLAG, ON_ROAD_FLAG, RAMP_FLAG, PAUSED_FLAG = 1, 2, 4, 8
+# One walker of a frame, little-endian: its index in the walkways file's seeds (uint16), x and y in
+# centimetres (int32), its heading in tenths of a degree anticlockwise from east (int16), its speed in
+# units of 2 cm/s (uint8) and its flags (uint8). 14 bytes a walker, as a vehicle is.
+PED_RECORD = struct.Struct("<HiihBB")
+_CELL_M = 20.0
 
 _PHASE_S, _CYCLE_S, _GREEN_S, _AMBER_S = signal_cycle.PHASE_S, signal_cycle.CYCLE_S, signal_cycle.GREEN_S, \
     signal_cycle.GREEN_S + signal_cycle.YELLOW_S
@@ -232,6 +288,31 @@ class Vehicle:
             if claim.from_r is road and not claim.entered:
                 return True
         return False
+
+
+class Walker:
+    """One pedestrian of the walkways file's seeds: where along which walkway it is, in which sub-lane, how
+    fast it walks and where it means to go. granted is the crossing walkway it has been let onto, if any."""
+
+    __slots__ = ("slot", "seed", "id", "rng", "way", "distance", "sublane", "aside", "speed", "target", "desired",
+                 "state", "wait_s", "kerb_wait_s", "crossings_due", "granted", "ahead", "lane_index",
+                 "x", "y", "fx", "fy")
+
+    def clone(self) -> Walker:
+        c = Walker.__new__(Walker)
+        c.slot, c.seed, c.id, c.rng, c.way, c.distance, c.sublane, c.aside = \
+            self.slot, self.seed, self.id, self.rng, self.way, self.distance, self.sublane, self.aside
+        c.speed, c.target, c.desired, c.state, c.wait_s, c.kerb_wait_s, c.crossings_due, c.granted = \
+            self.speed, self.target, self.desired, self.state, self.wait_s, self.kerb_wait_s, self.crossings_due, self.granted
+        c.lane_index, c.x, c.y, c.fx, c.fy = self.lane_index, self.x, self.y, self.fx, self.fy
+        c.ahead = self.ahead[:]
+        return c
+
+
+def walker_aside(way: Walkway, sublane: int) -> float:
+    """How far left of a walkway's middle a walker in this sub-lane of its own side walks."""
+    lane = min(max(sublane, 0), way.mine - 1)
+    return min(SUBLANE_M * (0.5 + lane), max(0.0, way.width / 2 - WALKWAY_EDGE_M))
 
 
 class ShuttleRoute:
@@ -375,8 +456,23 @@ class ShuttlePlan:
 class CityTraffic:
     """One session's background traffic, and its shuttles as the traffic sees them."""
 
-    def __init__(self, network: RoadNetwork):
+    def __init__(self, network: RoadNetwork, walks: WalkNetwork | None = None):
         self.network = network
+        # The walk network its pedestrians walk, or None without pedestrians
+        self.walks = walks
+        self.walkers: list[Walker] = []
+        # Crossings a walker has been let onto, and zebras a walker waits at, as the last step left them
+        self._occupied: set[int] = set()
+        self._claimed: set[int] = set()
+        # Zebras a vehicle has stood at for a walker, for how long (crossing index -> s), and zebras whose
+        # walkers hold back for the traffic until a time (crossing index -> s)
+        self.crossing_waits: dict[int, float] = {}
+        self.crossing_releases: dict[int, float] = {}
+        self._held: set[int] = set()
+        self._walk_lanes: dict[int, list[Walker]] = {}
+        self._vehicle_cells: dict[tuple[int, int], list[Vehicle]] | None = None
+        self._by_road = None
+        self._owns_walkers = True
         self.time_s = 0.0
         self.vehicles: list[Vehicle] = []
         self.shuttles: dict[str, Shuttle] = {}
@@ -403,20 +499,62 @@ class CityTraffic:
     # ---------------------------------------------------------------- building and copying
 
     @classmethod
-    def start(cls, area: str) -> CityTraffic | None:
-        """The area's sample, where its prepared file places it, or None with no prepared file."""
+    def start(cls, area: str, pedestrians: bool | None = None) -> CityTraffic | None:
+        """The area's sample, where its prepared file places it, or None with no prepared file. With
+        pedestrians (by default as F9_PEDESTRIANS says), the walkers of its walkways file walk too."""
         network = road_network(area)
-        return None if network is None else cls.on(network)
+        if network is None:
+            return None
+        if pedestrians is None:
+            pedestrians = walk_network_module.enabled()
+        return cls.on(network, walk_network_module.walk_network(area) if pedestrians else None)
 
     @classmethod
-    def on(cls, network: RoadNetwork) -> CityTraffic:
-        """A network's sample, where its seeds place it."""
-        traffic = cls(network)
+    def on(cls, network: RoadNetwork, walks: WalkNetwork | None = None) -> CityTraffic:
+        """A network's sample, where its seeds place it, and a walk network's walkers where theirs do."""
+        traffic = cls(network, walks)
         for slot, seed in enumerate(network.seeds):
             traffic._add(slot, seed)
         for vehicle in traffic.vehicles:
             traffic._pose(vehicle)
+        if walks is not None:
+            for seed in walks.seeds:
+                traffic._add_walker(seed)
+            if traffic.walkers:
+                traffic._by_road = walks.by_road
         return traffic
+
+    def _add_walker(self, seed: tuple) -> None:
+        index, walker_id, way, distance, speed, _, _ = seed
+        walker = Walker.__new__(Walker)
+        walker.slot = len(self.walkers)
+        walker.seed = index
+        walker.id = walker_id
+        walker.rng = rng_step(fnv_hash(walker_id))
+        # A crossing is no place to start: from its walking line, before the kerb
+        if way.crossing is not None:
+            distance = 0.0
+        # Half walk their walkway the other way
+        if random01(walker.rng) < 0.5:
+            way = self.walks.ways[way.back]
+            distance = way.length - distance
+        walker.way = way
+        walker.distance = min(max(distance, 0.0), way.length)
+        walker.rng = rng_step(walker.rng)
+        walker.sublane = min(int(random01(walker.rng) * way.mine), way.mine - 1)
+        walker.aside = walker_aside(way, walker.sublane)
+        walker.desired = walker.speed = walker.target = speed
+        walker.state = WALKING
+        walker.wait_s = walker.kerb_wait_s = 0.0
+        walker.rng = rng_step(walker.rng)
+        walker.crossings_due = int(random01(walker.rng) * 8)
+        walker.granted = -1
+        walker.ahead = []
+        walker.lane_index = 0
+        walker.x = walker.y = walker.fx = walker.fy = 0.0
+        self.walkers.append(walker)
+        self._plan_walk(walker)
+        self._pose_walker(walker)
 
     def _add(self, slot: int, seed: dict) -> None:
         model = self.network.models.get(seed.get("model") or "")
@@ -466,6 +604,11 @@ class CityTraffic:
         copy.hazards = {road: spans[:] for road, spans in self.hazards.items()}
         copy.pins, copy.signal_faults, copy._pinned = dict(self.pins), dict(self.signal_faults), set(self._pinned)
         copy._lanes, copy._filled, copy._requests, copy._asked, copy._look, copy._bodies = {}, [], {}, [], [], []
+        # The walkers are shared as the vehicles are, until either steps
+        self._owns_walkers = copy._owns_walkers = False
+        copy._occupied, copy._claimed, copy._held = set(self._occupied), set(self._claimed), set()
+        copy.crossing_waits, copy.crossing_releases = dict(self.crossing_waits), dict(self.crossing_releases)
+        copy._walk_lanes, copy._vehicle_cells = {}, None
         # Keyed by the actor's own waypoint lists, which the same deepcopy copies: keep them the same objects
         copy._shuttle_routes = {key: (deepcopy(waypoints, memo), route)
                                 for key, (waypoints, route) in self._shuttle_routes.items()}
@@ -487,8 +630,28 @@ class CityTraffic:
         self._lanes, self._filled = {}, []
         self._owns_vehicles = True
 
+    def _own_walkers(self) -> None:
+        """As _own_vehicles, for the walkers."""
+        if self._owns_walkers:
+            return
+        self.walkers = [walker.clone() for walker in self.walkers]
+        self._walk_lanes = {}
+        self._owns_walkers = True
+
     def state(self) -> dict:
         """Everything a checkpoint needs to carry on exactly as this would."""
+        state = self._vehicle_state()
+        if self.walks is not None:
+            # Only with pedestrians, so a checkpoint without them is as it always was
+            state["walk_source"] = self.walks.source_hash
+            state["walkers"] = [[w.way.index, w.distance, w.sublane, w.aside, w.speed, w.state, w.wait_s, w.kerb_wait_s,
+                                 w.rng, w.crossings_due, w.granted, [way.index for way in w.ahead]] for w in self.walkers]
+            state["crossings"] = [sorted(self._occupied), sorted(self._claimed),
+                                  [[index, s] for index, s in self.crossing_waits.items()],
+                                  [[index, until] for index, until in self.crossing_releases.items()]]
+        return state
+
+    def _vehicle_state(self) -> dict:
         return {
             "area": self.network.area, "time_s": self.time_s, "red_light_runs": self.red_light_runs,
             "vehicles": [[v.road.index, v.lane, v.distance, v.speed, v.stopped_s, v.wait_s, v.aside, int(v.outside),
@@ -504,9 +667,15 @@ class CityTraffic:
         }
 
     @classmethod
-    def from_state(cls, state: dict, network: RoadNetwork | None = None) -> CityTraffic:
-        """Traffic as state() left it, on its area's network or the one given."""
-        traffic = cls.on(network) if network is not None else cls.start(state["area"])
+    def from_state(cls, state: dict, network: RoadNetwork | None = None, walks: WalkNetwork | None = None) -> CityTraffic:
+        """Traffic as state() left it, on its area's network or the one given. Its walkers, if it walks
+        any, as the checkpoint left them; from where their seeds place them if it has none of them (a
+        checkpoint from before pedestrians), and a checkpoint's walkers are let go by traffic without. On
+        its area's network, a checkpoint with walkers walks them on, whatever F9_PEDESTRIANS now says."""
+        traffic = cls.on(network, walks) if network is not None else \
+            cls.start(state["area"], pedestrians=True if "walkers" in state else None)
+        if traffic is not None and traffic.walkers and "walkers" in state:
+            traffic._load_walkers(state)
         if traffic is None or len(state["vehicles"]) != len(traffic.vehicles):
             raise ValueError("Traffic checkpoint does not match the area's sample")
         roads = traffic.network.roads
@@ -545,6 +714,29 @@ class CityTraffic:
             traffic._pinned.update(slots)
         traffic.signal_faults = {str(junction): float(until) for junction, until in state.get("signal_faults", ())}
         return traffic
+
+    def _load_walkers(self, state: dict) -> None:
+        ways = self.walks.ways
+        items = state["walkers"]
+        if state.get("walk_source") != self.walks.source_hash or len(items) != len(self.walkers):
+            raise ValueError("Traffic checkpoint's walkers do not match the area's walk network")
+        for walker, item in zip(self.walkers, items):
+            way, distance, sublane, aside, speed, walker_state, wait_s, kerb_wait_s, rng, due, granted, ahead = item
+            walker.way = ways[way]
+            walker.distance, walker.sublane, walker.aside, walker.speed = float(distance), int(sublane), float(aside), float(speed)
+            walker.target = walker.speed
+            walker.state, walker.wait_s, walker.kerb_wait_s = int(walker_state), float(wait_s), float(kerb_wait_s)
+            walker.rng, walker.crossings_due, walker.granted = int(rng), int(due), int(granted)
+            walker.ahead = [ways[index] for index in ahead]
+            self._pose_walker(walker)
+        occupied, claimed, waits, releases = state["crossings"]
+        count = len(self.walks.crossings)
+        if not all(type(index) is int and 0 <= index < count for index in [*occupied, *claimed,
+                                                                           *(i for i, _ in waits), *(i for i, _ in releases)]):
+            raise ValueError("Traffic checkpoint names a crossing the walk network does not have")
+        self._occupied, self._claimed = set(occupied), set(claimed)
+        self.crossing_waits = {index: float(s) for index, s in waits}
+        self.crossing_releases = {index: float(until) for index, until in releases}
 
     # ---------------------------------------------------------------- hazards
 
@@ -685,6 +877,13 @@ class CityTraffic:
                 self._enter(vehicle)
         self._clear_shuttle_jams()
         self._fill_lanes()
+        walking = bool(self.walkers)
+        if walking:
+            # Walkers at a kerb decide from the traffic as it stands before anything moves this step
+            self._own_walkers()
+            self._vehicle_cells = None
+            self._fill_walkways()
+            self._walkers_decide()
         for vehicle in self.vehicles:
             if vehicle.outside or (pinned and vehicle.slot in pinned):
                 continue
@@ -695,6 +894,9 @@ class CityTraffic:
         for vehicle in self.vehicles:
             if not vehicle.outside:
                 vehicle.target_speed = 0.0 if pinned and vehicle.slot in pinned else self._safe_speed(vehicle)
+        if walking:
+            self._count_crossing_waits(dt)
+            self._walker_speeds()
         for vehicle in self.vehicles:
             if vehicle.outside:
                 continue
@@ -705,6 +907,11 @@ class CityTraffic:
         self._bodies = []
         for vehicle in self.vehicles:
             self._pose(vehicle)
+        if walking:
+            for walker in self.walkers:
+                self._move_walker(walker, dt)
+                self._pose_walker(walker)
+            self._vehicle_cells = None
 
     def _pose(self, vehicle: Vehicle) -> None:
         if vehicle.outside:
@@ -939,6 +1146,7 @@ class CityTraffic:
         half = vehicle.half
         road, lane, road_start = vehicle.road, vehicle.lane, -vehicle.distance
         ahead = vehicle.ahead
+        by_road = self._by_road
         i = 0
         while True:
             queue = self._lane(road, lane)
@@ -956,6 +1164,10 @@ class CityTraffic:
             for at, offset, phase, junction in road.stops:
                 if self._must_stop(offset, phase, junction, road_start + at - half, speed):
                     limit = min(limit, krauss(speed, road_start + at - half - STOP_MARGIN_M, 0.0))
+            if by_road is not None:
+                crossings = by_road[road.index]
+                if crossings:
+                    limit = self._crossing_limit(crossings, road_start, half, vehicle.half_width, speed, limit)
             # On past any leader, which may turn off and leave this vehicle facing what lies beyond
             if i >= len(ahead):
                 break
@@ -1185,6 +1397,8 @@ class CityTraffic:
         look = max(SHUTTLE_LOOK_M, speed * speed / (2 * COMFORT_BRAKE) + speed * REACTION_S + CLAIM_MARGIN_M)
         if not route.closed:
             look = min(look, route.length - along)
+        if self.walkers and (self._occupied or self._claimed):
+            self._shuttle_crossings(shuttle, route, along, look, cruise, plan)
         # The path its body sweeps, through its own lane
         points = self._look
         points.clear()
@@ -1488,6 +1702,527 @@ class CityTraffic:
     def forget_shuttle(self, shuttle_id: str) -> None:
         self.shuttles.pop(shuttle_id, None)
 
+    # ---------------------------------------------------------------- pedestrians
+    #
+    # Walkers walk the walk network (src.traffic.walk_network) as the vehicles drive the roads, in the same
+    # step and from the same picture of the world: at the start of a step the walkers at a kerb decide
+    # whether to step off, from where the vehicles and shuttles are and how fast they go; the vehicles then
+    # pick their speeds, giving way to a crossing a walker is on, and at a zebra to one waiting (if they
+    # can stop comfortably); then everything moves. A walker never steps off in front of a vehicle that
+    # could not stop for it, so nothing ever drives into one.
+
+    def _crossing_limit(self, crossings: list, road_start: float, half: float, half_width: float, speed: float,
+                        limit: float) -> float:
+        """A vehicle's limit for the crossings along a road ahead of it, the road starting road_start
+        from its middle: it stops short of one a walker is on, and of a zebra a walker waits at if it can
+        stop comfortably, its front corner short of it where the road meets it at a slant. Its front well
+        into one already goes on through."""
+        occupied, claimed = self._occupied, self._claimed
+        if not occupied and not claimed:
+            return limit
+        for at, crossing, band, slant in crossings:
+            front_gap = road_start + at - band - half - half_width * slant
+            if front_gap < -CROSSING_ENTERED_M:
+                continue
+            if front_gap > PLAN_AHEAD_M:
+                break
+            index = crossing.index
+            gap = front_gap - STOP_MARGIN_M
+            if index in occupied or (index in claimed and speed * speed <= 2 * COMFORT_BRAKE * gap):
+                limit = min(limit, krauss(speed, gap, 0.0))
+                if speed < STOPPED_MPS and front_gap < CROSSING_HELD_M:
+                    self._held.add(index)
+        return limit
+
+    def _shuttle_crossings(self, shuttle: Shuttle, route: ShuttleRoute, along: float, look: float, cruise: float,
+                           plan: ShuttlePlan) -> None:
+        """A shuttle gives way at the crossings on its route as the vehicles do. Its body is wide and follows
+        the route round a bend, so it stops where its body as it would stand there, not only its front on
+        the route, is short of the crossing."""
+        speed = shuttle.speed
+        for at, crossing, band in self.walks.route_crossings(route):
+            index = crossing.index
+            if index not in self._occupied and index not in self._claimed:
+                continue
+            front_gap = route.ahead(at, along) - band - shuttle.half_length
+            if front_gap < -CROSSING_ENTERED_M or front_gap > look + shuttle.half_length:
+                continue
+            gap = max(0.0, front_gap - STOP_MARGIN_M)
+            while gap > 0 and self._body_meets(shuttle, route, along + gap, crossing):
+                gap = max(0.0, gap - SHUTTLE_BODY_STEP_M)
+            if gap == 0 and self._body_meets(shuttle, route, along, crossing):
+                # Already over it: on through one a walker waits at, but never on into one a walker is on
+                if index not in self._occupied:
+                    continue
+            if index in self._occupied or speed * speed <= 2 * COMFORT_BRAKE * gap:
+                limit = krauss(speed, gap, 0.0)
+                if limit < cruise:
+                    plan.held = True
+                plan.limit_mps = min(plan.limit_mps, limit)
+                plan.cap_m = min(plan.cap_m, max(0.0, gap))
+
+    @staticmethod
+    def _body_meets(shuttle: Shuttle, route: ShuttleRoute, along: float, crossing: Crossing) -> bool:
+        """Whether a shuttle's body, with its middle this far along its route, comes within STOP_MARGIN_M
+        of a crossing's road part."""
+        x, y, fx, fy = route.body(along, shuttle.aside, shuttle.half_length)
+        return overlap(crossing.cx, crossing.cy, crossing.dx, crossing.dy, crossing.half_length,
+                       crossing.half_width + STOP_MARGIN_M, x, y, fx, fy, shuttle.half_length, shuttle.half_width)
+
+    def _plan_walk(self, walker: Walker) -> None:
+        reach = walker.way.length - walker.distance
+        for way in walker.ahead:
+            reach += way.length
+        while not walker.ahead or (reach < WALK_PLAN_M and len(walker.ahead) < MAX_PLANNED_WALKWAYS):
+            nxt = self._choose_next_way(walker, walker.ahead[-1] if walker.ahead else walker.way)
+            walker.ahead.append(nxt)
+            reach += nxt.length
+
+    def _choose_next_way(self, walker: Walker, origin: Walkway) -> Walkway:
+        """The walkway a walker takes on from the end of another: rather on than back, rather straight on
+        than round a corner, and a crossing only once it has walked a few sidewalks since the last."""
+        exits = self.walks.exits[origin.to_node]
+        # The way back always leaves the node, so there is always a way on
+        options = [way for way in exits if way.index != origin.back] or exits
+        walk = [way for way in options if way.crossing is None]
+        cross = [way for way in options if way.crossing is not None]
+        walker.rng = rng_step(walker.rng)
+        if cross and walker.crossings_due <= 0 and (not walk or random01(walker.rng) < TAKE_CROSSING_CHANCE):
+            pool = cross
+        else:
+            pool = walk or cross
+        pick = pool[0]
+        if len(pool) > 1:
+            weights = [lerp(0.3, 1.0, inverse_lerp(180.0, 0.0, angle_deg(origin.ex, origin.ey, way.sx, way.sy))) for way in pool]
+            walker.rng = rng_step(walker.rng)
+            left = random01(walker.rng) * sum(weights)
+            pick = pool[-1]
+            for way, weight in zip(pool, weights):
+                left -= weight
+                if left <= 0:
+                    pick = way
+                    break
+        if pick.crossing is not None:
+            walker.rng = rng_step(walker.rng)
+            walker.crossings_due = CROSSINGS_DUE_MIN + int(random01(walker.rng) * (CROSSINGS_DUE_MAX - CROSSINGS_DUE_MIN))
+        elif walker.crossings_due > 0:
+            walker.crossings_due -= 1
+        return pick
+
+    def _fill_walkways(self) -> None:
+        """Each walkway's walkers in each sub-lane, back to front."""
+        lanes = self._walk_lanes
+        lanes.clear()
+        for walker in self.walkers:
+            key = walker.way.index * 8 + walker.sublane
+            bucket = lanes.get(key)
+            if bucket is None:
+                lanes[key] = [walker]
+            else:
+                bucket.append(walker)
+        for bucket in lanes.values():
+            if len(bucket) > 1:
+                bucket.sort(key=lambda w: (w.distance, w.slot))
+            for i, walker in enumerate(bucket):
+                walker.lane_index = i
+
+    @staticmethod
+    def _approach(walker: Walker) -> tuple[Walkway, float] | None:
+        """The crossing a walker is on or about to walk onto, and how far along it the walker is (short
+        of its start while still on the walkway before)."""
+        way = walker.way
+        if way.crossing is not None and walker.distance <= way.kerb_out + WALKER_HALF_M:
+            return way, walker.distance
+        if walker.ahead and walker.ahead[0].crossing is not None:
+            return walker.ahead[0], walker.distance - way.length
+        return None
+
+    def _walkers_decide(self) -> None:
+        """The walkers at a kerb step off or wait; which crossings walkers are on, and at which zebras they
+        wait, for the traffic to give way."""
+        occupied, claimed = self._occupied, self._claimed
+        occupied.clear()
+        claimed.clear()
+        self._held.clear()
+        time_s = self.time_s
+        if self.crossing_releases:
+            for index in [i for i, until in self.crossing_releases.items() if until <= time_s]:
+                del self.crossing_releases[index]
+        for walker in self.walkers:
+            if walker.state == PAUSED:
+                continue
+            found = self._approach(walker)
+            if found is None:
+                continue
+            way, d = found
+            crossing = way.crossing
+            if walker.granted == way.index:
+                if d <= way.kerb_out + WALKER_HALF_M:
+                    occupied.add(crossing.index)
+                continue
+            if d > way.kerb_in:
+                # On the road without having been let on, as from a checkpoint of another network: it finishes crossing
+                walker.granted, walker.state = way.index, ON_CROSSING
+                occupied.add(crossing.index)
+                continue
+            if d < way.kerb_in - KERB_WAIT_BACK_M - DECIDE_M:
+                if walker.state == WAITING_AT_KERB:
+                    walker.state = WALKING
+                continue
+            if self._may_step_off(walker, way, d):
+                walker.granted, walker.state, walker.kerb_wait_s = way.index, ON_CROSSING, 0.0
+                occupied.add(crossing.index)
+                continue
+            walker.state = WAITING_AT_KERB
+            if crossing.control == ZEBRA and crossing.index not in self.crossing_releases:
+                claimed.add(crossing.index)
+            if walker.kerb_wait_s > KERB_GIVE_UP_S:
+                self._turn_back(walker)
+        # A zebra's walkers hold back until the traffic has had its time with the crossing clear
+        for index in self.crossing_releases:
+            if index in occupied:
+                self.crossing_releases[index] = time_s + ZEBRA_RELEASE_S
+
+    def _turn_back(self, walker: Walker) -> None:
+        """A walker kept at a kerb too long walks back the way it came."""
+        way = walker.way
+        walker.way = self.walks.ways[way.back]
+        walker.distance = max(0.0, way.length - walker.distance)
+        walker.sublane = min(walker.sublane, walker.way.mine - 1)
+        walker.state, walker.kerb_wait_s, walker.granted = WALKING, 0.0, -1
+        walker.crossings_due = max(walker.crossings_due, CROSSINGS_DUE_MIN)
+        walker.ahead = []
+        self._plan_walk(walker)
+
+    def _may_step_off(self, walker: Walker, way: Walkway, d: float) -> bool:
+        """Whether a walker this far along a crossing walkway may step off the kerb now.
+
+        At a light, only on the red of the traffic it crosses, with time to get over and some to spare;
+        at a zebra while its walkers are not holding back for the traffic. Never while anything stands in
+        the crossing, nor in front of a vehicle or shuttle that could not stop for it before it is over.
+        Where people have no priority (no light or zebra, or a light stuck by a fault) not in front of
+        anything coming that would get there first either."""
+        crossing = way.crossing
+        clear_s = (way.kerb_out - d) / max(walker.desired, 0.5)
+        within_s = clear_s + WALK_CLEAR_S
+        priority = crossing.control != UNCONTROLLED
+        if crossing.control == SIGNAL:
+            if self.signal_faults and self._fault(crossing.junction):
+                priority = False
+            else:
+                into = (self.time_s + crossing.offset - crossing.phase * _PHASE_S) % _CYCLE_S
+                if into < _AMBER_S or _CYCLE_S - into < clear_s + SIGNAL_SAFETY_BUFFER_S:
+                    return False
+        elif crossing.control == ZEBRA and crossing.index in self.crossing_releases:
+            return False
+        if self._in_crossing(crossing):
+            return False
+        roads = self.network.roads
+        for road_index, at, band, slant in crossing.roads:
+            if self._traffic_coming(roads[road_index], at - band, band, slant, within_s, priority):
+                return False
+        return not self._shuttle_coming(crossing, within_s, priority)
+
+    @staticmethod
+    def _unsafe(speed: float, front_gap: float, through: float, within_s: float, priority: bool) -> bool:
+        """Whether something this far short of a crossing's band, at this speed, rules out stepping off:
+        it is in the band, or cannot stop short of it and would get there in time, or (without priority)
+        is coming and would get there in time."""
+        if front_gap < 0:
+            return front_gap > -through
+        if speed * speed > 2 * YELLOW_BRAKE * (front_gap - STOP_MARGIN_M) and front_gap < speed * within_s:
+            return True
+        return not priority and speed > STANDING_MPS and front_gap < speed * within_s
+
+    @staticmethod
+    def _plans(vehicle: Vehicle, path: tuple) -> bool:
+        """Whether a vehicle means to take these roads next, or has not chosen so far yet."""
+        ahead = vehicle.ahead
+        for i in range(min(len(path), len(ahead))):
+            if ahead[i] is not path[i]:
+                return False
+        return True
+
+    def _traffic_coming(self, road: Road, edge: float, band: float, slant: float, within_s: float,
+                        priority: bool) -> bool:
+        """Whether a vehicle on a road a crossing cuts, or on the roads leading to it, rules out stepping
+        off (_unsafe); edge is how far along the road the crossing's band starts."""
+        stack = [(road, edge, ())]
+        arriving = self.walks.arriving
+        while stack:
+            r, at, path = stack.pop()
+            for lane in range(r.lanes):
+                for vehicle in self._lane(r, lane):
+                    if path and not self._plans(vehicle, path):
+                        continue
+                    corner = vehicle.half_width * slant
+                    if self._unsafe(vehicle.speed, at - vehicle.distance - vehicle.half - corner,
+                                    2 * (band + corner) + vehicle.length, within_s, priority):
+                        return True
+            if at < WALKER_LOOK_M and len(path) < 3:
+                for before in arriving.get(r.from_node, ()):
+                    stack.append((before, before.length + at, (r, *path)))
+        return False
+
+    def _shuttle_coming(self, crossing: Crossing, within_s: float, priority: bool) -> bool:
+        """Whether a shuttle rules out stepping off, as a vehicle would: its body swept on the way it faces
+        as far as it needs to stop (and, without priority, as far as it goes in the time) meets the crossing."""
+        for shuttle in self.shuttles.values():
+            if not shuttle.placed:
+                continue
+            if abs(shuttle.x - crossing.cx) > SHUTTLE_LOOK_M or abs(shuttle.y - crossing.cy) > SHUTTLE_LOOK_M:
+                continue
+            speed = shuttle.speed
+            reach = min(speed * speed / (2 * YELLOW_BRAKE) + STOP_MARGIN_M, speed * within_s) if speed > 0 else 0.0
+            if not priority and speed > STANDING_MPS:
+                reach = max(reach, speed * within_s)
+            d = 0.0
+            while True:
+                if overlap(crossing.cx, crossing.cy, crossing.dx, crossing.dy, crossing.half_length, crossing.half_width,
+                           shuttle.x + shuttle.fx * d, shuttle.y + shuttle.fy * d, shuttle.fx, shuttle.fy,
+                           shuttle.half_length, shuttle.half_width):
+                    return True
+                if d >= reach:
+                    break
+                d = min(d + 1.0, reach)
+        return False
+
+    def _cells(self) -> dict[tuple[int, int], list[Vehicle]]:
+        """The vehicles on the roads by where they are, made once a step when a walker needs them."""
+        cells = self._vehicle_cells
+        if cells is None:
+            cells = self._vehicle_cells = {}
+            for vehicle in self.vehicles:
+                if vehicle.placed:
+                    key = (math.floor(vehicle.x / _CELL_M), math.floor(vehicle.y / _CELL_M))
+                    found = cells.get(key)
+                    if found is None:
+                        cells[key] = [vehicle]
+                    else:
+                        found.append(vehicle)
+        return cells
+
+    def _near(self, x: float, y: float, reach: float):
+        cells = self._cells()
+        low_x, low_y = math.floor((x - reach) / _CELL_M), math.floor((y - reach) / _CELL_M)
+        high_x, high_y = math.floor((x + reach) / _CELL_M), math.floor((y + reach) / _CELL_M)
+        for cx in range(low_x, high_x + 1):
+            for cy in range(low_y, high_y + 1):
+                yield from cells.get((cx, cy), ())
+
+    def _in_crossing(self, crossing: Crossing) -> bool:
+        """Whether a vehicle's or a shuttle's body stands in a crossing's road part."""
+        reach = crossing.half_length + crossing.half_width + 12.0
+        for vehicle in self._near(crossing.cx, crossing.cy, reach):
+            if overlap(crossing.cx, crossing.cy, crossing.dx, crossing.dy, crossing.half_length, crossing.half_width,
+                       vehicle.x, vehicle.y, vehicle.fx, vehicle.fy, vehicle.half, vehicle.half_width):
+                return True
+        for shuttle in self.shuttles.values():
+            if shuttle.placed and overlap(crossing.cx, crossing.cy, crossing.dx, crossing.dy, crossing.half_length,
+                                          crossing.half_width, shuttle.x, shuttle.y, shuttle.fx, shuttle.fy,
+                                          shuttle.half_length, shuttle.half_width):
+                return True
+        return False
+
+    def _count_crossing_waits(self, dt: float) -> None:
+        """How long a vehicle has stood at each zebra for its walkers; one kept long enough has the walkers
+        who have not stepped off yet hold back a while, so the traffic is not held for good."""
+        held = self._held
+        crossings = self.walks.crossings
+        waits = self.crossing_waits
+        for index in [index for index in waits if index not in held]:
+            del waits[index]
+        for index in sorted(held):
+            if crossings[index].control != ZEBRA:
+                continue
+            waited = waits.get(index, 0.0) + dt
+            if waited > ZEBRA_COURTESY_S:
+                waits.pop(index, None)
+                self.crossing_releases[index] = self.time_s + ZEBRA_RELEASE_S
+            else:
+                waits[index] = waited
+
+    def _walker_speeds(self) -> None:
+        """Each walker's speed this step, from where every walker was at its start: it follows the one in
+        front in its sub-lane, steps into another to pass a slow one, and stops at a kerb it has not been
+        let off."""
+        lanes = self._walk_lanes
+        for walker in self.walkers:
+            if walker.state == PAUSED:
+                walker.target = 0.0
+                continue
+            way = walker.way
+            target = walker.desired
+            if walker.granted == way.index and walker.distance <= way.kerb_out + CLEAR_OF_ROAD_M:
+                # On the road, or just off it: it walks on clear of it, squeezing past anyone in the way,
+                # rather than queue where the traffic must still wait for it
+                walker.target = target
+                continue
+            bucket = lanes.get(way.index * 8 + walker.sublane)
+            leader = None
+            gap = 0.0
+            if bucket is not None:
+                i = walker.lane_index
+                if i < len(bucket) and bucket[i] is walker:
+                    leader = bucket[i + 1] if i + 1 < len(bucket) else None
+                else:
+                    leader = next((w for w in bucket if w.distance > walker.distance), None)
+                if leader is not None:
+                    gap = leader.distance - walker.distance
+            if leader is None and walker.ahead:
+                nxt = walker.ahead[0]
+                onward = lanes.get(nxt.index * 8 + min(walker.sublane, nxt.mine - 1))
+                if onward:
+                    leader = onward[0]
+                    gap = way.length - walker.distance + leader.distance
+            if leader is not None:
+                target = min(target, max(0.0, (gap - WALKER_GAP_M) / WALKER_REACTION_S))
+                if (leader.way is way and way.mine > 1 and gap < OVERTAKE_NEAR_M
+                        and leader.speed < walker.desired - OVERTAKE_SLOWER_MPS):
+                    self._overtake(walker, lanes)
+            found = self._approach(walker)
+            if found is not None and walker.granted != found[0].index:
+                way_on, d = found
+                stop = way_on.kerb_in - KERB_WAIT_BACK_M - d
+                target = min(target, math.sqrt(2 * WALKER_DECEL * max(0.0, stop)))
+            walker.target = target
+
+    @staticmethod
+    def _overtake(walker: Walker, lanes: dict) -> None:
+        way = walker.way
+        for sublane in (walker.sublane + 1, walker.sublane - 1):
+            if not 0 <= sublane < way.mine:
+                continue
+            others = lanes.get(way.index * 8 + sublane, ())
+            if all(abs(other.distance - walker.distance) >= OVERTAKE_CLEAR_M for other in others):
+                walker.sublane = sublane
+                return
+
+    def _move_walker(self, walker: Walker, dt: float) -> None:
+        if walker.state == PAUSED:
+            walker.wait_s -= dt
+            if walker.wait_s <= 0:
+                walker.wait_s = 0.0
+                walker.state = WALKING
+            return
+        rate = WALKER_ACCEL if walker.target > walker.speed else WALKER_DECEL
+        walker.speed = move_towards(walker.speed, walker.target, rate * dt)
+        walker.aside = move_towards(walker.aside, walker_aside(walker.way, walker.sublane), WALKER_ASIDE_MPS * dt)
+        if walker.state == WAITING_AT_KERB:
+            walker.kerb_wait_s += dt
+        walker.distance += walker.speed * dt
+        safety = 0
+        while walker.distance > walker.way.length and safety < 4:
+            safety += 1
+            leaving = walker.way
+            if not walker.ahead:
+                self._plan_walk(walker)
+            nxt = walker.ahead.pop(0)
+            walker.distance -= leaving.length
+            walker.way = nxt
+            walker.sublane = min(walker.sublane, nxt.mine - 1)
+            if walker.granted == leaving.index:
+                walker.granted, walker.state, walker.kerb_wait_s = -1, WALKING, 0.0
+            self._plan_walk(walker)
+            # Now and then it stands a while where two sidewalks meet, never at a crossing
+            if leaving.crossing is None and nxt.crossing is None and walker.state == WALKING:
+                walker.rng = rng_step(walker.rng)
+                if random01(walker.rng) < PAUSE_CHANCE:
+                    walker.rng = rng_step(walker.rng)
+                    walker.state = PAUSED
+                    walker.wait_s = PAUSE_MIN_S + (PAUSE_MAX_S - PAUSE_MIN_S) * random01(walker.rng)
+                    walker.distance = 0.0
+                    walker.speed = walker.target = 0.0
+                    break
+
+    @staticmethod
+    def _pose_walker(walker: Walker) -> None:
+        walker.x, walker.y, walker.fx, walker.fy = walker.way.sample(walker.distance, walker.aside)
+
+    @staticmethod
+    def _walker_flags(walker: Walker) -> int:
+        flags = 0
+        if walker.state == WAITING_AT_KERB:
+            flags |= WAITING_FLAG
+        elif walker.state == PAUSED:
+            flags |= PAUSED_FLAG
+        way = walker.way
+        if way.crossing is not None:
+            d = walker.distance
+            if way.kerb_in <= d <= way.kerb_out:
+                flags |= ON_ROAD_FLAG
+            elif way.kerb_in - RAMP_DEPTH_M <= d < way.kerb_in or way.kerb_out < d <= way.kerb_out + RAMP_DEPTH_M:
+                flags |= RAMP_FLAG
+        return flags
+
+    def pedestrian_frame(self) -> tuple[bytes, int]:
+        """The walkers for the 3D view, packed as PED_RECORD after PED_RECORD, and how many there are."""
+        packed = bytearray(PED_RECORD.size * len(self.walkers))
+        pack, size, at = PED_RECORD.pack_into, PED_RECORD.size, 0
+        for walker in self.walkers:
+            pack(packed, at, walker.seed,
+                 min(max(round(walker.x * 100), -_INT32), _INT32), min(max(round(walker.y * 100), -_INT32), _INT32),
+                 round(math.degrees(math.atan2(walker.fy, walker.fx)) * 10), min(round(walker.speed * 50), 255),
+                 self._walker_flags(walker))
+            at += size
+        return bytes(packed), len(self.walkers)
+
+    def _path_body(self, vehicle: Vehicle) -> tuple[float, float, float, float]:
+        """A vehicle's body as it drives its way: its front on the road it is turning onto, as its wheels
+        follow it, rather than straight on past the end of its road over the corner, as its pose (middle
+        and heading) would put it. Its middle and the way it faces."""
+        fx, fy, _, _ = self._future(vehicle, vehicle.half)
+        road = vehicle.road
+        bx, by, hx, hy = road.sample(vehicle.distance - vehicle.half, road.lane_offset(vehicle.lane) + vehicle.aside)
+        length = math.hypot(fx - bx, fy - by)
+        if length < 1e-6:
+            return vehicle.x, vehicle.y, vehicle.fx, vehicle.fy
+        return (fx + bx) / 2, (fy + by) / 2, (fx - bx) / length, (fy - by) / length
+
+    def pedestrian_hits(self) -> list[tuple[str, str]]:
+        """Each vehicle or shuttle touching a walker on the road part of a crossing, as (its id, the
+        walker's id): a walker run over. A vehicle's body is taken as it drives its way (_path_body), a
+        shuttle's as it stands (both ends on its route).
+
+        Everywhere else a walker is on the paving, which the importer cut the asphalt out of, so a body
+        that reaches it there has left the road only as a rectangle does: a 16 m truck's straight body
+        round the bend of short roads, or a shuttle's (the bus model's, 4.6 m wide) from a 3.2 m kerb lane,
+        both as the 3D view draws them. Those are counted apart (footpath_overlaps)."""
+        return self._walker_contacts()[0]
+
+    def footpath_overlaps(self) -> list[tuple[str, str]]:
+        """Each vehicle or shuttle whose body reaches over a walker off the road (pedestrian_hits), by ids."""
+        return self._walker_contacts()[1]
+
+    def _walker_contacts(self) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+        found: list[tuple[str, str]] = []
+        overhangs: list[tuple[str, str]] = []
+        if not self.walkers:
+            return found, overhangs
+        self._vehicle_cells = None
+        shuttles = [s for s in self.shuttles.values() if s.placed]
+        bodies: dict[int, tuple[float, float, float, float]] = {}
+        for walker in self.walkers:
+            on_road = bool(self._walker_flags(walker) & ON_ROAD_FLAG)
+            for vehicle in self._near(walker.x, walker.y, 12.0):
+                # Near enough for its body as posed to touch: then as it drives
+                if not overlap(walker.x, walker.y, walker.fx, walker.fy, WALKER_HALF_M, WALKER_HALF_M,
+                               vehicle.x, vehicle.y, vehicle.fx, vehicle.fy, vehicle.half + 2.0, vehicle.half_width):
+                    continue
+                body = bodies.get(vehicle.slot)
+                if body is None:
+                    body = bodies[vehicle.slot] = self._path_body(vehicle)
+                if overlap(walker.x, walker.y, walker.fx, walker.fy, WALKER_HALF_M, WALKER_HALF_M,
+                           *body, vehicle.half, vehicle.half_width):
+                    (found if on_road else overhangs).append((vehicle.id, walker.id))
+            for shuttle in shuttles:
+                if (abs(shuttle.x - walker.x) < 30 and abs(shuttle.y - walker.y) < 30
+                        and overlap(walker.x, walker.y, walker.fx, walker.fy, WALKER_HALF_M, WALKER_HALF_M,
+                                    shuttle.x, shuttle.y, shuttle.fx, shuttle.fy, shuttle.half_length, shuttle.half_width)):
+                    (found if on_road else overhangs).append((shuttle.id, walker.id))
+        self._vehicle_cells = None
+        return found, overhangs
+
     # ---------------------------------------------------------------- what is reported
 
     def frame(self) -> tuple[bytes, int, list[dict]]:
@@ -1526,8 +2261,15 @@ class CityTraffic:
                 front = queue[vehicle.lane_index + 1]
                 if front.distance - front.half < vehicle.distance + vehicle.half:
                     overlaps += 1
-        return {"driving": driving, "outside": outside, "overlaps": overlaps, "red_light_runs": self.red_light_runs,
-                "mean_speed_mps": speed / driving if driving else 0.0, "shuttle_overlaps": self.shuttle_overlaps()}
+        report = {"driving": driving, "outside": outside, "overlaps": overlaps, "red_light_runs": self.red_light_runs,
+                  "mean_speed_mps": speed / driving if driving else 0.0, "shuttle_overlaps": self.shuttle_overlaps()}
+        if self.walkers:
+            states = [walker.state for walker in self.walkers]
+            report.update(walkers_walking=states.count(WALKING) + states.count(PAUSED),
+                          walkers_waiting=states.count(WAITING_AT_KERB), walkers_crossing=states.count(ON_CROSSING),
+                          walker_mean_speed_mps=sum(walker.speed for walker in self.walkers) / len(self.walkers))
+            report["pedestrian_hits"], report["footpath_overlaps"] = self._walker_contacts()
+        return report
 
     def shuttle_overlaps(self) -> list[tuple[str, str]]:
         """Each vehicle or other shuttle touching a shuttle, by id."""

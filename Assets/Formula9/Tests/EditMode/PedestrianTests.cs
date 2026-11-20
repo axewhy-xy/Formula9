@@ -233,5 +233,101 @@ namespace Formula9.Tests
             for (var i = 0; i < sim.Poses.Count; i += 7)
                 Assert.IsTrue(OnAWalkway(data, sim.Poses[i].Position), $"walker {i} at {sim.Poses[i].Position}");
         }
+
+        // ---------------------------------------------------------------- the backend's walkers (phase 3)
+
+        // A frame of the backend's traffic with one walker, seed 1, at (x, y) heading east
+        private static TrafficFrame WalkerFrame(double timeS, float x, float y = 4, float speed = 1.3f, int flags = 0) => new TrafficFrame
+        {
+            SimulationTimeS = timeS,
+            Pedestrians = new[] { 1, Mathf.RoundToInt(x * 100), Mathf.RoundToInt(y * 100), 0, Mathf.RoundToInt(speed * 50), flags },
+        };
+
+        [Test]
+        public void TheTrafficReplyCarriesTheBackendsWalkers()
+        {
+            // Packed by the backend (struct "<HiihBB"): two walkers, the second at the edges of what the fields hold
+            const string packed = "AwDSBAAADP7//4QDQQFXAnAv/P8ACT0A+Pj/Dw==";
+            const string reply = "{\"session_id\":\"s1\",\"frames\":[{\"tick\":4,\"simulation_time_s\":0.2,\"vehicle_count\":0,\"vehicles\":\"\","
+                + "\"shuttles\":[],\"pedestrian_count\":2,\"pedestrians\":\"" + packed + "\"}]}";
+            var frames = TrainingApi.ParseTrafficFrames(reply, "s1");
+            Assert.AreEqual(2, frames[0].PedestrianCount);
+            CollectionAssert.AreEqual(new[] { 3, 1234, -500, 900, 65, 1, 599, -250000, 4000000, -1800, 255, 15 }, frames[0].Pedestrians);
+            Assert.AreEqual(packed, TrafficFrame.PackPedestrians(frames[0].Pedestrians), "packed as the backend packs them");
+            Assert.Throws<ContractException>(() => TrainingApi.ParseTrafficFrames(reply.Replace("\"pedestrian_count\":2", "\"pedestrian_count\":3"), "s1"),
+                "a miscounted frame");
+            Assert.Throws<ContractException>(() => TrainingApi.ParseTrafficFrames(reply.Replace(packed, "AwDSBAAADP7//4QD"), "s1"), "a walker cut short");
+            Assert.Throws<ContractException>(() => TrainingApi.ParseTrafficFrames(reply.Replace("\"" + packed + "\"", "[3,1234]"), "s1"),
+                "unpacked walkers");
+            var without = TrainingApi.ParseTrafficFrames(
+                "{\"session_id\":\"s1\",\"frames\":[{\"tick\":4,\"simulation_time_s\":0.2,\"vehicle_count\":0,\"vehicles\":\"\",\"shuttles\":[]}]}", "s1");
+            Assert.AreEqual(0, without[0].PedestrianCount, "a backend that walks none sends none");
+        }
+
+        [Test]
+        public void TheBackendsWalkersAreDrawnBetweenItsFramesOnTheTrafficsClock()
+        {
+            var follow = new PedestrianFollow();
+            follow.SetSeeds(CityWalkwayData.Parse(Network));
+            Assert.IsFalse(follow.Active);
+            follow.Add(new[] { WalkerFrame(10.0, 100f), WalkerFrame(10.1, 100.13f) });
+            Assert.IsTrue(follow.Active);
+
+            follow.Advance(10.05);
+            Assert.AreEqual(1, follow.Poses.Count);
+            var pose = follow.Poses[0];
+            Assert.AreEqual(100.065f, pose.Position.x, 1e-3f, "halfway between the frames, at the time drawn");
+            Assert.AreEqual(4f, pose.Position.z, 1e-4f);
+            Assert.AreEqual(RoadMesh.SurfaceY, pose.Position.y, 1e-6f, "at the road's height until the sidewalks are in");
+            Assert.Greater(Vector3.Dot(pose.Rotation * Vector3.forward, Vector3.right), 0.999f, "facing east");
+            Assert.IsTrue(pose.Moving);
+            Assert.AreEqual(0, pose.Model, "the seed's character from the walkways file");
+            Assert.AreEqual(1.6f, pose.ScaleM, 1e-6f, "and its height");
+
+            var phase = pose.WalkPhase;
+            follow.Advance(10.1);
+            Assert.AreEqual(100.13f, follow.Poses[0].Position.x, 1e-3f);
+            Assert.AreEqual(phase + 0.065f / PedestrianLocalSim.StrideM, follow.Poses[0].WalkPhase, 1e-4f, "the walk cycle runs on with the distance");
+            Assert.AreEqual(1, follow.FrameCount, "frames before the one drawn are let go");
+        }
+
+        [Test]
+        public void AWalkerWaitingAtAKerbStandsStillAndOneOnTheRoadIsAtItsHeight()
+        {
+            var follow = new PedestrianFollow();
+            follow.SetGroundHeight(_ => SidewalkMesh.TopY);
+            follow.Add(new[] { WalkerFrame(1.0, 5f, speed: 0, flags: TrafficFrame.PedestrianWaiting),
+                               WalkerFrame(1.1, 5f, speed: 0, flags: TrafficFrame.PedestrianWaiting) });
+            follow.Advance(1.05);
+            Assert.IsFalse(follow.Poses[0].Moving, "waiting stands in the idle pose");
+            Assert.AreEqual(5f, follow.Poses[0].Position.x, 1e-4f);
+            Assert.AreEqual(SidewalkMesh.TopY, follow.Poses[0].Position.y, 1e-6f, "on the sidewalk's top");
+
+            follow.Add(new[] { WalkerFrame(1.2, 5.1f, 0, flags: TrafficFrame.PedestrianOnRoad), WalkerFrame(1.3, 5.2f, 0, flags: TrafficFrame.PedestrianOnRoad) });
+            follow.Advance(1.25);
+            Assert.IsTrue(follow.Poses[0].Moving);
+            Assert.AreEqual(RoadMesh.SurfaceY, follow.Poses[0].Position.y, 1e-6f, "on a crossing, at the road's height");
+        }
+
+        [Test]
+        public void AWalkerPutSomewhereNewIsNotSlidThereAndForgettingTheFramesHandsBackToTheLocalCrowd()
+        {
+            var follow = new PedestrianFollow();
+            follow.Add(new[] { WalkerFrame(2.0, 10f), WalkerFrame(2.1, 40f) });
+            follow.Advance(2.05);
+            Assert.AreEqual(10f, follow.Poses[0].Position.x, 1e-4f, "held where it was until the frame that moved it");
+            follow.Advance(2.1);
+            Assert.AreEqual(40f, follow.Poses[0].Position.x, 1e-4f);
+
+            // Frames from a backend that walks none: the walkers here walk again
+            follow.Add(new[] { new TrafficFrame { SimulationTimeS = 2.2 } });
+            Assert.IsFalse(follow.Active);
+            follow.Add(new[] { WalkerFrame(2.3, 41f) });
+            Assert.IsTrue(follow.Active);
+            follow.Forget();
+            Assert.IsFalse(follow.Active);
+            follow.Advance(2.3);
+            Assert.AreEqual(0, follow.Poses.Count);
+        }
     }
 }

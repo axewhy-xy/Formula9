@@ -119,6 +119,13 @@ def freeze_static_heap() -> None:
     _static_heap_frozen = True
     get_workflow_definition()
     network = road_network(SIGNAL_AREA)
+    # And the walk network its pedestrians walk, when sessions walk them
+    from src.traffic import walk_network
+    try:
+        if walk_network.enabled():
+            walk_network.walk_network(SIGNAL_AREA)
+    except ValueError:
+        pass  # A misconfigured switch is reported when a session starts its traffic
     # And its native copy, when sessions drive the native traffic engine, so the first session does not
     # build it (src.traffic.native_traffic)
     from src.traffic import native_traffic

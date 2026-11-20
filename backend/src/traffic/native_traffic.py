@@ -13,6 +13,9 @@ engine() picks the class a new or recovered session uses. F9_NATIVE_TRAFFIC sets
     auto (default)  native when the module is built from the current source, else Python
     0               always Python
     1               native, or an error saying why it cannot be
+
+The native engine does not walk pedestrians yet (phase 4 of sidewalks_plan.md), so with F9_PEDESTRIANS on
+(src.traffic.walk_network) auto chooses Python, and 1 is an error.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ import threading
 from copy import deepcopy
 from pathlib import Path
 
-from src.traffic import city_traffic, road_network as road_network_module, signal_cycle
+from src.traffic import city_traffic, road_network as road_network_module, signal_cycle, walk_network
 from src.traffic.city_traffic import CityTraffic, ShuttlePlan, ShuttleRoute
 from src.traffic.road_network import Road, RoadNetwork, class_weight, road_network
 
@@ -111,6 +114,9 @@ def engine() -> type:
     global _reported
     choice = requested()
     usable, reason = status()
+    if walk_network.enabled():
+        # Only the Python engine walks pedestrians so far
+        usable, reason = False, f"{walk_network.PEDESTRIANS_VARIABLE}=1 and the native engine has no pedestrians yet"
     if choice == "native" and not usable:
         raise RuntimeError(f"{ENGINE_VARIABLE}=1 but the native traffic engine cannot run: {reason}")
     chosen = NativeCityTraffic if usable and choice != "python" else CityTraffic
@@ -505,6 +511,11 @@ class NativeCityTraffic:
                                  "heading_deg": round(city_traffic.math.degrees(city_traffic.math.atan2(s["fy"], s["fx"])), 2),
                                  "speed_mps": round(s["speed"], 3)})
         return packed, count, shuttles
+
+    @staticmethod
+    def pedestrian_frame() -> tuple[bytes, int]:
+        """No walkers: the native engine walks none yet."""
+        return b"", 0
 
     def report(self) -> dict:
         driving, outside, overlaps, red_light_runs, mean_speed = self._core.report()

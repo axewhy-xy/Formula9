@@ -1379,6 +1379,8 @@ class IntegratedSessionActor(SessionActor):
 
         The vehicles are packed (city_traffic.FRAME_RECORD) and base64-encoded: a frame of the whole
         sample is read by the 3D view ten times a second, and thousands of JSON numbers made it hitch.
+        The pedestrians the traffic walks (F9_PEDESTRIANS) come packed the same way
+        (city_traffic.PED_RECORD); a frame without any leaves them out.
         """
         if self.traffic is None:
             return None
@@ -1386,9 +1388,14 @@ class IntegratedSessionActor(SessionActor):
         # The junctions whose lights are stuck on red, so the 3D view draws them so
         faults = [{"junction_id": junction, "mode": signal_cycle.FAULT_MODE, "until_s": round(until, 3)}
                   for junction, until in sorted(self.traffic.signal_faults.items()) if until > self.timestamp_second]
-        return {"tick": self.current_tick, "simulation_time_s": round(self.timestamp_second, 3),
-                "vehicle_count": count, "vehicles": base64.b64encode(vehicles).decode("ascii"), "shuttles": shuttles,
-                "signal_faults": faults}
+        frame = {"tick": self.current_tick, "simulation_time_s": round(self.timestamp_second, 3),
+                 "vehicle_count": count, "vehicles": base64.b64encode(vehicles).decode("ascii"), "shuttles": shuttles,
+                 "signal_faults": faults}
+        walkers, walker_count = self.traffic.pedestrian_frame()
+        if walker_count:
+            frame["pedestrian_count"] = walker_count
+            frame["pedestrians"] = base64.b64encode(walkers).decode("ascii")
+        return frame
 
     def signal_state(self) -> dict:
         """Every signalled junction's colours now, on the session's clock, with any fault on it: the lights
