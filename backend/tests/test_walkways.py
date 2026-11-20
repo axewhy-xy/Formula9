@@ -1,11 +1,12 @@
 import json
+import math
 import re
 from pathlib import Path
 
 import pytest
 import shapely
 from fastapi.testclient import TestClient
-from shapely.geometry import Polygon
+from shapely.geometry import LineString, Polygon
 
 from src.app import app
 from src.traffic import import_walkways as walkways
@@ -98,11 +99,12 @@ def test_a_crossing_drops_the_kerb_to_the_road_at_each_end():
     data = walkways.build(CROSSROADS, {}, CROSSING, BUILDING, "test")
     report = data["report"]
     assert report["ramps"] == 2 and report["crossings_with_both_ramps"] == 1 and not report["unramped_crossing_ends"]
-    ramps = [corners for corners, zone in triangles(data) if zone == "ramp"]
+    # The western arm's side-street crossing has ramps of its own; these are crossing-001's, 30 m east
+    ramps = [corners for corners, zone in triangles(data) if zone == "ramp" and Polygon(corners).centroid.x > 20]
     ramp_area = sum(Polygon(corners).area for corners in ramps)
     assert ramp_area == pytest.approx(2 * walkways.RAMP_WIDTH_M * walkways.RAMP_DEPTH_M, rel=0.02)
     kerb = walkways.half_width(CROSSROADS[0])
-    tile_ramps = [ramp for tile in data["render"]["tiles"] for ramp in tile["ramps"]]
+    tile_ramps = [ramp for tile in data["render"]["tiles"] for ramp in tile["ramps"] if ramp[0] > 2000]
     found = sorted((ramp[0] / 100, ramp[1] / 100, ramp[2] / 10000, ramp[3] / 10000) for ramp in tile_ramps)
     assert found == [pytest.approx((30, -kerb, 0, -1)), pytest.approx((30, kerb, 0, 1))], "at each kerb, facing away from the road"
     assert sum(len(tile["cheek_edges"]) for tile in data["render"]["tiles"]) > 0, "ramps have sides"
@@ -201,3 +203,193 @@ def test_the_api_serves_the_walkways_gzipped_to_a_client_that_takes_it():
 @pytest.mark.parametrize("path", ["nowhere/walkways", "..%2F..%2Fsecret/walkways"])
 def test_an_area_with_no_walkways_is_not_found(path):
     assert TestClient(app).get(f"/api/road-features/{path}").status_code == 404
+
+
+# --- The walk network (phase 2) ---------------------------------------------------------------------------
+
+# A light at the crossroads: its east arm's westbound traffic (phase 1) is what crossing-001 cuts across; its
+# northbound approach runs along the crossing, so it can never be the one
+JUNCTIONS = [{"id": "J1", "approaches": [{"heading_deg": 180.0, "stop_x_m": 20.0, "stop_y_m": 2.0, "phase": 1},
+                                         {"heading_deg": 90.0, "stop_x_m": 0.0, "stop_y_m": -10.0, "phase": 0}]}]
+SIGNALLED = [{**CROSSING[0], "control": "signal"}]
+
+
+def walk_lines(data, kind=None):
+    return [LineString(way["points_m"]) for way in data["walkways"] if kind is None or way["kind"] == kind]
+
+
+def parts_of(data):
+    """Each node's connected part, by a walk over the walkways."""
+    joined = {node["id"]: set() for node in data["nodes"]}
+    for way in data["walkways"]:
+        joined[way["from"]].add(way["to"])
+        joined[way["to"]].add(way["from"])
+    part, count = {}, 0
+    for start in joined:
+        if start in part:
+            continue
+        stack = [start]
+        while stack:
+            node = stack.pop()
+            if node not in part:
+                part[node] = count
+                stack.extend(joined[node])
+        count += 1
+    return part
+
+
+def test_walkways_run_down_the_footpaths_and_never_onto_the_road():
+    data = walkways.build(CROSSROADS, {}, CROSSING, BUILDING, "test")
+    area = paved(data).buffer(0.05)
+    road_area = asphalt(CROSSROADS).buffer(-0.1)
+    for line in walk_lines(data, "sidewalk"):
+        assert area.covers(line), "on the paving drawn"
+    for line in walk_lines(data, "link"):
+        assert not line.intersects(road_area), "a link goes round a corner or an end, never over the road"
+    footpath = walkways.half_width(CROSSROADS[0]) + walkways.KERB_STONE_M + 0.5 + 1.8 / 2
+    north_side = [way for way in data["walkways"]
+                  if way["kind"] == "sidewalk" and way["road_id"] == "way/1/2" and way["side"] == "left"]
+    assert north_side and all(y == pytest.approx(footpath, abs=0.02) for way in north_side for _, y in way["points_m"]), \
+        "down the middle of the footpath"
+    assert {way["width_m"] for way in north_side} == {1.8} and {way["lanes"] for way in north_side} == {2}
+
+
+def test_walkway_ends_are_their_nodes_and_no_two_nodes_are_closer_than_the_merge_distance():
+    data = walkways.build(CROSSROADS, {}, CROSSING, BUILDING, "test")
+    places = [tuple(node["xy_m"]) for node in data["nodes"]]
+    assert [node["id"] for node in data["nodes"]] == list(range(len(places)))
+    for way in data["walkways"]:
+        assert tuple(way["points_m"][0]) == places[way["from"]] and tuple(way["points_m"][-1]) == places[way["to"]]
+        assert way["length_m"] == pytest.approx(LineString(way["points_m"]).length, abs=0.01)
+    assert all(math.dist(a, b) >= walkways.MERGE_NODE_M for i, a in enumerate(places) for b in places[i + 1:])
+
+
+def test_a_crossing_runs_kerb_to_kerb_between_nodes_split_into_the_sidewalks():
+    data = walkways.build(CROSSROADS, {}, CROSSING, BUILDING, "test")
+    crossing = next(way for way in data["walkways"] if way.get("crossing_id") == "crossing-001")
+    assert crossing["control"] == "zebra" and "junction_id" not in crossing
+    kerb = walkways.half_width(CROSSROADS[0])
+    assert [x for x, _ in crossing["points_m"]] == pytest.approx([30, 30, 30, 30], abs=0.05)
+    assert sorted(abs(y) for _, y in crossing["points_m"][1:3]) == pytest.approx([kerb, kerb], abs=0.05), "over the road kerb to kerb"
+    for end in (crossing["from"], crossing["to"]):
+        assert data["nodes"][end]["kind"] == "kerb"
+        assert sum(end in (way["from"], way["to"]) and way["kind"] == "sidewalk" for way in data["walkways"]) == 2, \
+            "the sidewalk is split where the crossing steps onto it"
+    assert data["report"]["unattached_crossings"] == 0
+
+
+def test_a_signalled_crossing_carries_the_light_whose_red_lets_people_over():
+    data = walkways.build(CROSSROADS, {}, SIGNALLED, BUILDING, "test", JUNCTIONS)
+    crossing = next(way for way in data["walkways"] if way.get("crossing_id") == "crossing-001")
+    assert (crossing["control"], crossing["junction_id"], crossing["phase"]) == ("signal", "J1", 1)
+
+
+def test_a_signalled_crossing_whose_light_cannot_be_told_is_left_out_not_left_free():
+    data = walkways.build(CROSSROADS, {}, SIGNALLED, BUILDING, "test", [])
+    assert not [way for way in data["walkways"] if way.get("crossing_id") == "crossing-001"]
+    assert data["report"]["unmatched_signal_crossings"] == 1
+    assert data["report"]["unmatched_signal_crossing_ids"] == ["crossing-001"]
+
+
+def test_side_streets_get_a_crossing_without_a_light_but_not_near_a_mapped_crossing_of_the_same_road():
+    bare = walkways.build(CROSSROADS, {}, [], BUILDING, "test")
+    across = {way["crossing_id"]: way for way in bare["walkways"] if way["kind"] == "crossing"}
+    # Over both residential arms, where the primary road's footpaths go by; never over the primary road
+    assert set(across) == {"uncontrolled/way/1/1/1", "uncontrolled/way/1/2/0"}
+    offset = walkways.walk_offset(CROSSROADS[2])
+    assert sorted(way["points_m"][0][0] for way in across.values()) == pytest.approx([-offset, offset], abs=0.3)
+    assert all(way["control"] == "uncontrolled" for way in across.values())
+    assert bare["report"]["uncontrolled_ramps"] == 4, "a dropped kerb at each end"
+    # crossing-001 is 30 m along the eastern arm, so only the western one keeps its own
+    mapped = walkways.build(CROSSROADS, {}, CROSSING, BUILDING, "test")
+    assert {way["crossing_id"] for way in mapped["walkways"] if way.get("control") == "uncontrolled"} == {"uncontrolled/way/1/1/1"}
+    assert mapped["report"]["ramps"] == 2, "LTA's ramps are counted on their own"
+
+
+def test_dead_ends_join_round_the_end_of_the_road():
+    data = walkways.build([road()], {}, [], [], "test")
+    links = [way for way in data["walkways"] if way["kind"] == "link"]
+    assert len(links) == 2, "one round each end"
+    for link in links:
+        assert not LineString(link["points_m"]).intersects(asphalt([road()]).buffer(-0.1))
+    assert data["report"]["components"] == 1
+
+
+def test_a_reversed_one_ways_sidewalk_is_on_the_side_traffic_sees_it():
+    one_way = road(oneway=True)
+    data = walkways.build([one_way], {1: {"sidewalk": "left", "oneway": "-1"}}, [], [], "test")
+    sides = {(way["road_id"], way["side"]) for way in data["walkways"] if way["kind"] == "sidewalk"}
+    assert sides == {("way/1/1", "right")}
+    assert all(y < 0 for line in walk_lines(data, "sidewalk") for _, y in line.coords)
+
+
+def test_walkers_start_spread_by_length_and_never_on_a_crossing():
+    data = walkways.build(CROSSROADS, {}, CROSSING, BUILDING, "test")
+    seeds, ways = data["seeds"], {way["id"]: way for way in data["walkways"]}
+    assert len(seeds) == walkways.SEED_COUNT and len({seed["id"] for seed in seeds}) == len(seeds)
+    for seed in seeds:
+        way = ways[seed["walkway"]]
+        assert way["kind"] != "crossing" and 0 <= seed["distance_m"] <= way["length_m"]
+        assert walkways.SEED_SPEED_MPS[0] <= seed["speed_mps"] <= walkways.SEED_SPEED_MPS[1]
+        assert walkways.SEED_HEIGHT_M[0] <= seed["height_m"] <= walkways.SEED_HEIGHT_M[1]
+        assert 0 <= seed["model"] < walkways.SEED_MODELS
+    # Spread by length: the longest walkway gets about its share
+    walked = [way for way in data["walkways"] if way["kind"] != "crossing"]
+    longest = max(walked, key=lambda way: way["length_m"])
+    share = longest["length_m"] / sum(way["length_m"] for way in walked)
+    assert sum(seed["walkway"] == longest["id"] for seed in seeds) == pytest.approx(share * len(seeds), rel=0.3)
+
+
+def test_a_network_in_pieces_is_refused():
+    with pytest.raises(ValueError, match="largest connected part"):
+        walkways.check_network({"report": {"main_component_share": walkways.MIN_MAIN_SHARE - 0.01, "components": 9}})
+    walkways.check_network({"report": {"main_component_share": walkways.MIN_MAIN_SHARE, "components": 1}})
+
+
+def test_the_committed_network_holds_together_and_its_walkers_start_on_its_main_part(committed):
+    report = committed["report"]
+    assert report["main_component_share"] >= walkways.MIN_MAIN_SHARE
+    assert report["seeds"] == len(committed["seeds"]) == walkways.SEED_COUNT
+    part = parts_of(committed)
+    lengths = {}
+    for way in committed["walkways"]:
+        lengths[part[way["from"]]] = lengths.get(part[way["from"]], 0) + way["length_m"]
+    main = max(lengths, key=lengths.get)
+    assert lengths[main] / sum(lengths.values()) == pytest.approx(report["main_component_share"], abs=1e-3)
+    assert len(lengths) == report["components"]
+    ways = {way["id"]: way for way in committed["walkways"]}
+    assert all(part[ways[seed["walkway"]]["from"]] == main and ways[seed["walkway"]]["kind"] != "crossing"
+               for seed in committed["seeds"])
+
+
+def test_every_committed_lta_crossing_is_walked_or_accounted_for(committed):
+    """Each LTA crossing is a crossing walkway, has nowhere to land, or has a light that cannot be told: never free to cross."""
+    report = committed["report"]
+    lta = json.loads(output_path("toa-payoh", "crossings").read_text(encoding="utf-8"))["crossings"]
+    walked = {way["crossing_id"]: way for way in committed["walkways"]
+              if way["kind"] == "crossing" and way["control"] != "uncontrolled"}
+    left = set(report["unattached_crossing_ids"]) | set(report["unmatched_signal_crossing_ids"])
+    assert set(walked) | left == {crossing["id"] for crossing in lta} and not set(walked) & left
+    assert report["unattached_crossings"] == len(report["unattached_crossing_ids"])
+    signals = {junction["id"]: {approach["phase"] for approach in junction["approaches"]}
+               for junction in json.loads(output_path("toa-payoh", "signals").read_text(encoding="utf-8"))["junctions"]}
+    for crossing in lta:
+        if crossing["id"] in walked:
+            way = walked[crossing["id"]]
+            if crossing["control"] == "signal":
+                assert way["control"] == "signal" and way["phase"] in signals[way["junction_id"]]
+            else:
+                assert way["control"] == "zebra" and "junction_id" not in way
+    assert len(walked) >= 0.6 * len(lta)
+
+
+def test_the_committed_walkways_keep_to_the_paving_and_off_the_road(committed):
+    roads, _, _, _ = walkways.inputs("toa-payoh")
+    road_area = asphalt(roads).buffer(-0.1)
+    area = paved(committed).buffer(0.05)
+    sidewalks = shapely.union_all(walk_lines(committed, "sidewalk"))
+    assert sidewalks.difference(area).length < 0.001 * sidewalks.length
+    assert shapely.union_all(walk_lines(committed, "link")).intersection(road_area).length < 0.5
+    places = [tuple(node["xy_m"]) for node in committed["nodes"]]
+    for way in committed["walkways"]:
+        assert tuple(way["points_m"][0]) == places[way["from"]] and tuple(way["points_m"][-1]) == places[way["to"]]

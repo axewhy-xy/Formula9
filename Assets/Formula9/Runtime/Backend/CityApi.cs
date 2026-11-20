@@ -139,12 +139,64 @@ namespace Formula9.Backend
         public int[] KerbEdges = Array.Empty<int>(), OuterEdges = Array.Empty<int>(), CheekEdges = Array.Empty<int>();
     }
 
+    // The walk network the backend and the views share: a node where walkways meet (x east, y north, metres)
+    public sealed class CityWalkNode
+    {
+        public int Id;
+        public float X, Y;
+        // corner, kerb (a crossing's end) or joint
+        public string Kind;
+    }
+
+    public enum CityWalkwayKind { Sidewalk, Link, Crossing }
+
+    // How a crossing walkway is controlled: by a light (signal), with priority to people (zebra), or neither
+    // (uncontrolled, over a side street's or driveway's mouth); None for a walkway that is not a crossing
+    public enum CityCrossingControl { None, Zebra, Signal, Uncontrolled }
+
+    // A walkway between two nodes, walked either way
+    public sealed class CityWalkway
+    {
+        public int Id, From, To, Lanes;
+        public CityWalkwayKind Kind;
+        // x, y of each point in metres; the first is From's place and the last To's
+        public float[] PointsM = Array.Empty<float>();
+        public float LengthM, WidthM;
+        // A sidewalk's road and side of it (of the way the road's traffic runs)
+        public string RoadId, Side;
+        // A crossing's id (LTA's, or uncontrolled/<road>/<end>) and control; a signalled one's junction and the
+        // phase whose red lets people over
+        public string CrossingId, JunctionId;
+        public CityCrossingControl Control;
+        public int Phase;
+    }
+
+    // Where a walker starts: a distance along a walkway (from its From node), and how it walks and looks
+    public sealed class CityWalkerSeed
+    {
+        public string Id;
+        public int Walkway, Model;
+        public float DistanceM, SpeedMps, HeightM;
+    }
+
+    // What the importer counted, to check the views against
+    public sealed class CityWalkReport
+    {
+        public int Walkways, CrossingWalkways, UncontrolledCrossings, UnattachedCrossings, UnmatchedSignalCrossings, Components;
+        public float MainComponentShare;
+    }
+
     public sealed class CityWalkwayData
     {
         public string Area, SourceHash;
         public int Version;
         public float SurfaceY, KerbRiseM, KerbStoneM, RampDepthM;
         public List<CityWalkwayTile> Tiles = new List<CityWalkwayTile>();
+        // The walk network; empty in a file from before it (version 1)
+        public List<CityWalkNode> Nodes = new List<CityWalkNode>();
+        public List<CityWalkway> Walkways = new List<CityWalkway>();
+        public List<CityWalkerSeed> Seeds = new List<CityWalkerSeed>();
+        public CityWalkReport Report = new CityWalkReport();
 
         // Reads the file a token at a time, its long number lists straight into arrays, as it runs to a
         // megabyte. Nothing here touches Unity, so it can run off the main thread.
@@ -174,15 +226,20 @@ namespace Formula9.Backend
                                 data.RampDepthM = (float)constants["ramp_depth_m"];
                                 break;
                             case "render": ReadRender(reader, data.Tiles); sawRender = true; break;
+                            case "nodes": data.Nodes = JArray.Load(reader).Select(ReadNode).ToList(); break;
+                            case "walkways": data.Walkways = JArray.Load(reader).Select(ReadWalkway).ToList(); break;
+                            case "seeds": data.Seeds = JArray.Load(reader).Select(ReadSeed).ToList(); break;
+                            case "report": data.Report = ReadReport(JObject.Load(reader)); break;
                             default: reader.Skip(); break;
                         }
                     }
                     if (!sawRender) throw new ContractException("Walkways reply has no render data");
                     if (data.KerbRiseM <= 0 || data.RampDepthM <= 0) throw new ContractException("Walkways reply has no kerb sizes");
+                    CheckNetwork(data);
                     return data;
                 }
             }
-            catch (Exception error) when (error is JsonException || error is InvalidCastException || error is FormatException || error is OverflowException || error is NullReferenceException)
+            catch (Exception error) when (error is JsonException || error is InvalidCastException || error is FormatException || error is OverflowException || error is NullReferenceException || error is ArgumentException)
             {
                 throw new ContractException("Invalid walkways reply: " + error.Message);
             }
@@ -290,6 +347,91 @@ namespace Formula9.Backend
         private static void Expect(JsonTextReader reader, JsonToken token)
         {
             if (!reader.Read() || reader.TokenType != token) throw new ContractException("Walkways reply is not a JSON object");
+        }
+
+        private static CityWalkNode ReadNode(JToken token)
+        {
+            var at = token["xy_m"] as JArray ?? throw new ContractException("A walk node has no place");
+            if (at.Count != 2) throw new ContractException("A walk node's place is not two numbers");
+            return new CityWalkNode { Id = (int)token["id"], X = (float)at[0], Y = (float)at[1], Kind = (string)token["kind"] };
+        }
+
+        private static CityWalkway ReadWalkway(JToken token)
+        {
+            var points = token["points_m"] as JArray ?? throw new ContractException("A walkway has no points");
+            var flat = new float[points.Count * 2];
+            for (var i = 0; i < points.Count; i++)
+            {
+                var point = points[i] as JArray;
+                if (point == null || point.Count != 2) throw new ContractException("A walkway point is not two numbers");
+                flat[i * 2] = (float)point[0];
+                flat[i * 2 + 1] = (float)point[1];
+            }
+            var kind = (string)token["kind"];
+            var control = (string)token["control"];
+            return new CityWalkway
+            {
+                Id = (int)token["id"],
+                From = (int)token["from"],
+                To = (int)token["to"],
+                Kind = kind == "sidewalk" ? CityWalkwayKind.Sidewalk : kind == "link" ? CityWalkwayKind.Link
+                    : kind == "crossing" ? CityWalkwayKind.Crossing : throw new ContractException("Unknown walkway kind " + kind),
+                PointsM = flat,
+                LengthM = (float)token["length_m"],
+                WidthM = (float?)token["width_m"] ?? 1.5f,
+                Lanes = (int?)token["lanes"] ?? 1,
+                RoadId = (string)token["road_id"],
+                Side = (string)token["side"],
+                CrossingId = (string)token["crossing_id"],
+                Control = control == null ? CityCrossingControl.None : control == "signal" ? CityCrossingControl.Signal
+                    : control == "zebra" ? CityCrossingControl.Zebra : control == "uncontrolled" ? CityCrossingControl.Uncontrolled
+                    : throw new ContractException("Unknown crossing control " + control),
+                JunctionId = (string)token["junction_id"],
+                Phase = (int?)token["phase"] ?? 0,
+            };
+        }
+
+        private static CityWalkerSeed ReadSeed(JToken token) => new CityWalkerSeed
+        {
+            Id = (string)token["id"],
+            Walkway = (int)token["walkway"],
+            DistanceM = (float)token["distance_m"],
+            SpeedMps = (float)token["speed_mps"],
+            HeightM = (float?)token["height_m"] ?? 1.7f,
+            Model = (int?)token["model"] ?? 0,
+        };
+
+        private static CityWalkReport ReadReport(JObject report) => new CityWalkReport
+        {
+            Walkways = (int?)report["walkways"] ?? 0,
+            CrossingWalkways = (int?)report["crossing_walkways"] ?? 0,
+            UncontrolledCrossings = (int?)report["uncontrolled_crossings"] ?? 0,
+            UnattachedCrossings = (int?)report["unattached_crossings"] ?? 0,
+            UnmatchedSignalCrossings = (int?)report["unmatched_signal_crossings"] ?? 0,
+            Components = (int?)report["components"] ?? 0,
+            MainComponentShare = (float?)report["main_component_share"] ?? 0,
+        };
+
+        // Every walkway joins nodes there are, at their places, and every walker starts on a walkway there is
+        private static void CheckNetwork(CityWalkwayData data)
+        {
+            for (var i = 0; i < data.Nodes.Count; i++)
+                if (data.Nodes[i].Id != i) throw new ContractException("Walk nodes are not numbered in order");
+            for (var i = 0; i < data.Walkways.Count; i++)
+            {
+                var way = data.Walkways[i];
+                if (way.Id != i) throw new ContractException("Walkways are not numbered in order");
+                if (way.From < 0 || way.From >= data.Nodes.Count || way.To < 0 || way.To >= data.Nodes.Count || way.From == way.To)
+                    throw new ContractException($"Walkway {i} joins nodes there are not");
+                if (way.PointsM.Length < 4) throw new ContractException($"Walkway {i} has fewer than two points");
+                if (way.Kind == CityWalkwayKind.Crossing && way.Control == CityCrossingControl.None)
+                    throw new ContractException($"Crossing walkway {i} says nothing of how it is controlled");
+                if (way.Control == CityCrossingControl.Signal && string.IsNullOrEmpty(way.JunctionId))
+                    throw new ContractException($"Signalled crossing walkway {i} names no junction");
+            }
+            foreach (var seed in data.Seeds)
+                if (seed.Walkway < 0 || seed.Walkway >= data.Walkways.Count || seed.DistanceM < 0 || seed.DistanceM > data.Walkways[seed.Walkway].LengthM + 0.01f)
+                    throw new ContractException($"Walker {seed.Id} starts off its walkway");
         }
     }
 

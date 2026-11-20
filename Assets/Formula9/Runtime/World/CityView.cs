@@ -98,7 +98,13 @@ namespace Formula9.World
         private List<CityBuilding> buildings;
         private Mesh buildingMesh;
         private CityTrafficRenderer traffic;
-        private CityPedestrianLiteRenderer pedestrians;
+        // People walking the sidewalks: the walk network from the walkways file, walked here, and drawn as a crowd.
+        // The network comes with the sidewalks and the lights with the traffic, so the walkers start once both have.
+        private PedestrianCrowd pedestrianCrowd;
+        private PedestrianLocalSim pedestrians;
+        private CityWalkwayData walkNetwork;
+        private CitySignalData pedestrianSignals;
+        private bool pedestrianSignalsKnown;
         // A queue grows slowly, so the traffic need not look at the incidents every frame
         private const float HazardRefreshS = 0.5f;
         private float hazardsDueS;
@@ -154,7 +160,8 @@ namespace Formula9.World
             traffic = new CityTrafficRenderer();
             if (EnablePedestrians)
             {
-                pedestrians = new CityPedestrianLiteRenderer();
+                pedestrianCrowd = new PedestrianCrowd();
+                pedestrians = new PedestrianLocalSim();
                 pedestrians.SetSignalClock(() => traffic != null ? traffic.SignalClockS : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0);
             }
             if (tiles != null) tiles.TileLoaded += RefreshTiles;
@@ -227,7 +234,7 @@ namespace Formula9.World
             {
                 Debug.LogWarning("No road surfaces, so the map's roads show instead: " + error.Message);
                 traffic?.Rebuild(Array.Empty<CityRoad>(), null);
-                pedestrians?.Rebuild(area, Array.Empty<CityRoad>(), null);
+                pedestrians?.Clear();
                 return;
             }
             cancellation.ThrowIfCancellationRequested();
@@ -415,7 +422,16 @@ namespace Formula9.World
                 cancellation.ThrowIfCancellationRequested();
             }
             traffic?.Rebuild(roads, trafficData, signals);
-            pedestrians?.Rebuild(area, roads, signals, buildings);
+            pedestrianSignals = signals;
+            pedestrianSignalsKnown = true;
+            RebuildPedestrians();
+        }
+
+        // Walkers start once the walk network and the lights (or the news that there are none) are both in
+        private void RebuildPedestrians()
+        {
+            if (pedestrians == null || walkNetwork == null || !pedestrianSignalsKnown || disposed) return;
+            pedestrians.Rebuild(walkNetwork, pedestrianSignals);
         }
 
         // Sidewalks from the backend's walkways file, or from the copy in Resources when the backend has none
@@ -443,6 +459,9 @@ namespace Formula9.World
                 cancellation.ThrowIfCancellationRequested();
                 if (disposed) return;
                 var surfaceBuild = Task.Run(() => SidewalkSurface.Build(data), cancellation);
+                // The walkers' network comes in the same file: nothing to work out here, only to read
+                walkNetwork = data;
+                RebuildPedestrians();
 
                 var materials = SidewalkMaterials(shader, grain);
                 var holder = new GameObject("Sidewalks").transform;
@@ -1164,7 +1183,7 @@ namespace Formula9.World
         public void DrawTraffic(IReadOnlyList<Camera> cameras)
         {
             traffic?.Draw(cameras);
-            pedestrians?.Draw(cameras);
+            if (pedestrians != null) pedestrianCrowd?.Draw(pedestrians.Poses, cameras);
         }
 
         // Called each frame: a shuttle is where the backend's traffic frames put its body; without them,
@@ -1231,8 +1250,10 @@ namespace Formula9.World
             busStopShelters.Dispose();
             traffic?.Dispose();
             traffic = null;
-            pedestrians?.Dispose();
+            pedestrians?.Clear();
             pedestrians = null;
+            pedestrianCrowd?.Dispose();
+            pedestrianCrowd = null;
             if (root != null) WorldBuilder.Remove(root.gameObject);
             trafficLightObjects.Clear();
             foreach (var item in owned)
