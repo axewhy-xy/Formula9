@@ -27,7 +27,7 @@ namespace Formula9.UI
         private readonly VisualElement routePending, routePendingItems;
         private readonly Label routePendingTitle, routeBadge;
         private readonly TextField routeReason;
-        private readonly Label routeProblem, routeOptionsExpiry, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes, selection;
+        private readonly Label routeProblem, routeOptionsExpiry, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes;
         private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowProblem, routeCameras, fleetCameras, approve, routeStart, routeWatch;
         private readonly VisualElement routeStages, routeWaypoints, routeIssues, routeMetrics, routeDecide, routeFeedback, routeApply, routeOutcomePanel, routeOutcomeRows, fleetTable;
         private readonly List<VisualElement> operationalViews;
@@ -75,6 +75,10 @@ namespace Formula9.UI
         private bool rerouting, awaitingError;
 
         private readonly List<Button> navButtons = new List<Button>();
+        // The Fleet List: its page (which remembers being collapsed), the panel it shares with the
+        // other pages, its header bar, and the map it floats over
+        private readonly VisualElement fleetPage, fleetPanel, fleetHeaderBar, mapArea;
+        private const float MapGapPoints = 8;
         // The incident last picked on the map; the Fleet List marks the shuttles it concerns
         public string SelectedIncident { get; private set; }
         public event Action IncidentSelected;
@@ -86,7 +90,6 @@ namespace Formula9.UI
             IncidentSelected?.Invoke();
         }
         private const int MaxLedgerEntries = 200;
-        public event Action <string> SectionChanged;
         // A page's index by its UXML name, or -1 when the layout leaves it out
         private int Page(string name) =>pageIndex.TryGetValue(name, out var index) ? index : -1;
         private int FleetPage => Page("page-fleet");
@@ -101,7 +104,7 @@ namespace Formula9.UI
         {
             this.api = api; this.session = session; this.world = world; this.run = run;
             // The pages are laid out in UI/Pages/*.uxml; this binds their controls by name.
-            foreach (var (pageName, navName) in new[] { ("page-fleet", "nav-fleet"), ("page-route", "nav-route"), ("page-charging", "nav-charging"), ("page-reports", "nav-reports"), ("page-scenarios", null) })
+            foreach (var (pageName, navName) in new[] { ("page-fleet", "nav-fleet"), ("page-route", "nav-route"), ("page-charging", "nav-charging"), ("page-reports", "nav-reports"), ("page-scenarios", "nav-scenarios") })
             {
                 // A page the layout leaves out gets no index: its lookups give -1 and it is never shown
                 var page = root.Q(pageName);
@@ -113,10 +116,18 @@ namespace Formula9.UI
                 navButtons.Add(button);
                 if (button != null) button.clicked+= () => {ShowPage(index); Render();};
             }
-            selection = root.Q<Label>("fleet-selection");
             Bind(root, "follow-selected", () => world.FollowSelected());
             fleetCameras = Bind(root, "fleet-cameras", ToggleSelectedCameras);
             Bind(root, "camera-overview", () => world.Overview());
+            fleetPage = root.Q("fleet-page");
+            fleetPanel = root.Q("fleet-panel");
+            fleetHeaderBar = fleetPage?.Q(className: "fleet-panel-header");
+            mapArea = root.Q("world");
+            var fleetToggle = root.Q<Button>("fleet-toggle-btn");
+            if (fleetToggle != null) fleetToggle.clicked += ToggleFleetList;
+            // Whatever resizes the sheet or the map (the window, a header that wraps) fits them again
+            fleetPanel?.RegisterCallback<GeometryChangedEvent>(_ => FitMapToFleetList());
+            mapArea?.RegisterCallback<GeometryChangedEvent>(_ => FitMapToFleetList());
 
             shuttles = root.Q<DropdownField>("shuttles");
             shuttles.RegisterValueChangedCallback(change => { if (shuttleByChoice.TryGetValue(change.newValue ?? "", out var id)) ChooseShuttle(id); });
@@ -200,7 +211,7 @@ namespace Formula9.UI
                 SetConfirmNote("The backend refused it: " + (message.StartsWith(prefix) ? message.Substring(prefix.Length) : message), true);
             };
             // The Cameras buttons depend on which shuttle is selected
-            world.EntitySelected += id => { selection.text = "Selected: " + id; UpdateActions(); };
+            world.EntitySelected += _ => UpdateActions();
             world.RouteNodeSelected += AppendNode;
             world.RoadClicked += AddRoad;
             world.WaypointClicked += RemoveWaypoint;
@@ -208,14 +219,13 @@ namespace Formula9.UI
             ShowPage(FleetPage);
         }
 
-        public void SelectVehicle(string id) { world.SelectEntity(id); selection.text = "Selected: " + id; }
+        public void SelectVehicle(string id) => world.SelectEntity(id);
 
         // The operator picking a shuttle in the fleet table or the Fleet List. Open cameras move to it,
         // except on Route Planning to a shuttle other than the one it is for: they stay on that one.
         public void PickVehicle(string id)
         {
             if (shownPage == RoutePage && id != selectedVehicle) world.SelectEntity(id); else world.PickShuttle(id);
-            selection.text = "Selected: " + id;
         }
 
         // Opens Route Planning on a shuttle's decision and frames the incident: from a notification's
@@ -668,7 +678,6 @@ namespace Formula9.UI
             var vehicle = RouteVehicle() ?? outcome?.VehicleId;
             if (vehicle == null) return;
             world.WatchShuttle(vehicle);
-            selection.text = "Selected: " + vehicle;
         }
 
         private void AddRoad(DraftRoad road, Vector2 at)
@@ -1023,7 +1032,7 @@ namespace Formula9.UI
         private void ShowPage(int index)
         {
             if (index < 0) return;
-            // Fleet Overview and Route Planning have the map beside them; the others take the full width, as in Qt.
+            // Fleet Overview (list over the map) and Route Planning (beside it) show the map; the others take the full width, as in Qt.
             foreach (var view in operationalViews) view.style.display = index == FleetPage || index == RoutePage ? DisplayStyle.Flex : DisplayStyle.None;
             var entering = index == RoutePage && shownPage != RoutePage;
             shownPage = index;
@@ -1033,15 +1042,53 @@ namespace Formula9.UI
             ShowDraftInViews();
             RenderWaypoints();
             RenderFeedback();
-            // The Fleet List button may have hidden the panel these pages live in.
-            pages[index].parent.style.display = DisplayStyle.Flex;
             for (var i = 0; i < pages.Count; i++)
             {
                 pages[i].style.display = i == index ? DisplayStyle.Flex : DisplayStyle.None;
                 navButtons[i]?.EnableInClassList("nav-item-selected", i == index);
             }
-            // The top menu shows the page's section: Reports and Scenarios, or everything else
-            SectionChanged?.Invoke(index == ReportsPageIndex ? "reports" : index == ScenariosPageIndex ? "scenarios" : "operations");
+            LayOutFleetList();
+        }
+
+        // Collapses or expands the Fleet List. The Fleet page keeps the state, so it survives
+        // switching pages.
+        private void ToggleFleetList()
+        {
+            fleetPage?.ToggleInClassList("collapsed");
+            LayOutFleetList();
+        }
+
+        // The one place that decides where the Fleet List sits. On the Fleet page it floats over
+        // the bottom of the map and can be collapsed to its header bar; every other page gets the
+        // whole panel beside the map.
+        private void LayOutFleetList()
+        {
+            if (fleetPanel == null) return;
+            var onFleetPage = shownPage == FleetPage;
+            fleetPanel.EnableInClassList("fleet-panel-collapsed", onFleetPage && fleetPage != null && fleetPage.ClassListContains("collapsed"));
+            fleetPanel.parent?.EnableInClassList("body-stacked", onFleetPage);
+            FitMapToFleetList();
+        }
+
+        // Keeps the map usable under the Fleet List. The map ends just above the collapsed bar,
+        // measured rather than assumed, so a header that wraps on a narrow window still fits.
+        // While the list is expanded over the map, the map's bottom controls move up above it.
+        private void FitMapToFleetList()
+        {
+            if (fleetPanel == null || mapArea == null) return;
+            var stacked = fleetPanel.parent != null && fleetPanel.parent.ClassListContains("body-stacked");
+            if (!stacked)
+            {
+                mapArea.style.marginBottom = StyleKeyword.Null;
+                if (world != null) world.SetBottomInset(0);
+                return;
+            }
+            var panel = fleetPanel.resolvedStyle;
+            var bar = panel.paddingTop + panel.paddingBottom + panel.borderTopWidth + panel.borderBottomWidth + (fleetHeaderBar?.layout.height ?? 0);
+            if (!float.IsNaN(bar) && bar > 0) mapArea.style.marginBottom = bar + MapGapPoints;
+            // How far the sheet reaches up into the map; 0 or less while it is collapsed below it
+            var covered = mapArea.worldBound.yMax - fleetPanel.worldBound.yMin;
+            if (world != null) world.SetBottomInset(float.IsNaN(covered) ? 0 : covered);
         }
 
         // A refused start sends the trainee here to approve a detour first.

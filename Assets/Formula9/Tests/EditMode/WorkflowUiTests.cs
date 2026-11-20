@@ -131,7 +131,7 @@ namespace Formula9.Tests
                 Assert.IsTrue(suggest.enabledSelf, string.Join("; ", errors.Select(e => e.Message)));
                 Assert.IsTrue(world.RouteEditing, "the map picks route nodes while the route is edited");
                 Assert.IsEmpty(errors);
-                CollectionAssert.AreEqual(new[] { "Fleet Overview", "Route Planning", "Charging", "Reports" }, root.Q("nav-items").Query<Label>().ToList().Where(l => !l.ClassListContains("nav-badge")).Select(l => l.text).ToList());
+                CollectionAssert.AreEqual(new[] { "Fleet Overview", "Route Planning", "Charging", "Scenarios", "Reports" }, root.Q("nav-items").Query<Label>().ToList().Where(l => !l.ClassListContains("nav-badge")).Select(l => l.text).ToList());
             }
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
         }
@@ -803,6 +803,45 @@ namespace Formula9.Tests
                 rig.Workspace.ShowRoutePlanning();
                 Assert.AreEqual(DisplayStyle.Flex, Page("page-route").style.display.value);
                 Assert.AreEqual(DisplayStyle.None, Page("page-fleet").style.display.value);
+            }
+        }
+
+        // The Fleet List floats over the map and collapses only on Fleet Overview, and stays
+        // collapsed while the operator visits another page. Route Planning keeps its panel beside
+        // the map, whole.
+        [Test]
+        public async Task TheFleetListStaysCollapsedAcrossPages()
+        {
+            using (var rig = new IncidentsRig())
+            {
+                await rig.Join();
+                var panel = rig.Q<VisualElement>("fleet-panel");
+                rig.Workspace.ShowSection("operations");
+                Assert.IsTrue(panel.parent.ClassListContains("body-stacked"), "Fleet Overview: the list floats over the map");
+                Assert.IsFalse(panel.ClassListContains("fleet-panel-collapsed"), "it starts expanded");
+                rig.Press("fleet-toggle-btn");
+                Assert.IsTrue(panel.ClassListContains("fleet-panel-collapsed"), "the chevron collapses it");
+                rig.Workspace.ShowRoutePlanning();
+                Assert.IsFalse(panel.parent.ClassListContains("body-stacked"), "Route Planning: the panel is beside the map");
+                Assert.IsFalse(panel.ClassListContains("fleet-panel-collapsed"), "and whole");
+                rig.Workspace.ShowSection("operations");
+                Assert.IsTrue(panel.ClassListContains("fleet-panel-collapsed"), "back on Fleet Overview, still collapsed");
+                rig.Press("fleet-toggle-btn");
+                Assert.IsFalse(panel.ClassListContains("fleet-panel-collapsed"), "one press expands it again");
+            }
+        }
+
+        // Scenarios has its own sidebar item now that the top bar is gone, and it is marked when shown
+        [Test]
+        public async Task ScenariosOpensFromTheSidebar()
+        {
+            using (var rig = new IncidentsRig())
+            {
+                await rig.Join();
+                rig.Press("nav-scenarios");
+                Assert.AreEqual(DisplayStyle.Flex, rig.Q<VisualElement>("page-scenarios").style.display.value);
+                Assert.IsTrue(rig.Q<Button>("nav-scenarios").ClassListContains("nav-item-selected"));
+                Assert.IsFalse(rig.Q<Button>("nav-fleet").ClassListContains("nav-item-selected"));
             }
         }
 
