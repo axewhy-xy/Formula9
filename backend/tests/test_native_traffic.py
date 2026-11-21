@@ -228,6 +228,60 @@ def test_walkers_walk_identically_on_both_engines_through_faults_incidents_and_a
 
 
 @native
+@pytest.mark.traffic
+def test_trips_the_time_of_day_and_a_jaywalker_play_out_identically_on_both_engines():
+    """The phase 5 bar: walkers on trips, going in and coming out with the evening's curve, crossings let go
+    lane by lane, and a jaywalker in front of a shuttle, bit for bit on both engines over 2,000 steps, with a
+    checkpoint taken in the middle of the jaywalk carrying on identically in either."""
+    evening = 17 * 3600.0
+    python = CityTraffic.start("toa-payoh", pedestrians=True, day_start_s=evening)
+    fast = NativeCityTraffic.start("toa-payoh", pedestrians=True, day_start_s=evening)
+    assert fast.state() == python.state() and python.state()["day_start_s"] == evening
+    points = _shuttle_route(python)
+    routes = {"python": ShuttleRoute(points), "native": ShuttleRoute(points)}
+    drives = {"python": {"along": 0.0, "speed": 0.0}, "native": {"along": 0.0, "speed": 0.0}}
+    # The jaywalk happens on a road of the shuttle's route ahead of it, where a walker is near enough
+    network = python.network
+    ahead = []
+    for (ax, ay), (bx, by) in zip(points[20:], points[21:]):
+        road, _ = network.road_under((ax + bx) / 2, (ay + by) / 2, bx - ax, by - ay, 0.7)
+        if road is not None and road not in ahead:
+            ahead.append(road)
+    jaywalked, checkpoint, reports = False, None, []
+    for i in range(2000):
+        clock = (i + 1) * DT
+        if 100 <= i and not jaywalked:
+            for road in ahead:
+                sent = python.jaywalk("jay", road, road.length / 2, clock + 120.0)
+                assert fast.jaywalk("jay", road, road.length / 2, clock + 120.0) == sent
+                if sent:
+                    jaywalked = True
+                    break
+        if i % 2 == 0 and drives["python"]["along"] < routes["python"].length - 2.0:
+            plans = {name: _drive_shuttle(traffic, routes[name], drives[name], 2 * DT)
+                     for name, traffic in (("python", python), ("native", fast))}
+            assert plans["native"] == plans["python"], i
+        python.step(DT, clock)
+        fast.step(DT, clock)
+        if checkpoint is None and python.jaywalks and python.jaywalks["jay"].phase >= 2:
+            checkpoint = (i, json.loads(json.dumps(fast.state())))
+        if i % 100 == 99:
+            assert fast.state() == python.state(), i
+            assert fast.pedestrian_frame() == python.pedestrian_frame(), i
+            reports.append(python.report())
+    assert jaywalked and checkpoint is not None, "a walker went across a road of the route"
+    assert fast.report() == python.report() and python.report()["pedestrian_hits"] == []
+    assert any(report["walkers_away"] for report in reports) and any(report["walkers_jaywalking"] for report in reports)
+    # From the checkpoint taken while the jaywalker was on the road, both engines drive on as the run did
+    at, state = checkpoint
+    again = {CityTraffic: CityTraffic.from_state(state), NativeCityTraffic: NativeCityTraffic.from_state(state)}
+    assert again[CityTraffic].state() == state == again[NativeCityTraffic].state()
+    run(again[CityTraffic], 200, (at + 1) * DT)
+    run(again[NativeCityTraffic], 200, (at + 1) * DT)
+    assert again[CityTraffic].state() == again[NativeCityTraffic].state()
+
+
+@native
 @pytest.mark.parametrize("written_by", [CityTraffic, NativeCityTraffic])
 def test_a_checkpoint_from_either_engine_drives_on_identically_in_the_other(written_by):
     traffic = written_by.start("toa-payoh")

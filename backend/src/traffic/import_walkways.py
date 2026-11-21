@@ -26,7 +26,19 @@ and the views both read, so a walker at a distance along a walkway is at the sam
   streets and driveways, so the footpaths would stop at every one: where a minor road's mouth meets a
   footpath on both sides, and no LTA crossing of that road is within 50 m, an uncontrolled crossing (no
   light, no priority) carries the footpath over it, with ramps of its own;
+- footway walkways run down the footpaths OpenStreetMap maps as ways of their own (plan phase 5): the
+  sidewalks of roads tagged sidewalk=separate, park paths and the paths between blocks
+  (fixtures/osm/<area>-footways.overpass.json, fetched once with --download-footways). They are paved and
+  drawn as the sidewalks are, cut where they meet a road's asphalt or a building, and join the sidewalks
+  where their paving meets. A road side tagged separate gets no sidewalk of its own where such a footway
+  runs alongside it; elsewhere it still does;
 - seeds are where walkers start, spread along the network's main connected part.
+
+Attractors are where walkers go (plan phase 5): bus stops and the interchange (from the OSM extract), and
+the blocks people live in and the places they visit (from the building outlines), each at the walk node of
+the main part nearest it. The population curve is how many of the walkers are out by the hour of the day;
+the rest are indoors or away on a bus. The backend routes each walker from attractor to attractor
+(src.traffic.walk_network).
 
 Rebuild the Unity copy with --unity-copy ../Assets/Formula9/Resources/Formula9/RoadData/<area>-walkways.json.
 """
@@ -41,18 +53,20 @@ import math
 import random
 import sys
 from pathlib import Path
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 import shapely
 import shapely.ops
 from shapely.geometry import LineString, Point, Polygon
 from shapely.geometry.polygon import orient
 
-from src.routing.build_singapore_fleet_fixture import DEFAULT_AREA, SERVICE_AREAS, extract_path
+from src.routing.build_singapore_fleet_fixture import DEFAULT_AREA, OSM_DIRECTORY, SERVICE_AREAS, extract_path, project
 from src.routing.import_buildings import OUTPUT_DIRECTORY as BUILDINGS_DIRECTORY, read_buildings
 from src.traffic.import_road_features import CROSSING_WIDTH_M, output_path
 from src.traffic.import_vehicle_population import OUTPUT_DIRECTORY, ROADS_ATTRIBUTION
 
-VERSION = 2
+VERSION = 3
 
 # The road surface the 3D view draws. These must equal RoadMesh.cs (a test reads them from there).
 LANE_WIDTH_M = 3.2
@@ -132,9 +146,42 @@ SEED_HEIGHT_M = (1.5, 1.9)
 SEED_MODELS = 8
 # The network's largest connected part must hold this share of its length, or a rule broke it. The plan asked
 # for 90%, but Toa Payoh's sidewalks only join across its main roads at LTA's crossings, and those are mapped
-# in the middle of the estate only: its southern and western edges are islands, joined by footpaths
-# OpenStreetMap maps as ways of their own (sidewalk=separate, plan phase 5). The area holds about 61% today.
+# in the middle of the estate only: its southern and western edges are islands. The footpaths OpenStreetMap
+# maps as ways of their own join some of them up (the main part grew from about 39 km to 55 km), but they also
+# add pieces of their own that only an unmapped crossing would join; the area holds about 58%.
 MIN_MAIN_SHARE = 0.55
+
+# Footpaths mapped as ways of their own. Those over a road (footway=crossing: LTA's crossings are the ones
+# walked), on a bridge or in a tunnel (the view draws neither), indoors or private are left out.
+FOOTWAY_QUERY = """
+[out:json][timeout:180];
+(
+  way["highway"~"^(footway|path|pedestrian|steps)$"]["access"!~"^(private|no)$"]({box});
+);
+out body;
+>;
+out skel qt;
+"""
+FOOTWAY_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+FOOTWAY_WIDTH_M = {"footway": 2.0, "path": 1.5, "pedestrian": 3.0, "steps": 1.5}
+MIN_FOOTWAY_M, MAX_FOOTWAY_M = 1.5, 6.0
+# A side tagged sidewalk=separate is mapped where footways come within this far of most of its walking line
+SEPARATE_REACH_M, SEPARATE_SHARE, SEPARATE_STEP_M = 6.0, 0.6, 2.0
+# A footway lying mostly on a sidewalk this importer makes anyway is that sidewalk mapped twice: left out
+DUPLICATE_SHARE = 0.6
+
+# Where walkers go: (kind, weight, reach m). A home or a place is gone into; at a stop a walker waits for a bus
+# and leaves on it. Each is at the main part's walk node nearest it, within reach (of a building's outline).
+ATTRACTORS = {"home": (1.0, 40.0), "place": (2.0, 40.0), "bus_stop": (2.0, 30.0), "interchange": (6.0, 80.0)}
+HOME_TYPES = frozenset({"residential", "apartments", "house", "terrace", "detached", "dormitory"})
+PLACE_TYPES = frozenset({"retail", "commercial", "public", "school", "office", "train_station", "hotel", "temple",
+                         "church", "mosque", "civic", "hospital", "kindergarten", "college", "university", "industrial"})
+# An untyped building this tall is taken for a block of flats
+UNTYPED_HOME_HEIGHT_M = 9.0
+# The share of the walkers out, by the hour of the day from midnight, the hour's middle to the next's: made
+# up for an HDB town, quiet at night, peaking with the morning and evening journeys and at lunch
+POPULATION_HOURLY = (0.08, 0.05, 0.04, 0.04, 0.05, 0.12, 0.35, 0.75, 0.85, 0.6, 0.55, 0.65,
+                     0.8, 0.7, 0.55, 0.55, 0.65, 0.9, 1.0, 0.95, 0.8, 0.6, 0.35, 0.18)
 
 
 def half_width(road: dict) -> float:
@@ -176,6 +223,89 @@ def sidewalk_sides(road: dict, tags: dict) -> tuple[bool, bool]:
     if tags.get("oneway") == "-1":
         drawn_left, drawn_right = drawn_right, drawn_left
     return (left if drawn_left is None else drawn_left, right if drawn_right is None else drawn_right)
+
+
+def separate_sides(tags: dict) -> tuple[bool, bool]:
+    """Whether OpenStreetMap maps the sidewalk (left, right) of a road's points as a way of its own."""
+    left = right = tags.get("sidewalk") == "separate" or tags.get("sidewalk:both") == "separate"
+    if tags.get("sidewalk:left") == "separate":
+        left = True
+    if tags.get("sidewalk:right") == "separate":
+        right = True
+    if tags.get("oneway") == "-1":
+        left, right = right, left
+    return left, right
+
+
+def footway_lines(osm: dict) -> list[dict]:
+    """The footpaths of a footways extract that the walkers may walk, as (id, points in metres, width)."""
+    elements = osm.get("elements", ())
+    position = {e["id"]: project(e["lat"], e["lon"]) for e in elements if e["type"] == "node"}
+    found = []
+    for way in sorted((e for e in elements if e["type"] == "way"), key=lambda e: e["id"]):
+        tags = way.get("tags", {})
+        highway = tags.get("highway")
+        if highway not in FOOTWAY_WIDTH_M or tags.get("footway") == "crossing" or tags.get("area") == "yes":
+            continue
+        # Through a block's void deck (a covered linkway, or a passage under it) is at ground level
+        passage = tags.get("tunnel") == "building_passage" or tags.get("covered") == "yes"
+        if tags.get("bridge", "no") != "no" or tags.get("tunnel", "no") not in ("no", "building_passage"):
+            continue
+        if tags.get("indoor", "no") != "no" or tags.get("level") not in (None, "0"):
+            continue
+        if tags.get("layer", "0") not in ("0", "") or tags.get("access") in ("private", "no"):
+            continue
+        points = []
+        for node in way.get("nodes", ()):
+            if node in position and (not points or math.dist(points[-1], position[node]) > MIN_SEGMENT_M):
+                points.append(position[node])
+        if len(points) < 2:
+            continue
+        width = FOOTWAY_WIDTH_M[highway]
+        try:
+            width = float(str(tags.get("width", width)).split()[0].rstrip("m"))
+        except ValueError:
+            pass
+        found.append({"id": f"way/{way['id']}", "points": points,
+                      "width_m": round(min(max(width, MIN_FOOTWAY_M), MAX_FOOTWAY_M), 2), "passage": passage})
+    return found
+
+
+def places_of(osm: dict, buildings: list[dict]) -> list[dict]:
+    """Where walkers go: bus stops and interchanges from the OSM extract, and homes and places from the
+    building outlines, each as (id, kind, name, and a point or the outline's rings in metres)."""
+    elements = osm.get("elements", ())
+    position = {e["id"]: project(e["lat"], e["lon"]) for e in elements if e["type"] == "node"}
+    places = []
+    for element in elements:
+        tags = element.get("tags", {})
+        # An interchange is often mapped as a stop too: it is the interchange
+        if element["type"] == "node" and tags.get("highway") == "bus_stop" and tags.get("amenity") != "bus_station":
+            places.append({"id": f"bus-stop/{tags.get('ref') or element['id']}", "kind": "bus_stop",
+                           "name": tags.get("name", ""), "point": list(position[element["id"]])})
+        elif tags.get("amenity") == "bus_station":
+            if element["type"] == "node":
+                point = position[element["id"]]
+            elif element["type"] == "way":
+                corners = [position[node] for node in element.get("nodes", ()) if node in position]
+                if not corners:
+                    continue
+                point = (sum(x for x, _ in corners) / len(corners), sum(y for _, y in corners) / len(corners))
+            else:
+                continue
+            places.append({"id": f"interchange/{element['type']}/{element['id']}", "kind": "interchange",
+                           "name": tags.get("name", ""), "point": [round(point[0], 2), round(point[1], 2)]})
+    for building in buildings:
+        kind = building.get("type") or "yes"
+        if kind in HOME_TYPES or (kind == "yes" and (building.get("height_m") or 0.0) >= UNTYPED_HOME_HEIGHT_M):
+            role = "home"
+        elif kind in PLACE_TYPES:
+            role = "place"
+        else:
+            continue
+        places.append({"id": f"building/{building['id']}", "kind": role, "name": building.get("name", ""),
+                       "rings": building["rings_m"]})
+    return sorted(places, key=lambda place: place["id"])
 
 
 def line_of(road: dict) -> list[tuple[float, float]]:
@@ -457,7 +587,9 @@ def walking_ways(graph: WalkGraph, sources: list[tuple], paved) -> None:
     walk_area = shapely.buffer(paved, -WALK_INSET_M)
     pieces, owners = [], []
     for points, offset, left, fields in sources:
-        line = LineString(points).offset_curve(offset if left else -offset, join_style="mitre", mitre_limit=MAX_MITRE)
+        # A footway is walked down its own line
+        line = LineString(points) if offset == 0 else \
+            LineString(points).offset_curve(offset if left else -offset, join_style="mitre", mitre_limit=MAX_MITRE)
         for part in shapely.get_parts(shapely.intersection(line, walk_area, grid_size=GRID_M)):
             for piece in shapely.get_parts(shapely.line_merge(part)) if part.geom_type == "MultiLineString" else [part]:
                 if piece.geom_type == "LineString" and piece.length > MIN_SEGMENT_M:
@@ -476,13 +608,13 @@ def walking_ways(graph: WalkGraph, sources: list[tuple], paved) -> None:
     for line in sorted(merged, key=order):
         # The road whose walking line this mostly is: the one nearest its middle
         middle = line.interpolate(0.5, normalized=True)
-        owner = owners[int(min(tree.query_nearest(middle)))]
-        graph.add("sidewalk", list(line.coords), **owner)
+        owner = dict(owners[int(min(tree.query_nearest(middle)))])
+        graph.add(owner.pop("kind", "sidewalk"), list(line.coords), **owner)
 
     for _ in range(3):
         cut = False
         for index, way in enumerate(graph.ways):
-            if way is None or way["kind"] != "sidewalk" or way["length"] >= STUB_M:
+            if way is None or way["kind"] not in ("sidewalk", "footway") or way["length"] >= STUB_M:
                 continue
             start, end = graph.degree(way["from"]), graph.degree(way["to"])
             if (start == 1 and end >= 3) or (end == 1 and start >= 3):
@@ -765,8 +897,38 @@ def attach_crossings(graph: WalkGraph, crossings: list[dict], kerbs: dict, junct
     return {"unmatched": sorted(unmatched), "unattached": sorted(unattached), "dropped": len(dropped)}
 
 
-def walk_network(graph: WalkGraph) -> tuple[list[dict], list[dict], list[dict], dict]:
-    """The graph's nodes, walkways and walker seeds as the file holds them, and how well it holds together."""
+def drop_footway_islands(graph: WalkGraph) -> float:
+    """Takes out the walkways of each connected part made of footways alone: a park's paths, or a path between
+    blocks, that leads to no road's sidewalk, so no walker could ever get there. Their paving is still drawn.
+    Returns the length taken out."""
+    parent = list(range(len(graph.nodes)))
+
+    def root(node):
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    for way in graph.ways:
+        if way is not None:
+            a, b = root(way["from"]), root(way["to"])
+            if a != b:
+                parent[max(a, b)] = min(a, b)
+    reaches_road: set[int] = set()
+    for way in graph.ways:
+        if way is not None and way["kind"] in ("sidewalk", "crossing"):
+            reaches_road.add(root(way["from"]))
+    dropped = 0.0
+    for index, way in enumerate(graph.ways):
+        if way is not None and root(way["from"]) not in reaches_road:
+            dropped += way["length"]
+            graph.remove(index)
+    return dropped
+
+
+def walk_network(graph: WalkGraph, places: list[dict] = ()) -> tuple[list[dict], list[dict], list[dict], list[dict], dict]:
+    """The graph's nodes, walkways, walker seeds and attractors as the file holds them, and how well it
+    holds together."""
     used = sorted({node for way in graph.ways if way is not None for node in (way["from"], way["to"])})
     number = {node: index for index, node in enumerate(used)}
     ways = [way for way in graph.ways if way is not None]
@@ -784,7 +946,7 @@ def walk_network(graph: WalkGraph) -> tuple[list[dict], list[dict], list[dict], 
         item = {"id": index, "kind": way["kind"], "from": number[way["from"]], "to": number[way["to"]],
                 "points_m": [list(point) for point in way["points"]], "length_m": round(way["length"], 2),
                 "width_m": way["width_m"], "lanes": way["lanes"]}
-        for key in ("road_id", "side", "crossing_id", "control", "junction_id", "phase"):
+        for key in ("road_id", "side", "footway_id", "crossing_id", "control", "junction_id", "phase"):
             if key in way:
                 item[key] = way[key]
         walkways.append(item)
@@ -824,22 +986,74 @@ def walk_network(graph: WalkGraph) -> tuple[list[dict], list[dict], list[dict], 
                       "distance_m": round(min(at - starts[home], way["length_m"]), 2),
                       "speed_mps": round(rng.uniform(*SEED_SPEED_MPS), 2), "height_m": round(rng.uniform(*SEED_HEIGHT_M), 2),
                       "model": rng.randrange(SEED_MODELS)})
+
+    # Each place at a node of the main part's walkway nearest it (a building's outline, a stop's point),
+    # within its reach: the walkway's end nearer the place
+    attractors, unreached = [], 0
+    main_ways = [way for way in walkways if root(way["from"]) == main]
+    tree = shapely.STRtree([LineString(way["points_m"]) for way in main_ways]) if main_ways else None
+    for place in places:
+        weight, reach = ATTRACTORS[place["kind"]]
+        if "rings" in place:
+            shape = drop_small(shapely.make_valid(shapely.MultiPolygon([Polygon(ring) for ring in place["rings"]
+                                                                         if len(ring) >= 4])), 0)
+            if shape.is_empty:
+                continue
+            centre = shape.centroid
+            xy = [round(centre.x, 2), round(centre.y, 2)]
+        else:
+            shape = Point(place["point"])
+            xy = [round(float(place["point"][0]), 2), round(float(place["point"][1]), 2)]
+        candidates = tree.query(shape, predicate="dwithin", distance=reach) if tree is not None else []
+        if len(candidates) == 0:
+            unreached += 1
+            continue
+        _, nearest = min((shape.distance(tree.geometries[k]), main_ways[k]["id"]) for k in candidates)
+        way = walkways[nearest]
+        _, node = min((shape.distance(Point(nodes[end]["xy_m"])), end) for end in (way["from"], way["to"]))
+        attractors.append({"id": place["id"], "kind": place["kind"], "node": node, "weight": weight,
+                           "xy_m": xy, **({"name": place["name"]} if place.get("name") else {})})
     report = {"walk_nodes": len(nodes), "walkways": len(walkways),
               "sidewalk_walkways": sum(way["kind"] == "sidewalk" for way in walkways),
+              "footway_walkways": sum(way["kind"] == "footway" for way in walkways),
               "link_walkways": sum(way["kind"] == "link" for way in walkways),
               "crossing_walkways": sum(way["kind"] == "crossing" for way in walkways),
               "walkway_length_m": round(total, 1), "components": len(lengths),
-              "main_component_share": round(lengths[main] / total, 4) if total else 0.0, "seeds": len(seeds)}
-    return nodes, walkways, seeds, report
+              "main_component_share": round(lengths[main] / total, 4) if total else 0.0, "seeds": len(seeds),
+              "attractors": {kind: sum(a["kind"] == kind for a in attractors) for kind in sorted(ATTRACTORS)},
+              "places_out_of_reach": unreached}
+    return nodes, walkways, seeds, attractors, report
+
+
+def mapped_alongside(points: list[tuple[float, float]], offset: float, left: bool, footways, tree) -> bool:
+    """Whether footways come within SEPARATE_REACH_M of most of a road side's walking line."""
+    if tree is None:
+        return False
+    line = LineString(points).offset_curve(offset if left else -offset, join_style="mitre", mitre_limit=MAX_MITRE)
+    if line.is_empty or line.length <= 0:
+        return False
+    steps = max(1, math.ceil(line.length / SEPARATE_STEP_M))
+    samples = [line.interpolate(step / steps, normalized=True) for step in range(steps + 1)]
+    near = sum(1 for sample in samples if len(tree.query(sample, predicate="dwithin", distance=SEPARATE_REACH_M)))
+    return near >= SEPARATE_SHARE * len(samples)
+
+
+def mostly_within(points: list[tuple[float, float]], area) -> bool:
+    """Whether most of a line lies in an area."""
+    line = LineString(points)
+    return line.length > 0 and shapely.intersection(line, area).length >= DUPLICATE_SHARE * line.length
 
 
 def build(roads: list[dict], tags_by_way: dict[int, dict], crossings: list[dict], buildings: list[dict], area_key: str,
-          junctions: list[dict] | None = None) -> dict:
-    """The walkways file's contents for an area. Junctions are the signals file's, for signalled crossings."""
+          junctions: list[dict] | None = None, footways: list[dict] | None = None, places: list[dict] | None = None) -> dict:
+    """The walkways file's contents for an area. Junctions are the signals file's, for signalled crossings;
+    footways the footpaths mapped as ways of their own (footway_lines); places where walkers go (places_of)."""
     roads = sorted(roads, key=lambda road: road["id"])
+    footways = sorted(footways or (), key=lambda footway: footway["id"])
+    footway_tree = shapely.STRtree([LineString(footway["points"]) for footway in footways]) if footways else None
     asphalt_parts, band_parts, verge_parts = [], [], []
     walk_sources = []
-    sides_report = {"left": 0, "right": 0, "none": 0}
+    sides_report = {"left": 0, "right": 0, "none": 0, "separate_mapped": 0}
     for road in roads:
         points = line_of(road)
         if len(points) < 2:
@@ -849,6 +1063,16 @@ def build(roads: list[dict], tags_by_way: dict[int, dict], crossings: list[dict]
         tags = tags_by_way.get(int(road["id"].split("/")[1]), {})
         left, right = sidewalk_sides(road, tags)
         _, verge, footpath, lanes = class_of(road)
+        # A side whose sidewalk OpenStreetMap maps as a footway of its own is that footway, where it is mapped
+        for is_left, separate in zip((True, False), separate_sides(tags)):
+            has = left if is_left else right
+            if has and separate and mapped_alongside(points, radius + KERB_STONE_M + verge + footpath / 2, is_left,
+                                                     footways, footway_tree):
+                sides_report["separate_mapped"] += 1
+                if is_left:
+                    left = False
+                else:
+                    right = False
         sides_report["left"] += left
         sides_report["right"] += right
         sides_report["none"] += not left and not right
@@ -860,6 +1084,22 @@ def build(roads: list[dict], tags_by_way: dict[int, dict], crossings: list[dict]
                                  {"width_m": footpath, "lanes": lanes, "road_id": road["id"], "side": "left" if is_left else "right"}))
             if verge > 0:
                 verge_parts.extend(side_band(points, radius + KERB_STONE_M + verge, is_left))
+    # The footways, paved as wide as they are and walked down their middles; one that mostly lies on a
+    # sidewalk made above is that sidewalk mapped again, and is left out
+    sidewalks = union(band_parts) if band_parts else Polygon()
+    shapely.prepare(sidewalks)
+    footways_used = 0
+    # Linkways through a block's void deck are paved through its outline
+    passage_parts = []
+    for footway in footways:
+        if not sidewalks.is_empty and mostly_within(footway["points"], sidewalks):
+            continue
+        footways_used += 1
+        (passage_parts if footway.get("passage") else band_parts).append(
+            LineString(footway["points"]).buffer(footway["width_m"] / 2, cap_style="round", join_style="round", quad_segs=3))
+        walk_sources.append((footway["points"], 0.0, True, {"kind": "footway", "width_m": footway["width_m"],
+                                                            "lanes": sublanes(footway["width_m"]),
+                                                            "footway_id": footway["id"]}))
     roads_area = union(asphalt_parts)
     roads_edge = roads_area.boundary
     building_area = union([drop_small(shapely.make_valid(Polygon(ring)), 0) for building in sorted(buildings, key=lambda b: b["id"])
@@ -879,13 +1119,19 @@ def build(roads: list[dict], tags_by_way: dict[int, dict], crossings: list[dict]
     side_kerbs = [(f"{crossing['id']}/{end}", kerb_point(crossing["line_m"], end, roads_area, roads_edge))
                   for crossing in uncontrolled for end in (0, 1)]
 
-    paved = shapely.difference(union(band_parts), blocked, grid_size=GRID_M)
+    passages = shapely.difference(union(passage_parts), roads_area, grid_size=GRID_M) if passage_parts else None
+
+    def pave(parts):
+        found = shapely.difference(union(parts), blocked, grid_size=GRID_M)
+        return found if passages is None else shapely.union(found, passages, grid_size=GRID_M)
+
+    paved = pave(band_parts)
     # A crossing always lands on something to stand on: where its kerb has no sidewalk (a central divider,
     # or a side OpenStreetMap leaves bare) it gets a landing as wide as the crossing and as deep as its ramp
     landings = [landing_shape(*found) for _, found in kerbs if found is not None
                 and shapely.intersection(ramp_shape(*found), paved).area < MIN_RAMP_M2]
     if landings:
-        paved = shapely.difference(union([*band_parts, *landings]), blocked, grid_size=GRID_M)
+        paved = pave([*band_parts, *landings])
     paved = shapely.simplify(paved, SIMPLIFY_M)
     paved = drop_small(shapely.difference(drop_small(shapely.make_valid(paved), 0), roads_area, grid_size=GRID_M), MIN_PIECE_M2)
     shapely.prepare(paved)
@@ -1014,7 +1260,9 @@ def build(roads: list[dict], tags_by_way: dict[int, dict], crossings: list[dict]
     shapely.prepare(obstacles)
     crossing_report = attach_crossings(graph, [*sorted(crossings, key=lambda crossing: crossing["id"]), *uncontrolled],
                                        dict([*kerbs, *side_kerbs]), junctions or [], walkable, obstacles)
-    nodes, walkways, seeds, walk_report = walk_network(graph)
+    islands_m = drop_footway_islands(graph)
+    nodes, walkways, seeds, attractors, walk_report = walk_network(graph, places or ())
+    walk_report["footway_islands_m"] = round(islands_m, 1)
 
     partly_ramped = {name.split("/")[0] for name in unramped + off_road}
     return {
@@ -1029,8 +1277,12 @@ def build(roads: list[dict], tags_by_way: dict[int, dict], crossings: list[dict]
         "nodes": nodes,
         "walkways": walkways,
         "seeds": seeds,
+        "attractors": attractors,
+        "population": {"hourly": list(POPULATION_HOURLY)},
         "report": {"roads": len(roads), "road_sides_left": sides_report["left"], "road_sides_right": sides_report["right"],
-                   "roads_without_sidewalk": sides_report["none"], "paved_area_m2": round(paved.area, 1),
+                   "roads_without_sidewalk": sides_report["none"],
+                   "separate_sides_mapped": sides_report["separate_mapped"],
+                   "footways": len(footways), "footways_used": footways_used, "paved_area_m2": round(paved.area, 1),
                    "triangles": triangle_count, "kerb_edges": kerb_count, "outer_edges": outer_count,
                    "cheek_edges": cheek_count, "ramps": mapped_ramps, "uncontrolled_ramps": len(ramps) - mapped_ramps,
                    "crossings": len(crossings),
@@ -1056,7 +1308,11 @@ def source_hash(*inputs) -> str:
                 "walk": [WALK_INSET_M, MERGE_NODE_M, STUB_M, LINK_REACH_M, LINKS_PER_END, CROSSING_REACH_M,
                          MATCH_SIGNAL_REACH_M, MATCH_SIGNAL_MAX_ALIGNMENT, SUBLANE_M],
                 "uncontrolled": [sorted(UNCONTROLLED_CLASSES), UNCONTROLLED_CLEAR_OF_CROSSING_M],
-                "seeds": [SEED_COUNT, SEED, SEED_SPEED_MPS, SEED_HEIGHT_M, SEED_MODELS]}
+                "seeds": [SEED_COUNT, SEED, SEED_SPEED_MPS, SEED_HEIGHT_M, SEED_MODELS],
+                "footways": [FOOTWAY_WIDTH_M, MIN_FOOTWAY_M, MAX_FOOTWAY_M, SEPARATE_REACH_M, SEPARATE_SHARE,
+                             SEPARATE_STEP_M, DUPLICATE_SHARE],
+                "attractors": [ATTRACTORS, sorted(HOME_TYPES), sorted(PLACE_TYPES), UNTYPED_HOME_HEIGHT_M],
+                "population": POPULATION_HOURLY}
     digest.update(json.dumps(settings, sort_keys=True).encode("utf-8"))
     return digest.hexdigest()[:16]
 
@@ -1068,12 +1324,29 @@ def sidewalk_tags(osm: dict) -> dict[int, dict]:
             for element in osm["elements"] if element["type"] == "way"}
 
 
-def inputs(area: str) -> tuple[list[dict], dict[int, dict], list[dict], list[dict]]:
+def footways_path(area: str) -> Path:
+    return OSM_DIRECTORY / f"{area}-footways.overpass.json"
+
+
+def download_footways(area: str, overpass_url: str = FOOTWAY_OVERPASS_URL) -> dict:
+    """The area's footpaths from Overpass (no key), as FOOTWAY_QUERY asks for them."""
+    box = ",".join(str(value) for value in SERVICE_AREAS[area]["box"])
+    request = Request(overpass_url, data=urlencode({"data": FOOTWAY_QUERY.replace("{box}", box)}).encode(),
+                      headers={"User-Agent": "Formula9-training-map/1.0"})
+    with urlopen(request, timeout=300) as response:
+        return json.load(response)
+
+
+def inputs(area: str) -> tuple[list[dict], dict[int, dict], list[dict], list[dict], dict, list[dict]]:
+    """The prepared roads, their sidewalk tags, LTA's crossings, the buildings, the OSM extract and the
+    footways (none, before they are downloaded)."""
     prepared = json.loads((OUTPUT_DIRECTORY / f"{area}.json").read_text(encoding="utf-8"))
     osm = json.loads(extract_path(area).read_text(encoding="utf-8"))
     crossings = json.loads(output_path(area, "crossings").read_text(encoding="utf-8"))["crossings"]
     buildings = read_buildings(BUILDINGS_DIRECTORY / f"{area}.sqlite")
-    return prepared["roads"], sidewalk_tags(osm), crossings, buildings
+    path = footways_path(area)
+    footways = footway_lines(json.loads(path.read_text(encoding="utf-8"))) if path.is_file() else []
+    return prepared["roads"], sidewalk_tags(osm), crossings, buildings, osm, footways
 
 
 def signal_junctions(area: str) -> list[dict]:
@@ -1095,18 +1368,20 @@ def check_network(data: dict) -> None:
 
 
 def build_area(area: str) -> dict:
-    roads, tags, crossings, buildings = inputs(area)
+    roads, tags, crossings, buildings, osm, footways = inputs(area)
     crossing_lines = [{"id": crossing["id"], "line_m": crossing["line_m"], "control": crossing.get("control", "no_signal")}
                       for crossing in crossings]
     rings = [{"id": building["id"], "rings_m": building["rings_m"]} for building in buildings]
     junctions = signal_junctions(area)
-    data = build(roads, tags, crossing_lines, rings, area, junctions)
+    places = places_of(osm, buildings)
+    data = build(roads, tags, crossing_lines, rings, area, junctions, footways, places)
     check_network(data)
     used_tags = {str(key): value for key, value in sorted(tags.items()) if value}
     return {"area": data.pop("area"), "version": data.pop("version"),
-            "source_hash": source_hash(roads, used_tags, crossing_lines, rings, junctions),
+            "source_hash": source_hash(roads, used_tags, crossing_lines, rings, junctions, footways, places),
             "attribution": [ROADS_ATTRIBUTION, "Crossings and signals from LTA DataMall static datasets, under the Singapore "
-                            "Open Data Licence version 1.0. Sidewalk widths and heights are chosen, not measured."],
+                            "Open Data Licence version 1.0. Sidewalk widths and heights are chosen, not measured; where "
+                            "walkers go and how many are out by the hour are made up."],
             **data}
 
 
@@ -1117,7 +1392,7 @@ def write(path: Path, data: dict) -> None:
         if key == "render":
             tiles = ",\n".join("  " + json.dumps(tile, separators=(",", ":")) for tile in value["tiles"])
             parts.append(f'"render": {{"tiles": [\n{tiles}\n ]}}')
-        elif key in ("nodes", "walkways", "seeds") and value:
+        elif key in ("nodes", "walkways", "seeds", "attractors") and value:
             items = ",\n".join("  " + json.dumps(item, separators=(",", ":")) for item in value)
             parts.append(f"{json.dumps(key)}: [\n{items}\n ]")
         else:
@@ -1132,7 +1407,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, default=None, help="JSON file to write")
     parser.add_argument("--unity-copy", type=Path, default=None,
                         help="also write the file here, for the view's offline fallback")
+    parser.add_argument("--download-footways", action="store_true",
+                        help="first fetch the area's footpaths from Overpass into fixtures/osm (needs the network)")
+    parser.add_argument("--overpass", default=FOOTWAY_OVERPASS_URL, help="Overpass interpreter URL for --download-footways")
     arguments = parser.parse_args(argv)
+    if arguments.download_footways:
+        try:
+            fetched = download_footways(arguments.area, arguments.overpass)
+        except OSError as error:
+            print(f"Could not download the footways; nothing was written. {error}", file=sys.stderr)
+            return 1
+        path = footways_path(arguments.area)
+        path.write_text(json.dumps(fetched, separators=(",", ":")), encoding="utf-8", newline="\n")
+        print(f"Wrote {sum(e['type'] == 'way' for e in fetched.get('elements', ()))} footways to {path}")
     try:
         data = build_area(arguments.area)
     except (OSError, KeyError, ValueError) as error:
@@ -1146,9 +1433,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{arguments.area}: {report['paved_area_m2']:.0f} square metres of sidewalk, {report['triangles']} triangles in "
           f"{len(data['render']['tiles'])} tiles, {report['ramps']} ramps; {report['crossings_with_both_ramps']} of "
           f"{report['crossings']} crossings ramped at both ends. Walk network: {report['walkways']} walkways "
-          f"({report['crossing_walkways']} crossings, {report['uncontrolled_crossings']} of them without a light), "
-          f"{report['main_component_share']:.0%} of it joined up, {report['seeds']} walkers; {report['unattached_crossings']} "
-          f"crossings with nowhere to land, {report['unmatched_signal_crossings']} whose light cannot be told. Wrote {output}")
+          f"({report['crossing_walkways']} crossings, {report['uncontrolled_crossings']} of them without a light; "
+          f"{report['footway_walkways']} along {report['footways_used']} mapped footways), "
+          f"{report['main_component_share']:.0%} of it joined up, {report['seeds']} walkers, {len(data['attractors'])} "
+          f"places to go; {report['unattached_crossings']} crossings with nowhere to land, "
+          f"{report['unmatched_signal_crossings']} whose light cannot be told. Wrote {output}")
     return 0
 
 

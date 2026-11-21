@@ -3,6 +3,7 @@ using System.Linq;
 using Formula9.Backend;
 using Formula9.Contracts;
 using Formula9.World;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -68,6 +69,28 @@ namespace Formula9.Tests
         {
             var at = new Vector2(position.x, position.z);
             return data.Walkways.Any(way => DistanceToWalkway(way, at) <= way.WidthM / 2 + 0.05f);
+        }
+
+        [Test]
+        public void AFootwayIsReadAsAWalkwayOfItsOwnKind()
+        {
+            // A footpath OpenStreetMap maps as a way of its own (sidewalks plan phase 5), and the attractors and
+            // population curve the backend's walkers use, which the view has no need of
+            var file = JObject.Parse(Network);
+            var footway = (JObject)file["walkways"][0].DeepClone();
+            footway["id"] = 7;
+            footway["kind"] = "footway";
+            footway["footway_id"] = "way/77";
+            footway.Remove("road_id");
+            footway.Remove("side");
+            ((JArray)file["walkways"]).Add(footway);
+            file["attractors"] = JArray.Parse(@"[{""id"":""bus-stop/1"",""kind"":""bus_stop"",""node"":0,""weight"":2.0,""xy_m"":[-20,4]}]");
+            file["population"] = JObject.Parse(@"{""hourly"":[0.1,0.1,0.1,0.1,0.1,0.1,0.5,0.9,0.9,0.6,0.6,0.6,0.8,0.7,0.6,0.6,0.7,0.9,1,0.9,0.8,0.6,0.4,0.2]}");
+            var data = CityWalkwayData.Parse(file.ToString());
+            Assert.AreEqual(8, data.Walkways.Count);
+            Assert.AreEqual(CityWalkwayKind.Footway, data.Walkways[7].Kind);
+            Assert.AreEqual(CityCrossingControl.None, data.Walkways[7].Control);
+            Assert.IsNull(data.Walkways[7].RoadId);
         }
 
         [Test]

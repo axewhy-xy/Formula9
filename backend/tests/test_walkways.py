@@ -174,7 +174,7 @@ def test_the_committed_sidewalks_never_cover_the_asphalt(committed):
     A sliver's area grows with the kerb's length (a triangle of kerb stone can run 100 m), so its
     width is what is checked: nothing is left of the overlap after shaving a centimetre off every side.
     """
-    roads, _, _, _ = walkways.inputs("toa-payoh")
+    roads = walkways.inputs("toa-payoh")[0]
     area = paved(committed)
     overlap = area.intersection(asphalt(roads))
     assert overlap.buffer(-0.01).is_empty
@@ -384,7 +384,7 @@ def test_every_committed_lta_crossing_is_walked_or_accounted_for(committed):
 
 
 def test_the_committed_walkways_keep_to_the_paving_and_off_the_road(committed):
-    roads, _, _, _ = walkways.inputs("toa-payoh")
+    roads = walkways.inputs("toa-payoh")[0]
     road_area = asphalt(roads).buffer(-0.1)
     area = paved(committed).buffer(0.05)
     sidewalks = shapely.union_all(walk_lines(committed, "sidewalk"))
@@ -393,3 +393,105 @@ def test_the_committed_walkways_keep_to_the_paving_and_off_the_road(committed):
     places = [tuple(node["xy_m"]) for node in committed["nodes"]]
     for way in committed["walkways"]:
         assert tuple(way["points_m"][0]) == places[way["from"]] and tuple(way["points_m"][-1]) == places[way["to"]]
+
+
+# ---------------------------------------------------------------- footways and attractors (plan phase 5)
+
+def footway(way_id, points, width=2.0, passage=False):
+    return {"id": f"way/{way_id}", "points": [tuple(p) for p in points], "width_m": width, "passage": passage}
+
+
+def test_a_footway_is_paved_and_walked_but_never_over_the_asphalt():
+    """A path from a block across a street to a park: drawn and walked both sides, cut where the street is."""
+    street = road(points=((-60, 0), (60, 0)))
+    path = footway(77, ((0, -40), (0, 40)))
+    data = walkways.build([street], {}, [], [], "test", footways=[path])
+    lines = walk_lines(data, "footway")
+    assert lines and all(way["footway_id"] == "way/77" for way in data["walkways"] if way["kind"] == "footway")
+    assert shapely.union_all(lines).intersection(asphalt([street]).buffer(-0.1)).length == 0
+    assert any(line.bounds[1] < -10 for line in lines) and any(line.bounds[3] > 10 for line in lines)
+    assert paved(data).intersection(Polygon([(-1, -40), (1, -40), (1, -20), (-1, -20)])).area > 30
+    assert data["report"]["footways_used"] == 1
+
+
+def test_a_footway_through_a_void_deck_is_not_cut_by_its_block():
+    block = [{"id": "way/9", "rings_m": [[[-10, 20], [10, 20], [10, 40], [-10, 40], [-10, 20]]]}]
+    street = road(points=((-60, 0), (60, 0)))
+    covered = walkways.build([street], {}, [], block, "test", footways=[footway(5, ((0, 10), (0, 50)), passage=True)])
+    open_air = walkways.build([street], {}, [], block, "test", footways=[footway(5, ((0, 10), (0, 50)))])
+    inside = Polygon([(-1, 25), (1, 25), (1, 35), (-1, 35)])
+    assert paved(covered).intersection(inside).area > 15 and paved(open_air).intersection(inside).area < 0.01
+
+
+def test_a_side_tagged_separate_is_the_footway_mapped_beside_it_and_only_where_one_is():
+    street = road(points=((-100, 0), (100, 0)))
+    # The left side's own footpath, mapped 7 m out; nothing mapped on the right
+    alongside = footway(8, ((-100, 7.0), (100, 7.0)))
+    assert walkways.separate_sides({"sidewalk": "separate"}) == (True, True)
+    assert walkways.separate_sides({"sidewalk:left": "separate", "oneway": "-1"}) == (False, True)
+    data = walkways.build([street], {1: {"sidewalk": "separate"}}, [], [], "test", footways=[alongside])
+    assert data["report"]["separate_sides_mapped"] == 1
+    sides = {way["side"] for way in data["walkways"] if way["kind"] == "sidewalk"}
+    assert sides == {"right"}, "the right side, with nothing mapped, keeps its sidewalk"
+    # The footway is paved; with no crossing over to the right side's sidewalk no walker could reach it, so
+    # it is not walked
+    assert paved(data).intersection(Polygon([(-90, 6.2), (90, 6.2), (90, 7.8), (-90, 7.8)])).area > 250
+    assert not walk_lines(data, "footway") and data["report"]["footway_islands_m"] > 150
+
+
+def test_a_footway_mapped_on_a_sidewalk_made_anyway_is_left_out():
+    street = road(points=((-100, 0), (100, 0)))
+    middle = walkways.walk_offset(street)
+    data = walkways.build([street], {}, [], [], "test", footways=[footway(3, ((-90, middle), (90, middle)))])
+    assert data["report"]["footways_used"] == 0 and not walk_lines(data, "footway")
+
+
+def test_footways_over_roads_on_bridges_indoors_or_private_are_not_walked():
+    def way(way_id, tags):
+        return {"type": "way", "id": way_id, "nodes": [1, 2], "tags": {"highway": "footway", **tags}}
+    nodes = [{"type": "node", "id": 1, "lat": 1.33, "lon": 103.84}, {"type": "node", "id": 2, "lat": 1.3302, "lon": 103.84}]
+    osm = {"elements": [*nodes, way(10, {}), way(11, {"footway": "crossing"}), way(12, {"bridge": "yes", "layer": "1"}),
+                        way(13, {"indoor": "yes"}), way(14, {"access": "private"}), way(15, {"tunnel": "building_passage"}),
+                        way(16, {"covered": "yes", "width": "3 m"})]}
+    found = {line["id"]: line for line in walkways.footway_lines(osm)}
+    assert set(found) == {"way/10", "way/15", "way/16"}
+    assert found["way/15"]["passage"] and found["way/16"]["passage"] and not found["way/10"]["passage"]
+    assert found["way/16"]["width_m"] == 3.0 and found["way/10"]["width_m"] == walkways.FOOTWAY_WIDTH_M["footway"]
+
+
+def test_places_are_reached_at_a_node_of_the_walkway_nearest_them():
+    street = road(points=((-100, 0), (100, 0)))
+    places = [{"id": "bus-stop/1", "kind": "bus_stop", "name": "Opp Blk 1", "point": [20.0, 5.0]},
+              {"id": "building/2", "kind": "home", "name": "", "rings": [[[-40, 12], [-20, 12], [-20, 30], [-40, 30], [-40, 12]]]},
+              {"id": "building/3", "kind": "place", "name": "", "rings": [[[0, 300], [10, 300], [10, 310], [0, 310], [0, 300]]]}]
+    data = walkways.build([street], {}, [], [], "test", places=places)
+    found = {a["id"]: a for a in data["attractors"]}
+    assert set(found) == {"bus-stop/1", "building/2"} and data["report"]["places_out_of_reach"] == 1
+    assert found["bus-stop/1"]["weight"] == walkways.ATTRACTORS["bus_stop"][0] and found["bus-stop/1"]["name"] == "Opp Blk 1"
+    ends = {node for way in data["walkways"] for node in (way["from"], way["to"])}
+    assert all(a["node"] in ends for a in data["attractors"])
+    assert data["population"]["hourly"] == list(walkways.POPULATION_HOURLY) and len(walkways.POPULATION_HOURLY) == 24
+
+
+def test_an_interchange_mapped_as_a_stop_too_is_the_interchange():
+    stop = {"type": "node", "id": 7, "lat": 1.3324, "lon": 103.8475,
+            "tags": {"highway": "bus_stop", "amenity": "bus_station", "name": "Toa Payoh Interchange", "ref": "52009"}}
+    places = walkways.places_of({"elements": [stop]}, [])
+    assert [(p["id"], p["kind"]) for p in places] == [("interchange/node/7", "interchange")]
+
+
+def test_the_committed_file_walks_its_footways_and_has_places_to_go(committed):
+    report = committed["report"]
+    assert report["footways_used"] > 500 and report["footway_walkways"] > 500
+    assert report["separate_sides_mapped"] > 0 and report["footway_islands_m"] > 0
+    kinds = report["attractors"]
+    assert kinds["interchange"] == 1 and kinds["bus_stop"] > 40 and kinds["home"] > 150 and kinds["place"] > 40
+    assert len(committed["population"]["hourly"]) == 24
+    part = parts_of(committed)
+    sizes: dict[int, int] = {}
+    for node in part.values():
+        sizes[node] = sizes.get(node, 0) + 1
+    biggest = max(sizes, key=lambda index: sizes[index])
+    assert all(part[a["node"]] == biggest for a in committed["attractors"]), "every place is on the network's main part"
+    footways = shapely.union_all(walk_lines(committed, "footway"))
+    assert footways.difference(paved(committed).buffer(0.05)).length < 0.001 * footways.length

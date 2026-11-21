@@ -59,7 +59,7 @@ DECIDABLE = {*ON_ITS_ROUTE, "DETOURING"}
 SETTLED = {"RESOLVED", "UNRESOLVED"}
 # How an alert names each world event type, and the type of a record from before world events
 EVENT_NAMES = {"BREAKDOWN": "a breakdown", "COLLISION": "a collision", "SIGNAL_FAULT": "a signal fault",
-               "ROAD_CLOSURE": "a road closure"}
+               "ROAD_CLOSURE": "a road closure", "PEDESTRIAN_ON_ROAD": "a pedestrian on the road"}
 LEGACY_TYPES = {"ROAD_ACCIDENT": "COLLISION", "ROAD_BLOCK": "ROAD_CLOSURE"}
 # The decision each state of an incident from before per-shuttle decisions stood for
 LEGACY_RESPONSES = {"WAITING": "KEEP_ROUTE", "ESCALATED": "ESCALATE", "EXECUTING": "ROAD_DETOUR"}
@@ -508,9 +508,9 @@ class IncidentService:
         delays = self._delays(snapshot, incident, vehicle_id)
         allowed = [("KEEP_ROUTE" if action == "WAIT" else action) for action in self.config["reference_acceptable_actions"]]
         auxiliary_kw = self.routes._fixture["auxiliary_kw"]
-        # A signal fault holds up every approach to its junction, which the planner does not know of: a shuttle
-        # keeps its route, holds or gets assistance
-        detours = capable and "ROAD_DETOUR" in allowed and self._event_type() != "SIGNAL_FAULT"
+        # A signal fault holds up every approach to its junction, which the planner does not know of, and a
+        # pedestrian on the road is gone in moments: a shuttle keeps its route, holds or gets assistance
+        detours = capable and "ROAD_DETOUR" in allowed and self._event_type() not in ("SIGNAL_FAULT", "PEDESTRIAN_ON_ROAD")
         road = self._road_preview(snapshot, vehicle_id) if detours else None
         baseline = road.original.model_dump(mode="json") if road is not None and road.original else None
         offered = []

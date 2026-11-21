@@ -183,6 +183,7 @@ namespace Formula9.UI
                     if (detour == null)
                     {
                         option.Tooltip = incident.EventType == "SIGNAL_FAULT" ? "Signal faults can't be routed round."
+                            : incident.EventType == World.IncidentSimulation.PedestrianOnRoad ? "A pedestrian on the road is gone in moments: wait for them."
                             : $"{name}'s route can't be taken round it.";
                         continue;
                     }

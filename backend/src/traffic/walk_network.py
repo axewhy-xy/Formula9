@@ -15,17 +15,30 @@ finds the crossings it passes over (route_crossings).
 A signalled crossing carries the junction and phase whose red lets people over. One whose junction is
 not among the area's signals is left out, never left free to cross on any light, as the views do.
 
-Nothing here changes once built, so every session shares one network per area. Pedestrians are walked by
-both traffic engines (src.traffic.city_traffic, src.traffic.native_traffic) unless F9_PEDESTRIANS is 0.
+Each crossing also knows, for each road it cuts, where that road's centreline meets it along its line and
+how a metre to the left of that road maps onto the line (Crossing.lanes_at): so a vehicle in one lane can
+be let go once every walker on the crossing has passed that lane (per-lane release, plan phase 5).
+
+Where walkers go (plan phase 5): the attractors of the file (homes, places, bus stops and interchanges),
+each at a walk node. A walker on a trip follows the shortest way there (next_hop), a crossing counting as a
+detour of the time it usually costs to wait at it; how many walkers are out follows the hour of the day
+(density), the rest being indoors or away on a bus. A file without attractors leaves the walkers walking at
+random, as before.
+
+Nothing here changes once built, so every session shares one network per area (the routing trees it works
+out as walkers need them are the same whoever asks first). Pedestrians are walked by both traffic engines
+(src.traffic.city_traffic, src.traffic.native_traffic) unless F9_PEDESTRIANS is 0.
 
 Points are planar metres, x east and y north, as in the prepared files.
 """
 
 from __future__ import annotations
 
+import heapq
 import json
 import math
 import os
+from array import array
 from functools import lru_cache
 from pathlib import Path
 
@@ -34,9 +47,21 @@ from src.traffic.import_vehicle_population import OUTPUT_DIRECTORY
 from src.traffic.road_network import RoadNetwork, road_network
 
 PEDESTRIANS_VARIABLE = "F9_PEDESTRIANS"
+# When a session's traffic clock starts, as a time of day: HH:MM (08:00 unless set)
+DAY_START_VARIABLE = "F9_DAY_START"
+DEFAULT_DAY_START_S = 8 * 3600
+DAY_S = 86400
 
 SIDEWALK, LINK, CROSSING = 0, 1, 2
-_KINDS = {"sidewalk": SIDEWALK, "link": LINK, "crossing": CROSSING}
+# A footway (a footpath mapped as a way of its own) is walked as a sidewalk is
+_KINDS = {"sidewalk": SIDEWALK, "link": LINK, "crossing": CROSSING, "footway": SIDEWALK}
+# What an attractor is: a home or a place is gone into; at a stop or an interchange a walker waits, then
+# leaves on a bus
+HOME, PLACE, STOP, INTERCHANGE = 0, 1, 2, 3
+_ATTRACTOR_KINDS = {"home": HOME, "place": PLACE, "bus_stop": STOP, "interchange": INTERCHANGE}
+# A trip's way counts a crossing as this many metres more than its length: about the wait it usually costs,
+# at a walking pace (20 s at a light, 5 s elsewhere, at 1.3 m/s)
+SIGNAL_DETOUR_M, CROSSING_DETOUR_M = 26.0, 6.5
 # How a crossing is controlled: by a light whose red lets people over, a zebra (people have priority), or
 # nothing (a side road's mouth: people wait for a gap)
 SIGNAL, ZEBRA, UNCONTROLLED = 0, 1, 2
@@ -60,6 +85,22 @@ def enabled() -> bool:
     if value in ("", "1", "on", "true", "yes"):
         return True
     raise ValueError(f"{PEDESTRIANS_VARIABLE} must be 0 or 1, not {value!r}")
+
+
+def day_start_s() -> float:
+    """The time of day a new session's traffic clock starts at, in seconds after midnight (F9_DAY_START,
+    HH:MM, 08:00 unless set)."""
+    value = os.environ.get(DAY_START_VARIABLE, "").strip()
+    if not value:
+        return float(DEFAULT_DAY_START_S)
+    hours, _, minutes = value.partition(":")
+    try:
+        hour, minute = int(hours), int(minutes or 0)
+    except ValueError:
+        raise ValueError(f"{DAY_START_VARIABLE} must be a time of day as HH:MM, not {value!r}") from None
+    if not (0 <= hour < 24 and 0 <= minute < 60):
+        raise ValueError(f"{DAY_START_VARIABLE} must be a time of day as HH:MM, not {value!r}")
+    return float(hour * 3600 + minute * 60)
 
 
 def walkways_path(area: str) -> Path:
@@ -88,10 +129,24 @@ class Crossing:
     """A crossing as the traffic sees it: its road part as a rectangle (middle, direction, half length and
     half width), how it is controlled, and the directed roads it cuts as (road index, metres along, how far
     either side of that its band reaches along the road, and its slant: how much sooner a body's front
-    corner reaches the band than its middle, a metre of the body's half width)."""
+    corner reaches the band than its middle, a metre of the body's half width).
+
+    lanes_at maps each road it cuts to (where that road's centreline meets its line, in metres from its
+    first kerb a; and the sine of the angle between them, signed: a metre to the left of the road is
+    1/sine metres along the crossing)."""
 
     __slots__ = ("index", "crossing_id", "control", "junction", "offset", "phase", "cx", "cy", "dx", "dy",
-                 "half_length", "half_width", "ax", "ay", "bx", "by", "roads")
+                 "half_length", "half_width", "ax", "ay", "bx", "by", "roads", "lanes_at")
+
+    def __deepcopy__(self, memo):
+        return self
+
+
+class Attractor:
+    """Somewhere walkers go: its kind (HOME, PLACE, STOP or INTERCHANGE), the walk node it is at, how much
+    it draws walkers, and where that node is."""
+
+    __slots__ = ("index", "attractor_id", "kind", "node", "weight", "x", "y")
 
     def __deepcopy__(self, memo):
         return self
@@ -99,10 +154,11 @@ class Crossing:
 
 class Walkway:
     """One way along one walkway of the file: its line, width and sub-lanes, the nodes it joins, the
-    walkway back the other way, and for a crossing where its road part starts and ends along it."""
+    walkway back the other way, and for a crossing where its road part starts and ends along it and which
+    way along the crossing's line (from kerb a to b: 1, back: -1) it runs. A trip counts it as cost metres."""
 
     __slots__ = ("index", "source", "kind", "crossing", "xs", "ys", "along", "length", "width", "lanes", "mine",
-                 "from_node", "to_node", "back", "kerb_in", "kerb_out", "sx", "sy", "ex", "ey")
+                 "from_node", "to_node", "back", "kerb_in", "kerb_out", "sx", "sy", "ex", "ey", "axis", "cost")
 
     def __deepcopy__(self, memo):
         return self
@@ -191,6 +247,35 @@ class WalkNetwork:
                 for y in range(low_y, high_y + 1):
                     self.grid.setdefault((x, y), []).append(crossing)
         self._routes: dict[str, list[tuple[float, Crossing, float]]] = {}
+        # Node -> the walkways ending there, in order: a trip's way is worked out back from where it goes
+        self.entering: list[list[Walkway]] = [[] for _ in self.nodes]
+        for way in self.ways:
+            self.entering[way.to_node].append(way)
+        # Where walkers go, at nodes some walkway leaves; none in a file from before trips
+        self.attractors: list[Attractor] = []
+        for source in data.get("attractors") or ():
+            node = int(source["node"])
+            kind = _ATTRACTOR_KINDS.get(source.get("kind"))
+            if kind is None or not 0 <= node < len(self.nodes) or not self.exits[node]:
+                continue
+            attractor = Attractor.__new__(Attractor)
+            attractor.index = len(self.attractors)
+            attractor.attractor_id = str(source["id"])
+            attractor.kind = kind
+            attractor.node = node
+            attractor.weight = float(source.get("weight") or 1.0)
+            attractor.x, attractor.y = self.nodes[node]
+            self.attractors.append(attractor)
+        # The homes walkers start in (any attractor, with none), and the stops a bus brings them back to
+        self.homes: list[Attractor] = [a for a in self.attractors if a.kind == HOME] or self.attractors
+        self.stops: list[Attractor] = [a for a in self.attractors if a.kind in (STOP, INTERCHANGE)]
+        # The share of the walkers out by the hour from midnight; all of them, without a curve
+        hourly = (data.get("population") or {}).get("hourly") or ()
+        self.hourly: tuple[float, ...] = tuple(min(max(float(v), 0.0), 1.0) for v in hourly) if len(hourly) == 24 else ()
+        # Target node -> the walkway each node's walkers take towards it (-1 where none leads there)
+        self._trees: dict[int, array] = {}
+        # The walkways (not crossings) by where they run, for placing a walker back on the network
+        self._way_grid: dict[tuple[int, int], list[Walkway]] | None = None
 
     def __deepcopy__(self, memo):
         # Shared by every session and never changed, as the road network is
@@ -220,8 +305,11 @@ class WalkNetwork:
         way.from_node, way.to_node = int(start), int(end)
         way.back = -1
         way.kerb_in = way.kerb_out = 0.0
+        way.axis = 0
         way.sx, way.sy = _unit(points[1][0] - points[0][0], points[1][1] - points[0][1])
         way.ex, way.ey = _unit(points[-1][0] - points[-2][0], points[-1][1] - points[-2][1])
+        detour = 0.0 if crossing is None else SIGNAL_DETOUR_M if crossing.control == SIGNAL else CROSSING_DETOUR_M
+        way.cost = way.length + detour
         self.ways.append(way)
         self.exits[way.from_node].append(way)
         return way
@@ -240,6 +328,7 @@ class WalkNetwork:
         crossing.half_length = math.hypot(crossing.bx - crossing.ax, crossing.by - crossing.ay) / 2
         crossing.half_width = float(source.get("width_m") or 3.0) / 2
         crossing.roads = []
+        crossing.lanes_at = {}
         self.crossings.append(crossing)
         return crossing
 
@@ -256,35 +345,89 @@ class WalkNetwork:
                 found_b, best_b = math.hypot(px - bx, py - by), ahead.along[i]
         ahead.kerb_in, ahead.kerb_out = min(best_a, best_b), max(best_a, best_b)
         back.kerb_in, back.kerb_out = ahead.length - ahead.kerb_out, ahead.length - ahead.kerb_in
+        # The way that reaches kerb a first runs from a to b along the crossing's line
+        ahead.axis = 1 if best_a <= best_b else -1
+        back.axis = -ahead.axis
 
     def _cut_roads(self, crossing: Crossing) -> None:
         """The directed roads whose centrelines the crossing's road part (a little longer) cuts."""
-        network = self.network
-        ax, ay = crossing.ax - crossing.dx * CUT_REACH_M, crossing.ay - crossing.dy * CUT_REACH_M
-        bx, by = crossing.bx + crossing.dx * CUT_REACH_M, crossing.by + crossing.dy * CUT_REACH_M
-        low_x, low_y = network.cell(min(ax, bx), min(ay, by))
-        high_x, high_y = network.cell(max(ax, bx), max(ay, by))
-        seen: set[int] = set()
-        candidates = []
-        for x in range(low_x, high_x + 1):
-            for y in range(low_y, high_y + 1):
-                for road in network.grid.get((x, y), ()):
-                    if road.index not in seen:
-                        seen.add(road.index)
-                        candidates.append(road)
-        candidates.sort(key=lambda road: road.index)
-        for road in candidates:
-            xs, ys = road.xs, road.ys
-            for i in range(1, len(xs)):
-                hit = _cut(xs[i - 1], ys[i - 1], xs[i], ys[i], ax, ay, bx, by)
-                if hit is None:
+        crossing.roads, crossing.lanes_at = cut_roads(self.network, crossing.ax, crossing.ay, crossing.bx, crossing.by,
+                                                      crossing.dx, crossing.dy, crossing.half_width)
+
+    # ---------------------------------------------------------------- trips
+
+    def next_hop(self, target: int) -> array:
+        """For every node, the walkway a walker there takes on the shortest way to the target node (each
+        crossing a detour of the wait it usually costs), or -1 where none leads there or it is there.
+        Worked out once per target, the first time a walker needs it."""
+        tree = self._trees.get(target)
+        if tree is not None:
+            return tree
+        count = len(self.nodes)
+        cost = [math.inf] * count
+        hop = array("i", [-1]) * count
+        cost[target] = 0.0
+        heap = [(0.0, target)]
+        entering = self.entering
+        while heap:
+            reached, node = heapq.heappop(heap)
+            if reached > cost[node]:
+                continue
+            for way in entering[node]:
+                start = way.from_node
+                through = reached + way.cost
+                if through < cost[start]:
+                    cost[start] = through
+                    hop[start] = way.index
+                    heapq.heappush(heap, (through, start))
+        self._trees[target] = hop
+        return hop
+
+    def density(self, time_of_day_s: float) -> float:
+        """The share of the walkers out at this time of day (seconds after midnight): the hourly curve's,
+        from each hour's value to the next's; all of them without a curve."""
+        hourly = self.hourly
+        if not hourly:
+            return 1.0
+        hour = (time_of_day_s % DAY_S) / 3600.0
+        index = math.floor(hour)
+        share = hour - index
+        index = min(max(index, 0), 23)
+        here, after = hourly[index], hourly[(index + 1) % 24]
+        return here + (after - here) * share
+
+    # ---------------------------------------------------------------- putting a walker back
+
+    def nearest_way(self, x: float, y: float, reach: float) -> tuple[Walkway, float, float] | None:
+        """The walkway (not a crossing) passing nearest a point within reach, how far along it that is, and
+        how far off; the lowest numbered of equals. None with none in reach."""
+        grid = self._way_grid
+        if grid is None:
+            grid = {}
+            for way in self.ways:
+                if way.crossing is not None:
                     continue
-                tx, ty = _unit(xs[i] - xs[i - 1], ys[i] - ys[i - 1])
-                sine = abs(tx * crossing.dy - ty * crossing.dx)
-                half = crossing.half_width / max(sine, MIN_CROSSING_SINE) + WALKER_HALF_M
-                along = road.along[i - 1] + (road.along[i] - road.along[i - 1]) * hit[0]
-                crossing.roads.append((road.index, along, half, _slant(sine)))
-                break
+                low_x, low_y = self.cell(min(way.xs), min(way.ys))
+                high_x, high_y = self.cell(max(way.xs), max(way.ys))
+                for cx in range(low_x, high_x + 1):
+                    for cy in range(low_y, high_y + 1):
+                        grid.setdefault((cx, cy), []).append(way)
+            self._way_grid = grid
+        low_x, low_y = self.cell(x - reach, y - reach)
+        high_x, high_y = self.cell(x + reach, y + reach)
+        best = None
+        for cx in range(low_x, high_x + 1):
+            for cy in range(low_y, high_y + 1):
+                for way in grid.get((cx, cy), ()):
+                    for i in range(1, len(way.xs)):
+                        ax, ay, bx, by = way.xs[i - 1], way.ys[i - 1], way.xs[i], way.ys[i]
+                        dx, dy = bx - ax, by - ay
+                        length2 = dx * dx + dy * dy
+                        t = 0.0 if length2 <= 1e-12 else min(max(((x - ax) * dx + (y - ay) * dy) / length2, 0.0), 1.0)
+                        off = math.hypot(ax + dx * t - x, ay + dy * t - y)
+                        if off <= reach and (best is None or (off, way.index) < (best[2], best[0].index)):
+                            best = (way, way.along[i - 1] + (way.along[i] - way.along[i - 1]) * t, off)
+        return best
 
     def route_crossings(self, route) -> list[tuple[float, Crossing, float]]:
         """The crossings a shuttle route passes over, as (metres along the route, crossing, half band), in
@@ -323,6 +466,44 @@ class WalkNetwork:
         found.sort(key=lambda entry: (entry[0], entry[1].index))
         self._routes[route.sig] = found
         return found
+
+
+def cut_roads(network: RoadNetwork, ax0: float, ay0: float, bx0: float, by0: float, dx: float, dy: float,
+              half_width: float) -> tuple[list[tuple[int, float, float, float]], dict[int, tuple[float, float]]]:
+    """The directed roads whose centrelines a line from kerb a to kerb b (running dx, dy), carried on a
+    little past each, cuts: each as (road index, metres along it, the band either side, slant), for a band
+    half_width either side of the line; and for each, where its centreline meets the line (metres from a)
+    and the signed sine of their angle (Crossing.lanes_at)."""
+    ax, ay = ax0 - dx * CUT_REACH_M, ay0 - dy * CUT_REACH_M
+    bx, by = bx0 + dx * CUT_REACH_M, by0 + dy * CUT_REACH_M
+    span = math.hypot(bx - ax, by - ay)
+    low_x, low_y = network.cell(min(ax, bx), min(ay, by))
+    high_x, high_y = network.cell(max(ax, bx), max(ay, by))
+    seen: set[int] = set()
+    candidates = []
+    for x in range(low_x, high_x + 1):
+        for y in range(low_y, high_y + 1):
+            for road in network.grid.get((x, y), ()):
+                if road.index not in seen:
+                    seen.add(road.index)
+                    candidates.append(road)
+    candidates.sort(key=lambda road: road.index)
+    roads: list[tuple[int, float, float, float]] = []
+    lanes_at: dict[int, tuple[float, float]] = {}
+    for road in candidates:
+        xs, ys = road.xs, road.ys
+        for i in range(1, len(xs)):
+            hit = _cut(xs[i - 1], ys[i - 1], xs[i], ys[i], ax, ay, bx, by)
+            if hit is None:
+                continue
+            tx, ty = _unit(xs[i] - xs[i - 1], ys[i] - ys[i - 1])
+            sine = abs(tx * dy - ty * dx)
+            half = half_width / max(sine, MIN_CROSSING_SINE) + WALKER_HALF_M
+            along = road.along[i - 1] + (road.along[i] - road.along[i - 1]) * hit[0]
+            roads.append((road.index, along, half, _slant(sine)))
+            lanes_at[road.index] = (hit[1] * span - CUT_REACH_M, tx * dy - ty * dx)
+            break
+    return roads, lanes_at
 
 
 def _slant(sine: float) -> float:

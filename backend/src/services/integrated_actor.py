@@ -41,7 +41,7 @@ from src.services.asset_loader import MAX_ROUTE_WAYPOINTS, validate_routes
 from src.services.incidents import (FIXTURE_PATH as INCIDENT_FIXTURE, IncidentService, detouring, holding_at_stop,
                                     is_detour_of, vehicle_label)
 from src.services.incident_scenarios.simulated_catalog import SimulatedIncidentCatalog
-from src.services.incident_scenarios.world_events import KIND_EVENTS, WorldEvent, legacy_event
+from src.services.incident_scenarios.world_events import KIND_EVENTS, ONE_ROAD_EVENTS, WorldEvent, legacy_event
 from src.services.route_edit import RouteEditService
 from src.services.session_actor import SessionActor
 from src.traffic import incident_hazards, route_signals, signal_cycle
@@ -1306,6 +1306,9 @@ class IntegratedSessionActor(SessionActor):
         for record, until in live:
             event = record.get("event") or {}
             kind = incident_hazards.event_type(record)
+            if kind == "PEDESTRIAN_ON_ROAD" and event.get("edge_id") in edges:
+                self._jaywalk(event.get("event_id") or record["incident_id"], edges[event["edge_id"]], until)
+                continue
             if kind not in PINNED_VEHICLES or event.get("edge_id") not in edges:
                 continue
             key = event.get("event_id") or record["incident_id"]
@@ -1319,6 +1322,17 @@ class IntegratedSessionActor(SessionActor):
             # Which lane it happens in is the event's own, so a replay picks the same one
             lane = fnv_hash(key) % road.lanes
             self.traffic.pin_vehicle(key, road, distance, lane, until*self.STEP_S, PINNED_VEHICLES[kind])
+
+    def _jaywalk(self, key, edge, until):
+        """A pedestrian on the road: the traffic sends the walker nearest the middle of the event's road across
+        it there (CityTraffic.jaywalk), once, trying again at the next refresh while no walker is near. With
+        no pedestrians in the traffic it has only its kind's fallback."""
+        if getattr(self.traffic, "walks", None) is None:
+            return
+        place = self.traffic.locate([tuple(p) for p in edge["path"]])
+        if place is not None:
+            road, distance = place
+            self.traffic.jaywalk(key, road, distance, until*self.STEP_S)
 
     def _signal_faults(self):
         """The junctions whose lights a live signal fault has stuck on red, and the second each clears."""
@@ -1664,7 +1678,7 @@ class IntegratedSessionActor(SessionActor):
         else:
             # Congestion spreads one network hop; not an arbitrary spatial radius. A breakdown blocks one lane
             # of its own road only.
-            congested = {edge} if event.event_type == "BREAKDOWN" else self.definition.neighbours(edge)
+            congested = {edge} if event.event_type in ONE_ROAD_EVENTS else self.definition.neighbours(edge)
             affected = [edge]
             impacted = [candidate for candidate in target["remaining"] if candidate in congested] if target else []
             # World coordinates are the same planar metres as the route scene.

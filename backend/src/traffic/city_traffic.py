@@ -24,8 +24,16 @@ With F9_PEDESTRIANS on (the default), pedestrians walk in it too (sidewalks_plan
 area's walkways file, on the walk network src.traffic.walk_network reads from it. They step off a kerb
 only when they may (on the red of the traffic they cross, over a zebra, or into a gap where they have no
 priority) and never in front of anything that could not stop for them; the vehicles and the shuttles stop
-for a crossing a walker is on, and at a zebra for one waiting if they comfortably can. The native engine
-(src.traffic.native_traffic) walks them exactly as this does.
+for a crossing a walker is on, and at a zebra for one waiting if they comfortably can. A vehicle already on
+the road a crossing cuts waits only until every walker on it has passed its lane (per-lane release). The
+native engine (src.traffic.native_traffic) walks them exactly as this does.
+
+Where the walkways file has attractors (plan phase 5), walkers make trips: each walks the shortest way to a
+home, a place, a bus stop or the interchange, goes in (or waits and leaves on a bus), and comes out again
+later for another, so how many are out follows the file's curve over the time of day (day_start_s is the
+time of day the traffic's clock starts at). A world event can send one across a road where there is no
+crossing (jaywalk): it waits for a gap only in traffic that could not stop, so the traffic and the shuttles
+must stop for it.
 
 Everything is deterministic: the same session from the same state drives the same way, and state() and
 from_state() carry it through a checkpoint exactly. Unity's float arithmetic is not reproduced, so the
@@ -51,7 +59,9 @@ from copy import deepcopy
 from src.traffic import signal_cycle, walk_network as walk_network_module
 from src.traffic.road_network import LANE_WIDTH_M, Road, RoadNetwork, angle_deg, class_weight, inverse_lerp, lerp, \
     road_network
-from src.traffic.walk_network import SIGNAL, UNCONTROLLED, WALKER_HALF_M, ZEBRA, Crossing, WalkNetwork, Walkway
+from src.traffic.walk_network import (CUT_REACH_M, HOME, INTERCHANGE, MIN_CROSSING_SINE, SIGNAL, STOP, UNCONTROLLED,
+                                      WALKER_HALF_M, ZEBRA, Crossing, WalkNetwork, Walkway, cut_roads)
+from src.traffic.walk_network import _cut as walk_cut
 
 # How far ahead a vehicle has chosen its roads
 PLAN_AHEAD_M = 80.0
@@ -159,8 +169,36 @@ CROSSING_HELD_M = 5.0
 SHUTTLE_BODY_STEP_M = 0.5
 # A walker this far either side of a kerb is on its ramp
 RAMP_DEPTH_M = 1.5
-# What a walker is doing: walking, waiting at a kerb, let onto a crossing, or standing a while
-WALKING, WAITING_AT_KERB, ON_CROSSING, PAUSED = 0, 1, 2, 3
+# Per-lane release: a vehicle on a road a crossing cuts is held only until every walker on the crossing has
+# passed its lane's stretch of the crossing, with this much to spare (where the road meets the crossing no
+# more slanted than MIN_CROSSING_SINE; otherwise, and for a vehicle still turning into the road, the whole
+# crossing holds it)
+LANE_RELEASE_MARGIN_M = 0.5
+# Trips: a walker goes somewhere within this far if it can, and waits at a stop this long. There, or at a home
+# or a place, it goes in (or leaves on the bus) while more walkers are out than the time of day has, and this
+# often otherwise; else it sets off again. In, it stays at least this long (from the least to the most), and
+# comes out once fewer are out than the time of day has, trying again this much later while not; at the start,
+# those not out are due out within this long
+TRIP_REACH_M = 1000.0
+BUS_WAIT_MIN_S, BUS_WAIT_MAX_S = 15.0, 120.0
+GO_IN_CHANCE = 0.3
+HOME_STAY_MIN_S, HOME_STAY_MAX_S = 120.0, 900.0
+PLACE_STAY_MIN_S, PLACE_STAY_MAX_S = 60.0, 600.0
+AWAY_ON_BUS_MIN_S, AWAY_ON_BUS_MAX_S = 120.0, 600.0
+AWAY_RETRY_MIN_S, AWAY_RETRY_MAX_S = 30.0, 120.0
+START_AWAY_MAX_S = 600.0
+# A jaywalker (jaywalk) is the walker nearest where it happens within this far; it waits this far outside
+# the asphalt's edge, is this wide a band to the traffic, stops in the middle of the road for a while (from
+# the least to the most) and steps back onto a walkway within this far of where it gets over
+JAYWALK_PICK_M, JAYWALK_KERB_M, JAYWALK_HALF_WIDTH_M = 40.0, 0.4, 0.75
+JAYWALK_PAUSE_MIN_S, JAYWALK_PAUSE_MAX_S = 2.0, 5.0
+JAYWALK_LAND_M = 30.0
+# What a jaywalker is doing: walking to the kerb, waiting there, crossing, standing in the middle, walking
+# off to a walkway on the far side, walking back (its event over before it went), or done
+APPROACH, KERB, CROSS, HESITATE, LEAVE, RETURN, DONE = 0, 1, 2, 3, 4, 5, 6
+# What a walker is doing: walking, waiting at a kerb, let onto a crossing, or standing a while; away (indoors,
+# or gone on a bus) and off the walk network; or a jaywalker off the walk network
+WALKING, WAITING_AT_KERB, ON_CROSSING, PAUSED, AWAY, JAYWALKING = 0, 1, 2, 3, 4, 5
 # Bits of a walker's flags in a frame
 WAITING_FLAG, ON_ROAD_FLAG, RAMP_FLAG, PAUSED_FLAG = 1, 2, 4, 8
 # One walker of a frame, little-endian: its index in the walkways file's seeds (uint16), x and y in
@@ -293,10 +331,12 @@ class Vehicle:
 
 class Walker:
     """One pedestrian of the walkways file's seeds: where along which walkway it is, in which sub-lane, how
-    fast it walks and where it means to go. granted is the crossing walkway it has been let onto, if any."""
+    fast it walks and where it means to go. granted is the crossing walkway it has been let onto, if any;
+    dest the attractor its trip is to (-1 without one), and home the attractor it is at or in (-1 when it
+    is not at one)."""
 
     __slots__ = ("slot", "seed", "id", "rng", "way", "distance", "sublane", "aside", "speed", "target", "desired",
-                 "state", "wait_s", "kerb_wait_s", "crossings_due", "granted", "ahead", "lane_index",
+                 "state", "wait_s", "kerb_wait_s", "crossings_due", "granted", "ahead", "lane_index", "dest", "home",
                  "x", "y", "fx", "fy")
 
     def clone(self) -> Walker:
@@ -305,9 +345,40 @@ class Walker:
             self.slot, self.seed, self.id, self.rng, self.way, self.distance, self.sublane, self.aside
         c.speed, c.target, c.desired, c.state, c.wait_s, c.kerb_wait_s, c.crossings_due, c.granted = \
             self.speed, self.target, self.desired, self.state, self.wait_s, self.kerb_wait_s, self.crossings_due, self.granted
-        c.lane_index, c.x, c.y, c.fx, c.fy = self.lane_index, self.x, self.y, self.fx, self.fy
+        c.lane_index, c.dest, c.home, c.x, c.y, c.fx, c.fy = \
+            self.lane_index, self.dest, self.home, self.x, self.y, self.fx, self.fy
         c.ahead = self.ahead[:]
         return c
+
+
+class Jaywalk:
+    """A walker sent across a road where there is no crossing by a world event (CityTraffic.jaywalk): its
+    line over the road from kerb a to kerb b (as a crossing's road part: middle, direction, half length and
+    half width) and the roads it cuts; what it is doing (phase) and how far along its leg (s); the walkway
+    it steps back onto on the far side (rejoin), or back where it came from (back) if its event ends before
+    it goes."""
+
+    __slots__ = ("key", "slot", "until", "phase", "s", "wait_s", "pause_s", "road", "distance", "side",
+                 "ax", "ay", "bx", "by", "cx", "cy", "dx", "dy", "half_length", "half_width", "roads",
+                 "from_x", "from_y", "to_x", "to_y", "rejoin_way", "rejoin_distance", "back_way", "back_distance",
+                 "routes")
+
+    def clone(self) -> Jaywalk:
+        copy = Jaywalk.__new__(Jaywalk)
+        for name in Jaywalk.__slots__:
+            setattr(copy, name, getattr(self, name))
+        return copy
+
+
+def jaywalk_line(road: Road, distance: float, side: int) -> tuple[float, float, float, float, float]:
+    """Where a jaywalker crosses a road at a distance along it from one side (1 left of the road's way, -1
+    right): its kerbs a and b, just outside the asphalt either side, and its half length."""
+    px, py, tx, ty = road.sample(distance, 0.0)
+    # The asphalt's half width, as the 3D view draws it: every lane of both ways (a one-way road's lanes
+    # either side of its line), and a shoulder
+    half = (road.lanes * LANE_WIDTH_M if not road.oneway else road.lanes * LANE_WIDTH_M / 2) + 0.6 + JAYWALK_KERB_M
+    nx, ny = -ty * side, tx * side
+    return px + nx * half, py + ny * half, px - nx * half, py - ny * half, half
 
 
 def walker_aside(way: Walkway, sublane: int) -> float:
@@ -458,14 +529,24 @@ class ShuttlePlan:
 class CityTraffic:
     """One session's background traffic, and its shuttles as the traffic sees them."""
 
-    def __init__(self, network: RoadNetwork, walks: WalkNetwork | None = None):
+    def __init__(self, network: RoadNetwork, walks: WalkNetwork | None = None, day_start_s: float | None = None):
         self.network = network
         # The walk network its pedestrians walk, or None without pedestrians
         self.walks = walks
         self.walkers: list[Walker] = []
+        # The time of day the traffic's clock starts at (seconds after midnight), for how many walkers are out
+        self.day_start_s = float(walk_network_module.day_start_s() if day_start_s is None else day_start_s)
+        # How many walkers are out (not away) and how many should be, as the step goes
+        self._active = 0
+        self._target = 0
         # Crossings a walker has been let onto, and zebras a walker waits at, as the last step left them
         self._occupied: set[int] = set()
         self._claimed: set[int] = set()
+        # For each crossing walkers are on: from where along its line (from kerb a) those walking from a still
+        # have to cross, and up to where those walking from b do (per-lane release)
+        self._extents: dict[int, list[float]] = {}
+        # Walkers a world event sends across a road, by the event's key, in the order they came
+        self.jaywalks: dict[str, Jaywalk] = {}
         # Zebras a vehicle has stood at for a walker, for how long (crossing index -> s), and zebras whose
         # walkers hold back for the traffic until a time (crossing index -> s)
         self.crossing_waits: dict[int, float] = {}
@@ -501,20 +582,21 @@ class CityTraffic:
     # ---------------------------------------------------------------- building and copying
 
     @classmethod
-    def start(cls, area: str, pedestrians: bool | None = None) -> CityTraffic | None:
+    def start(cls, area: str, pedestrians: bool | None = None, day_start_s: float | None = None) -> CityTraffic | None:
         """The area's sample, where its prepared file places it, or None with no prepared file. With
-        pedestrians (by default as F9_PEDESTRIANS says), the walkers of its walkways file walk too."""
+        pedestrians (by default as F9_PEDESTRIANS says), the walkers of its walkways file walk too, as many
+        out as the time of day its clock starts at (by default as F9_DAY_START says) has."""
         network = road_network(area)
         if network is None:
             return None
         if pedestrians is None:
             pedestrians = walk_network_module.enabled()
-        return cls.on(network, walk_network_module.walk_network(area) if pedestrians else None)
+        return cls.on(network, walk_network_module.walk_network(area) if pedestrians else None, day_start_s)
 
     @classmethod
-    def on(cls, network: RoadNetwork, walks: WalkNetwork | None = None) -> CityTraffic:
+    def on(cls, network: RoadNetwork, walks: WalkNetwork | None = None, day_start_s: float | None = None) -> CityTraffic:
         """A network's sample, where its seeds place it, and a walk network's walkers where theirs do."""
-        traffic = cls(network, walks)
+        traffic = cls(network, walks, day_start_s)
         for slot, seed in enumerate(network.seeds):
             traffic._add(slot, seed)
         for vehicle in traffic.vehicles:
@@ -553,8 +635,24 @@ class CityTraffic:
         walker.granted = -1
         walker.ahead = []
         walker.lane_index = 0
+        walker.dest = walker.home = -1
         walker.x = walker.y = walker.fx = walker.fy = 0.0
         self.walkers.append(walker)
+        walks = self.walks
+        if walks.attractors:
+            # As many are out as the time of day has; the rest are at home, coming out over a while
+            walker.rng = rng_step(walker.rng)
+            if random01(walker.rng) >= walks.density(self.day_start_s):
+                homes = walks.homes
+                walker.rng = rng_step(walker.rng)
+                walker.home = homes[min(int(random01(walker.rng) * len(homes)), len(homes) - 1)].index
+                walker.rng = rng_step(walker.rng)
+                walker.wait_s = random01(walker.rng) * START_AWAY_MAX_S
+                walker.state = AWAY
+                walker.speed = walker.target = 0.0
+                self._pose_walker(walker)
+                return
+            self._start_trip(walker, way.to_node)
         self._plan_walk(walker)
         self._pose_walker(walker)
 
@@ -610,7 +708,8 @@ class CityTraffic:
         self._owns_walkers = copy._owns_walkers = False
         copy._occupied, copy._claimed, copy._held = set(self._occupied), set(self._claimed), set()
         copy.crossing_waits, copy.crossing_releases = dict(self.crossing_waits), dict(self.crossing_releases)
-        copy._walk_lanes, copy._vehicle_cells = {}, None
+        copy._walk_lanes, copy._vehicle_cells, copy._extents = {}, None, {}
+        copy.jaywalks = {key: jaywalk.clone() for key, jaywalk in self.jaywalks.items()}
         # Keyed by the actor's own waypoint lists, which the same deepcopy copies: keep them the same objects
         copy._shuttle_routes = {key: (deepcopy(waypoints, memo), route)
                                 for key, (waypoints, route) in self._shuttle_routes.items()}
@@ -646,11 +745,14 @@ class CityTraffic:
         if self.walks is not None:
             # Only with pedestrians, so a checkpoint without them is as it always was
             state["walk_source"] = self.walks.source_hash
+            state["day_start_s"] = self.day_start_s
             state["walkers"] = [[w.way.index, w.distance, w.sublane, w.aside, w.speed, w.state, w.wait_s, w.kerb_wait_s,
-                                 w.rng, w.crossings_due, w.granted, [way.index for way in w.ahead]] for w in self.walkers]
+                                 w.rng, w.crossings_due, w.granted, [way.index for way in w.ahead], w.dest, w.home]
+                                for w in self.walkers]
             state["crossings"] = [sorted(self._occupied), sorted(self._claimed),
                                   [[index, s] for index, s in self.crossing_waits.items()],
                                   [[index, until] for index, until in self.crossing_releases.items()]]
+            state["jaywalks"] = [jaywalk_state(j) for j in self.jaywalks.values()]
         return state
 
     def _vehicle_state(self) -> dict:
@@ -673,9 +775,11 @@ class CityTraffic:
         """Traffic as state() left it, on its area's network or the one given. Its walkers, if it walks
         any, as the checkpoint left them; from where their seeds place them if it has none of them (a
         checkpoint from before pedestrians), and a checkpoint's walkers are let go by traffic without. On
-        its area's network, a checkpoint with walkers walks them on, whatever F9_PEDESTRIANS now says."""
-        traffic = cls.on(network, walks) if network is not None else \
-            cls.start(state["area"], pedestrians=True if "walkers" in state else None)
+        its area's network, a checkpoint with walkers walks them on, whatever F9_PEDESTRIANS now says. Its
+        clock's time of day is the checkpoint's (F9_DAY_START's for one from before trips)."""
+        day_start = state.get("day_start_s")
+        traffic = cls.on(network, walks, day_start) if network is not None else \
+            cls.start(state["area"], pedestrians=True if "walkers" in state else None, day_start_s=day_start)
         if traffic is not None and traffic.walkers and "walkers" in state:
             traffic._load_walkers(state)
         if traffic is None or len(state["vehicles"]) != len(traffic.vehicles):
@@ -722,14 +826,15 @@ class CityTraffic:
         items = state["walkers"]
         if state.get("walk_source") != self.walks.source_hash or len(items) != len(self.walkers):
             raise ValueError("Traffic checkpoint's walkers do not match the area's walk network")
-        for walker, item in zip(self.walkers, items):
-            way, distance, sublane, aside, speed, walker_state, wait_s, kerb_wait_s, rng, due, granted, ahead = item
+        for walker, item in zip(self.walkers, walker_items(items, len(self.walks.attractors))):
+            way, distance, sublane, aside, speed, walker_state, wait_s, kerb_wait_s, rng, due, granted, ahead, dest, home = item
             walker.way = ways[way]
             walker.distance, walker.sublane, walker.aside, walker.speed = float(distance), int(sublane), float(aside), float(speed)
             walker.target = walker.speed
             walker.state, walker.wait_s, walker.kerb_wait_s = int(walker_state), float(wait_s), float(kerb_wait_s)
             walker.rng, walker.crossings_due, walker.granted = int(rng), int(due), int(granted)
             walker.ahead = [ways[index] for index in ahead]
+            walker.dest, walker.home = dest, home
             self._pose_walker(walker)
         occupied, claimed, waits, releases = state["crossings"]
         count = len(self.walks.crossings)
@@ -739,6 +844,11 @@ class CityTraffic:
         self._occupied, self._claimed = set(occupied), set(claimed)
         self.crossing_waits = {index: float(s) for index, s in waits}
         self.crossing_releases = {index: float(until) for index, until in releases}
+        self.jaywalks = {}
+        for item in state.get("jaywalks", ()):
+            jaywalk = load_jaywalk(self, item)
+            self.jaywalks[jaywalk.key] = jaywalk
+            self._pose_jaywalker(jaywalk)
 
     # ---------------------------------------------------------------- hazards
 
@@ -843,6 +953,29 @@ class CityTraffic:
         if until_s > self.time_s:
             self.signal_faults[junction_id] = float(until_s)
 
+    def jaywalk(self, key: str, road: Road, distance: float, until_s: float) -> bool:
+        """Sends the walker nearest a place on a road (within JAYWALK_PICK_M, walking a sidewalk) across the
+        road there, where there is no crossing: a pedestrian on the road, a world event. It walks to the
+        kerb and waits only for traffic that could not stop for it, crosses, stands a while in the middle,
+        and steps back onto a walkway on the far side; the traffic and the shuttles must stop for it. If the
+        event is over (until_s) before it has stepped off, it walks back where it came from instead.
+
+        Returns whether the event's walker is on its way: False, to try again later, while no walker is near
+        or there is nowhere to land on the far side. Sending an event already sent changes nothing."""
+        if key in self.jaywalks:
+            return True
+        if not self.walkers or until_s <= self.time_s:
+            return False
+        jaywalk = plan_jaywalk(self, key, road, distance, until_s)
+        if jaywalk is None:
+            return False
+        self._own_walkers()
+        walker = self.walkers[jaywalk.slot]
+        walker.state, walker.granted, walker.kerb_wait_s, walker.speed, walker.target = JAYWALKING, -1, 0.0, 0.0, 0.0
+        self.jaywalks[key] = jaywalk
+        self._pose_jaywalker(jaywalk)
+        return True
+
     def _clear_events(self) -> None:
         """Ends the world events whose time is up: their pinned vehicles are towed away and their lights
         work again."""
@@ -884,8 +1017,11 @@ class CityTraffic:
             # Walkers at a kerb decide from the traffic as it stands before anything moves this step
             self._own_walkers()
             self._vehicle_cells = None
+            self._count_out()
             self._fill_walkways()
             self._walkers_decide()
+            if self.jaywalks:
+                self._jaywalks_decide()
         for vehicle in self.vehicles:
             if vehicle.outside or (pinned and vehicle.slot in pinned):
                 continue
@@ -912,7 +1048,10 @@ class CityTraffic:
         if walking:
             for walker in self.walkers:
                 self._move_walker(walker, dt)
-                self._pose_walker(walker)
+                if walker.state < AWAY:
+                    self._pose_walker(walker)
+            if self.jaywalks:
+                self._move_jaywalks(dt)
             self._vehicle_cells = None
 
     def _pose(self, vehicle: Vehicle) -> None:
@@ -1169,7 +1308,17 @@ class CityTraffic:
             if by_road is not None:
                 crossings = by_road[road.index]
                 if crossings:
-                    limit = self._crossing_limit(crossings, road_start, half, vehicle.half_width, speed, limit)
+                    if i == 0:
+                        # On the road itself, it is held only until the walkers are past its lane
+                        offset = road.lane_offset(lane)
+                        low = offset + min(vehicle.aside, vehicle.target_aside, 0.0) - vehicle.half_width
+                        high = offset + max(vehicle.aside, vehicle.target_aside, 0.0) + vehicle.half_width
+                        limit = self._crossing_limit(crossings, road_start, half, vehicle.half_width, speed, limit,
+                                                     road.index, low, high)
+                    else:
+                        limit = self._crossing_limit(crossings, road_start, half, vehicle.half_width, speed, limit)
+            if self.jaywalks:
+                limit = self._jaywalk_limit(road.index, road_start, half, vehicle.half_width, speed, limit)
             # On past any leader, which may turn off and leave this vehicle facing what lies beyond
             if i >= len(ahead):
                 break
@@ -1401,6 +1550,8 @@ class CityTraffic:
             look = min(look, route.length - along)
         if self.walkers and (self._occupied or self._claimed):
             self._shuttle_crossings(shuttle, route, along, look, cruise, plan)
+        if self.jaywalks:
+            self._shuttle_jaywalks(shuttle, route, along, look, cruise, plan)
         # The path its body sweeps, through its own lane
         points = self._look
         points.clear()
@@ -1714,11 +1865,13 @@ class CityTraffic:
     # could not stop for it, so nothing ever drives into one.
 
     def _crossing_limit(self, crossings: list, road_start: float, half: float, half_width: float, speed: float,
-                        limit: float) -> float:
+                        limit: float, road_index: int = -1, low: float = 0.0, high: float = 0.0) -> float:
         """A vehicle's limit for the crossings along a road ahead of it, the road starting road_start
         from its middle: it stops short of one a walker is on, and of a zebra a walker waits at if it can
         stop comfortably, its front corner short of it where the road meets it at a slant. Its front well
-        into one already goes on through."""
+        into one already goes on through. With road_index (the road it is on), one a walker is on holds it
+        only until every walker on it is past the stretch from low to high metres left of the road's line
+        it covers (_lane_clear)."""
         occupied, claimed = self._occupied, self._claimed
         if not occupied and not claimed:
             return limit
@@ -1730,10 +1883,43 @@ class CityTraffic:
                 break
             index = crossing.index
             gap = front_gap - STOP_MARGIN_M
-            if index in occupied or (index in claimed and speed * speed <= 2 * COMFORT_BRAKE * gap):
+            holds = index in claimed and speed * speed <= 2 * COMFORT_BRAKE * gap
+            if not holds and index in occupied:
+                holds = road_index < 0 or not self._lane_clear(crossing, road_index, low, high)
+            if holds:
                 limit = min(limit, krauss(speed, gap, 0.0))
                 if speed < STOPPED_MPS and front_gap < CROSSING_HELD_M:
                     self._held.add(index)
+        return limit
+
+    def _lane_clear(self, crossing: Crossing, road_index: int, low: float, high: float) -> bool:
+        """Whether every walker on a crossing is past the stretch of it a vehicle covers, from low to high
+        metres left of a road's line, its band's slant and LANE_RELEASE_MARGIN_M to spare: those walking from
+        kerb a are all beyond it, and those walking from b all short of it."""
+        extent = self._extents.get(crossing.index)
+        cut = crossing.lanes_at.get(road_index)
+        if extent is None or cut is None:
+            return False
+        meets, sine = cut
+        if abs(sine) < MIN_CROSSING_SINE:
+            return False
+        spare = crossing.half_width * math.sqrt(max(0.0, 1.0 - sine * sine)) / abs(sine) + LANE_RELEASE_MARGIN_M
+        a, b = meets + low / sine, meets + high / sine
+        return max(a, b) + spare <= extent[0] and min(a, b) - spare >= extent[1]
+
+    def _jaywalk_limit(self, road_index: int, road_start: float, half: float, half_width: float, speed: float,
+                       limit: float) -> float:
+        """A vehicle's limit for a jaywalker on a road ahead of it, as for a crossing a walker is on: it
+        stops short of the jaywalker's band, the whole road over, until the jaywalker is off the road."""
+        for jaywalk in self.jaywalks.values():
+            if jaywalk.phase != CROSS and jaywalk.phase != HESITATE:
+                continue
+            for road, at, band, slant in jaywalk.roads:
+                if road != road_index:
+                    continue
+                front_gap = road_start + at - band - half - half_width * slant
+                if -CROSSING_ENTERED_M <= front_gap <= PLAN_AHEAD_M:
+                    limit = min(limit, krauss(speed, front_gap - STOP_MARGIN_M, 0.0))
         return limit
 
     def _shuttle_crossings(self, shuttle: Shuttle, route: ShuttleRoute, along: float, look: float, cruise: float,
@@ -1764,6 +1950,27 @@ class CityTraffic:
                 plan.cap_m = min(plan.cap_m, max(0.0, gap))
                 plan.pedestrian_mps = min(plan.pedestrian_mps, limit)
 
+    def _shuttle_jaywalks(self, shuttle: Shuttle, route: ShuttleRoute, along: float, look: float, cruise: float,
+                          plan: ShuttlePlan) -> None:
+        """A shuttle stops for a jaywalker on its route, as for a crossing a walker is on."""
+        speed = shuttle.speed
+        for jaywalk in self.jaywalks.values():
+            if jaywalk.phase != CROSS and jaywalk.phase != HESITATE:
+                continue
+            for at, band in jaywalk_route(jaywalk, route):
+                front_gap = route.ahead(at, along) - band - shuttle.half_length
+                if front_gap < -CROSSING_ENTERED_M or front_gap > look + shuttle.half_length:
+                    continue
+                gap = max(0.0, front_gap - STOP_MARGIN_M)
+                while gap > 0 and self._body_meets(shuttle, route, along + gap, jaywalk):
+                    gap = max(0.0, gap - SHUTTLE_BODY_STEP_M)
+                limit = krauss(speed, gap, 0.0)
+                if limit < cruise:
+                    plan.held = True
+                plan.limit_mps = min(plan.limit_mps, limit)
+                plan.cap_m = min(plan.cap_m, max(0.0, gap))
+                plan.pedestrian_mps = min(plan.pedestrian_mps, limit)
+
     @staticmethod
     def _body_meets(shuttle: Shuttle, route: ShuttleRoute, along: float, crossing: Crossing) -> bool:
         """Whether a shuttle's body, with its middle this far along its route, comes within STOP_MARGIN_M
@@ -1782,9 +1989,29 @@ class CityTraffic:
             reach += nxt.length
 
     def _choose_next_way(self, walker: Walker, origin: Walkway) -> Walkway:
-        """The walkway a walker takes on from the end of another: rather on than back, rather straight on
-        than round a corner, and a crossing only once it has walked a few sidewalks since the last."""
-        exits = self.walks.exits[origin.to_node]
+        """The walkway a walker takes on from the end of another. On a trip, the next of the shortest way
+        to where it is going. Otherwise (or past where it is going, or where no way leads there) at random:
+        rather on than back, rather straight on than round a corner, and a crossing only once it has walked
+        a few sidewalks since the last. A walker without a trip starts one once it may cross again."""
+        walks = self.walks
+        node = origin.to_node
+        if walks.attractors and walker.dest < 0 and walker.crossings_due <= 0 and walker.state < AWAY:
+            self._start_trip(walker, node)
+        if walker.dest >= 0:
+            target = walks.attractors[walker.dest].node
+            if node != target:
+                hop = walks.next_hop(target)[node]
+                if hop >= 0:
+                    pick = walks.ways[hop]
+                    if pick.crossing is not None:
+                        walker.crossings_due = CROSSINGS_DUE_MIN
+                    elif walker.crossings_due > 0:
+                        walker.crossings_due -= 1
+                    return pick
+                # Nothing leads there from here: it walks at random until it may start another
+                walker.dest = -1
+                walker.crossings_due = max(walker.crossings_due, CROSSINGS_DUE_MIN)
+        exits = walks.exits[origin.to_node]
         # The way back always leaves the node, so there is always a way on
         options = [way for way in exits if way.index != origin.back] or exits
         walk = [way for way in options if way.crossing is None]
@@ -1812,11 +2039,54 @@ class CityTraffic:
             walker.crossings_due -= 1
         return pick
 
+    def _start_trip(self, walker: Walker, node: int) -> None:
+        """Picks where a walker at a node goes next, by the attractors' weights: one within TRIP_REACH_M
+        if any is, and a home while more walkers are out than the time of day has. None (dest -1) where
+        nothing it may go to leads from the node."""
+        walks = self.walks
+        home_only = self._active > self._target
+        x, y = walks.nodes[node]
+        near: list = []
+        anywhere: list = []
+        for attractor in walks.attractors:
+            if attractor.node == node or (home_only and attractor.kind != HOME):
+                continue
+            anywhere.append(attractor)
+            if math.hypot(attractor.x - x, attractor.y - y) <= TRIP_REACH_M:
+                near.append(attractor)
+        pool = near or anywhere
+        walker.dest = -1
+        if not pool:
+            return
+        walker.rng = rng_step(walker.rng)
+        left = random01(walker.rng) * sum([attractor.weight for attractor in pool])
+        pick = pool[-1]
+        for attractor in pool:
+            left -= attractor.weight
+            if left <= 0:
+                pick = attractor
+                break
+        if walks.next_hop(pick.node)[node] >= 0:
+            walker.dest = pick.index
+        else:
+            walker.crossings_due = max(walker.crossings_due, CROSSINGS_DUE_MIN)
+
+    def _count_out(self) -> None:
+        """How many walkers are out, and how many the time of day has out (all of them without attractors)."""
+        walks = self.walks
+        if not walks.attractors:
+            self._active = self._target = len(self.walkers)
+            return
+        self._active = sum(1 for walker in self.walkers if walker.state != AWAY)
+        self._target = int(len(self.walkers) * walks.density(self.day_start_s + self.time_s))
+
     def _fill_walkways(self) -> None:
-        """Each walkway's walkers in each sub-lane, back to front."""
+        """Each walkway's walkers in each sub-lane, back to front; those off the walk network are in none."""
         lanes = self._walk_lanes
         lanes.clear()
         for walker in self.walkers:
+            if walker.state >= AWAY:
+                continue
             key = walker.way.index * 8 + walker.sublane
             bucket = lanes.get(key)
             if bucket is None:
@@ -1847,12 +2117,13 @@ class CityTraffic:
         occupied.clear()
         claimed.clear()
         self._held.clear()
+        self._extents.clear()
         time_s = self.time_s
         if self.crossing_releases:
             for index in [i for i, until in self.crossing_releases.items() if until <= time_s]:
                 del self.crossing_releases[index]
         for walker in self.walkers:
-            if walker.state == PAUSED:
+            if walker.state >= PAUSED:
                 continue
             found = self._approach(walker)
             if found is None:
@@ -1861,12 +2132,12 @@ class CityTraffic:
             crossing = way.crossing
             if walker.granted == way.index:
                 if d <= way.kerb_out + WALKER_HALF_M:
-                    occupied.add(crossing.index)
+                    self._occupy(way, d)
                 continue
             if d > way.kerb_in:
                 # On the road without having been let on, as from a checkpoint of another network: it finishes crossing
                 walker.granted, walker.state = way.index, ON_CROSSING
-                occupied.add(crossing.index)
+                self._occupy(way, d)
                 continue
             if d < way.kerb_in - KERB_WAIT_BACK_M - DECIDE_M:
                 if walker.state == WAITING_AT_KERB:
@@ -1874,7 +2145,7 @@ class CityTraffic:
                 continue
             if self._may_step_off(walker, way, d):
                 walker.granted, walker.state, walker.kerb_wait_s = way.index, ON_CROSSING, 0.0
-                occupied.add(crossing.index)
+                self._occupy(way, d)
                 continue
             walker.state = WAITING_AT_KERB
             if crossing.control == ZEBRA and crossing.index not in self.crossing_releases:
@@ -1886,6 +2157,19 @@ class CityTraffic:
             if index in occupied:
                 self.crossing_releases[index] = time_s + ZEBRA_RELEASE_S
 
+    def _occupy(self, way: Walkway, d: float) -> None:
+        """A walker this far along a crossing walkway is on the crossing: the traffic must keep out of the
+        part of it the walker has still to cross (_lane_clear), from where it is with its body's half."""
+        index = way.crossing.index
+        self._occupied.add(index)
+        extent = self._extents.get(index)
+        if extent is None:
+            extent = self._extents[index] = [math.inf, -math.inf]
+        if way.axis > 0:
+            extent[0] = min(extent[0], d - way.kerb_in - WALKER_HALF_M)
+        else:
+            extent[1] = max(extent[1], way.kerb_out - d + WALKER_HALF_M)
+
     def _turn_back(self, walker: Walker) -> None:
         """A walker kept at a kerb too long walks back the way it came."""
         way = walker.way
@@ -1894,6 +2178,8 @@ class CityTraffic:
         walker.sublane = min(walker.sublane, walker.way.mine - 1)
         walker.state, walker.kerb_wait_s, walker.granted = WALKING, 0.0, -1
         walker.crossings_due = max(walker.crossings_due, CROSSINGS_DUE_MIN)
+        # It gives up its trip too, and starts another once it may cross again
+        walker.dest = -1
         walker.ahead = []
         self._plan_walk(walker)
 
@@ -2051,7 +2337,7 @@ class CityTraffic:
         let off."""
         lanes = self._walk_lanes
         for walker in self.walkers:
-            if walker.state == PAUSED:
+            if walker.state >= PAUSED:
                 walker.target = 0.0
                 continue
             way = walker.way
@@ -2102,11 +2388,26 @@ class CityTraffic:
                 return
 
     def _move_walker(self, walker: Walker, dt: float) -> None:
+        if walker.state == JAYWALKING:
+            return
+        if walker.state == AWAY:
+            walker.wait_s -= dt
+            if walker.wait_s <= 0:
+                if self._active < self._target:
+                    self._come_out(walker)
+                else:
+                    walker.rng = rng_step(walker.rng)
+                    walker.wait_s = AWAY_RETRY_MIN_S + (AWAY_RETRY_MAX_S - AWAY_RETRY_MIN_S) * random01(walker.rng)
+            return
         if walker.state == PAUSED:
             walker.wait_s -= dt
             if walker.wait_s <= 0:
                 walker.wait_s = 0.0
-                walker.state = WALKING
+                if walker.home >= 0:
+                    # Waited at a stop: it leaves on the bus, or sets off again as if it had come on one
+                    self._go_in_or_on(walker, AWAY_ON_BUS_MIN_S, AWAY_ON_BUS_MAX_S)
+                else:
+                    walker.state = WALKING
             return
         rate = WALKER_ACCEL if walker.target > walker.speed else WALKER_DECEL
         walker.speed = move_towards(walker.speed, walker.target, rate * dt)
@@ -2126,6 +2427,9 @@ class CityTraffic:
             walker.sublane = min(walker.sublane, nxt.mine - 1)
             if walker.granted == leaving.index:
                 walker.granted, walker.state, walker.kerb_wait_s = -1, WALKING, 0.0
+            if walker.dest >= 0 and leaving.to_node == self.walks.attractors[walker.dest].node:
+                self._arrive(walker)
+                break
             self._plan_walk(walker)
             # Now and then it stands a while where two sidewalks meet, never at a crossing
             if leaving.crossing is None and nxt.crossing is None and walker.state == WALKING:
@@ -2138,12 +2442,74 @@ class CityTraffic:
                     walker.speed = walker.target = 0.0
                     break
 
+    def _arrive(self, walker: Walker) -> None:
+        """A walker at the node its trip was to: into a home or a place for a while, or waiting at a stop."""
+        attractor = self.walks.attractors[walker.dest]
+        walker.home, walker.dest = attractor.index, -1
+        walker.distance = 0.0
+        walker.speed = walker.target = 0.0
+        walker.granted, walker.kerb_wait_s = -1, 0.0
+        if attractor.kind == STOP or attractor.kind == INTERCHANGE:
+            walker.rng = rng_step(walker.rng)
+            walker.state = PAUSED
+            walker.wait_s = BUS_WAIT_MIN_S + (BUS_WAIT_MAX_S - BUS_WAIT_MIN_S) * random01(walker.rng)
+        elif attractor.kind == HOME:
+            self._go_in_or_on(walker, HOME_STAY_MIN_S, HOME_STAY_MAX_S)
+        else:
+            self._go_in_or_on(walker, PLACE_STAY_MIN_S, PLACE_STAY_MAX_S)
+
+    def _go_in_or_on(self, walker: Walker, stay_min_s: float, stay_max_s: float) -> None:
+        """A walker at the attractor it is at (home) goes in for a stay while more are out than the time of
+        day has, or GO_IN_CHANCE of the time otherwise; else it stands a moment and sets off on another trip."""
+        walker.rng = rng_step(walker.rng)
+        if self._active > self._target or random01(walker.rng) < GO_IN_CHANCE:
+            walker.rng = rng_step(walker.rng)
+            walker.state = AWAY
+            walker.wait_s = stay_min_s + (stay_max_s - stay_min_s) * random01(walker.rng)
+            walker.speed = walker.target = 0.0
+            walker.ahead = []
+            self._active -= 1
+            return
+        walker.rng = rng_step(walker.rng)
+        walker.state = PAUSED
+        walker.wait_s = PAUSE_MIN_S + (PAUSE_MAX_S - PAUSE_MIN_S) * random01(walker.rng)
+        self._set_off(walker, self.walks.attractors[walker.home].node)
+
+    def _come_out(self, walker: Walker) -> None:
+        """A walker away comes back out where it went in, or off a bus at any stop, and sets off on a trip."""
+        walks = self.walks
+        place = walks.attractors[walker.home] if 0 <= walker.home < len(walks.attractors) else None
+        if (place is None or place.kind == STOP or place.kind == INTERCHANGE) and walks.stops:
+            walker.rng = rng_step(walker.rng)
+            place = walks.stops[min(int(random01(walker.rng) * len(walks.stops)), len(walks.stops) - 1)]
+        elif place is None:
+            place = walks.homes[0]
+        self._active += 1
+        walker.state, walker.wait_s = WALKING, 0.0
+        self._set_off(walker, place.node)
+
+    def _set_off(self, walker: Walker, node: int) -> None:
+        """A walker at a node starts a trip from it, standing at the start of the first walkway of its way."""
+        walks = self.walks
+        walker.home = -1
+        self._start_trip(walker, node)
+        hop = walks.next_hop(walks.attractors[walker.dest].node)[node] if walker.dest >= 0 else -1
+        way = walks.ways[hop] if hop >= 0 else walks.exits[node][0]
+        walker.way, walker.distance = way, 0.0
+        walker.sublane = min(walker.sublane, way.mine - 1)
+        walker.aside = walker_aside(way, walker.sublane)
+        walker.speed = walker.target = 0.0
+        walker.kerb_wait_s, walker.granted = 0.0, -1
+        walker.ahead = []
+        self._plan_walk(walker)
+
     @staticmethod
     def _pose_walker(walker: Walker) -> None:
         walker.x, walker.y, walker.fx, walker.fy = walker.way.sample(walker.distance, walker.aside)
 
-    @staticmethod
-    def _walker_flags(walker: Walker) -> int:
+    def _walker_flags(self, walker: Walker) -> int:
+        if walker.state == JAYWALKING:
+            return self._jaywalker_flags(walker)
         flags = 0
         if walker.state == WAITING_AT_KERB:
             flags |= WAITING_FLAG
@@ -2158,17 +2524,140 @@ class CityTraffic:
                 flags |= RAMP_FLAG
         return flags
 
+    # ---------------------------------------------------------------- jaywalkers
+
+    def _jaywalks_decide(self) -> None:
+        """Each jaywalker at its kerb steps off once nothing that could not stop for it is coming, from the
+        traffic as it stands at the step's start, as a walker at a crossing does; one whose event is over
+        before it went walks back. A finished one is forgotten once its event is over."""
+        time_s = self.time_s
+        for key in list(self.jaywalks):
+            jaywalk = self.jaywalks[key]
+            if jaywalk.phase == DONE:
+                if time_s >= jaywalk.until:
+                    del self.jaywalks[key]
+                continue
+            walker = self.walkers[jaywalk.slot]
+            if time_s >= jaywalk.until and (jaywalk.phase == APPROACH or jaywalk.phase == KERB):
+                x, y, _, _ = self.walks.ways[jaywalk.back_way].sample(jaywalk.back_distance, 0.0)
+                self._leg(jaywalk, RETURN, walker.x, walker.y, x, y)
+                continue
+            if jaywalk.phase == KERB:
+                within_s = 2 * jaywalk.half_length / max(walker.desired, 0.5) + WALK_CLEAR_S + jaywalk.pause_s
+                if self._jaywalk_clear(jaywalk, within_s):
+                    jaywalk.phase, jaywalk.s = CROSS, 0.0
+
+    def _jaywalk_clear(self, jaywalk: Jaywalk, within_s: float) -> bool:
+        """Whether a jaywalker may step off: nothing stands in its way over the road, and nothing coming could
+        not stop for it (it takes the priority it does not have, so the rest must stop)."""
+        if self._in_crossing(jaywalk):
+            return False
+        roads = self.network.roads
+        for road_index, at, band, slant in jaywalk.roads:
+            if self._traffic_coming(roads[road_index], at - band, band, slant, within_s, True):
+                return False
+        return not self._shuttle_coming(jaywalk, within_s, True)
+
+    @staticmethod
+    def _leg(jaywalk: Jaywalk, phase: int, from_x: float, from_y: float, to_x: float, to_y: float) -> None:
+        jaywalk.phase, jaywalk.s = phase, 0.0
+        jaywalk.from_x, jaywalk.from_y, jaywalk.to_x, jaywalk.to_y = from_x, from_y, to_x, to_y
+
+    def _move_jaywalks(self, dt: float) -> None:
+        """Each jaywalker walks its leg at its own pace: to the kerb, over the road (standing a while in the
+        middle), and off to the walkway it rejoins, or back to where it came from."""
+        for jaywalk in self.jaywalks.values():
+            if jaywalk.phase == DONE:
+                continue
+            walker = self.walkers[jaywalk.slot]
+            phase = jaywalk.phase
+            if phase == KERB:
+                walker.speed = 0.0
+            elif phase == HESITATE:
+                walker.speed = 0.0
+                jaywalk.wait_s -= dt
+                if jaywalk.wait_s <= 0:
+                    jaywalk.wait_s = 0.0
+                    jaywalk.phase = CROSS
+            else:
+                walker.speed = walker.desired
+                jaywalk.s += walker.speed * dt
+                if phase == CROSS:
+                    if jaywalk.pause_s > 0 and jaywalk.s >= jaywalk.half_length:
+                        jaywalk.s = jaywalk.half_length
+                        jaywalk.phase, jaywalk.wait_s, jaywalk.pause_s = HESITATE, jaywalk.pause_s, 0.0
+                    elif jaywalk.s >= 2 * jaywalk.half_length:
+                        x, y, _, _ = self.walks.ways[jaywalk.rejoin_way].sample(jaywalk.rejoin_distance, 0.0)
+                        self._leg(jaywalk, LEAVE, jaywalk.bx, jaywalk.by, x, y)
+                elif jaywalk.s >= math.hypot(jaywalk.to_x - jaywalk.from_x, jaywalk.to_y - jaywalk.from_y):
+                    if phase == APPROACH:
+                        jaywalk.phase, jaywalk.s = KERB, 0.0
+                    elif phase == LEAVE:
+                        jaywalk.phase = DONE
+                        self._rejoin(walker, jaywalk.rejoin_way, jaywalk.rejoin_distance)
+                    else:
+                        jaywalk.phase = DONE
+                        self._rejoin(walker, jaywalk.back_way, jaywalk.back_distance)
+            if jaywalk.phase != DONE:
+                self._pose_jaywalker(jaywalk)
+
+    def _rejoin(self, walker: Walker, way_index: int, distance: float) -> None:
+        """A jaywalker back on the walk network, walking on (its trip, if it has one, from there)."""
+        way = self.walks.ways[way_index]
+        walker.way, walker.distance = way, min(max(distance, 0.0), way.length)
+        walker.sublane = min(walker.sublane, way.mine - 1)
+        walker.aside = walker_aside(way, walker.sublane)
+        walker.state, walker.granted, walker.kerb_wait_s = WALKING, -1, 0.0
+        walker.ahead = []
+        self._plan_walk(walker)
+        self._pose_walker(walker)
+
+    def _pose_jaywalker(self, jaywalk: Jaywalk) -> None:
+        walker = self.walkers[jaywalk.slot]
+        phase = jaywalk.phase
+        if phase == DONE:
+            return
+        if phase == KERB or phase == CROSS or phase == HESITATE:
+            s = 0.0 if phase == KERB else jaywalk.s
+            walker.x, walker.y = jaywalk.ax + jaywalk.dx * s, jaywalk.ay + jaywalk.dy * s
+            walker.fx, walker.fy = jaywalk.dx, jaywalk.dy
+            return
+        lx, ly = jaywalk.to_x - jaywalk.from_x, jaywalk.to_y - jaywalk.from_y
+        length = math.hypot(lx, ly)
+        if length > 1e-9:
+            t = min(jaywalk.s / length, 1.0)
+            walker.x, walker.y = jaywalk.from_x + lx * t, jaywalk.from_y + ly * t
+            walker.fx, walker.fy = lx / length, ly / length
+        else:
+            walker.x, walker.y = jaywalk.to_x, jaywalk.to_y
+
+    def _jaywalker_flags(self, walker: Walker) -> int:
+        """A jaywalker standing at the kerb or in the road waits; one between the asphalt's edges is on it."""
+        for jaywalk in self.jaywalks.values():
+            if jaywalk.slot != walker.slot or jaywalk.phase == DONE:
+                continue
+            if jaywalk.phase == KERB:
+                return WAITING_FLAG
+            if jaywalk.phase == CROSS or jaywalk.phase == HESITATE:
+                flags = WAITING_FLAG if jaywalk.phase == HESITATE else 0
+                if abs(jaywalk.s - jaywalk.half_length) <= jaywalk.half_length - JAYWALK_KERB_M:
+                    flags |= ON_ROAD_FLAG
+                return flags
+            return 0
+        return 0
+
     def pedestrian_frame(self) -> tuple[bytes, int]:
-        """The walkers for the 3D view, packed as PED_RECORD after PED_RECORD, and how many there are."""
-        packed = bytearray(PED_RECORD.size * len(self.walkers))
+        """The walkers out (not away) for the 3D view, packed as PED_RECORD after PED_RECORD, and how many."""
+        out = [walker for walker in self.walkers if walker.state != AWAY]
+        packed = bytearray(PED_RECORD.size * len(out))
         pack, size, at = PED_RECORD.pack_into, PED_RECORD.size, 0
-        for walker in self.walkers:
+        for walker in out:
             pack(packed, at, walker.seed,
                  min(max(round(walker.x * 100), -_INT32), _INT32), min(max(round(walker.y * 100), -_INT32), _INT32),
                  round(math.degrees(math.atan2(walker.fy, walker.fx)) * 10), min(round(walker.speed * 50), 255),
                  self._walker_flags(walker))
             at += size
-        return bytes(packed), len(self.walkers)
+        return bytes(packed), len(out)
 
     def _path_body(self, vehicle: Vehicle) -> tuple[float, float, float, float]:
         """A vehicle's body as it drives its way: its front on the road it is turning onto, as its wheels
@@ -2206,6 +2695,8 @@ class CityTraffic:
         shuttles = [s for s in self.shuttles.values() if s.placed]
         bodies: dict[int, tuple[float, float, float, float]] = {}
         for walker in self.walkers:
+            if walker.state == AWAY:
+                continue
             on_road = bool(self._walker_flags(walker) & ON_ROAD_FLAG)
             for vehicle in self._near(walker.x, walker.y, 12.0):
                 # Near enough for its body as posed to touch: then as it drives
@@ -2270,7 +2761,9 @@ class CityTraffic:
             states = [walker.state for walker in self.walkers]
             report.update(walkers_walking=states.count(WALKING) + states.count(PAUSED),
                           walkers_waiting=states.count(WAITING_AT_KERB), walkers_crossing=states.count(ON_CROSSING),
-                          walker_mean_speed_mps=sum(walker.speed for walker in self.walkers) / len(self.walkers))
+                          walker_mean_speed_mps=sum(walker.speed for walker in self.walkers) / len(self.walkers),
+                          walkers_away=states.count(AWAY), walkers_jaywalking=states.count(JAYWALKING),
+                          walkers_on_trips=sum(1 for walker in self.walkers if walker.dest >= 0))
             report["pedestrian_hits"], report["footpath_overlaps"] = self._walker_contacts()
         return report
 
@@ -2323,6 +2816,120 @@ def hazard_spans(network: RoadNetwork, hazards: list[tuple[list[tuple[float, flo
             if road.length - end < HAZARD_SNAP_M:
                 end = road.length
             found.setdefault(road.index, []).append((start, end))
+    return found
+
+
+def walker_items(items: list, attractors: int):
+    """A checkpoint's walkers, each with its trip (dest) and the attractor it is at (home): -1 for one from
+    before trips. Raises ValueError on an attractor the walk network does not have."""
+    for item in items:
+        if len(item) == 12:
+            yield (*item, -1, -1)
+            continue
+        dest, home = item[12], item[13]
+        if not all(type(value) is int and -1 <= value < attractors for value in (dest, home)):
+            raise ValueError("Traffic checkpoint names an attractor the walk network does not have")
+        yield tuple(item)
+
+
+def make_jaywalk(network: RoadNetwork, key: str, slot: int, until_s: float, road: Road, distance: float,
+                 side: int) -> Jaywalk:
+    """A jaywalk's line over a road (jaywalk_line) and the roads it cuts, its walker and when its event ends;
+    the rest (what it is doing, where it rejoins) is the caller's to fill in."""
+    jaywalk = Jaywalk.__new__(Jaywalk)
+    jaywalk.key, jaywalk.slot, jaywalk.until = key, slot, float(until_s)
+    jaywalk.road, jaywalk.distance, jaywalk.side = road.index, float(distance), side
+    ax, ay, bx, by, half = jaywalk_line(road, distance, side)
+    jaywalk.ax, jaywalk.ay, jaywalk.bx, jaywalk.by = ax, ay, bx, by
+    jaywalk.cx, jaywalk.cy = (ax + bx) / 2, (ay + by) / 2
+    jaywalk.dx, jaywalk.dy = (bx - ax) / (2 * half), (by - ay) / (2 * half)
+    jaywalk.half_length, jaywalk.half_width = half, JAYWALK_HALF_WIDTH_M
+    jaywalk.roads, _ = cut_roads(network, ax, ay, bx, by, jaywalk.dx, jaywalk.dy, JAYWALK_HALF_WIDTH_M)
+    jaywalk.phase, jaywalk.s, jaywalk.wait_s, jaywalk.pause_s = APPROACH, 0.0, 0.0, 0.0
+    jaywalk.from_x = jaywalk.from_y = jaywalk.to_x = jaywalk.to_y = 0.0
+    jaywalk.rejoin_way = jaywalk.back_way = -1
+    jaywalk.rejoin_distance = jaywalk.back_distance = 0.0
+    jaywalk.routes = {}
+    return jaywalk
+
+
+def plan_jaywalk(traffic, key: str, road: Road, distance: float, until_s: float) -> Jaywalk | None:
+    """The jaywalk a world event starts (CityTraffic.jaywalk), for either engine's traffic: the walker
+    walking a sidewalk nearest the place within JAYWALK_PICK_M (the lowest slot of equals) crosses from its
+    own side, walking first to the kerb, and rejoins the walkway nearest the far kerb within JAYWALK_LAND_M.
+    How long it stands in the road is the event's own (from its key). None with no such walker or walkway."""
+    walks = traffic.walks
+    if walks is None:
+        return None
+    distance = min(max(float(distance), 0.0), road.length)
+    px, py, tx, ty = road.sample(distance, 0.0)
+    best, best_off = None, JAYWALK_PICK_M
+    for walker in traffic.walkers:
+        if walker.state != WALKING or walker.granted != -1 or walker.way.crossing is not None:
+            continue
+        off = math.hypot(walker.x - px, walker.y - py)
+        if off <= best_off and (best is None or off < best_off):
+            best, best_off = walker, off
+    if best is None:
+        return None
+    side = 1 if (best.x - px) * -ty + (best.y - py) * tx >= 0 else -1
+    jaywalk = make_jaywalk(traffic.network, key, best.slot, until_s, road, distance, side)
+    landing = walks.nearest_way(jaywalk.bx + jaywalk.dx * 2.0, jaywalk.by + jaywalk.dy * 2.0, JAYWALK_LAND_M)
+    if landing is None:
+        return None
+    jaywalk.pause_s = JAYWALK_PAUSE_MIN_S + (JAYWALK_PAUSE_MAX_S - JAYWALK_PAUSE_MIN_S) * random01(rng_step(fnv_hash(key)))
+    jaywalk.from_x, jaywalk.from_y, jaywalk.to_x, jaywalk.to_y = best.x, best.y, jaywalk.ax, jaywalk.ay
+    jaywalk.rejoin_way, jaywalk.rejoin_distance = landing[0].index, landing[1]
+    jaywalk.back_way, jaywalk.back_distance = best.way.index, best.distance
+    return jaywalk
+
+
+def jaywalk_state(jaywalk: Jaywalk) -> list:
+    return [jaywalk.key, jaywalk.slot, jaywalk.until, jaywalk.phase, jaywalk.s, jaywalk.wait_s, jaywalk.pause_s,
+            jaywalk.road, jaywalk.distance, jaywalk.side, jaywalk.from_x, jaywalk.from_y, jaywalk.to_x, jaywalk.to_y,
+            jaywalk.rejoin_way, jaywalk.rejoin_distance, jaywalk.back_way, jaywalk.back_distance]
+
+
+def load_jaywalk(traffic, item: list) -> Jaywalk:
+    """A checkpoint's jaywalk (jaywalk_state), its line worked out again on the traffic's network."""
+    (key, slot, until, phase, s, wait_s, pause_s, road, distance, side, from_x, from_y, to_x, to_y,
+     rejoin_way, rejoin_distance, back_way, back_distance) = item
+    ways = len(traffic.walks.ways)
+    if (not isinstance(key, str) or type(slot) is not int or not 0 <= slot < len(traffic.walkers)
+            or type(road) is not int or not 0 <= road < len(traffic.network.roads) or side not in (1, -1)
+            or type(phase) is not int or not APPROACH <= phase <= DONE
+            or not all(type(way) is int and 0 <= way < ways for way in (rejoin_way, back_way))):
+        raise ValueError("Traffic checkpoint has a jaywalk the traffic cannot have")
+    jaywalk = make_jaywalk(traffic.network, key, slot, until, traffic.network.roads[road], distance, side)
+    jaywalk.phase, jaywalk.s, jaywalk.wait_s, jaywalk.pause_s = phase, float(s), float(wait_s), float(pause_s)
+    jaywalk.from_x, jaywalk.from_y, jaywalk.to_x, jaywalk.to_y = float(from_x), float(from_y), float(to_x), float(to_y)
+    jaywalk.rejoin_way, jaywalk.rejoin_distance = rejoin_way, float(rejoin_distance)
+    jaywalk.back_way, jaywalk.back_distance = back_way, float(back_distance)
+    return jaywalk
+
+
+def jaywalk_route(jaywalk: Jaywalk, route: ShuttleRoute) -> list[tuple[float, float]]:
+    """Where a shuttle route passes over a jaywalker's line, as (metres along the route, half band), in order
+    along it; as walk_network.route_crossings finds a crossing's. Worked out once per route's geometry."""
+    known = jaywalk.routes.get(route.sig)
+    if known is not None:
+        return known
+    ax, ay = jaywalk.ax - jaywalk.dx * CUT_REACH_M, jaywalk.ay - jaywalk.dy * CUT_REACH_M
+    bx, by = jaywalk.bx + jaywalk.dx * CUT_REACH_M, jaywalk.by + jaywalk.dy * CUT_REACH_M
+    found = []
+    points, along = route.points, route.along
+    for i in range(1, len(points)):
+        (px, py), (qx, qy) = points[i - 1], points[i]
+        hit = walk_cut(px, py, qx, qy, ax, ay, bx, by)
+        if hit is None:
+            continue
+        at = along[i - 1] + (along[i] - along[i - 1]) * hit[0]
+        length = math.hypot(qx - px, qy - py)
+        tx, ty = ((qx - px) / length, (qy - py) / length) if length > 1e-9 else (0.0, 0.0)
+        sine = abs(tx * jaywalk.dy - ty * jaywalk.dx)
+        found.append((at, jaywalk.half_width / max(sine, MIN_CROSSING_SINE) + WALKER_HALF_M))
+    found.sort()
+    jaywalk.routes[route.sig] = found
     return found
 
 

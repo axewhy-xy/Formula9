@@ -34,6 +34,9 @@ from src.traffic.walk_network import WalkNetwork
 
 MODELS = {"car": {"length_m": 4.5, "width_m": 1.8, "height_m": 1.5}}
 DT = 0.1
+# A vehicle this slow short of a crossing has given way: with per-lane release it need not stand, only wait
+# until the walker is past its lane
+GAVE_WAY_MPS = 1.0
 
 
 @pytest.fixture(params=["python", "native"])
@@ -100,6 +103,13 @@ def vehicle(traffic, identifier):
 def on_road_part(walker):
     way = walker.way
     return way.crossing is not None and way.kerb_in <= walker.distance <= way.kerb_out
+
+
+def clear_of(vehicle):
+    """How far a walker must be either side of the middle of a vehicle's lane, along a crossing square to its
+    road, for the vehicle to be let through it (per-lane release): its half width, the margin and the walker's
+    half (the crossings here are square to their roads, so the band adds no slant)."""
+    return vehicle.half_width + city_traffic.LANE_RELEASE_MARGIN_M + walk_network.WALKER_HALF_M - 1e-9
 
 
 def band_of(traffic, road_key):
@@ -214,10 +224,12 @@ def test_at_a_zebra_a_car_that_can_stop_gives_way_and_one_that_cannot_drives_on(
             # Not let on until the near car is past
             assert near.x - near.half > end
             crossed = True
-        if on_road_part(walker):
-            # Never in the crossing while the walker is on the road (it crosses again later, back from its footpath)
+        if on_road_part(walker) and abs(walker.y) < clear_of(far):
+            # Never in the crossing while the walker is on the road in its lane (it crosses again later, back
+            # from its footpath); once the walker is past its lane, it may go (per-lane release)
             assert not (far.x + far.half > start and far.x - far.half < end)
-        if far.x + far.half < start and far.speed < 0.3:
+        # It gives way: all but stops, and goes on once the walker is past its lane
+        if far.x + far.half < start and far.speed < GAVE_WAY_MPS:
             far_stopped = True
     assert waited and crossed and far_stopped
     assert near_slowest > 10.0, "the near car drove on at its speed"
@@ -257,8 +269,11 @@ def test_a_car_turning_into_a_road_stops_for_a_walker_on_a_crossing_there(engine
         traffic.step(DT, (i + 1) * DT)
         assert traffic.pedestrian_hits() == []
         if on_road_part(walker) and turning.road.road_id == "east":
-            assert turning.distance + turning.half < start or turning.distance - turning.half > start + 3.5
-            stood = stood or turning.speed < 0.3
+            # Out of the crossing while the walker is in its lane: on the road it turned into, it goes once the
+            # walker is past its lane (per-lane release)
+            assert (turning.distance + turning.half < start or turning.distance - turning.half > start + 3.5
+                    or abs(walker.y) >= clear_of(turning))
+            stood = stood or turning.speed < GAVE_WAY_MPS
     assert stood
     assert turning.road.road_id != "north"
 
@@ -308,7 +323,8 @@ def test_on_toa_payoh_walkers_cross_signals_only_on_red_and_nothing_touches_them
     report = traffic.report()
     assert started > 10
     assert report["pedestrian_hits"] == [] and report["overlaps"] == 0
-    assert report["walkers_walking"] + report["walkers_waiting"] + report["walkers_crossing"] == 600
+    assert report["walkers_walking"] + report["walkers_waiting"] + report["walkers_crossing"] + report["walkers_away"] == 600
+    assert report["walkers_away"] < 600 * 0.3, "most are out at 8 in the morning"
     assert 0.8 < report["walker_mean_speed_mps"] < 1.6
 
 
@@ -353,8 +369,10 @@ def test_packed_walkers_are_where_the_traffic_has_them(engine):
     for i in range(50):
         traffic.step(DT, (i + 1) * DT)
     packed, count = traffic.pedestrian_frame()
-    assert count == 600 and len(packed) == count * PED_RECORD.size == count * 14
-    for (seed, x, y, heading, speed, flags), walker in zip(PED_RECORD.iter_unpack(packed), traffic.walkers):
+    # Only the walkers out: those indoors or away on a bus are not drawn
+    out = [walker for walker in traffic.walkers if walker.state != city_traffic.AWAY]
+    assert 0 < count == len(out) < 600 and len(packed) == count * PED_RECORD.size == count * 14
+    for (seed, x, y, heading, speed, flags), walker in zip(PED_RECORD.iter_unpack(packed), out):
         assert seed == walker.seed
         assert abs(x / 100 - walker.x) <= 0.005 + 1e-9 and abs(y / 100 - walker.y) <= 0.005 + 1e-9
         assert abs(heading / 10 - math.degrees(math.atan2(walker.fy, walker.fx))) <= 0.05
@@ -393,7 +411,8 @@ def test_a_session_with_pedestrians_sends_them_and_never_runs_one_over(monkeypat
             frame = actor.traffic_frame()
             StreamTrafficFrame.model_validate(frame)
             packed = base64.b64decode(frame["pedestrians"])
-            assert frame["pedestrian_count"] == 600 and len(packed) == 600 * PED_RECORD.size
+            out = sum(1 for walker in actor.traffic.walkers if walker.state != city_traffic.AWAY)
+            assert frame["pedestrian_count"] == out and len(packed) == out * PED_RECORD.size
             # A shuttle the traffic holds says what for, as the actor last placed it
             assert {s["vehicle_id"]: s["held_by"] for s in frame["shuttles"] if "held_by" in s} == actor.hold_reasons
             frames += 1

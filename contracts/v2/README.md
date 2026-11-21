@@ -160,7 +160,7 @@ mute handling, and silent history playback remain the gates' responsibility.
 
 An incident stands for a world event at a place on the road network, not an
 effect attached to one shuttle. `Incident.event_type` (`BREAKDOWN`,
-`COLLISION`, `SIGNAL_FAULT`, `ROAD_CLOSURE`) and `location` (exactly one of
+`COLLISION`, `SIGNAL_FAULT`, `ROAD_CLOSURE`, `PEDESTRIAN_ON_ROAD`) and `location` (exactly one of
 `edge_id` or `node_id`, with an optional `road_name`) say what and where it is.
 `exposed_vehicle_ids` lists, nearest first, the shuttles whose remaining route
 crosses its footprint (the scene and the queue behind it) before it clears, and

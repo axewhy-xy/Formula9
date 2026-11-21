@@ -148,7 +148,9 @@ namespace Formula9.Backend
         public string Kind;
     }
 
-    public enum CityWalkwayKind { Sidewalk, Link, Crossing }
+    // A sidewalk beside a road, a link round a corner, a crossing over a road, or a footway: a footpath
+    // OpenStreetMap maps as a way of its own (a park path, a linkway between blocks), walked as a sidewalk is
+    public enum CityWalkwayKind { Sidewalk, Link, Crossing, Footway }
 
     // How a crossing walkway is controlled: by a light (signal), with priority to people (zebra), or neither
     // (uncontrolled, over a side street's or driveway's mouth); None for a walkway that is not a crossing
@@ -375,7 +377,8 @@ namespace Formula9.Backend
                 From = (int)token["from"],
                 To = (int)token["to"],
                 Kind = kind == "sidewalk" ? CityWalkwayKind.Sidewalk : kind == "link" ? CityWalkwayKind.Link
-                    : kind == "crossing" ? CityWalkwayKind.Crossing : throw new ContractException("Unknown walkway kind " + kind),
+                    : kind == "crossing" ? CityWalkwayKind.Crossing : kind == "footway" ? CityWalkwayKind.Footway
+                    : throw new ContractException("Unknown walkway kind " + kind),
                 PointsM = flat,
                 LengthM = (float)token["length_m"],
                 WidthM = (float?)token["width_m"] ?? 1.5f,

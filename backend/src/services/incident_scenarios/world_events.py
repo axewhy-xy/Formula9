@@ -18,19 +18,25 @@ from dataclasses import asdict, dataclass
 
 # Every type a world event can have. With background traffic, the traffic plays each out: a breakdown pins
 # a vehicle in its lane, a collision two and closes its scene, a signal fault sticks a junction's lights on
-# red, and a road closure closes its road (src.traffic.city_traffic). Without it, each has the fallback its
-# kind gives it (EVENT_KINDS): a speed factor on the roads around an accident, a held shuttle at a closure,
-# and a shuttle held at the faulted junction's stop line.
-EVENT_TYPES = ("BREAKDOWN", "COLLISION", "SIGNAL_FAULT", "ROAD_CLOSURE")
+# red, a road closure closes its road, and a pedestrian on the road sends a walker across the road where
+# there is no crossing, which the traffic and the shuttles must stop for (src.traffic.city_traffic). Without
+# it, each has the fallback its kind gives it (EVENT_KINDS): a speed factor on the roads around an accident
+# (on its own road, for a breakdown or a pedestrian), a held shuttle at a closure, and a shuttle held at the
+# faulted junction's stop line.
+EVENT_TYPES = ("BREAKDOWN", "COLLISION", "SIGNAL_FAULT", "ROAD_CLOSURE", "PEDESTRIAN_ON_ROAD")
 # The incident kind (the closure or congestion model the backend and the 3D client already know) each type
-# is played out as. A breakdown blocks a lane, so it is drawn and slowed like a small accident.
+# is played out as. A breakdown blocks a lane, so it is slowed like a small accident; a pedestrian on the
+# road slows the traffic on its road as one does, though nothing is drawn but the pedestrian.
 EVENT_KINDS = {"BREAKDOWN": "ROAD_ACCIDENT", "COLLISION": "ROAD_ACCIDENT", "ROAD_CLOSURE": "ROAD_BLOCK",
-               "SIGNAL_FAULT": "SIGNAL_FAULT"}
+               "SIGNAL_FAULT": "SIGNAL_FAULT", "PEDESTRIAN_ON_ROAD": "ROAD_ACCIDENT"}
 # The world type of each of the random generator's template kinds
 KIND_EVENTS = {"ROAD_ACCIDENT": "COLLISION", "ROAD_BLOCK": "ROAD_CLOSURE"}
 # Types a timeline may schedule. A signal fault is at a junction (a signalled junction's id); the rest are
 # on an operating-network edge.
-SCHEDULABLE = ("BREAKDOWN", "COLLISION", "ROAD_CLOSURE", "SIGNAL_FAULT")
+SCHEDULABLE = ("BREAKDOWN", "COLLISION", "ROAD_CLOSURE", "SIGNAL_FAULT", "PEDESTRIAN_ON_ROAD")
+# Types whose only scene is on one road, which no detour is taken round: the traffic keeps off no stretch
+# of road for them (incident_hazards.live_hazards) and they slow only their own road without traffic
+ONE_ROAD_EVENTS = ("BREAKDOWN", "PEDESTRIAN_ON_ROAD")
 AT_JUNCTION = ("SIGNAL_FAULT",)
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}$")
 
