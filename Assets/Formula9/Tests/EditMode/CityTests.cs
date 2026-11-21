@@ -61,8 +61,9 @@ namespace Formula9.Tests
                 for (var wall = 0; wall < 4; wall++)
                 {
                     float start = wall * 10, end = start + 10;
-                    // A 30 m residential block is an HDB tower, so its walls carry the HDB set
-                    const float set = CityMesh.HdbPair;
+                    // A 30 m residential block is an HDB tower, so its walls carry the HDB style
+                    float set = CityMesh.StyleFor(Square("way/1", 30));
+                    StringAssert.StartsWith("hdb", BuildingStyles.Default.Styles[(int)set].Name);
                     var expected = new[] { new Vector4(start, 0, set, 0), new Vector4(start, 30, set, 0), new Vector4(end, 30, set, 0), new Vector4(end, 0, set, 0) };
                     for (var corner = 0; corner < 4; corner++)
                         Assert.Less(Vector4.Distance(expected[corner], uvs[wall * 4 + corner]), 1e-3f, $"wall {wall}, corner {corner}");
@@ -72,19 +73,19 @@ namespace Formula9.Tests
             finally { UnityEngine.Object.DestroyImmediate(mesh); }
         }
 
-        [TestCase("residential", 40, CityMesh.HdbPair)]
-        [TestCase("residential", 12, CityMesh.LowRisePair)]
-        [TestCase("apartments", 40, CityMesh.HomePair)]
-        [TestCase("apartments", 12, CityMesh.LowRisePair)]
-        [TestCase("house", 8, CityMesh.LowRisePair)]
-        [TestCase("terrace", 8, CityMesh.LowRisePair)]
-        [TestCase("office", 12, CityMesh.OfficePair)]
-        [TestCase("commercial", 20, CityMesh.OfficePair)]
-        [TestCase("yes", 60, CityMesh.OfficePair)]
-        [TestCase("yes", 12, CityMesh.OtherPair)]
-        [TestCase("retail", 6, CityMesh.OtherPair)]
-        [TestCase("garage", 4, CityMesh.OtherPair)]
-        public void EachKindOfBuildingUsesItsOwnTextures(string type, float heightM, float pair)
+        [TestCase("residential", 40, "hdb")]
+        [TestCase("residential", 12, "lowrise")]
+        [TestCase("apartments", 40, "home")]
+        [TestCase("apartments", 12, "lowrise")]
+        [TestCase("house", 8, "lowrise")]
+        [TestCase("terrace", 8, "lowrise")]
+        [TestCase("office", 12, "office")]
+        [TestCase("commercial", 20, "office")]
+        [TestCase("yes", 60, "office")]
+        [TestCase("yes", 12, "other")]
+        [TestCase("retail", 6, "other")]
+        [TestCase("garage", 4, "other")]
+        public void EachKindOfBuildingUsesItsOwnTextures(string type, float heightM, string style)
         {
             var building = Square("way/1", heightM);
             building.Type = type;
@@ -93,9 +94,98 @@ namespace Formula9.Tests
             {
                 var uvs = new List<Vector4>();
                 mesh.GetUVs(0, uvs);
-                Assert.IsTrue(uvs.All(uv => uv.z == pair));
+                // A rule may offer several styles of the kind, such as two HDB designs
+                var index = CityMesh.StyleFor(building);
+                StringAssert.StartsWith(style, BuildingStyles.Default.Styles[index].Name);
+                Assert.IsTrue(uvs.All(uv => uv.z == index));
             }
             finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
+        public void ABuildingIsPaintedFromItsStylesColoursAndHasTangentsForTheNormalMaps()
+        {
+            var styles = BuildingStyles.Default;
+            var hdb = styles.Styles[CityMesh.StyleFor(Square("way/1", 30))];
+            var mesh = CityMesh.Build(new[] { Square("way/1", 30) });
+            try
+            {
+                Color Expected(string hex) => CityMesh.PaintColor(hex, styles.ColorSaturation);
+                var body = Expected(BuildingStyles.Pick(hdb.BodyColors, "way/1", 1));
+                var accent = Expected(BuildingStyles.Pick(hdb.AccentColors, "way/1", 2));
+                var colors = new List<Color>();
+                mesh.GetColors(colors);
+                // The top of a wall carries the body colour as it is; lower down it is shaded
+                Assert.Less(Mathf.Abs(colors[1].r - body.r) + Mathf.Abs(colors[1].g - body.g) + Mathf.Abs(colors[1].b - body.b), 1e-3f);
+                var accents = new List<Vector4>();
+                mesh.GetUVs(3, accents);
+                Assert.AreEqual(mesh.vertexCount, accents.Count);
+                Assert.IsTrue(accents.All(a => Mathf.Abs(a.x - accent.r) + Mathf.Abs(a.y - accent.g) + Mathf.Abs(a.z - accent.b) < 1e-3f));
+                Assert.AreEqual(mesh.vertexCount, mesh.tangents.Length);
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
+        public void WithDetailsAnHdbBlockGetsAParapetRooftopStructuresAndAVoidDeckInsideItsOutline()
+        {
+            var block = Square("way/7", 40);
+            block.Rings[0] = new List<(double X, double Y)> { (0, 0), (40, 0), (40, 15), (0, 15), (0, 0) };
+            var bare = CityMesh.Build(new[] { block });
+            var detailed = CityMesh.Build(new[] { block }, details: true);
+            try
+            {
+                var hdb = BuildingStyles.Default.Styles[CityMesh.StyleFor(block)];
+                Assert.Greater(detailed.vertexCount, bare.vertexCount);
+                Assert.AreEqual(40 + hdb.Rooftop.Max(r => r.SizeM[2]), detailed.bounds.max.y, 1e-3f, "the tallest rooftop structure stands on the roof");
+                var vertices = detailed.vertices;
+                foreach (var v in vertices)
+                {
+                    Assert.That(v.x, Is.InRange(-1e-3f, 40 + 1e-3f), "everything stays within the outline");
+                    Assert.That(v.z, Is.InRange(-1e-3f, 15 + 1e-3f));
+                }
+                Assert.IsTrue(vertices.Any(v => Mathf.Abs(v.y - (40 + hdb.Parapet.HeightM)) < 1e-3f && v.x < 1e-3f), "a parapet stands round the edge");
+                var uvs = new List<Vector4>();
+                detailed.GetUVs(0, uvs);
+                Assert.IsTrue(Enumerable.Range(0, vertices.Length).Where(i => vertices[i].y > 40 + 1e-3f).All(i => uvs[i].w == 1), "what stands on the roof is plain colour");
+                // The void deck: walls above it start at the ground floor's height, its back wall stands
+                // inside the outline, and its ceiling faces down
+                var deck = hdb.VoidDeck;
+                bool At(float x, float y, float z) => vertices.Any(v => (v - new Vector3(x, y, z)).magnitude < 1e-3f);
+                Assert.IsTrue(At(0, 0, deck.DepthM) && At(40, 0, deck.DepthM) && At(40, hdb.GroundFloorM, deck.DepthM), "the back wall of the long side is set in");
+                var triangles = detailed.triangles;
+                var down = 0;
+                for (var i = 0; i < triangles.Length; i += 3)
+                    if (Vector3.Cross(vertices[triangles[i + 1]] - vertices[triangles[i]], vertices[triangles[i + 2]] - vertices[triangles[i]]).y < -1e-3f) down++;
+                Assert.Greater(down, 0, "the void deck has a ceiling");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(bare); UnityEngine.Object.DestroyImmediate(detailed); }
+        }
+
+        [Test]
+        public void SimplifyingDropsSmallJogsButKeepsRealCorners()
+        {
+            var outline = new List<Vector2> { new Vector2(0, 0), new Vector2(10, 0), new Vector2(10, 4.8f), new Vector2(10.4f, 5), new Vector2(10, 5.2f), new Vector2(10, 10), new Vector2(0, 10) };
+            var simple = CityMesh.Simplify(outline, 0.8f);
+            CollectionAssert.AreEqual(new[] { new Vector2(0, 0), new Vector2(10, 0), new Vector2(10, 10), new Vector2(0, 10) }, simple);
+        }
+
+        [Test]
+        public void AListInTheStylesFileReplacesItsDefaultInsteadOfAddingToIt()
+        {
+            var styles = BuildingStyles.Parse("{\"defaultStyle\":\"a\",\"styles\":[{\"name\":\"a\",\"accentColors\":[\"#123456\"]}]}");
+            CollectionAssert.AreEqual(new[] { "#123456" }, styles.Styles[0].AccentColors);
+        }
+
+        [Test]
+        public void TheStylesFileNamesEveryStyleItsRulesUse()
+        {
+            var styles = BuildingStyles.Default;
+            Assert.LessOrEqual(styles.Styles.Count, BuildingStyles.MaxStyles);
+            foreach (var rule in styles.Rules)
+                foreach (var name in rule.Choices.Count > 0 ? rule.Choices : new List<string> { rule.Style })
+                    Assert.DoesNotThrow(() => styles.IndexOf(name), name);
+            Assert.AreEqual(styles.IndexOf(styles.DefaultStyle), styles.StyleFor("something-new", 10), "an unknown type takes the default style");
         }
 
         [Test]
@@ -141,17 +231,23 @@ namespace Formula9.Tests
 
         private static List<Corridor> CutAlong(params Vector2[] path) => CityMesh.Corridors(new[] { path }, 1);
 
-        private static float RoofArea(Mesh mesh)
+        // The roof itself: upward faces at the lowest level any face up, so parapet tops and rooftop
+        // structures standing on the roof are not counted
+        private static float RoofArea(Mesh mesh, bool ceilings = false)
         {
-            var vertices = mesh.vertices; var triangles = mesh.triangles; var area = 0f;
+            var vertices = mesh.vertices; var triangles = mesh.triangles;
+            var up = new List<(Vector3 A, Vector3 B, Vector3 C)>();
             for (var i = 0; i < triangles.Length; i += 3)
             {
                 Vector3 a = vertices[triangles[i]], b = vertices[triangles[i + 1]], c = vertices[triangles[i + 2]];
                 var normal = Vector3.Cross(b - a, c - a);
-                Assert.GreaterOrEqual(normal.y, -1e-3f, "nothing faces down");
-                if (normal.y > 1e-3f) area += normal.magnitude / 2;
+                // Only void deck ceilings face down
+                if (!ceilings) Assert.GreaterOrEqual(normal.y, -1e-3f, "nothing faces down");
+                if (normal.y > 1e-3f) up.Add((a, b, c));
             }
-            return area;
+            if (up.Count == 0) return 0;
+            var roofY = up.Min(t => t.A.y);
+            return up.Where(t => t.A.y < roofY + 1e-3f).Sum(t => Vector3.Cross(t.B - t.A, t.C - t.A).magnitude / 2);
         }
 
         [TestCase(false)]
@@ -408,12 +504,13 @@ namespace Formula9.Tests
             {
                 Assert.IsTrue(view.LoadAsync(new CityClient(new OneBuilding(), new Uri("http://localhost")), "toa-payoh", CancellationToken.None).IsCompleted);
                 var buildings = rig.GetComponentsInChildren<MeshRenderer>().First(r => r.name == "Buildings").sharedMaterial;
-                Assert.AreEqual(10, CityView.BuildingTextures.Length, "a wall and a window for each of the five sets");
+                Assert.AreEqual(4, CityView.BuildingTextures.Length, "walls and facades, each with a normal map");
                 foreach (var property in CityView.BuildingTextures.Select(t => t.Property))
                 {
                     Assert.IsTrue(buildings.HasProperty(property), property + " is in the shader");
-                    var texture = buildings.GetTexture(property);
+                    var texture = buildings.GetTexture(property) as Texture2DArray;
                     Assert.IsNotNull(texture, property);
+                    Assert.GreaterOrEqual(texture.depth, BuildingStyles.Default.Styles.Count, property + " has a slice per style");
                     Assert.AreEqual(TextureWrapMode.Repeat, texture.wrapMode, property + " tiles along the wall");
                 }
                 Assert.AreEqual(0, buildings.GetFloat("_Plain"));
@@ -494,17 +591,19 @@ namespace Formula9.Tests
                 var load = view.LoadAsync(new CityClient(new OneBuilding(), new Uri("http://localhost")), "toa-payoh", CancellationToken.None);
                 Assert.IsTrue(load.IsCompleted, "the fake replies at once");
                 var mesh = rig.GetComponentsInChildren<MeshFilter>().First(f => f.name == "Buildings").sharedMesh;
-                Assert.AreEqual(100, RoofArea(mesh), 1e-2f, "whole until a route is shown");
+                Assert.AreEqual(100, RoofArea(mesh, true), 1e-2f, "whole until a route is shown");
                 var snapshot = (FullSnapshot)ContractParser.ParseMessage(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/snapshot.json")));
                 Position At(double x, double y) => new Position { XM = x, YM = y };
                 snapshot.Routes[0].EdgePathsM = new List<List<Position>> { new List<Position> { At(3, -20), At(3, 30) } };
                 view.Show(snapshot, new ShuttleMotion(), 0);
-                Assert.AreEqual(100 - 70, RoofArea(mesh), 1e-2f, "the route clears 4 m each side, so only x from 7 to 10 stands");
+                Assert.AreEqual(100 - 70, RoofArea(mesh, true), 1e-2f, "the route clears 4 m each side, so only x from 7 to 10 stands");
                 snapshot.Routes[0].Revision++;
                 snapshot.Routes[0].EdgePathsM = new List<List<Position>> { new List<Position> { At(100, -20), At(100, 30) } };
                 view.Show(snapshot, new ShuttleMotion(), 1);
-                Assert.AreEqual(100, RoofArea(mesh), 1e-2f, "a route that moves away gives the building back");
-                Assert.AreEqual(30, view.Bounds.max.y, 1e-3f);
+                Assert.AreEqual(100, RoofArea(mesh, true), 1e-2f, "a route that moves away gives the building back");
+                // The 30 m building and the parapet round its roof
+                var other = BuildingStyles.Default.Styles[BuildingStyles.Default.IndexOf("other")];
+                Assert.AreEqual(30 + other.Parapet.HeightM, view.Bounds.max.y, 1e-3f);
             }
             finally
             {
@@ -574,7 +673,9 @@ namespace Formula9.Tests
                 while (Time.realtimeSinceStartup < deadline) yield return null;
                 var camera = new GameObject("Camera", typeof(Camera)).GetComponent<Camera>();
                 camera.transform.SetParent(rig.transform, true);
-                camera.clearFlags = CameraClearFlags.SolidColor; camera.backgroundColor = new Color(0.72f, 0.84f, 0.92f);
+                // The sky WorldLighting set up, as the 3D view shows it
+                camera.clearFlags = RenderSettings.skybox != null ? CameraClearFlags.Skybox : CameraClearFlags.SolidColor;
+                camera.backgroundColor = new Color(0.72f, 0.84f, 0.92f);
                 camera.fieldOfView = 50; camera.farClipPlane = 8000; camera.nearClipPlane = 0.1f;
                 var center = view.Bounds.center;
                 var focus = new Vector3(center.x, 0, center.z);
@@ -598,6 +699,8 @@ namespace Formula9.Tests
                 Shoot(focus, 1200, 0.75f, Path.ChangeExtension(output ?? "", ".opening.png"));
                 Shoot(new Vector3(2988, 0, -2604), 90, 0.7f, Path.ChangeExtension(output ?? "", ".street.png"));
                 Shoot(new Vector3(2988, 0, -2604), 350, 1.1f, Path.ChangeExtension(output ?? "", ".junctions.png"));
+                // Looking across the blocks at an angle, as the 3D view is usually used
+                Shoot(new Vector3(2988, 0, -2604), 260, 0.5f, Path.ChangeExtension(output ?? "", ".blocks.png"));
             }
             finally
             {

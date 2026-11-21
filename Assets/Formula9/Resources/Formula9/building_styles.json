@@ -1,0 +1,289 @@
+{
+  "_about": "How every kind of building looks. Rules pick a style from the OSM building type and height (first match wins; a rule with several styles picks one per building). Edit a style, then run Formula9 > Generate Building Textures in Unity (colours, parapets, rooftop boxes and void decks need no regenerating). Colours are #RRGGBB; sizes are metres. A surface's tint says which building colour paints it: body, accent or none. Parapet, rooftop and void deck colours can be body, accent, roof or #RRGGBB.",
+  "textureSize": 1024,
+  "normalStrength": 1.0,
+  "recessShade": 0.25,
+  "simplifyM": 0.8,
+  "colorSaturation": 1.4,
+  "defaultStyle": "other",
+  "rules": [
+    { "types": ["residential"], "minHeightM": 25, "styles": ["hdb_slab", "hdb_point"] },
+    { "types": ["apartments"], "minHeightM": 25, "style": "home" },
+    { "types": ["residential", "apartments", "house", "terrace", "detached", "semidetached_house", "bungalow"], "style": "lowrise" },
+    { "types": ["office", "commercial", "hotel", "hospital"], "style": "office" },
+    { "types": ["yes"], "minHeightM": 25, "style": "office" }
+  ],
+  "styles": [
+    {
+      "name": "home",
+      "_about": "Private condominiums: white towers with thick slab edges, dark glass, glass balconies and slim fins; a glass lobby behind columns",
+      "bodyColors": ["#F5F4F1", "#F0EEEA", "#ECEDEE", "#F3F0EA"],
+      "accentColors": ["#4A5056", "#5F646A", "#6E5E4E", "#3F474D"],
+      "roofColors": ["#CDCECD", "#C6C8C8", "#D3D4D2"],
+      "groundFloorM": 4.5,
+      "voidDeck": { "depthM": 3.0, "columnM": 0.6, "spacingM": 8, "columnColor": "accent", "ceilingColor": "#ECEAE6", "shade": 0.25, "minHeightM": 12 },
+      "parapet": { "heightM": 1.1, "thicknessM": 0.3, "color": "body" },
+      "rooftop": [
+        { "name": "plant room", "sizeM": [6, 5, 3.2], "count": 1, "minRoofM2": 150, "color": "body" },
+        { "name": "air-conditioning units", "sizeM": [2.2, 1.4, 1.3], "count": 2, "perThousandM2": 4, "minRoofM2": 150, "color": "#C3C7C9" }
+      ],
+      "wall": {
+        "tileM": [8, 4.5], "bays": 4,
+        "surface": { "pattern": "panels", "color": "#DCD7CC", "tint": "none", "cellM": [1.0, 0.75], "jointM": 0.01, "jointColor": "#B3AEA4", "variation": 0.03, "grime": 0.03, "grain": 0.01 },
+        "windows": {
+          "widthM": 1.85, "heightM": 3.7, "sillM": 0.25, "frameM": 0.06, "frameColor": "#3E4449", "depthM": 0.08,
+          "mullionsX": 1, "mullionsY": 0, "glassColor": "#4A5F6A", "glassVariation": 0.08, "reflection": 0.3,
+          "curtainChance": 0, "sillLedgeM": 0
+        }
+      },
+      "facade": {
+        "bays": 6, "floors": 4, "bayM": 4.0, "floorM": 3.15,
+        "surface": { "pattern": "plaster", "color": "#F2F2F2", "grime": 0.03, "grain": 0.01 },
+        "windows": {
+          "widthM": 3.5, "heightM": 2.5, "sillM": 0.45, "frameM": 0.05, "frameColor": "#3E4449", "depthM": 0.4,
+          "mullionsX": 2, "mullionsY": 0, "glassColor": "#4E6B78", "glassVariation": 0.1, "reflection": 0.42,
+          "curtainChance": 0.35, "curtainColors": ["#E4DED2", "#CFC8BA", "#BFB6A6"],
+          "coverings": [
+            { "kind": "curtain", "weight": 2, "drawn": [0.4, 1], "from": "both", "colors": ["#ECE8E0", "#E0DAD0", "#D6D2CA", "#C9C3B8"] },
+            { "kind": "roller", "weight": 2, "drawn": [0.2, 0.9], "from": "top", "colors": ["#E9E6E0", "#CFCAC0", "#9C9890", "#5E5C58"] },
+            { "kind": "venetian", "weight": 1, "patternM": 0.05, "drawn": [0.4, 1], "from": "top", "colors": ["#E5E3DE", "#B9B5AE", "#8A7A68"] },
+            { "kind": "dark", "weight": 1.5, "colors": ["#2A2F33", "#30353A"] }
+          ],
+          "sillLedgeM": 0
+        },
+        "bands": [
+          { "fromM": 0, "heightM": 0.45, "depthM": 0.4, "surface": { "color": "#F6F6F6", "tint": "body", "grime": 0.02 } }
+        ],
+        "piers": [
+          { "everyBays": 1, "offsetM": -0.1, "widthM": 0.2, "depthM": 0.3, "surface": { "color": "#E2E2E2", "tint": "accent", "grime": 0.02 } }
+        ],
+        "balcony": { "heightM": 1.05, "railing": "glass", "depthM": 0.45, "railColor": "#93AAB6", "barM": 0.035 },
+        "streaks": 0.03
+      }
+    },
+    {
+      "name": "other",
+      "_about": "Shops, schools and community buildings: a covered five-foot way with shopfronts and coloured signboards, light tiled walls and strip windows above",
+      "bodyColors": ["#F1EEE8", "#ECEEED", "#F2ECE0", "#EAE8EC"],
+      "accentColors": ["#4F86A8", "#B5643F", "#6D9563", "#B8504E", "#7A6AA3", "#C99A3C", "#3E8C86"],
+      "roofColors": ["#CDCECD", "#C6C8C8", "#D3D4D2"],
+      "groundFloorM": 3.6,
+      "voidDeck": { "depthM": 2.5, "columnM": 0.5, "spacingM": 4.2, "columnColor": "body", "ceilingColor": "#E8E6E0", "shade": 0.25, "minHeightM": 6 },
+      "parapet": { "heightM": 1.0, "thicknessM": 0.25, "color": "body" },
+      "rooftop": [
+        { "name": "air-conditioning units", "sizeM": [2.0, 1.5, 1.2], "count": 1, "perThousandM2": 3, "minRoofM2": 120, "color": "#C8CBCC" }
+      ],
+      "wall": {
+        "tileM": [8, 3.6], "bays": 2,
+        "surface": { "pattern": "tiles", "color": "#E3E0D9", "tint": "none", "cellM": [0.3, 0.3], "jointM": 0.006, "jointColor": "#C2BFB8", "variation": 0.03, "grime": 0.05, "grain": 0.015 },
+        "windows": {
+          "widthM": 3.5, "heightM": 2.45, "sillM": 0.15, "frameM": 0.06, "frameColor": "#565D62", "depthM": 0.08,
+          "mullionsX": 2, "mullionsY": 0, "glassColor": "#56707D", "glassVariation": 0.15, "reflection": 0.25,
+          "curtainChance": 0.45, "curtainColors": ["#E8D9B8", "#D9C3A0", "#F0E6D0", "#D4DCE0"], "sillLedgeM": 0
+        },
+        "bands": [
+          { "fromM": 2.75, "heightM": 0.65, "depthM": 0.06, "surface": { "color": "#E6E6E6", "tint": "accent", "grime": 0.03 } }
+        ]
+      },
+      "facade": {
+        "bays": 3, "floors": 2, "bayM": 3.2, "floorM": 3.6,
+        "surface": { "pattern": "tiles", "color": "#EFEEEA", "cellM": [0.2, 0.1], "jointM": 0.005, "jointColor": "#CFCDC7", "variation": 0.02, "grime": 0.05, "grain": 0.015 },
+        "windows": {
+          "widthM": 2.8, "heightM": 1.5, "sillM": 0.95, "frameM": 0.05, "frameColor": "#6A7379", "depthM": 0.15,
+          "mullionsX": 2, "mullionsY": 0, "glassColor": "#4F6673", "glassVariation": 0.12, "reflection": 0.3,
+          "curtainChance": 0.15, "curtainColors": ["#D8D3C7", "#C5CCD0"], "sillLedgeM": 0.08, "sillColor": "#E2E1DC"
+        },
+        "bands": [
+          { "fromM": 2.6, "heightM": 0.5, "depthM": 0.12, "surface": { "color": "#F3F3F3", "tint": "body", "grime": 0.04 } }
+        ],
+        "piers": [],
+        "streaks": 0.1
+      }
+    },
+    {
+      "name": "hdb_slab",
+      "_about": "Older HDB slab blocks: white corridor parapets running the length of every floor over the dark recess of the corridor, a pastel stair column, a void deck",
+      "bodyColors": ["#F4ECDF", "#F1E8DA", "#F6F5F2", "#EFEEEB", "#F3EADD", "#E6E5E1"],
+      "accentColors": ["#A9D6E2", "#9CCFDD", "#8FC7D6", "#7FC0CF", "#B5DCE5", "#93CBD9", "#4A8FD0", "#2F6FBF", "#C4574A", "#E8A58C", "#EDE9E1", "#E4E2DD", "#ECE8E0"],
+      "roofColors": ["#CDCECD", "#C6C8C8", "#D3D4D2"],
+      "groundFloorM": 3.6,
+      "voidDeck": { "depthM": 2.2, "columnM": 0.8, "spacingM": 7.5, "columnColor": "body", "ceilingColor": "#ECEAE4", "shade": 0.3, "minHeightM": 12 },
+      "parapet": { "heightM": 1.2, "thicknessM": 0.3, "color": "#C2593F" },
+      "rooftop": [
+        { "name": "lift motor room", "sizeM": [5, 3.5, 3.2], "count": 2, "minRoofM2": 150, "color": "body" },
+        { "name": "water tank", "sizeM": [7, 3, 2.4], "count": 1, "minRoofM2": 250, "color": "#E0E0DD" }
+      ],
+      "wall": {
+        "tileM": [7.5, 3.6], "bays": 2,
+        "surface": { "pattern": "tiles", "color": "#E6E3DC", "cellM": [0.3, 0.3], "jointM": 0.006, "jointColor": "#C6C2BA", "variation": 0.03, "grime": 0.06, "grain": 0.015 },
+        "windows": {
+          "widthM": 1.8, "heightM": 2.3, "sillM": 0, "frameM": 0.06, "frameColor": "#8E969C", "depthM": 0.1,
+          "mullionsX": 1, "mullionsY": 0, "glassColor": "#3F4E58", "glassVariation": 0.1, "reflection": 0.18,
+          "curtainChance": 0, "sillLedgeM": 0
+        },
+        "bands": [
+          { "fromM": 0, "heightM": 1.1, "depthM": 0.01, "surface": { "pattern": "tiles", "color": "#E8E8E8", "tint": "accent", "cellM": [0.15, 0.15], "jointM": 0.004, "jointColor": "#BDBDBD", "variation": 0.04, "grime": 0.05 } }
+        ]
+      },
+      "facade": {
+        "bays": 8, "floors": 4, "bayM": 3.3, "floorM": 2.8,
+        "surface": { "pattern": "plaster", "color": "#F2F2F2", "grime": 0.05, "grain": 0.015 },
+        "windows": {
+          "perBay": 1, "widthM": 1.4, "heightM": 1.1, "sillM": 1.25, "frameM": 0.05, "frameColor": "#EDEBE6", "depthM": 1.55,
+          "mullionsX": 1, "mullionsY": 0, "glassColor": "#4C5C66", "glassVariation": 0.15, "reflection": 0.15,
+          "curtainChance": 0.5, "curtainColors": ["#D9D2C3", "#CBC3B3", "#C2CACD", "#D5C7B3"],
+          "coverings": [
+            { "kind": "curtain", "weight": 4, "drawn": [0.55, 1], "from": "both", "colors": ["#E4DCCB", "#D8CDB8", "#C9D6DC", "#9FB8C9", "#B9C9A8", "#E3C3B4", "#C9A86E", "#8E5A5A", "#F2EEE6", "#A7B6A0", "#D9B5C2", "#7A8FA6"] },
+            { "kind": "curtain", "weight": 1, "drawn": [0.3, 0.6], "from": "left", "colors": ["#E8E0D0", "#B9C9D6", "#D4B8A8", "#C2CFB2"] },
+            { "kind": "stripes", "weight": 1.2, "patternM": 0.07, "drawn": [0.6, 1], "colors": ["#F0EBE0", "#D9E2E8", "#EADFC9"], "patternColors": ["#8DA7BE", "#B07A6A", "#7F9A7A", "#C9A45A"] },
+            { "kind": "checks", "weight": 0.6, "patternM": 0.05, "colors": ["#EFE9DE", "#E2E8EC"], "patternColors": ["#9AB0C4", "#C48E7E", "#93A88B"] },
+            { "kind": "print", "weight": 0.8, "patternM": 0.06, "drawn": [0.7, 1], "colors": ["#F2ECE0", "#E8DCCB", "#DDE6E9"], "patternColors": ["#B85C5C", "#5C7FB8", "#6E9A5E", "#C9963F"] },
+            { "kind": "roller", "weight": 1.2, "drawn": [0.3, 1], "from": "top", "colors": ["#EDE8DD", "#D8D2C4", "#BFC6CA", "#9AA5AE"] },
+            { "kind": "venetian", "weight": 0.8, "patternM": 0.04, "drawn": [0.5, 1], "from": "top", "colors": ["#E9E7E2", "#CFCCC5", "#B8BDC1"] },
+            { "kind": "dark", "weight": 1, "colors": ["#2C3236", "#33383B", "#3A3633"] }
+          ],
+          "sillLedgeM": 0
+        },
+        "bands": [
+          { "fromM": 1.0, "heightM": 1.8, "depthM": -1.4, "surface": { "color": "#E6DED2", "tint": "body", "grime": 0.04, "grain": 0.01 } },
+          { "fromM": 0, "heightM": 0.4, "depthM": 0.2, "surface": { "color": "#F5F5F5", "tint": "body", "grime": 0.05 } },
+          { "fromM": 0.4, "heightM": 0.6, "depthM": 0.2, "surface": { "color": "#F0F0F0", "tint": "accent", "grime": 0.04 } }
+        ],
+        "piers": [
+          { "everyBays": 4, "offsetM": 0, "widthM": 0.9, "depthM": 0.2, "surface": { "color": "#EAEAEA", "tint": "accent", "grime": 0.04 } }
+        ],
+        "streaks": 0.12
+      }
+    },
+    {
+      "name": "lowrise",
+      "_about": "Landed houses and low flats: warm plaster, smaller windows with curtains, white trim, terracotta roofs",
+      "bodyColors": ["#F0DDC0", "#EAD3BC", "#F3E6CF", "#E2D2B8", "#ECDCCB", "#E1E4D9", "#F1DAC4"],
+      "accentColors": ["#FFFFFF", "#F4F1EA", "#E7E2D6"],
+      "roofColors": ["#9C5B45", "#8A6A55", "#B07457", "#7F8487", "#A4583F"],
+      "groundFloorM": 0.5,
+      "parapet": { "heightM": 0.5, "thicknessM": 0.25, "color": "accent" },
+      "wall": {
+        "tileM": [1.5, 1.5],
+        "surface": { "pattern": "plaster", "color": "#EDEDED", "grime": 0.06, "grain": 0.02 }
+      },
+      "facade": {
+        "bays": 4, "floors": 3, "bayM": 3.0, "floorM": 3.2,
+        "surface": { "pattern": "plaster", "color": "#EDEDED", "grime": 0.06, "grain": 0.02 },
+        "windows": {
+          "widthM": 1.5, "heightM": 1.5, "sillM": 0.9, "frameM": 0.07, "frameColor": "#F2F2F0", "depthM": 0.12,
+          "mullionsX": 1, "mullionsY": 1, "glassColor": "#4E606C", "glassVariation": 0.15, "reflection": 0.28,
+          "curtainChance": 0.55, "curtainColors": ["#E6DCC8", "#D9CBB4", "#E8E0D6", "#CBB89E"],
+          "coverings": [
+            { "kind": "curtain", "weight": 4, "drawn": [0.55, 1], "from": "both", "colors": ["#E4DCCB", "#D8CDB8", "#C9D6DC", "#9FB8C9", "#B9C9A8", "#E3C3B4", "#C9A86E", "#8E5A5A", "#F2EEE6", "#A7B6A0", "#D9B5C2", "#7A8FA6"] },
+            { "kind": "curtain", "weight": 1, "drawn": [0.3, 0.6], "from": "left", "colors": ["#E8E0D0", "#B9C9D6", "#D4B8A8", "#C2CFB2"] },
+            { "kind": "stripes", "weight": 1.2, "patternM": 0.07, "drawn": [0.6, 1], "colors": ["#F0EBE0", "#D9E2E8", "#EADFC9"], "patternColors": ["#8DA7BE", "#B07A6A", "#7F9A7A", "#C9A45A"] },
+            { "kind": "checks", "weight": 0.6, "patternM": 0.05, "colors": ["#EFE9DE", "#E2E8EC"], "patternColors": ["#9AB0C4", "#C48E7E", "#93A88B"] },
+            { "kind": "print", "weight": 0.8, "patternM": 0.06, "drawn": [0.7, 1], "colors": ["#F2ECE0", "#E8DCCB", "#DDE6E9"], "patternColors": ["#B85C5C", "#5C7FB8", "#6E9A5E", "#C9963F"] },
+            { "kind": "roller", "weight": 1.2, "drawn": [0.3, 1], "from": "top", "colors": ["#EDE8DD", "#D8D2C4", "#BFC6CA", "#9AA5AE"] },
+            { "kind": "venetian", "weight": 0.8, "patternM": 0.04, "drawn": [0.5, 1], "from": "top", "colors": ["#E9E7E2", "#CFCCC5", "#B8BDC1"] },
+            { "kind": "dark", "weight": 1, "colors": ["#2C3236", "#33383B", "#3A3633"] }
+          ],
+          "sillLedgeM": 0.08, "sillColor": "#F3F3F1"
+        },
+        "bands": [
+          { "fromM": 3.0, "heightM": 0.2, "depthM": 0.06, "surface": { "color": "#F0F0F0", "tint": "accent", "grime": 0.04 } }
+        ],
+        "piers": [],
+        "streaks": 0.12
+      }
+    },
+    {
+      "name": "office",
+      "_about": "Offices, hotels and towers: a glass curtain wall with stone spandrels and metal mullions; a tall glass lobby behind columns",
+      "bodyColors": ["#D9CFBC", "#CFC8B9", "#C9CED2", "#E0D8C9", "#BFC7CC"],
+      "accentColors": ["#868D94", "#6A7178", "#9C917E"],
+      "roofColors": ["#CDCECD", "#C6C8C8", "#D3D4D2"],
+      "groundFloorM": 6.0,
+      "voidDeck": { "depthM": 3.5, "columnM": 0.9, "spacingM": 9, "columnColor": "body", "ceilingColor": "#E2E0DB", "shade": 0.2, "minHeightM": 20 },
+      "parapet": { "heightM": 1.4, "thicknessM": 0.35, "color": "body" },
+      "rooftop": [
+        { "name": "plant room", "sizeM": [10, 8, 4], "count": 1, "minRoofM2": 250, "color": "#C9CACB" },
+        { "name": "cooling units", "sizeM": [2.6, 1.8, 1.5], "count": 3, "perThousandM2": 3, "minRoofM2": 200, "color": "#DADCDD" }
+      ],
+      "wall": {
+        "tileM": [9, 6], "bays": 3,
+        "surface": { "pattern": "panels", "color": "#D8D1C4", "tint": "none", "cellM": [1.5, 1.0], "jointM": 0.01, "jointColor": "#ABA598", "variation": 0.03, "grime": 0.02, "grain": 0.01 },
+        "windows": {
+          "widthM": 2.9, "heightM": 5.4, "sillM": 0.2, "frameM": 0.06, "frameColor": "#5E666C", "depthM": 0.08,
+          "mullionsX": 1, "mullionsY": 1, "glassColor": "#465E69", "glassVariation": 0.06, "reflection": 0.3,
+          "curtainChance": 0, "sillLedgeM": 0
+        }
+      },
+      "facade": {
+        "bays": 6, "floors": 4, "bayM": 1.5, "floorM": 3.8,
+        "surface": { "pattern": "panels", "color": "#E8E8E8", "cellM": [1.5, 1.9], "jointM": 0.01, "jointColor": "#A4A8AB", "variation": 0.03, "grime": 0.02, "grain": 0.01 },
+        "windows": {
+          "widthM": 1.5, "heightM": 2.7, "sillM": 0.8, "frameM": 0.04, "frameColor": "#6F787F", "depthM": 0.06,
+          "mullionsX": 0, "mullionsY": 0, "glassColor": "#4A6874", "glassVariation": 0.1, "reflection": 0.45,
+          "curtainChance": 0, "sillLedgeM": 0
+        },
+        "bands": [],
+        "piers": [
+          { "everyBays": 1, "offsetM": -0.05, "widthM": 0.1, "depthM": 0.12, "surface": { "color": "#9AA3AA", "tint": "accent", "grime": 0.02 } }
+        ],
+        "streaks": 0.03
+      }
+    },
+    {
+      "name": "hdb_point",
+      "_about": "Newer HDB blocks: the window side, with air-con ledges under every window, slim vertical fins, pastel panels and a void deck",
+      "bodyColors": ["#F4ECDF", "#F1E8DA", "#F6F5F2", "#EFEEEB", "#F3EADD", "#E6E5E1"],
+      "accentColors": ["#A9D6E2", "#9CCFDD", "#8FC7D6", "#7FC0CF", "#B5DCE5", "#93CBD9", "#4A8FD0", "#2F6FBF", "#C4574A", "#E8A58C", "#EDE9E1", "#E4E2DD", "#ECE8E0"],
+      "roofColors": ["#CDCECD", "#C6C8C8", "#D3D4D2"],
+      "groundFloorM": 3.6,
+      "voidDeck": { "depthM": 2.2, "columnM": 0.8, "spacingM": 7.5, "columnColor": "body", "ceilingColor": "#ECEAE4", "shade": 0.3, "minHeightM": 12 },
+      "parapet": { "heightM": 1.2, "thicknessM": 0.3, "color": "#C2593F" },
+      "rooftop": [
+        { "name": "lift motor room", "sizeM": [5, 3.5, 3.2], "count": 2, "minRoofM2": 150, "color": "body" },
+        { "name": "water tank", "sizeM": [7, 3, 2.4], "count": 1, "minRoofM2": 250, "color": "#E0E0DD" }
+      ],
+      "wall": {
+        "tileM": [7.5, 3.6], "bays": 2,
+        "surface": { "pattern": "tiles", "color": "#E6E3DC", "cellM": [0.3, 0.3], "jointM": 0.006, "jointColor": "#C6C2BA", "variation": 0.03, "grime": 0.06, "grain": 0.015 },
+        "windows": {
+          "widthM": 1.8, "heightM": 2.3, "sillM": 0, "frameM": 0.06, "frameColor": "#8E969C", "depthM": 0.1,
+          "mullionsX": 1, "mullionsY": 0, "glassColor": "#3F4E58", "glassVariation": 0.1, "reflection": 0.18,
+          "curtainChance": 0, "sillLedgeM": 0
+        },
+        "bands": [
+          { "fromM": 0, "heightM": 1.1, "depthM": 0.01, "surface": { "pattern": "tiles", "color": "#E8E8E8", "tint": "accent", "cellM": [0.15, 0.15], "jointM": 0.004, "jointColor": "#BDBDBD", "variation": 0.04, "grime": 0.05 } }
+        ]
+      },
+      "facade": {
+        "bays": 8, "floors": 4, "bayM": 3.0, "floorM": 2.8,
+        "surface": { "pattern": "plaster", "color": "#F2F2F2", "grime": 0.05, "grain": 0.015 },
+        "windows": {
+          "widthM": 1.6, "heightM": 1.3, "sillM": 1.0, "frameM": 0.05, "frameColor": "#D0D4D6", "depthM": 0.3,
+          "mullionsX": 2, "mullionsY": 0, "glassColor": "#4F616C", "glassVariation": 0.15, "reflection": 0.3,
+          "curtainChance": 0.5, "curtainColors": ["#D9D2C3", "#CBC3B3", "#C2CACD", "#D5C7B3"],
+          "coverings": [
+            { "kind": "curtain", "weight": 4, "drawn": [0.55, 1], "from": "both", "colors": ["#E4DCCB", "#D8CDB8", "#C9D6DC", "#9FB8C9", "#B9C9A8", "#E3C3B4", "#C9A86E", "#8E5A5A", "#F2EEE6", "#A7B6A0", "#D9B5C2", "#7A8FA6"] },
+            { "kind": "curtain", "weight": 1, "drawn": [0.3, 0.6], "from": "left", "colors": ["#E8E0D0", "#B9C9D6", "#D4B8A8", "#C2CFB2"] },
+            { "kind": "stripes", "weight": 1.2, "patternM": 0.07, "drawn": [0.6, 1], "colors": ["#F0EBE0", "#D9E2E8", "#EADFC9"], "patternColors": ["#8DA7BE", "#B07A6A", "#7F9A7A", "#C9A45A"] },
+            { "kind": "checks", "weight": 0.6, "patternM": 0.05, "colors": ["#EFE9DE", "#E2E8EC"], "patternColors": ["#9AB0C4", "#C48E7E", "#93A88B"] },
+            { "kind": "print", "weight": 0.8, "patternM": 0.06, "drawn": [0.7, 1], "colors": ["#F2ECE0", "#E8DCCB", "#DDE6E9"], "patternColors": ["#B85C5C", "#5C7FB8", "#6E9A5E", "#C9963F"] },
+            { "kind": "roller", "weight": 1.2, "drawn": [0.3, 1], "from": "top", "colors": ["#EDE8DD", "#D8D2C4", "#BFC6CA", "#9AA5AE"] },
+            { "kind": "venetian", "weight": 0.8, "patternM": 0.04, "drawn": [0.5, 1], "from": "top", "colors": ["#E9E7E2", "#CFCCC5", "#B8BDC1"] },
+            { "kind": "dark", "weight": 1, "colors": ["#2C3236", "#33383B", "#3A3633"] }
+          ],
+          "sillLedgeM": 0.45, "sillColor": "#E6E4DE", "ledgeHeightM": 0.35, "ledgeOverhangM": 0.15
+        },
+        "bands": [
+          { "fromM": 0, "heightM": 0.25, "depthM": 0.12, "surface": { "color": "#E8E8E8", "tint": "body", "grime": 0.06 } },
+          { "fromM": 0.25, "heightM": 0.4, "depthM": 0.03, "bays": [1, 2, 5, 6], "surface": { "color": "#EAEAEA", "tint": "accent", "grime": 0.04 } }
+        ],
+        "piers": [
+          { "everyBays": 4, "offsetM": 0, "widthM": 1.2, "depthM": 0.05, "surface": { "color": "#EAEAEA", "tint": "accent", "grime": 0.04 } },
+          { "everyBays": 1, "offsetM": -0.12, "widthM": 0.24, "depthM": 0.35, "surface": { "color": "#EEEEEE", "tint": "body", "grime": 0.04 } }
+        ],
+        "streaks": 0.12
+      }
+    }
+  ]
+}
