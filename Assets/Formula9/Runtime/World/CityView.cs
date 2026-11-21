@@ -85,10 +85,29 @@ namespace Formula9.World
         private const float ShelterHalfDepthM = 1.3f * BusStopShelterFactory.ShelterScale;
         // Off-switch for the pedestrians: when false none are made, and every call to them is skipped.
         private static readonly bool EnablePedestrians = true;
+        // Sidewalks: paving, kerb stone and verge colours, and the sides of the kerb (the shader is unlit,
+        // so faces are tinted darker to read as vertical). One paver texture repeat covers PaverRepeatM.
+        private static readonly Color PavingTint = new Color(1.02f, 1.02f, 1.02f), VergeColor = new Color(0.36f, 0.47f, 0.30f);
+        private const float PaverRepeatM = 1.2f, KerbFaceShade = 0.78f, OuterFaceShade = 0.6f;
+        // Most milliseconds of one frame spent turning sidewalk tiles into meshes (performance.md §8)
+        private const double SidewalkBuildBudgetMs = 2;
+        private SidewalkSurface sidewalkSurface;
+        private Task sidewalksLoading = Task.CompletedTask;
+        public int SidewalkTileCount { get; private set; }
+        public bool SidewalksLoaded => sidewalkSurface != null;
         private List<CityBuilding> buildings;
         private Mesh buildingMesh;
         private CityTrafficRenderer traffic;
-        private CityPedestrianLiteRenderer pedestrians;
+        // People walking the sidewalks, drawn as a crowd: where the backend's traffic frames put them while
+        // they carry any (the backend walks them, and its traffic gives way to them), otherwise walking the
+        // walk network from the walkways file here. The network comes with the sidewalks and the lights with
+        // the traffic, so the walkers here start once both have.
+        private PedestrianCrowd pedestrianCrowd;
+        private PedestrianLocalSim pedestrians;
+        private PedestrianFollow pedestrianFollow;
+        private CityWalkwayData walkNetwork;
+        private CitySignalData pedestrianSignals;
+        private bool pedestrianSignalsKnown;
         // A queue grows slowly, so the traffic need not look at the incidents every frame
         private const float HazardRefreshS = 0.5f;
         private float hazardsDueS;
@@ -144,8 +163,10 @@ namespace Formula9.World
             traffic = new CityTrafficRenderer();
             if (EnablePedestrians)
             {
-                pedestrians = new CityPedestrianLiteRenderer();
+                pedestrianCrowd = new PedestrianCrowd();
+                pedestrians = new PedestrianLocalSim();
                 pedestrians.SetSignalClock(() => traffic != null ? traffic.SignalClockS : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0);
+                pedestrianFollow = new PedestrianFollow();
             }
             if (tiles != null) tiles.TileLoaded += RefreshTiles;
         }
@@ -217,7 +238,7 @@ namespace Formula9.World
             {
                 Debug.LogWarning("No road surfaces, so the map's roads show instead: " + error.Message);
                 traffic?.Rebuild(Array.Empty<CityRoad>(), null);
-                pedestrians?.Rebuild(area, Array.Empty<CityRoad>(), null);
+                pedestrians?.Clear();
                 return;
             }
             cancellation.ThrowIfCancellationRequested();
@@ -314,6 +335,10 @@ namespace Formula9.World
                 Debug.Log($"[CityView] RoadMesh built {RoadCount} backend roads; " +
                     $"textured={texturedRoads}; kerbsHidden=true; tint={AsphaltColor}");
 
+                // The raised sidewalks replace the hidden kerb strips. They load on their own, as the
+                // file is large and nothing waits on them: poles and shelters are lifted when they come.
+                sidewalksLoading = LoadSidewalksAsync(client, area, surface, grain, cancellation);
+
                 // The LTA dataset contributes special paint ONLY. Standard lane
                 // separators and edges are sampled from the user-supplied road texture.
                 LtaMappedRoadPaint.Result mappedPaint = null;
@@ -401,7 +426,137 @@ namespace Formula9.World
                 cancellation.ThrowIfCancellationRequested();
             }
             traffic?.Rebuild(roads, trafficData, signals);
-            pedestrians?.Rebuild(area, roads, signals, buildings);
+            pedestrianSignals = signals;
+            pedestrianSignalsKnown = true;
+            RebuildPedestrians();
+        }
+
+        // Walkers start once the walk network and the lights (or the news that there are none) are both in
+        private void RebuildPedestrians()
+        {
+            if (pedestrians == null || walkNetwork == null || !pedestrianSignalsKnown || disposed) return;
+            pedestrians.Rebuild(walkNetwork, pedestrianSignals);
+        }
+
+        // Sidewalks from the backend's walkways file, or from the copy in Resources when the backend has none
+        // (an older backend, or offline). Without either, the roads stand as they did before sidewalks.
+        private async Task LoadSidewalksAsync(CityClient client, string area, Shader shader, Texture2D grain, CancellationToken cancellation)
+        {
+            try
+            {
+                if (shader == null) { Debug.LogWarning("[CityView] No road shader, so no sidewalks"); return; }
+                CityWalkwayData data;
+                try { data = await client.GetWalkwaysAsync(area, cancellation); }
+                catch (Exception error) when (!(error is OperationCanceledException))
+                {
+                    if (disposed) return;
+                    var bundled = Resources.Load<TextAsset>("Formula9/RoadData/" + area + "-walkways");
+                    if (bundled == null)
+                    {
+                        Debug.LogWarning("[CityView] No sidewalks, from the backend or bundled: " + error.Message);
+                        return;
+                    }
+                    Debug.Log("[CityView] Sidewalks from the bundled copy, as the backend sent none: " + error.Message);
+                    var text = bundled.text;
+                    data = await Task.Run(() => CityWalkwayData.Parse(text), cancellation);
+                }
+                cancellation.ThrowIfCancellationRequested();
+                if (disposed) return;
+                var surfaceBuild = Task.Run(() => SidewalkSurface.Build(data), cancellation);
+                // Observed even when this returns before awaiting it (disposed, cancelled, a tile failing),
+                // so a failed build is never reported as an unobserved task exception
+                _ = surfaceBuild.ContinueWith(t => _ = t.Exception, CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                // The walkers' network comes in the same file: nothing to work out here, only to read
+                walkNetwork = data;
+                pedestrianFollow?.SetSeeds(data);
+                RebuildPedestrians();
+
+                var materials = SidewalkMaterials(shader, grain);
+                var holder = new GameObject("Sidewalks").transform;
+                holder.SetParent(root, false);
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                foreach (var tile in data.Tiles)
+                {
+                    var mesh = Own(SidewalkMesh.Build(tile));
+                    var piece = new GameObject(mesh.name, typeof(MeshFilter), typeof(MeshRenderer));
+                    piece.transform.SetParent(holder, false);
+                    piece.GetComponent<MeshFilter>().sharedMesh = mesh;
+                    var renderer = piece.GetComponent<MeshRenderer>();
+                    renderer.sharedMaterials = materials;
+                    renderer.shadowCastingMode = ShadowCastingMode.Off;
+                    renderer.receiveShadows = false;
+                    SidewalkTileCount++;
+                    // Spread over frames, so the city keeps drawing while they come in
+                    if (clock.Elapsed.TotalMilliseconds > SidewalkBuildBudgetMs)
+                    {
+                        await Task.Yield();
+                        cancellation.ThrowIfCancellationRequested();
+                        if (disposed) return;
+                        clock.Restart();
+                    }
+                }
+
+                var surface = await surfaceBuild;
+                if (disposed) return;
+                sidewalkSurface = surface;
+                // Poles already standing were put on the road's height; lift those now on a sidewalk
+                foreach (var light in trafficLightObjects)
+                {
+                    if (light == null) continue;
+                    var at = light.transform.position;
+                    light.transform.position = new Vector3(at.x, GroundAt(new Vector2(at.x, at.z)), at.z);
+                }
+                pedestrians?.SetGroundHeight(at => sidewalkSurface.HeightOr(at, RoadMesh.SurfaceY));
+                pedestrianFollow?.SetGroundHeight(at => sidewalkSurface.HeightOr(at, RoadMesh.SurfaceY));
+                Debug.Log($"[CityView] Sidewalks: {SidewalkTileCount} tiles, {surface.TriangleCount} paved triangles " +
+                    $"(walkways {data.SourceHash}).");
+            }
+            catch (OperationCanceledException) { /* city closed or changed */ }
+            catch (Exception error)
+            {
+                if (!disposed) Debug.LogWarning("[CityView] Sidewalks unavailable; roads still render: " + error.Message);
+            }
+        }
+
+        // The ground under a point: the sidewalk's top where there is one, the map's ground elsewhere
+        private float GroundAt(Vector2 at) => sidewalkSurface != null ? sidewalkSurface.HeightOr(at, 0) : 0;
+
+        // The sidewalks are raised above the asphalt, so they draw BEFORE it (where the old kerb strips did)
+        // and the depth test sorts them out: where a sidewalk stands in front of the road it hides it, and
+        // the asphalt then fails its depth test there, writing no stencil, so LTA paint stays off it too.
+        // The importer already cut every sidewalk clear of the asphalt. Masking them with the asphalt's
+        // stencil instead, as the flat kerbs were, would cut away the kerb and the paving next to it
+        // wherever the road shows behind them on screen.
+        private Material[] SidewalkMaterials(Shader shader, Texture2D grain)
+        {
+            var paver = Resources.Load<Texture2D>("Formula9/Textures/paver_tiles");
+            if (paver != null)
+            {
+                paver.wrapMode = TextureWrapMode.Repeat;
+                paver.anisoLevel = 8;
+            }
+            else Debug.LogWarning("[CityView] Resources/Formula9/Textures/paver_tiles is missing; sidewalks are plain");
+            Material Make(string name, Color color, Texture texture, float repeatM)
+            {
+                var material = Own(new Material(shader) { name = name, color = color, mainTexture = texture });
+                material.mainTextureScale = Vector2.one / repeatM;
+                material.SetInt("_StencilComp", (int)CompareFunction.Always);
+                material.SetInt("_StencilPass", (int)StencilOp.Keep);
+                material.SetInt("_StencilWriteMask", 0);
+                material.renderQueue = (int)RenderQueue.Geometry + 1;
+                return material;
+            }
+            Color Shade(Color color, float share) => new Color(color.r * share, color.g * share, color.b * share, 1);
+            var materials = new Material[SidewalkMesh.LayerCount];
+            materials[SidewalkMesh.FootpathLayer] = paver != null
+                ? Make("Sidewalk paving", PavingTint, paver, PaverRepeatM)
+                : Make("Sidewalk paving (plain)", new Color(0.78f, 0.71f, 0.68f), grain, 1);
+            materials[SidewalkMesh.KerbStoneLayer] = Make("Kerb stone", KerbColor, grain, 1);
+            materials[SidewalkMesh.VergeLayer] = Make("Verge", VergeColor, grain, 1);
+            materials[SidewalkMesh.KerbFaceLayer] = Make("Kerb face", Shade(KerbColor, KerbFaceShade), grain, 1);
+            materials[SidewalkMesh.OuterFaceLayer] = Make("Sidewalk edge", Shade(KerbColor, OuterFaceShade), grain, 1);
+            return materials;
         }
 
         // The same LTA client supplies FleetMap's 2D bus-stop dots. Here its
@@ -469,6 +624,10 @@ namespace Formula9.World
 
                 cancellation.ThrowIfCancellationRequested();
                 if (disposed) return;
+                // Shelters stand on the sidewalk, so wait for it (it never fails, only goes without)
+                await sidewalksLoading;
+                cancellation.ThrowIfCancellationRequested();
+                if (disposed) return;
                 var placements = new List<BusStopShelterFactory.Placement>(unique.Count);
                 var autoMoved = 0;
                 var cappedMoves = 0;
@@ -488,6 +647,7 @@ namespace Formula9.World
                     if (shelterOverrides.TryGetValue(stop.Code, out var correction))
                     {
                         var corrected = placed.Position + new Vector3(correction.Move.x, 0f, correction.Move.y);
+                        corrected.y = GroundAt(new Vector2(corrected.x, corrected.z));
                         placed = new BusStopShelterFactory.Placement(stop.Code, corrected,
                             Quaternion.Euler(0f, correction.Yaw, 0f) * placed.Rotation);
                         manual++;
@@ -558,7 +718,7 @@ namespace Formula9.World
             }
             if (!matched)
                 return new BusStopShelterFactory.Placement(null,
-                    new Vector3(pin.x, 0, pin.y), Quaternion.identity);
+                    new Vector3(pin.x, GroundAt(pin), pin.y), Quaternion.identity);
 
             // The previous version faced the raw pin-to-road vector. Near
             // segment endpoints this can be diagonal, rotating the shelter
@@ -566,8 +726,9 @@ namespace Formula9.World
             var roadNormal = new Vector2(-tangent.y, tangent.x);
             float side = Vector2.Dot(pin - nearest, roadNormal) < 0f ? -1f : 1f;
             var outward = roadNormal * side;
-            // The whole paved base should remain beyond the edge of the carriageway.
-            var desiredDistance = halfWidth + ShelterHalfDepthM + KerbGapM;
+            // The whole paved base should remain beyond the edge of the carriageway,
+            // on the footpath behind the kerb stone.
+            var desiredDistance = halfWidth + SidewalkMesh.KerbStoneM + KerbGapM + ShelterHalfDepthM;
             var currentDistance = Vector2.Dot(pin - nearest, outward);
             var missingDistance = Mathf.Max(0f, desiredDistance - currentDistance);
             capped = missingDistance > MaxAutomaticMoveM;
@@ -577,7 +738,7 @@ namespace Formula9.World
             // In the generated shelter, local -Z is its road-facing front.
             var facing = Quaternion.LookRotation(new Vector3(outward.x, 0f, outward.y), Vector3.up);
             return new BusStopShelterFactory.Placement(null,
-                new Vector3(finalPosition.x, 0f, finalPosition.y), facing);
+                new Vector3(finalPosition.x, GroundAt(finalPosition), finalPosition.y), facing);
         }
 
         // Optional per-stop fine tuning WITHOUT recompiling C#.
@@ -654,7 +815,7 @@ namespace Formula9.World
 
             foreach (var signal in filteredSignals)
             {
-                var pose = TrafficLightPlacement.Place(signal, loadedRoads);
+                var pose = TrafficLightPlacement.Place(signal, loadedRoads, sidewalkSurface != null ? GroundAt : (Func<Vector2, float>)null);
 
                 var lightObj = UnityEngine.Object.Instantiate(prefab, pose.Position, pose.Rotation, trafficLightsContainer.transform);
                 lightObj.name = $"TrafficLight_{signal.Id ?? signal.Junction}";
@@ -1007,7 +1168,9 @@ namespace Formula9.World
             {
                 // The backend keeps the traffic off its hazards and away from the shuttles
                 traffic.Advance(deltaTime);
-                pedestrians?.Tick(pedestrianDelta);
+                // And walks the pedestrians, if it sends any, on the same clock as the traffic
+                if (pedestrianFollow != null && pedestrianFollow.Active) pedestrianFollow.Advance(traffic.FollowedS);
+                else pedestrians?.Tick(pedestrianDelta);
                 return;
             }
             deltaTime = running ? deltaTime : 0;
@@ -1032,8 +1195,12 @@ namespace Formula9.World
         public void DrawTraffic(IReadOnlyList<Camera> cameras)
         {
             traffic?.Draw(cameras);
-            pedestrians?.Draw(cameras);
+            if (FollowsBackendPedestrians) pedestrianCrowd?.Draw(pedestrianFollow.Poses, cameras);
+            else if (pedestrians != null) pedestrianCrowd?.Draw(pedestrians.Poses, cameras);
         }
+
+        // True while the backend's traffic frames carry the pedestrians, and they are drawn from there.
+        public bool FollowsBackendPedestrians => pedestrianFollow != null && pedestrianFollow.Active && FollowsBackendTraffic;
 
         // Called each frame: a shuttle is where the backend's traffic frames put its body; without them,
         // one on its route is where the traffic here drove it, and any other glides between the
@@ -1059,11 +1226,19 @@ namespace Formula9.World
         public void ResetShuttles() => traffic?.ResetShuttles();
 
         // The backend's latest traffic frames, which then draw the traffic and the shuttles' bodies.
-        public void ShowTraffic(IReadOnlyList<TrafficFrame> frames) => traffic?.FollowBackend(frames);
+        public void ShowTraffic(IReadOnlyList<TrafficFrame> frames)
+        {
+            traffic?.FollowBackend(frames);
+            pedestrianFollow?.Add(frames);
+        }
 
         // Forgets the backend's traffic frames, as for another session: until more come, the traffic
-        // here drives itself.
-        public void ForgetTraffic() => traffic?.ForgetBackend();
+        // here drives itself, and the walkers here walk.
+        public void ForgetTraffic()
+        {
+            traffic?.ForgetBackend();
+            pedestrianFollow?.Forget();
+        }
 
         // True while the backend's traffic frames draw the traffic.
         public bool FollowsBackendTraffic => traffic != null && traffic.FollowsBackend;
@@ -1099,8 +1274,12 @@ namespace Formula9.World
             busStopShelters.Dispose();
             traffic?.Dispose();
             traffic = null;
-            pedestrians?.Dispose();
+            pedestrians?.Clear();
             pedestrians = null;
+            pedestrianFollow?.Forget();
+            pedestrianFollow = null;
+            pedestrianCrowd?.Dispose();
+            pedestrianCrowd = null;
             if (root != null) WorldBuilder.Remove(root.gameObject);
             trafficLightObjects.Clear();
             foreach (var item in owned)

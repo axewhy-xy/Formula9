@@ -1256,6 +1256,18 @@ namespace Formula9.Tests
             Assert.Throws<Formula9.Contracts.ContractException>(() => TrainingApi.ParseTrafficFrames(
                 "{\"session_id\":\"s1\",\"frames\":[{\"tick\":4,\"simulation_time_s\":0.2,\"vehicle_count\":1,\"vehicles\":[7,1,2,3,4]}]}", "s1"), "unpacked vehicles");
             Assert.AreEqual(0, frames[0].SignalFaults.Count, "a backend from before signal faults sends none");
+            Assert.IsNull(frames[0].Shuttles[0].HeldBy, "nothing holds it up, or a backend from before says nothing");
+        }
+
+        [Test]
+        public void ATrafficFrameSaysWhatHoldsAShuttleUp()
+        {
+            const string reply = "{\"session_id\":\"s1\",\"frames\":[{\"tick\":4,\"simulation_time_s\":0.2,\"vehicle_count\":0,\"vehicles\":\"\",\"shuttles\":["
+                + "{\"vehicle_id\":\"shuttle-01\",\"x_m\":1.5,\"y_m\":-2.5,\"heading_deg\":45.0,\"speed_mps\":0.0,\"held_by\":\"pedestrians\"},"
+                + "{\"vehicle_id\":\"shuttle-02\",\"x_m\":9.0,\"y_m\":1.0,\"heading_deg\":0.0,\"speed_mps\":0.0,\"held_by\":\"traffic\"}]}]}";
+            var frames = TrainingApi.ParseTrafficFrames(reply, "s1");
+            Assert.AreEqual(TrafficShuttlePose.HeldByPedestrians, frames[0].Shuttles[0].HeldBy);
+            Assert.AreEqual(TrafficShuttlePose.HeldByTraffic, frames[0].Shuttles[1].HeldBy);
         }
 
         [Test]

@@ -986,7 +986,8 @@
                 "BREAKDOWN",
                 "COLLISION",
                 "SIGNAL_FAULT",
-                "ROAD_CLOSURE"
+                "ROAD_CLOSURE",
+                "PEDESTRIAN_ON_ROAD"
               ],
               "type": "string"
             },
@@ -1930,8 +1931,19 @@
     },
     "StreamTrafficFrame": {
       "additionalProperties": true,
-      "description": "One traffic step. vehicles is base64 of vehicle_count records of 14 bytes, little-endian: uint16\nindex in /api/traffic/{area}'s vehicles, int32 x cm, int32 y cm, int16 heading in tenths of a degree\nanticlockwise from east, uint16 speed cm/s. Presentation only; the snapshot is the authority.",
+      "description": "One traffic step. vehicles is base64 of vehicle_count records of 14 bytes, little-endian: uint16\nindex in /api/traffic/{area}'s vehicles, int32 x cm, int32 y cm, int16 heading in tenths of a degree\nanticlockwise from east, uint16 speed cm/s. pedestrians (2.x, optional) is base64 of pedestrian_count\nrecords of 14 bytes, little-endian: uint16 index in /api/road-features/{area}/walkways's seeds, int32 x\ncm, int32 y cm, int16 heading in tenths of a degree anticlockwise from east, uint8 speed in units of\n2 cm/s, uint8 flags (bit 0 waiting at a kerb, bit 1 on a crossing's road part, bit 2 on a kerb ramp,\nbit 3 standing a while); a frame from a backend that walks none has neither. Presentation only; the\nsnapshot is the authority.",
       "properties": {
+        "pedestrian_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Pedestrian Count",
+          "type": "integer"
+        },
+        "pedestrians": {
+          "default": "",
+          "title": "Pedestrians",
+          "type": "string"
+        },
         "shuttles": {
           "items": {
             "$ref": "#/$defs/StreamTrafficShuttle"
@@ -1977,10 +1989,27 @@
     },
     "StreamTrafficShuttle": {
       "additionalProperties": true,
+      "description": "A shuttle's body in a traffic step. held_by (2.x, optional) says what the background traffic holds it\nup for when it does: a vehicle (\"traffic\") or the walkers on or waiting at a crossing on its way\n(\"pedestrians\"); a shuttle nothing in the traffic holds up has none.",
       "properties": {
         "heading_deg": {
           "title": "Heading Deg",
           "type": "number"
+        },
+        "held_by": {
+          "anyOf": [
+            {
+              "enum": [
+                "traffic",
+                "pedestrians"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Held By"
         },
         "speed_mps": {
           "title": "Speed Mps",

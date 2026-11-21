@@ -155,7 +155,8 @@ The integrated fixture (`backend/fixtures/m2_integrated.json`) is built by
   and taken round an incident
 - two depots: Toa Payoh Interchange and Saint Michael's Bus Terminal
 - incidents from `fixtures/incidents/predefined_scenarios.json`: a `timeline` of scheduled world events
-  (`BREAKDOWN`, `COLLISION`, `ROAD_CLOSURE` on an edge, `SIGNAL_FAULT` at a signalled junction) beside the
+  (`BREAKDOWN`, `COLLISION`, `ROAD_CLOSURE`, `PEDESTRIAN_ON_ROAD` on an edge, `SIGNAL_FAULT` at a signalled
+  junction) beside the
   random generator. A random event is placed for an in-service shuttle chosen with the session RNG, about
   `warning_s` at cruising speed ahead of it, so it is detected 60–120 s before that shuttle gets there.
   Each template's `warning_s`, `detection_delay_s`, `duration_s` and `recovery_s` are used. The scripted
@@ -257,7 +258,13 @@ Each tick, `IntegratedSessionActor` does the following:
   current source, else Python (`F9_NATIVE_TRAFFIC`: `0` Python, `1` native or fail). The native engine
   lets go of the GIL while it steps the traffic and plans, places and checks the shuttles, so the
   sessions of one process (or one session worker) tick on several cores at once. A staged copy shares
-  the vehicles until one side steps, as the Python engine's does. Change the driving in both;
+  the vehicles until one side steps, as the Python engine's does. Both engines walk the pedestrians of
+  the area's walkways file in the same step (`walk_network.py`; off with `F9_PEDESTRIANS=0`), so
+  vehicles and shuttles give way to them at crossings and a shuttle held for them says so in the traffic
+  frame (`held_by: "pedestrians"`). A vehicle on the road a crossing cuts waits only until every walker
+  on it is past its lane. Walkers with an attractors file make trips (shortest ways, a crossing counting
+  as its usual wait), go in and come out by the time of day (`F9_DAY_START`), and a `PEDESTRIAN_ON_ROAD`
+  world event sends one across a road where there is no crossing. Change the driving and the walking in both;
   `test_native_traffic.py` holds them to each other, and the traffic tests run on both engines.
 - **Energy:** charges travel and auxiliary energy with energy model `ENERGY_R1`. It also issues
   `CONTINUE` and `CHARGE_NOW` offers, runs scheduled charger bookings, and sends a shuttle back to a

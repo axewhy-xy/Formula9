@@ -498,6 +498,8 @@ namespace Formula9.Tests
                 shared.Select(m => m.Kind).ToList());
             CollectionAssert.AreEqual(new[] { 3, 1200, -450, 900, 1000 }, shared[1].Frames.Single().Vehicles);
             Assert.AreEqual(40.0, shared[1].Frames.Single().SignalFaults["junction-1"], 1e-9);
+            Assert.IsNull(shared[1].Frames.Single().Shuttles[0].HeldBy);
+            Assert.AreEqual(TrafficShuttlePose.HeldByPedestrians, shared[1].Frames.Single().Shuttles[1].HeldBy);
             Assert.IsTrue(shared[3].Error.Retryable);
         }
     }

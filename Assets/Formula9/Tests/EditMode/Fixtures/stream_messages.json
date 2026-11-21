@@ -362,6 +362,8 @@
     {
       "frames": [
         {
+          "pedestrian_count": 1,
+          "pedestrians": "AwDSBAAADP7//4QDQQE=",
           "shuttles": [
             {
               "heading_deg": 90.0,
@@ -369,6 +371,14 @@
               "vehicle_id": "shuttle-01",
               "x_m": 1.5,
               "y_m": -2.0
+            },
+            {
+              "heading_deg": 0.0,
+              "held_by": "pedestrians",
+              "speed_mps": 0.0,
+              "vehicle_id": "shuttle-02",
+              "x_m": 40.0,
+              "y_m": 8.0
             }
           ],
           "signal_faults": [
