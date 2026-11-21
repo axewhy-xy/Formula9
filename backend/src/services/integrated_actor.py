@@ -1327,7 +1327,7 @@ class IntegratedSessionActor(SessionActor):
         """A pedestrian on the road: the traffic sends the walker nearest the middle of the event's road across
         it there (CityTraffic.jaywalk), once, trying again at the next refresh while no walker is near. With
         no pedestrians in the traffic it has only its kind's fallback."""
-        if getattr(self.traffic, "walks", None) is None:
+        if getattr(self.traffic, "walks", None) is None or key in self.traffic.jaywalks:
             return
         place = self.traffic.locate([tuple(p) for p in edge["path"]])
         if place is not None:

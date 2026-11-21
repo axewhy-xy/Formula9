@@ -463,6 +463,10 @@ namespace Formula9.World
                 cancellation.ThrowIfCancellationRequested();
                 if (disposed) return;
                 var surfaceBuild = Task.Run(() => SidewalkSurface.Build(data), cancellation);
+                // Observed even when this returns before awaiting it (disposed, cancelled, a tile failing),
+                // so a failed build is never reported as an unobserved task exception
+                _ = surfaceBuild.ContinueWith(t => _ = t.Exception, CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
                 // The walkers' network comes in the same file: nothing to work out here, only to read
                 walkNetwork = data;
                 pedestrianFollow?.SetSeeds(data);

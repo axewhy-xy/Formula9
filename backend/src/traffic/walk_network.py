@@ -103,6 +103,15 @@ def day_start_s() -> float:
     return float(hour * 3600 + minute * 60)
 
 
+def session_day_start_s(pedestrians: bool, given: float | None = None) -> float:
+    """The time of day a session's traffic clock starts at: the one given (a checkpoint's), else F9_DAY_START's
+    with pedestrians. Without them nothing depends on it, so F9_DAY_START is not read, and a malformed value
+    cannot stop traffic that walks nobody."""
+    if given is not None:
+        return float(given)
+    return day_start_s() if pedestrians else float(DEFAULT_DAY_START_S)
+
+
 def walkways_path(area: str) -> Path:
     return OUTPUT_DIRECTORY / f"{area}-walkways.json"
 

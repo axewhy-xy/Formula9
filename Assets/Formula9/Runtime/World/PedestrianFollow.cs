@@ -39,6 +39,8 @@ namespace Formula9.World
         private float[] walkPhase = Array.Empty<float>();
         private Vector2[] lastAt = Array.Empty<Vector2>();
         private bool[] drawn = Array.Empty<bool>();
+        // By seed index: where it is in the frame Advance draws towards, or -1; filled and cleared each Advance
+        private int[] nextOffset = Array.Empty<int>();
         private Func<Vector2, float> groundHeight;
 
         // True while the newest frame carries walkers: then they, not PedestrianLocalSim's, are drawn.
@@ -132,6 +134,15 @@ namespace Formula9.World
             const int stride = TrafficFrame.PedestrianStride;
             var a = from.Walkers;
             var b = to.Walkers;
+            // Where each seed is in the next frame, found once: frames leave out walkers who are away, so
+            // the same walker is seldom at the same place in both
+            for (var j = 0; j + stride <= b.Length; j += stride)
+            {
+                var seed = b[j];
+                if (seed < 0) continue;
+                Grow(seed + 1);
+                nextOffset[seed] = j;
+            }
             for (var i = 0; i + stride <= a.Length; i += stride)
             {
                 var seed = a[i];
@@ -141,8 +152,8 @@ namespace Formula9.World
                 var heading = a[i + 3] / 10f;
                 var speed = a[i + 4] * 0.02f;
                 var flags = a[i + 5];
-                // The backend sends its walkers in the same order every frame; one not found there stands
-                var j = FindSeed(b, seed, i);
+                // One not in the next frame stands
+                var j = nextOffset[seed];
                 if (j >= 0)
                 {
                     var next = new Vector2(b[j + 1] / 100f, b[j + 2] / 100f);
@@ -177,6 +188,9 @@ namespace Formula9.World
                     Moving = !standing,
                 });
             }
+            // Cleared as filled, so the table is all -1 again for the next Advance
+            for (var j = 0; j + stride <= b.Length; j += stride)
+                if (b[j] >= 0) nextOffset[b[j]] = -1;
         }
 
         // The height of a walker's feet: the road's on a crossing's road part, else the sidewalk's (which
@@ -185,15 +199,6 @@ namespace Formula9.World
         {
             if ((flags & TrafficFrame.PedestrianOnRoad) != 0 || groundHeight == null) return RoadMesh.SurfaceY;
             return groundHeight(at);
-        }
-
-        private static int FindSeed(int[] walkers, int seed, int hint)
-        {
-            const int stride = TrafficFrame.PedestrianStride;
-            if (hint + stride <= walkers.Length && walkers[hint] == seed) return hint;
-            for (var i = 0; i + stride <= walkers.Length; i += stride)
-                if (walkers[i] == seed) return i;
-            return -1;
         }
 
         private void Grow(int count)
@@ -206,11 +211,13 @@ namespace Formula9.World
             Array.Resize(ref walkPhase, size);
             Array.Resize(ref lastAt, size);
             Array.Resize(ref drawn, size);
+            Array.Resize(ref nextOffset, size);
             // Seeds the walkways file has not named yet: a model by their number, and an everyday height
             for (var i = oldCount; i < size; i++)
             {
                 models[i] = i;
                 heights[i] = DefaultHeightM;
+                nextOffset[i] = -1;
             }
         }
 

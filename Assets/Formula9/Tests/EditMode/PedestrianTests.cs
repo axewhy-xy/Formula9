@@ -333,6 +333,27 @@ namespace Formula9.Tests
         }
 
         [Test]
+        public void AWalkerGoneInsideBetweenFramesLeavesTheOthersFollowingTheirOwnRecords()
+        {
+            // Seeds 1, 2 and 3 out, then 1 goes in: in the next frame 2 and 3 sit one record earlier
+            var follow = new PedestrianFollow();
+            follow.Add(new[]
+            {
+                new TrafficFrame { SimulationTimeS = 3.0, Pedestrians = new[] { 1, 1000, 400, 0, 65, 0, 2, 2000, 400, 0, 65, 0, 3, 3000, 400, 0, 65, 0 } },
+                new TrafficFrame { SimulationTimeS = 3.1, Pedestrians = new[] { 2, 2020, 400, 0, 65, 0, 3, 3040, 400, 0, 65, 0 } },
+            });
+            follow.Advance(3.05);
+            Assert.AreEqual(3, follow.Poses.Count);
+            Assert.AreEqual(10f, follow.Poses[0].Position.x, 1e-4f, "one missing from the next frame stands");
+            Assert.AreEqual(20.1f, follow.Poses[1].Position.x, 1e-3f, "halfway to its own next record");
+            Assert.AreEqual(30.2f, follow.Poses[2].Position.x, 1e-3f);
+            follow.Advance(3.1);
+            Assert.AreEqual(2, follow.Poses.Count);
+            Assert.AreEqual(20.2f, follow.Poses[0].Position.x, 1e-3f);
+            Assert.AreEqual(30.4f, follow.Poses[1].Position.x, 1e-3f);
+        }
+
+        [Test]
         public void AWalkerPutSomewhereNewIsNotSlidThereAndForgettingTheFramesHandsBackToTheLocalCrowd()
         {
             var follow = new PedestrianFollow();

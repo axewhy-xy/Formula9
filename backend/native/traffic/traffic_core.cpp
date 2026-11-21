@@ -4382,6 +4382,17 @@ NB_MODULE(_traffic_native, m) {
              })
         .def("walker_count", [](const Traffic& t) { return t.walkers().size(); })
         .def("walker", [](const Traffic& t, int slot) { return walker_dict(t, t.walker_checked(slot)); })
+        // The walkers a jaywalk may send (CityTraffic.jaywalk_candidates), in slot order, in one call
+        .def("jaywalk_candidates",
+             [](const Traffic& t) {
+                 std::vector<std::tuple<int, double, double, int, double>> out;
+                 if (!t.has_walks()) return out;
+                 const auto& ways = t.walks().ways;
+                 for (const Walker& w : t.walkers())
+                     if (w.state == WALKING && w.granted == -1 && ways[w.way].crossing < 0)
+                         out.emplace_back(w.slot, w.x, w.y, w.way, w.distance);
+                 return out;
+             })
         .def("crossing_sets",
              [](const Traffic& t) {
                  std::vector<std::pair<int, double>> waits(t.crossing_waits().items), releases(t.crossing_releases().items);

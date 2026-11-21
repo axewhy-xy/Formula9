@@ -30,6 +30,7 @@ from contracts.v2.route_edit import RouteEditRequest
 from src.persistence.training_store import TrainingStore, TrainingStoreError
 from src.services.route_edit import RouteEditService, get_route_edit_service, scene_closed
 from src.services.incident_scenarios.simulated_catalog import SimulatedIncidentCatalog
+from src.services.incident_scenarios.world_events import NO_DETOUR_EVENTS
 
 
 FIXTURE_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "m2_incident.json"
@@ -510,7 +511,7 @@ class IncidentService:
         auxiliary_kw = self.routes._fixture["auxiliary_kw"]
         # A signal fault holds up every approach to its junction, which the planner does not know of, and a
         # pedestrian on the road is gone in moments: a shuttle keeps its route, holds or gets assistance
-        detours = capable and "ROAD_DETOUR" in allowed and self._event_type() not in ("SIGNAL_FAULT", "PEDESTRIAN_ON_ROAD")
+        detours = capable and "ROAD_DETOUR" in allowed and self._event_type() not in NO_DETOUR_EVENTS
         road = self._road_preview(snapshot, vehicle_id) if detours else None
         baseline = road.original.model_dump(mode="json") if road is not None and road.original else None
         offered = []

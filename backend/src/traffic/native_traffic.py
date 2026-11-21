@@ -443,7 +443,7 @@ class NativeCityTraffic:
         if walks is not None and walks.network is not network:
             LOG.warning("Walk network %s is not on the road network it is driven with; driving it in Python", walks.area)
             return CityTraffic.on(network, walks, day_start_s)
-        day_start = float(walk_network.day_start_s() if day_start_s is None else day_start_s)
+        day_start = walk_network.session_day_start_s(walks is not None, day_start_s)
         core = _native.Traffic(native_network(network), None if walks is None else native_walks(walks))
         core.day_start_s = day_start
         for seed in _seeds(network):
@@ -656,6 +656,10 @@ class NativeCityTraffic:
             return False
         self._core.start_jaywalk(jaywalk_tuple(jaywalk), True)
         return True
+
+    def jaywalk_candidates(self):
+        """As CityTraffic.jaywalk_candidates, read in one native call rather than walker by walker."""
+        return self._core.jaywalk_candidates()
 
     # ------------------------------------------------ driving
 

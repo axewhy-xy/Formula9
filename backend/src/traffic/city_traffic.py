@@ -535,7 +535,7 @@ class CityTraffic:
         self.walks = walks
         self.walkers: list[Walker] = []
         # The time of day the traffic's clock starts at (seconds after midnight), for how many walkers are out
-        self.day_start_s = float(walk_network_module.day_start_s() if day_start_s is None else day_start_s)
+        self.day_start_s = walk_network_module.session_day_start_s(walks is not None, day_start_s)
         # How many walkers are out (not away) and how many should be, as the step goes
         self._active = 0
         self._target = 0
@@ -826,8 +826,12 @@ class CityTraffic:
         items = state["walkers"]
         if state.get("walk_source") != self.walks.source_hash or len(items) != len(self.walkers):
             raise ValueError("Traffic checkpoint's walkers do not match the area's walk network")
+        count = len(ways)
         for walker, item in zip(self.walkers, walker_items(items, len(self.walks.attractors))):
             way, distance, sublane, aside, speed, walker_state, wait_s, kerb_wait_s, rng, due, granted, ahead, dest, home = item
+            # As the native engine checks them: a negative index would otherwise wrap round to another walkway
+            if not all(type(index) is int and 0 <= index < count for index in (way, *ahead)):
+                raise IndexError("Traffic checkpoint names a walkway the walk network does not have")
             walker.way = ways[way]
             walker.distance, walker.sublane, walker.aside, walker.speed = float(distance), int(sublane), float(aside), float(speed)
             walker.target = walker.speed
@@ -975,6 +979,13 @@ class CityTraffic:
         self.jaywalks[key] = jaywalk
         self._pose_jaywalker(jaywalk)
         return True
+
+    def jaywalk_candidates(self):
+        """The walkers a jaywalk may send (plan_jaywalk), in slot order: those walking a sidewalk, neither
+        let onto a crossing nor on one, each as (slot, x, y, walkway index, distance along it)."""
+        for walker in self.walkers:
+            if walker.state == WALKING and walker.granted == -1 and walker.way.crossing is None:
+                yield walker.slot, walker.x, walker.y, walker.way.index, walker.distance
 
     def _clear_events(self) -> None:
         """Ends the world events whose time is up: their pinned vehicles are towed away and their lights
@@ -2864,23 +2875,23 @@ def plan_jaywalk(traffic, key: str, road: Road, distance: float, until_s: float)
     distance = min(max(float(distance), 0.0), road.length)
     px, py, tx, ty = road.sample(distance, 0.0)
     best, best_off = None, JAYWALK_PICK_M
-    for walker in traffic.walkers:
-        if walker.state != WALKING or walker.granted != -1 or walker.way.crossing is not None:
-            continue
-        off = math.hypot(walker.x - px, walker.y - py)
+    for candidate in traffic.jaywalk_candidates():
+        _, x, y, _, _ = candidate
+        off = math.hypot(x - px, y - py)
         if off <= best_off and (best is None or off < best_off):
-            best, best_off = walker, off
+            best, best_off = candidate, off
     if best is None:
         return None
-    side = 1 if (best.x - px) * -ty + (best.y - py) * tx >= 0 else -1
-    jaywalk = make_jaywalk(traffic.network, key, best.slot, until_s, road, distance, side)
+    slot, bx, by, way, way_distance = best
+    side = 1 if (bx - px) * -ty + (by - py) * tx >= 0 else -1
+    jaywalk = make_jaywalk(traffic.network, key, slot, until_s, road, distance, side)
     landing = walks.nearest_way(jaywalk.bx + jaywalk.dx * 2.0, jaywalk.by + jaywalk.dy * 2.0, JAYWALK_LAND_M)
     if landing is None:
         return None
     jaywalk.pause_s = JAYWALK_PAUSE_MIN_S + (JAYWALK_PAUSE_MAX_S - JAYWALK_PAUSE_MIN_S) * random01(rng_step(fnv_hash(key)))
-    jaywalk.from_x, jaywalk.from_y, jaywalk.to_x, jaywalk.to_y = best.x, best.y, jaywalk.ax, jaywalk.ay
+    jaywalk.from_x, jaywalk.from_y, jaywalk.to_x, jaywalk.to_y = bx, by, jaywalk.ax, jaywalk.ay
     jaywalk.rejoin_way, jaywalk.rejoin_distance = landing[0].index, landing[1]
-    jaywalk.back_way, jaywalk.back_distance = best.way.index, best.distance
+    jaywalk.back_way, jaywalk.back_distance = way, way_distance
     return jaywalk
 
 

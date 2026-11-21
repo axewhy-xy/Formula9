@@ -38,6 +38,9 @@ SCHEDULABLE = ("BREAKDOWN", "COLLISION", "ROAD_CLOSURE", "SIGNAL_FAULT", "PEDEST
 # of road for them (incident_hazards.live_hazards) and they slow only their own road without traffic
 ONE_ROAD_EVENTS = ("BREAKDOWN", "PEDESTRIAN_ON_ROAD")
 AT_JUNCTION = ("SIGNAL_FAULT",)
+# Types no detour is offered for: a signal fault holds up every approach to its junction, which the planner
+# does not know of, and a pedestrian on the road is gone in moments (Unity's RoutePresenter says so too)
+NO_DETOUR_EVENTS = ("SIGNAL_FAULT", "PEDESTRIAN_ON_ROAD")
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}$")
 
 

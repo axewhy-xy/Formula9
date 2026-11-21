@@ -205,6 +205,40 @@ def test_walkers_on_trips_survive_a_checkpoint_and_engines_agree_on_it():
         CityTraffic.from_state(bad)
 
 
+def test_a_checkpoint_naming_a_walkway_it_does_not_have_is_refused_by_either_engine(engine):
+    """A negative walkway index is refused as one past the end is, not wrapped round to another walkway."""
+    traffic = CityTraffic.start("toa-payoh", pedestrians=True)
+    state = json.loads(json.dumps(traffic.state()))
+    count = len(traffic.walks.ways)
+    for way, ahead in ((-1, None), (count, None), (None, [-1]), (None, [count])):
+        bad = deepcopy(state)
+        if way is not None:
+            bad["walkers"][0][0] = way
+        if ahead is not None:
+            bad["walkers"][0][11] = ahead
+        with pytest.raises(IndexError):
+            engine.from_state(bad)
+
+
+def test_a_malformed_day_start_stops_only_traffic_that_walks_someone(engine, monkeypatch):
+    monkeypatch.setenv(walk_network.DAY_START_VARIABLE, "noon")
+    traffic = engine.start("toa-payoh", pedestrians=False)
+    assert traffic is not None and traffic.vehicles, "traffic without pedestrians never reads F9_DAY_START"
+    with pytest.raises(ValueError):
+        engine.start("toa-payoh", pedestrians=True)
+
+
+def test_engines_agree_on_who_a_jaywalk_may_send():
+    python = CityTraffic.start("toa-payoh", pedestrians=True)
+    for i in range(100):
+        python.step(0.5, (i + 1) * 0.5)
+    native = NativeCityTraffic.from_state(json.loads(json.dumps(python.state())))
+    if not isinstance(native, NativeCityTraffic):
+        pytest.skip("native traffic engine unavailable")
+    candidates = list(python.jaywalk_candidates())
+    assert candidates and candidates == list(native.jaywalk_candidates())
+
+
 # ---------------------------------------------------------------- the jaywalker
 
 def jaywalk_street(engine, cars=(), speed=1.0):
