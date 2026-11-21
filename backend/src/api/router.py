@@ -14,7 +14,7 @@ Description:
 
 from fastapi import APIRouter
 
-from src.api.routes import auth, buildings, health, road_features, roads, route_planning, scenes, simulations, traffic, training_scenes, training_v2, transit
+from src.api.routes import auth, buildings, health, road_features, roads, route_planning, scenes, simulations, traffic, training_scenes, training_stream, training_v2, transit
 
 # Create the main API router and include the individual route modules
 api_router = APIRouter()
@@ -24,6 +24,7 @@ api_router.include_router(route_planning.router)
 api_router.include_router(scenes.router)
 api_router.include_router(simulations.router)
 api_router.include_router(training_v2.router)
+api_router.include_router(training_stream.router)
 api_router.include_router(training_scenes.router)
 api_router.include_router(transit.router)
 api_router.include_router(buildings.router)

@@ -94,6 +94,14 @@ class RouteEditService:
         shared = {key: value for key, value in self._fixture.items() if key not in ROUTE_KEYS}
         self._configs = {self._fixture["route_id"]: self._fixture,
                          **{route_id: {**shared, **config, "route_id": route_id} for route_id, config in peers.items()}}
+        # A detour is traced back to its route by its stops (base_route_id), so no two routes may share them
+        by_stops: dict[frozenset, str] = {}
+        for route_id, config in self._configs.items():
+            stops = frozenset(config["required_stops"])
+            if stops in by_stops:
+                raise ValueError(f"Routes {by_stops[stops]} and {route_id} serve the same stops, so a detour "
+                                 "taken from either could not be traced back to it")
+            by_stops[stops] = route_id
         self._previews: OrderedDict[str, tuple[RouteEditRequest, RouteEditPreview]] = OrderedDict()
         self._lock = RLock()
         # Routes with no operating network keep to their curated paths and curated metadata.
@@ -107,7 +115,8 @@ class RouteEditService:
 
     def base_route_id(self, snapshot: FullSnapshot, route_id: str | None) -> str | None:
         """The route whose editor data a route is edited with: its own, or for an incident's detour the
-        route it was taken from, which is the one whose stops it keeps. None when there is none."""
+        route it was taken from, which is the one whose stops it keeps (no two routes share them; see
+        __init__). None when there is none."""
         if route_id in self._configs:
             return route_id
         if not route_id or not any(route_id == i.incident_id + "-detour" or route_id.startswith(i.incident_id + "-detour-")
@@ -294,7 +303,7 @@ class RouteEditService:
         vehicle = next(v for v in snapshot.vehicles if v.vehicle_id == vehicle_id)
         route = next(r for r in snapshot.routes if r.route_id == vehicle.route_id)
         planning = scene_closed(snapshot, incident, self._driven_prefix(vehicle, route))
-        return self.continuation_preview(planning, vehicle_id, request)
+        return self.continuation_preview(planning, vehicle_id, request, live=snapshot)
 
     def _driven_prefix(self, vehicle, route) -> list[str]:
         """The roads of a route already driven, through the one the shuttle is on; empty when it is off the route."""
@@ -315,14 +324,18 @@ class RouteEditService:
         return route.directed_edge_ids[:nearest[1]+1] if nearest[0] <= 0.01 else []
 
     def continuation_preview(self, snapshot: FullSnapshot, vehicle_id: str,
-                             draft: RouteEditRequest | None = None) -> RouteEditPreview:
-        """Validate a detour that still contains the shuttle's current road and driven prefix."""
+                             draft: RouteEditRequest | None = None, *, live: FullSnapshot | None = None) -> RouteEditPreview:
+        """Validate a detour that still contains the shuttle's current road and driven prefix.
+
+        snapshot is the one the detour is planned in. When that is a hypothetical one, with an incident's
+        scene closed for a moment (scene_closed), live is the session's own: the preview answers its
+        closures, not the planner's."""
         vehicle = next(v for v in snapshot.vehicles if v.vehicle_id == vehicle_id)
         route = next(r for r in snapshot.routes if r.route_id == vehicle.route_id)
         request = dict(route_id=route.route_id, expected_route_revision=draft.expected_route_revision if draft else route.revision,
                        draft_revision=draft.draft_revision if draft else 1)
         if self._network is None:
-            return self.preview(snapshot, RouteEditRequest(**request), retain=False)
+            return self.preview(snapshot, RouteEditRequest(**request), retain=False, live=live)
         prefix = self._driven_prefix(vehicle, route)
         visited = self._stop_visits(prefix, self._walk(prefix, self._edges()))
         remaining_stops = [self._fixture["stop_approach_edge_ids"][stop]
@@ -331,7 +344,7 @@ class RouteEditService:
                                                     self._closed(snapshot), self._fixture,
                                                     draft.waypoint_edge_ids if draft else [])
         result = self.preview(snapshot, RouteEditRequest(**request,
-                              directed_edge_ids=ids or route.directed_edge_ids), retain=False)
+                              directed_edge_ids=ids or route.directed_edge_ids), retain=False, live=live)
         if not ids:
             message = (f"The shuttle can't reach {self._network.road_name(unreached)} from where it is held and still complete its loop."
                        if unreached else "No detour connects to the shuttle's current road")
@@ -353,7 +366,8 @@ class RouteEditService:
             result.validation, result.approvable = "FAIL", False
         return result
 
-    def preview(self, snapshot: FullSnapshot, request: RouteEditRequest, *, retain: bool = True) -> RouteEditPreview:
+    def preview(self, snapshot: FullSnapshot, request: RouteEditRequest, *, retain: bool = True,
+                live: FullSnapshot | None = None) -> RouteEditPreview:
         route = next((r for r in snapshot.routes if r.route_id == request.route_id), None)
         if route is None:
             raise TrainingStoreError("INVALID_REFERENCE", "Route was not found")
@@ -453,7 +467,8 @@ class RouteEditService:
                                    route_id=route.route_id,
                                    route_revision=route.revision, scene_revision=snapshot.scene_revision,
                                    fixture_id=config["fixture_id"],
-                                   closure_revisions={d.disruption_id: d.aggregate_revision for d in snapshot.disruptions},
+                                   # The session's closures: a planner's temporary one is not the client's to match
+                                   closure_revisions={d.disruption_id: d.aggregate_revision for d in (live or snapshot).disruptions},
                                    directed_edge_ids=ids, node_ids=nodes,
                                    polyline=[{"x": float(self._graph_repository.get().graph.nodes[node]["x"]),
                                               "y": float(self._graph_repository.get().graph.nodes[node]["y"]),
@@ -464,11 +479,21 @@ class RouteEditService:
                                    edge_paths=self._edge_paths(ids) if nodes else [],
                                    service_impact=self._service_impact(snapshot, route.route_id, original, edited))
         if retain:
-            with self._lock:
-                self._previews[preview.preview_id] = (request.model_copy(deep=True), preview.model_copy(deep=True))
-                while len(self._previews) > 256:
-                    self._previews.popitem(last=False)
+            self.retain(request, preview)
         return preview
+
+    def retain(self, request: RouteEditRequest, preview: RouteEditPreview) -> None:
+        """Keeps a preview for approve, as preview does. Previews are kept per process: a session in a
+        worker process is approved there, so the gateway hands the worker the one it previewed (retained)."""
+        with self._lock:
+            self._previews[preview.preview_id] = (request.model_copy(deep=True), preview.model_copy(deep=True))
+            while len(self._previews) > 256:
+                self._previews.popitem(last=False)
+
+    def retained(self, preview_id: str) -> tuple[RouteEditRequest, RouteEditPreview] | None:
+        """The draft and preview kept under preview_id, if they are still kept."""
+        with self._lock:
+            return self._previews.get(preview_id)
 
     def _check_waypoints(self, request: RouteEditRequest) -> None:
         if not request.waypoint_edge_ids:

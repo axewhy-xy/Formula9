@@ -15,6 +15,18 @@ python Tools/run_backend.py --test
 ```
 
 Windows shortcuts: `run.bat --setup`, `run.bat`, `run.bat --test`.
+
+Setup also builds the native background traffic engine when CMake and a C++ compiler (Visual
+Studio's "Desktop development with C++") are installed. Rebuild it after changing
+`backend/native/traffic/traffic_core.cpp` with `python Tools/build_native.py`. Without a current build the
+backend logs so and drives the same traffic in Python, about five times slower per session.
+`F9_NATIVE_TRAFFIC=0` forces Python; `=1` refuses to start sessions without the native engine.
+Both engines walk the area's pedestrians on its sidewalks and mapped footpaths
+(`fixtures/traffic/<area>-walkways.json`), and vehicles and shuttles give way to them at crossings, a
+vehicle only until the walkers are past its lane; `F9_PEDESTRIANS=0` turns them off. Walkers make trips
+between homes, places and bus stops, and how many are out follows the time of day a session's clock starts
+at (`F9_DAY_START=HH:MM`, 08:00 by default). Rebuild the walkways file with
+`python -m src.traffic.import_walkways` (`--download-footways` fetches the footpaths from Overpass first).
 Python 3.12+ is required; the existing lock targets Python 3.12. `--reload` watches
 backend source and contracts. The default map is `backend/fixtures/map/map.db`;
 the default session database is ignored `state/training.sqlite`. Environment variables
@@ -24,10 +36,12 @@ override those settings. The bundled map also requires the adjacent `map.osm`.
 For a disposable server with in-memory accounts and temporary session storage:
 
 ```powershell
-backend\.venv\Scripts\python Tools/isolated_backend.py
+backend\.venv\Scripts\python Tools/isolated_backend.py --seed-incidents
 ```
 
-It listens on port 8010 and is intended for Unity end-to-end tests. The sections
+It listens on port 8010 and is intended for Unity end-to-end tests. `--seed-incidents`
+schedules known incidents in every session, beside the random ones; the incident
+end-to-end test and `RouteWalkthrough` need them. The sections
 below preserve the original backend service documentation, including historical
 Qt/web references; those client applications are not required to run this backend.
 

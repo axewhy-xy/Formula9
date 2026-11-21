@@ -19,6 +19,7 @@ from copy import deepcopy
 from functools import lru_cache
 import json
 from pathlib import Path
+import re
 from uuid import uuid4
 
 from contracts.v2.models import (
@@ -29,6 +30,7 @@ from contracts.v2.route_edit import RouteEditRequest
 from src.persistence.training_store import TrainingStore, TrainingStoreError
 from src.services.route_edit import RouteEditService, get_route_edit_service, scene_closed
 from src.services.incident_scenarios.simulated_catalog import SimulatedIncidentCatalog
+from src.services.incident_scenarios.world_events import NO_DETOUR_EVENTS
 
 
 FIXTURE_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "m2_incident.json"
@@ -58,7 +60,7 @@ DECIDABLE = {*ON_ITS_ROUTE, "DETOURING"}
 SETTLED = {"RESOLVED", "UNRESOLVED"}
 # How an alert names each world event type, and the type of a record from before world events
 EVENT_NAMES = {"BREAKDOWN": "a breakdown", "COLLISION": "a collision", "SIGNAL_FAULT": "a signal fault",
-               "ROAD_CLOSURE": "a road closure"}
+               "ROAD_CLOSURE": "a road closure", "PEDESTRIAN_ON_ROAD": "a pedestrian on the road"}
 LEGACY_TYPES = {"ROAD_ACCIDENT": "COLLISION", "ROAD_BLOCK": "ROAD_CLOSURE"}
 # The decision each state of an incident from before per-shuttle decisions stood for
 LEGACY_RESPONSES = {"WAITING": "KEEP_ROUTE", "ESCALATED": "ESCALATE", "EXECUTING": "ROAD_DETOUR"}
@@ -116,6 +118,22 @@ def exposure_headline(event_type: str | None, road_name: str | None, exposures) 
     more = len(exposures) - 1
     others = f" (and {more} more shuttle{'s' if more > 1 else ''})" if more else ""
     return f"{vehicle_label(first['vehicle_id'])} reaches {phrase} {when}{others}"
+
+
+def option_id(incident_id: str, revision: int, vehicle_id: str, action: str) -> str:
+    """The id of one shuttle's option, as issued at an incident revision: <incident>-r<revision>-<shuttle>-<action>."""
+    return f"{incident_id}-r{revision}-{vehicle_id}-{action.lower()}"
+
+
+def option_vehicle(incident_id: str, candidate_id: str) -> str | None:
+    """The shuttle an option id (option_id) names, or None for one that names none: an id from before
+    per-shuttle options (<incident>-r<revision>-<action>) or one this incident never issued.
+
+    It is read from between the incident's own id and a known action, so an incident or shuttle id that
+    contains the other's cannot be mistaken for it."""
+    actions = "|".join(re.escape(a.lower()) for a in (*INCIDENT_ACTIONS, "WAIT"))
+    match = re.fullmatch(rf"{re.escape(incident_id)}-r\d+-(.+)-(?:{actions})", candidate_id)
+    return match.group(1) if match else None
 
 
 def detour_route_id(incident_id: str, vehicle_id: str) -> str:
@@ -403,9 +421,11 @@ class IncidentService:
         """What each shuttle's live options were worked out from, by shuttle, from their journalled evidence.
 
         Evidence never changes once written, so it is read once per issue of options (they are named by
-        the incident revision they were issued at) and remembered."""
-        key = (str(getattr(store, "path", id(store))), snapshot.session_id, incident.incident_id,
-               tuple(sorted(c.candidate_id for c in live)))
+        the incident revision they were issued at) and remembered. Crash recovery replays from a checkpoint
+        and can issue the same ids again from different evidence; it starts a new session epoch, so the
+        epoch is part of the key."""
+        key = (str(getattr(store, "path", id(store))), snapshot.session_id, snapshot.session_epoch,
+               incident.incident_id, tuple(sorted(c.candidate_id for c in live)))
         known = _EVIDENCE_DEPENDENCIES.get(key)
         if known is None:
             options = self._evidence(store, snapshot, incident).data["options"]
@@ -444,7 +464,7 @@ class IncidentService:
 
     def _road_preview(self, snapshot: FullSnapshot, vehicle_id: str):
         return self._route_service(snapshot, vehicle_id).continuation_preview(self._avoiding(snapshot, vehicle_id),
-                                                                              vehicle_id)
+                                                                              vehicle_id, live=snapshot)
 
     def _delays(self, snapshot: FullSnapshot, incident: Incident, vehicle_id: str) -> dict:
         """About how long each option but a detour holds one shuttle up from now, from what the actor last
@@ -489,9 +509,9 @@ class IncidentService:
         delays = self._delays(snapshot, incident, vehicle_id)
         allowed = [("KEEP_ROUTE" if action == "WAIT" else action) for action in self.config["reference_acceptable_actions"]]
         auxiliary_kw = self.routes._fixture["auxiliary_kw"]
-        # A signal fault holds up every approach to its junction, which the planner does not know of: a shuttle
-        # keeps its route, holds or gets assistance
-        detours = capable and "ROAD_DETOUR" in allowed and self._event_type() != "SIGNAL_FAULT"
+        # A signal fault holds up every approach to its junction, which the planner does not know of, and a
+        # pedestrian on the road is gone in moments: a shuttle keeps its route, holds or gets assistance
+        detours = capable and "ROAD_DETOUR" in allowed and self._event_type() not in NO_DETOUR_EVENTS
         road = self._road_preview(snapshot, vehicle_id) if detours else None
         baseline = road.original.model_dump(mode="json") if road is not None and road.original else None
         offered = []
@@ -507,7 +527,7 @@ class IncidentService:
             offered.append(action)
         options = {}
         for action in offered:
-            candidate_id = f"{incident.incident_id}-r{incident.aggregate_revision}-{vehicle_id}-{action.lower()}"
+            candidate_id = option_id(incident.incident_id, incident.aggregate_revision, vehicle_id, action)
             directed = []
             if action == "ROAD_DETOUR":
                 metrics = road.edited.model_dump(mode="json") if road.edited else None
@@ -1046,13 +1066,15 @@ class IncidentService:
         data["wall_response_time_s"] = (max(0.0, (datetime.fromisoformat(record["accepted_at_utc"]) -
                                                   datetime.fromisoformat(detected_at)).total_seconds())
                                         if detected_at else None)
-        # Attempts count per shuttle: its options' ids name it. An attempt at an option that names no shuttle
-        # (one never offered, or one from before per-shuttle options) counts for every shuttle.
-        markers = {v.vehicle_id: f"-{v.vehicle_id}-" for v in snapshot.vehicles}
+        # Attempts count per shuttle: its options' ids name it (option_vehicle). An attempt at an option that
+        # names no shuttle of this session (one never offered, or one from before per-shuttle options) counts
+        # for every shuttle.
+        fleet = {v.vehicle_id for v in snapshot.vehicles}
 
         def counts(attempt) -> bool:
             chosen = str((attempt["command"].get("payload") or {}).get("candidate_id", ""))
-            return markers[data["vehicle_id"]] in chosen or not any(m in chosen for m in markers.values())
+            named = option_vehicle(accepted.target_id, chosen)
+            return named == data["vehicle_id"] or named not in fleet
         mine = [a for a in attempts if counts(a)]
         attempt_count = next((index + 1 for index, attempt in enumerate(mine) if attempt["command_id"] == accepted.command_id),
                              len(mine) or 1)

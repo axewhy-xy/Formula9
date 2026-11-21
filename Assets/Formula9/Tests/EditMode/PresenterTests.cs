@@ -256,6 +256,82 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
+        // Function: ARunningSessionBehindRealTimeSaysSo
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A backend running the session below real time is named in the summary, with its
+        //     factor, only while the session runs and the backend answers.
+        [Test]
+        public void ARunningSessionBehindRealTimeSaysSo()
+        {
+            var s = WithStatus("RUNNING");
+            var behind = TrainingPresenter.SessionStatus(s, true, 0.62);
+            Assert.IsTrue(behind.Behind);
+            Assert.AreEqual("Session: session-001 · Connected · Backend behind (0.6x)", behind.Summary);
+            StringAssert.Contains("0.6x real time", behind.Tooltip);
+            Assert.IsFalse(TrainingPresenter.SessionStatus(s, true, 0.99).Behind);
+            Assert.IsFalse(TrainingPresenter.SessionStatus(s, true, null).Behind);
+            Assert.IsFalse(TrainingPresenter.SessionStatus(s, false, 0.5).Behind, "offline says so instead");
+            Assert.IsFalse(TrainingPresenter.SessionStatus(WithStatus("PAUSED"), true, 0.5).Behind);
+
+            var presenter = new SessionStatusPresenter();
+            var first = presenter.Present(s, true, 0.62);
+            Assert.AreSame(first.Summary, presenter.Present(s, true, 0.61).Summary, "the same factor shown is not redrawn");
+            StringAssert.Contains("(0.4x)", presenter.Present(s, true, 0.4).Summary);
+            Assert.AreEqual("Session: session-001 · Connected", presenter.Present(s, true, 1.0).Summary);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: PaceIsSimulatedOverWallTimeWhileRunning
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The real-time factor is known once the snapshots span a few seconds, and starts
+        //     over when the session stops running or changes epoch.
+        [Test]
+        public void PaceIsSimulatedOverWallTimeWhileRunning()
+        {
+            var pace = new BackendPace();
+            var s = WithStatus("RUNNING");
+            for (var second = 0; second <= 3; second++)
+            {
+                s.SimulationTimeS = 100 + 0.5 * second;
+                pace.Observe(s, 1000 + second);
+            }
+            Assert.IsNull(pace.Factor, "three seconds is too short to tell");
+            Assert.IsFalse(pace.Behind);
+            for (var second = 4; second <= 30; second++)
+            {
+                s.SimulationTimeS = 100 + 0.5 * second;
+                pace.Observe(s, 1000 + second);
+            }
+            Assert.AreEqual(0.5, pace.Factor.Value, 1e-9);
+            Assert.IsTrue(pace.Behind);
+            // Only the last WindowS count: it caught up
+            for (var second = 31; second <= 45; second++)
+            {
+                s.SimulationTimeS += 1;
+                pace.Observe(s, 1000 + second);
+            }
+            Assert.AreEqual(1.0, pace.Factor.Value, 1e-9);
+            Assert.IsFalse(pace.Behind);
+            // A stalled backend repeats its last snapshot: the slowest pace there is
+            for (var second = 46; second <= 60; second++) pace.Observe(s, 1000 + second);
+            Assert.AreEqual(0.0, pace.Factor.Value, 1e-9);
+
+            s.Session.Status = "PAUSED";
+            pace.Observe(s, 1061);
+            Assert.IsNull(pace.Factor);
+            s.Session.Status = "RUNNING";
+            pace.Observe(s, 1062);
+            s.SessionEpoch++;
+            s.SimulationTimeS += 10;
+            pace.Observe(s, 1070);
+            Assert.IsNull(pace.Factor, "a new epoch starts over");
+            pace.Observe(null, 1071);
+            Assert.IsNull(pace.Factor);
+        }
+
+        // -----------------------------------------------------------------------------------
         // Function: StartWaitsWhileAnAssignedRouteCrossesAnActiveClosure
         // -----------------------------------------------------------------------------------
         // Description:
@@ -415,7 +491,7 @@ namespace Formula9.Tests
         // -----------------------------------------------------------------------------------
         // Description:
         //     A world event that names no shuttle still shows on the cards of the shuttles it
-        //     will reach, with their ETAs, and on the Incident Monitor with who reaches it.
+        //     will reach, with their ETAs, and in its description with who reaches it.
         [Test]
         public void AShuttleShowsAnIncidentItWillReachAndWhen()
         {
@@ -425,36 +501,52 @@ namespace Formula9.Tests
             Assert.AreEqual("! Incident scheduled-collision-1 · Detected · reaches it in ~110 s", rows["shuttle-04"].Incident);
             Assert.IsNull(rows["shuttle-05"].Incident);
             var world = snapshot.Incidents.Single(i => i.IncidentId == "scheduled-collision-1");
-            var summary = TrainingPresenter.IncidentSummary(world, false);
+            var summary = TrainingPresenter.IncidentDescription(world);
             StringAssert.StartsWith("COLLISION on Lorong 6 Toa Payoh | DETECTED", summary);
             StringAssert.Contains("It belongs to no shuttle.", summary);
             StringAssert.Contains("Shuttles reaching it: shuttle-03 in ~85 s, shuttle-04 in ~110 s.", summary);
-            StringAssert.Contains("No shuttle reaches it before it clears.", TrainingPresenter.IncidentSummary(new Incident
+            StringAssert.Contains("No shuttle reaches it before it clears.", TrainingPresenter.IncidentDescription(new Incident
             {
                 IncidentId = "random-road_block-9", State = "DETECTED", VehicleId = "shuttle-01", CandidateIds = new List<string>(),
-            }, false));
+            }));
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: TheIncidentMonitorSaysWhatWasDecidedForEachShuttle
+        // Function: TheDescriptionSaysWhatWasDecidedForEachShuttle
         // -----------------------------------------------------------------------------------
         // Description:
         //     Each shuttle's decision is listed, a late one marked, and the options are named
         //     for people.
         [Test]
-        public void TheIncidentMonitorSaysWhatWasDecidedForEachShuttle()
+        public void TheDescriptionSaysWhatWasDecidedForEachShuttle()
         {
             var snapshot = (FullSnapshot)ContractParser.ParseMessage(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/incident_decisions_snapshot.json")));
             var incident = snapshot.Incidents.Single(i => i.IncidentId == "scheduled-collision-1");
             Assert.AreEqual("shuttle-03 request assistance", TrainingPresenter.Responses(incident));
-            var summary = TrainingPresenter.IncidentSummary(incident, true);
+            var summary = TrainingPresenter.IncidentDescription(incident);
             StringAssert.Contains("Decided: shuttle-03 request assistance.", summary);
-            StringAssert.Contains("Decide for each shuttle that will reach it", summary);
             incident.Responses.Add(new IncidentResponse { VehicleId = "shuttle-04", Action = "KEEP_ROUTE", DecidedTick = 230, BeforeArrival = false });
             Assert.AreEqual("shuttle-03 request assistance, shuttle-04 keep route (late)", TrainingPresenter.Responses(incident));
             Assert.IsNull(TrainingPresenter.Responses(new Incident { IncidentId = "none" }));
             Assert.AreEqual("Hold at stop", TrainingPresenter.ActionLabel("HOLD_AT_STOP"));
             Assert.AreEqual("Keep route", TrainingPresenter.ActionLabel("WAIT"));
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: TheReportsDescribeAnIncidentWithoutAskingForADecision
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The Reports page describes an incident and what was decided, but asks nothing of
+        //     the operator.
+        [Test]
+        public void TheReportsDescribeAnIncidentWithoutAskingForADecision()
+        {
+            var snapshot = (FullSnapshot)ContractParser.ParseMessage(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/incident_decisions_snapshot.json")));
+            var incident = snapshot.Incidents.Single(i => i.IncidentId == "scheduled-collision-1");
+            var description = TrainingPresenter.IncidentDescription(incident);
+            StringAssert.Contains("Decided: shuttle-03 request assistance.", description);
+            StringAssert.DoesNotContain("Decide for each shuttle", description);
+            StringAssert.DoesNotContain("No operator decision is required", description);
         }
 
         // -----------------------------------------------------------------------------------

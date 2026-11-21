@@ -2,7 +2,6 @@
     <ui:Template name="FleetOverview" src="project://database/Assets/Formula9/UI/Pages/FleetOverview.uxml" />
     <ui:Template name="RoutePlanning" src="project://database/Assets/Formula9/UI/Pages/RoutePlanning.uxml" />
     <ui:Template name="Charging" src="project://database/Assets/Formula9/UI/Pages/Charging.uxml" />
-    <ui:Template name="IncidentMonitor" src="project://database/Assets/Formula9/UI/Pages/IncidentMonitor.uxml" />
     <ui:Template name="Reports" src="project://database/Assets/Formula9/UI/Pages/Reports.uxml" />
     <ui:Template name="Scenarios" src="project://database/Assets/Formula9/UI/Pages/Scenarios.uxml" />
     <Style src="project://database/Assets/Formula9/UI/Formula9App.uss" />
@@ -20,26 +19,27 @@
             </ui:Button>
             <ui:VisualElement name="nav-items" class="nav-items">
                 <ui:Button name="nav-fleet" class="nav-item" tooltip="Fleet Overview"><f9:Glyph kind="Bus" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Fleet Overview" picking-mode="Ignore" /></ui:Button>
-                <ui:Button name="nav-route" class="nav-item" tooltip="Route Planning"><f9:Glyph kind="Pin" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Route Planning" picking-mode="Ignore" /></ui:Button>
-                <ui:Button name="nav-incident" class="nav-item" tooltip="Incident Monitor"><f9:Glyph kind="Warning" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Incident Monitor" picking-mode="Ignore" /></ui:Button>
+                <ui:Button name="nav-route" class="nav-item" tooltip="Route Planning"><f9:Glyph kind="Pin" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Route Planning" picking-mode="Ignore" /><ui:Label name="nav-route-badge" class="nav-badge" picking-mode="Ignore" style="display: none;" /></ui:Button>
                 <ui:Button name="nav-charging" class="nav-item" tooltip="Charging"><f9:Glyph kind="Plug" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Charging" picking-mode="Ignore" /></ui:Button>
+                <ui:Button name="nav-scenarios" class="nav-item" tooltip="Scenarios"><f9:Glyph kind="Info" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Scenarios" picking-mode="Ignore" /></ui:Button>
                 <ui:Button name="nav-reports" class="nav-item" tooltip="Reports"><f9:Glyph kind="Document" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Reports" picking-mode="Ignore" /></ui:Button>
+            </ui:VisualElement>
+            <!-- Who is signed in, the time, and leaving: at the bottom of the sidebar, in place of a top bar -->
+            <ui:VisualElement class="grow" />
+            <ui:VisualElement name="nav-footer" class="nav-footer">
+                <ui:VisualElement class="nav-user" tooltip="Signed in">
+                    <f9:Glyph kind="User" tint="#E6F2F2" class="nav-item-icon" />
+                    <ui:VisualElement class="nav-user-text">
+                        <ui:Label name="user" class="nav-user-name" />
+                        <ui:Label name="clock" class="nav-clock" />
+                    </ui:VisualElement>
+                </ui:VisualElement>
+                <ui:Button name="logout" class="nav-item" tooltip="Log out"><f9:Glyph kind="LogOut" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Log out" picking-mode="Ignore" /></ui:Button>
+                <ui:Button name="exit-app" class="nav-item" tooltip="Exit Formula 9 (Esc)"><f9:Glyph kind="Power" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Exit" picking-mode="Ignore" /></ui:Button>
             </ui:VisualElement>
         </ui:VisualElement>
 
         <ui:VisualElement class="training-body">
-            <ui:VisualElement class="top-bar">
-                <ui:Button name="section-operations" text="Operations" class="section-item" />
-                <ui:Button name="section-scenarios" text="Scenarios" class="section-item" />
-                <ui:Button name="section-reports" text="Reports" class="section-item" />
-                <ui:VisualElement class="grow" />
-                <f9:Glyph kind="User" tint="#1E2A2E" size="24" />
-                <ui:Label name="user" class="user" />
-                <ui:Label name="clock" class="user" />
-                <ui:Button name="logout" text="Log out" />
-                <ui:Button name="exit-app" text="Exit" tooltip="Exit Formula 9 (Esc)" />
-            </ui:VisualElement>
-
             <ui:VisualElement name="content-card" class="content-card">
                 <ui:VisualElement class="session-header">
                     <ui:VisualElement class="session-heading">
@@ -95,7 +95,6 @@
                     <ui:Button name="view-map" text="2D Map" class="segment" />
                     <ui:Button name="view-world" text="3D View" class="segment" />
                     <ui:Label name="world-notice" class="world-notice" />
-                    <ui:Button name="toggle-fleet" text="Fleet List" class="segment-round" />
                 </ui:VisualElement>
 
                 <ui:VisualElement class="body">
@@ -104,10 +103,11 @@
                         <ui:Instance template="FleetOverview" name="page-fleet" class="page-host" />
                         <ui:Instance template="RoutePlanning" name="page-route" class="page-host" style="display: none;" />
                         <ui:Instance template="Charging" name="page-charging" class="page-host" style="display: none;" />
-                        <ui:Instance template="IncidentMonitor" name="page-incident" class="page-host" style="display: none;" />
                         <ui:Instance template="Reports" name="page-reports" class="page-host" style="display: none;" />
                         <ui:Instance template="Scenarios" name="page-scenarios" class="page-host" style="display: none;" />
                     </ui:VisualElement>
+                    <!-- Incident notifications, over the map's top-right corner (NotificationStack places it) -->
+                    <ui:VisualElement name="notifications" class="notifications" picking-mode="Ignore" style="display: none;" />
                 </ui:VisualElement>
             </ui:VisualElement>
         </ui:VisualElement>

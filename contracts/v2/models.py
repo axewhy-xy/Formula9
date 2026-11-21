@@ -235,7 +235,7 @@ class Incident(WireModel):
     candidate_ids: list[Id]
     provenance: Provenance
     # The world event behind the incident. None in 2.x snapshots from before world events.
-    event_type: Literal["BREAKDOWN", "COLLISION", "SIGNAL_FAULT", "ROAD_CLOSURE"] | None = None
+    event_type: Literal["BREAKDOWN", "COLLISION", "SIGNAL_FAULT", "ROAD_CLOSURE", "PEDESTRIAN_ON_ROAD"] | None = None
     location: IncidentLocation | None = None
     # Shuttles that will reach the incident while it lasts, nearest first, and each one's distance and
     # ETA. Live data like a vehicle's position: it changes without a new aggregate_revision.

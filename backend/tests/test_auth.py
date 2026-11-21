@@ -131,6 +131,12 @@ def test_training_routes_accept_a_logged_in_user(client):
         def snapshot(self, session_id):
             raise TrainingStoreError("INVALID_REFERENCE", "no such session")
 
+        def published_snapshot_json(self, session_id):
+            return None
+
+        def snapshot_json(self, session_id):
+            raise TrainingStoreError("INVALID_REFERENCE", "no such session")
+
     app.dependency_overrides[get_training_store] = lambda: Store()
     token = sign_up(client)["token"]
     # Logged in: gets past the identity check to the (missing) session

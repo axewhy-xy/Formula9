@@ -6,6 +6,7 @@
         <ui:VisualElement class="tabs">
             <ui:Button name="reports-tab-log" text="Log (latest 1000)" class="tab-item" />
             <ui:Button name="reports-tab-commands" text="Commands (latest 200)" class="tab-item" />
+            <ui:Button name="reports-tab-incidents" text="Incidents" class="tab-item" />
         </ui:VisualElement>
         <ui:VisualElement name="reports-log-panel">
             <ui:VisualElement class="reports-filters">
@@ -26,6 +27,20 @@
             <ui:Label name="reports-command-count" class="reports-count" />
             <ui:Label name="reports-command-empty" class="reports-empty" />
             <ui:VisualElement name="ledger-table-host" />
+        </ui:VisualElement>
+        <ui:VisualElement name="reports-incidents-panel" style="display: none;">
+            <ui:Label text="Pick an incident in the list or the menu, then History to replay the simulation around it or Debrief for its assessment." class="reports-help" />
+            <ui:VisualElement name="reports-incident-table-host" />
+            <ui:DropdownField name="reports-incidents" label="Incident" />
+            <ui:Label name="reports-incident-summary" class="workspace-text" />
+            <ui:VisualElement class="row">
+                <ui:Button name="reports-incident-history" text="History" />
+                <ui:Button name="reports-incident-debrief" text="Debrief" />
+            </ui:VisualElement>
+            <ui:Label name="reports-evidence-status" class="workspace-text" />
+            <f9:FleetMap name="reports-evidence-map" class="route-map" style="display: none;" />
+            <ui:SliderInt name="reports-history-sample" label="History sample" low-value="0" high-value="0" style="display: none;" />
+            <ui:Label name="reports-incident-report" class="workspace-text" />
         </ui:VisualElement>
     </ui:ScrollView>
 </ui:UXML>

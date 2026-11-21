@@ -161,7 +161,7 @@ def prepare(output, phases):
                     write(output/(phase.lower()+"-seed.json"), seeds[phase])
 
                 preview = request(client, "POST", path+"/route-previews", json={
-                    "route_id": "route-m2-detour", "expected_route_revision": 1, "draft_revision": 1})
+                    "route_id": "route-peer-a", "expected_route_revision": 1, "draft_revision": 1})
                 approval = {"preview_id": preview["preview_id"], "preview_revision": preview["preview_revision"],
                     "command_id": uuid4().hex, "idempotency_key": "crash-route",
                     "target_vehicle_ids": ["shuttle-01"], "reason": "Authored crash drill bypass"}
@@ -237,7 +237,9 @@ def serve(database, output):
 
     def write_runtime(connection, sid, state):
         original_runtime(connection, sid, state)
-        if armed.get("fault") == "UNCOMMITTED_TICK" and state["tick"] > armed["tick"]:
+        # The store encodes a checkpoint before its writer takes it (training_store._EncodedRuntime)
+        tick = state["tick"] if isinstance(state, dict) else state.tick
+        if armed.get("fault") == "UNCOMMITTED_TICK" and tick > armed["tick"]:
             gate(transaction=connection)
 
     def apply(cid, *args, **kwargs):

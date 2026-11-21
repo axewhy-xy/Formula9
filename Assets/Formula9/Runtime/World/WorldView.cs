@@ -66,6 +66,10 @@ namespace Formula9.World
         private float yaw, pitch = 0.6f, distance = 90;
         private int dragButton = -1;
         private FleetMap map;
+        // The 3D view's Draft in 3D / road surface / Retry 3D row, in its bottom-left corner
+        private VisualElement worldActions;
+        // The column of camera thumbnails over the camera view's left edge
+        private VisualElement cameraRail;
         private bool preferMap;
         private CityClient cityClient;
         private CityView city;
@@ -99,6 +103,8 @@ namespace Formula9.World
         public event Action<DraftRoad, Vector2> RoadClicked;
         public event Action<int> WaypointClicked;
         public event Action ViewChanged;
+        // The shuttle cameras opened (true) or closed (false), whatever closed them
+        public event Action<bool> CamerasToggled;
 
         public bool Ready { get; private set; }
         public string Diagnostic { get; private set; } = "Join a training session to see its world.";
@@ -140,14 +146,14 @@ namespace Formula9.World
             hud.AddToClassList("world-hud");
             hud.style.display = DisplayStyle.None;
             surface.Add(hud);
-            var actions = new VisualElement(); actions.AddToClassList("world-actions");
-            actions.style.position = UnityEngine.UIElements.Position.Absolute; actions.style.left = 8; actions.style.bottom = 8;
-            drafting = new Toggle("Draft in 3D"); actions.Add(drafting);
-            surfaces = new DropdownField("Road surface / lane / deck"); actions.Add(surfaces);
+            worldActions = new VisualElement(); worldActions.AddToClassList("world-actions");
+            worldActions.style.position = UnityEngine.UIElements.Position.Absolute; worldActions.style.left = 8; worldActions.style.bottom = 8;
+            drafting = new Toggle("Draft in 3D"); worldActions.Add(drafting);
+            surfaces = new DropdownField("Road surface / lane / deck"); worldActions.Add(surfaces);
             surfaces.RegisterValueChangedCallback(_ => DrawDraft());
             drafting.RegisterValueChangedCallback(_ => DrawDraft());
-            actions.Add(new Button(Retry) { text = "Retry 3D" });
-            surface.Add(actions);
+            worldActions.Add(new Button(Retry) { text = "Retry 3D" });
+            surface.Add(worldActions);
             var cameraObject = new GameObject("World Camera");
             cameraObject.transform.SetParent(transform, false);
             viewCamera = cameraObject.AddComponent<Camera>();
@@ -162,7 +168,21 @@ namespace Formula9.World
             mainCameraLabel.AddToClassList("camera-label");
             mainCameraView.Add(mainCameraLabel);
             cameraPanel.Add(mainCameraView);
-            var strip = new VisualElement();
+            // The thumbnails sit in a rail over the large view's left edge, which the operator can fold
+            // away. Left, because incident notifications stack in the top-right corner.
+            var rail = new VisualElement { pickingMode = PickingMode.Ignore };
+            rail.AddToClassList("camera-rail");
+            cameraRail = rail;
+            var railToggle = new Button { text = "‹ Cameras", tooltip = "Show or hide the camera thumbnails" };
+            railToggle.AddToClassList("camera-rail-toggle");
+            railToggle.clicked += () =>
+            {
+                rail.ToggleInClassList("camera-rail-collapsed");
+                railToggle.text = rail.ClassListContains("camera-rail-collapsed") ? "Cameras ›" : "‹ Cameras";
+            };
+            rail.Add(railToggle);
+            // It scrolls, so on a short view (or above the Fleet List) every thumbnail stays reachable
+            var strip = new ScrollView(ScrollViewMode.Vertical);
             strip.AddToClassList("camera-strip");
             for (var i = 0; i < shuttleCameras.Cameras.Count; i++)
             {
@@ -177,7 +197,8 @@ namespace Formula9.World
                 strip.Add(tile);
                 cameraTiles.Add(tile);
             }
-            cameraPanel.Add(strip);
+            rail.Add(strip);
+            cameraPanel.Add(rail);
             cameraPanel.style.display = DisplayStyle.None;    // hidden until the button is pressed
             surface.Add(cameraPanel);
             SelectCamera(0);
@@ -858,7 +879,8 @@ namespace Formula9.World
         // Function: SelectEntity
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function selects an entity in both views and reports it.
+        //     This function selects an entity in both views and reports it. Open cameras stay on
+        //     the shuttle they are watching; PickShuttle is for the operator choosing another.
         //
         // Args:
         //     id (string): The entity ID, or null.
@@ -866,6 +888,22 @@ namespace Formula9.World
         {
             selectedId = id; map.SelectedId = id;
             EntitySelected?.Invoke(id);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: PickShuttle
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function selects the shuttle the operator picked. Open cameras move to it when
+        //     it is another shuttle in the 3D city; otherwise they stay as they are.
+        //
+        // Args:
+        //     id (string): The shuttle, or null.
+        public void PickShuttle(string id)
+        {
+            SelectEntity(id);
+            if (camerasShown && id != null && id != watchedId && city != null && city.TryGetShuttlePose(id, out _, out _))
+                ShowCameras(true);
         }
 
         // -----------------------------------------------------------------------------------
@@ -878,20 +916,15 @@ namespace Formula9.World
 
         private bool camerasShown;
         private string watchedId;
-        // Remembers whether the cameras were opened from the 2D map.
-        private bool camerasFromMap;
 
         // -----------------------------------------------------------------------------------
         // Function: OpenCameras
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function shows the selected shuttle's cameras in the 3D city, the way both
-        //     Cameras buttons open them. It remembers whether they were opened from the 2D map,
-        //     keeping the first answer when they are opened again for another route's shuttle.
+        //     Cameras buttons open them, leaving the 2D map if it is showing.
         public void OpenCameras()
         {
-            if (!CamerasShown)
-                camerasFromMap = ShowingMap;
             ShowMap(false);
             ShowCameras(true);
         }
@@ -900,21 +933,19 @@ namespace Formula9.World
         // Function: CloseCameras
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function closes the cameras and goes back to where they were opened from,
-        //     the 2D map or the 3D view. It is used by Hide cameras and when the watched
+        //     This function closes the cameras and always goes back to the 3D view, wherever
+        //     they were opened from. It is used by Hide cameras and when the watched
         //     shuttle leaves; Overview and the like use LeaveCameras, as they need the 3D view.
         public void CloseCameras()
         {
             ShowCameras(false);
-            if (camerasFromMap)
-                ShowMap(true);
         }
 
         // Whether the shuttle's cameras are shown in place of the 3D view, whether there is a
         // selected shuttle in the 3D city to watch, and whether this session has a 3D city at all.
         public bool CamerasShown => camerasShown;
-        // The shuttle whose cameras are shown, or null. It stays the same when another shuttle
-        // is selected, so the feed never switches without the operator asking for it.
+        // The shuttle whose cameras are shown, or null. Selecting another shuttle in the 3D city
+        // moves the cameras to it; clearing the selection keeps the shuttle being watched.
         public string WatchedId => camerasShown ? watchedId : null;
         public bool CanShowCameras => CityShown && city != null && city.TryGetShuttlePose(camerasShown ? watchedId : selectedId, out _, out _);
         public bool HasCity => latest != null && latest.Spatial == null && cityClient != null;
@@ -950,7 +981,30 @@ namespace Formula9.World
             else if (CityShown) viewCamera.enabled = true;
             if (show) SelectCamera(mainCamera);
             RefreshHint();
+            CamerasToggled?.Invoke(show);
         }
+
+        // -----------------------------------------------------------------------------------
+        // Function: SetBottomInset
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function lifts the controls along the view's bottom edge (the 2D map's buttons,
+        //     scale bar and credits, and the 3D view's Draft in 3D row) by this many points, and
+        //     ends the camera thumbnails' column above them, so a panel laid over the bottom of the
+        //     view, such as the Fleet List, hides none of them. 0 puts them back.
+        //
+        // Args:
+        //     points (float): How far the panel reaches up into the view.
+        public void SetBottomInset(float points)
+        {
+            points = Mathf.Max(0, points);
+            map?.SetBottomInset(points);
+            if (worldActions != null) worldActions.style.translate = new StyleTranslate(new Translate(0, -points));
+            if (cameraRail != null) cameraRail.style.bottom = RailBottomGap + points;
+        }
+
+        // The gap below the camera thumbnails' column, as in .camera-rail
+        private const float RailBottomGap = 10;
 
         // -----------------------------------------------------------------------------------
         // Function: SelectCamera
