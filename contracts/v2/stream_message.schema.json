@@ -1988,10 +1988,27 @@
     },
     "StreamTrafficShuttle": {
       "additionalProperties": true,
+      "description": "A shuttle's body in a traffic step. held_by (2.x, optional) says what the background traffic holds it\nup for when it does: a vehicle (\"traffic\") or the walkers on or waiting at a crossing on its way\n(\"pedestrians\"); a shuttle nothing in the traffic holds up has none.",
       "properties": {
         "heading_deg": {
           "title": "Heading Deg",
           "type": "number"
+        },
+        "held_by": {
+          "anyOf": [
+            {
+              "enum": [
+                "traffic",
+                "pedestrians"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Held By"
         },
         "speed_mps": {
           "title": "Speed Mps",

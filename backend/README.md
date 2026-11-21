@@ -21,6 +21,8 @@ Studio's "Desktop development with C++") are installed. Rebuild it after changin
 `backend/native/traffic/traffic_core.cpp` with `python Tools/build_native.py`. Without a current build the
 backend logs so and drives the same traffic in Python, about five times slower per session.
 `F9_NATIVE_TRAFFIC=0` forces Python; `=1` refuses to start sessions without the native engine.
+Both engines walk the area's pedestrians on its sidewalks (`fixtures/traffic/<area>-walkways.json`), and
+vehicles and shuttles give way to them at crossings; `F9_PEDESTRIANS=0` turns them off.
 Python 3.12+ is required; the existing lock targets Python 3.12. `--reload` watches
 backend source and contracts. The default map is `backend/fixtures/map/map.db`;
 the default session database is ignored `state/training.sqlite`. Environment variables

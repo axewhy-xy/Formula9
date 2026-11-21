@@ -153,7 +153,8 @@ async def traffic(session_id: str, after_tick: Annotated[int, Query(ge=-1)] = -1
     next, so a view that asks again at once hears of each frame as it is made. Each frame has its tick and
     simulation time; vehicle_count vehicles on the roads, base64 of 14 bytes each, little-endian (uint16
     index in /api/traffic/{area}'s vehicles, int32 x cm, int32 y cm, int16 heading in tenths of a degree
-    anticlockwise from east, uint16 speed cm/s); each shuttle's body: its middle, heading and speed; and
+    anticlockwise from east, uint16 speed cm/s); each shuttle's body: its middle, heading and speed, and
+    held_by when the traffic holds it up ("traffic" for a vehicle, "pedestrians" for walkers on a crossing); and
     signal_faults, each junction a signal fault has stuck on red ({junction_id, mode, until_s}). A world
     event's pinned vehicles are among the vehicles, standing still. With pedestrians (F9_PEDESTRIANS),
     pedestrian_count walkers, base64 of 14 bytes each, little-endian (uint16 index in the walkways file's

@@ -257,7 +257,10 @@ Each tick, `IntegratedSessionActor` does the following:
   current source, else Python (`F9_NATIVE_TRAFFIC`: `0` Python, `1` native or fail). The native engine
   lets go of the GIL while it steps the traffic and plans, places and checks the shuttles, so the
   sessions of one process (or one session worker) tick on several cores at once. A staged copy shares
-  the vehicles until one side steps, as the Python engine's does. Change the driving in both;
+  the vehicles until one side steps, as the Python engine's does. Both engines walk the pedestrians of
+  the area's walkways file in the same step (`walk_network.py`; off with `F9_PEDESTRIANS=0`), so
+  vehicles and shuttles give way to them at crossings and a shuttle held for them says so in the traffic
+  frame (`held_by: "pedestrians"`). Change the driving and the walking in both;
   `test_native_traffic.py` holds them to each other, and the traffic tests run on both engines.
 - **Energy:** charges travel and auxiliary energy with energy model `ENERGY_R1`. It also issues
   `CONTINUE` and `CHARGE_NOW` offers, runs scheduled charger bookings, and sends a shuttle back to a

@@ -121,17 +121,18 @@ def freeze_static_heap() -> None:
     network = road_network(SIGNAL_AREA)
     # And the walk network its pedestrians walk, when sessions walk them
     from src.traffic import walk_network
+    walks = None
     try:
         if walk_network.enabled():
-            walk_network.walk_network(SIGNAL_AREA)
+            walks = walk_network.walk_network(SIGNAL_AREA)
     except ValueError:
         pass  # A misconfigured switch is reported when a session starts its traffic
-    # And its native copy, when sessions drive the native traffic engine, so the first session does not
-    # build it (src.traffic.native_traffic)
+    # And their native copies, when sessions drive the native traffic engine, so the first session does not
+    # build them (src.traffic.native_traffic)
     from src.traffic import native_traffic
     try:
         if network is not None and native_traffic.engine() is native_traffic.NativeCityTraffic:
-            native_traffic.prepare(network)
+            native_traffic.prepare(network, walks)
     except (RuntimeError, ValueError):
         pass  # A misconfigured engine is reported when a session starts its traffic
     gc.collect()

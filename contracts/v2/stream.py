@@ -35,11 +35,15 @@ class StreamModel(BaseModel):
 
 
 class StreamTrafficShuttle(StreamModel):
+    """A shuttle's body in a traffic step. held_by (2.x, optional) says what the background traffic holds it
+    up for when it does: a vehicle ("traffic") or the walkers on or waiting at a crossing on its way
+    ("pedestrians"); a shuttle nothing in the traffic holds up has none."""
     vehicle_id: Id
     x_m: FiniteFloat
     y_m: FiniteFloat
     heading_deg: FiniteFloat
     speed_mps: FiniteFloat
+    held_by: Literal["traffic", "pedestrians"] | None = None
 
 
 class StreamSignalFault(StreamModel):

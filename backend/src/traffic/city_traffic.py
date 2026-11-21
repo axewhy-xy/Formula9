@@ -20,12 +20,12 @@ pins vehicles dead in their lane (pin_vehicle), and a signal fault sticks a junc
 and a shuttle meets the queue as any vehicle does. The usual jam release still applies, except to the
 pinned vehicles themselves, which stay until their event clears.
 
-With F9_PEDESTRIANS on, pedestrians walk in it too (phase 3 of sidewalks_plan.md): the walkers of the
+With F9_PEDESTRIANS on (the default), pedestrians walk in it too (sidewalks_plan.md): the walkers of the
 area's walkways file, on the walk network src.traffic.walk_network reads from it. They step off a kerb
 only when they may (on the red of the traffic they cross, over a zebra, or into a gap where they have no
 priority) and never in front of anything that could not stop for them; the vehicles and the shuttles stop
-for a crossing a walker is on, and at a zebra for one waiting if they comfortably can. Only this engine
-walks them so far; src.traffic.native_traffic drives in Python while they are on.
+for a crossing a walker is on, and at a zebra for one waiting if they comfortably can. The native engine
+(src.traffic.native_traffic) walks them exactly as this does.
 
 Everything is deterministic: the same session from the same state drives the same way, and state() and
 from_state() carry it through a checkpoint exactly. Unity's float arithmetic is not reproduced, so the
@@ -120,7 +120,8 @@ PINNED_PASS_MPS = 2.5
 FRAME_RECORD = struct.Struct("<HiihH")
 _INT32 = 2**31 - 1
 
-# ---- Pedestrians (src.traffic.walk_network), walked only while F9_PEDESTRIANS is on
+# ---- Pedestrians (src.traffic.walk_network), walked unless F9_PEDESTRIANS is 0; the native engine has
+# its own copy of each of these (native_traffic._python_constants checks them)
 # How a walker speeds up and slows down, and how far behind the one in front of it it keeps
 WALKER_ACCEL, WALKER_DECEL = 1.0, 4.0
 WALKER_GAP_M, WALKER_REACTION_S = 0.8, 1.0
@@ -444,12 +445,13 @@ class Shuttle:
 class ShuttlePlan:
     """What the road ahead of a shuttle allows it this step: the speed the traffic in its way allows
     (limit_mps) and how much further it may go before it would touch any of it (cap_m), whether that
-    traffic holds it up (held), and the speed the bends ahead allow (bend_mps)."""
+    traffic holds it up (held), and the speed the bends ahead allow (bend_mps). Of limit_mps, the speed the
+    crossings walkers are on or wait at allow is pedestrian_mps, so a shuttle held for them can say so."""
 
-    __slots__ = ("limit_mps", "cap_m", "held", "bend_mps")
+    __slots__ = ("limit_mps", "cap_m", "held", "bend_mps", "pedestrian_mps")
 
     def __init__(self):
-        self.limit_mps = self.cap_m = self.bend_mps = math.inf
+        self.limit_mps = self.cap_m = self.bend_mps = self.pedestrian_mps = math.inf
         self.held = False
 
 
@@ -1760,6 +1762,7 @@ class CityTraffic:
                     plan.held = True
                 plan.limit_mps = min(plan.limit_mps, limit)
                 plan.cap_m = min(plan.cap_m, max(0.0, gap))
+                plan.pedestrian_mps = min(plan.pedestrian_mps, limit)
 
     @staticmethod
     def _body_meets(shuttle: Shuttle, route: ShuttleRoute, along: float, crossing: Crossing) -> bool:

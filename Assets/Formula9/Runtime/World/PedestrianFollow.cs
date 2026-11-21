@@ -5,8 +5,8 @@ using UnityEngine;
 
 namespace Formula9.World
 {
-    // Drawing the pedestrians the backend walks (backend src/traffic/city_traffic.py, with F9_PEDESTRIANS
-    // on). The backend's traffic frames then carry every walker as well as every vehicle, and the vehicles
+    // Drawing the pedestrians the backend walks (backend src/traffic/city_traffic.py and its native engine,
+    // unless F9_PEDESTRIANS is 0). The backend's traffic frames then carry every walker as well as every vehicle, and the vehicles
     // there give way to them, so nothing walks here: walkers are drawn where the frames say, at the time the
     // traffic is drawn (CityTrafficRenderer.FollowedS, its TrafficPlaybackClock). A car is therefore never
     // drawn driving through someone the backend had it stop for.

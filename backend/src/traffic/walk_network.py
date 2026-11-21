@@ -16,8 +16,7 @@ A signalled crossing carries the junction and phase whose red lets people over. 
 not among the area's signals is left out, never left free to cross on any light, as the views do.
 
 Nothing here changes once built, so every session shares one network per area. Pedestrians are walked by
-CityTraffic (src.traffic.city_traffic) only while F9_PEDESTRIANS is on: phase 3 of sidewalks_plan.md,
-until the native traffic engine walks them too.
+both traffic engines (src.traffic.city_traffic, src.traffic.native_traffic) unless F9_PEDESTRIANS is 0.
 
 Points are planar metres, x east and y north, as in the prepared files.
 """
@@ -54,11 +53,11 @@ CELL_M = 40.0
 
 
 def enabled() -> bool:
-    """Whether sessions' background traffic walks pedestrians (F9_PEDESTRIANS, off unless 1)."""
-    value = os.environ.get(PEDESTRIANS_VARIABLE, "0").strip().lower()
-    if value in ("", "0", "off", "false", "no"):
+    """Whether sessions' background traffic walks pedestrians (F9_PEDESTRIANS, on unless 0)."""
+    value = os.environ.get(PEDESTRIANS_VARIABLE, "1").strip().lower()
+    if value in ("0", "off", "false", "no"):
         return False
-    if value in ("1", "on", "true", "yes"):
+    if value in ("", "1", "on", "true", "yes"):
         return True
     raise ValueError(f"{PEDESTRIANS_VARIABLE} must be 0 or 1, not {value!r}")
 

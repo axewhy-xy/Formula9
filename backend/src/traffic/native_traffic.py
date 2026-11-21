@@ -9,13 +9,14 @@ once.
 NativeCityTraffic has CityTraffic's interface. Its vehicles and shuttles are views of the native state:
 reading one reads the traffic as it is now, as CityTraffic's own objects would show.
 
+It walks CityTraffic's pedestrians too (F9_PEDESTRIANS, src.traffic.walk_network), on a native copy of
+the area's walk network made once and shared as the road network's is. Its walkers are views of the native
+state, as its vehicles are.
+
 engine() picks the class a new or recovered session uses. F9_NATIVE_TRAFFIC sets it:
     auto (default)  native when the module is built from the current source, else Python
     0               always Python
     1               native, or an error saying why it cannot be
-
-The native engine does not walk pedestrians yet (phase 4 of sidewalks_plan.md), so with F9_PEDESTRIANS on
-(src.traffic.walk_network) auto chooses Python, and 1 is an error.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from pathlib import Path
 from src.traffic import city_traffic, road_network as road_network_module, signal_cycle, walk_network
 from src.traffic.city_traffic import CityTraffic, ShuttlePlan, ShuttleRoute
 from src.traffic.road_network import Road, RoadNetwork, class_weight, road_network
+from src.traffic.walk_network import WalkNetwork
 
 try:
     from src.traffic import _traffic_native as _native
@@ -65,6 +67,18 @@ def _python_constants() -> dict:
         values[name] = getattr(road_network_module, name)
     for name in ("GREEN_S", "YELLOW_S", "ALL_RED_S", "PHASES"):
         values[name] = getattr(signal_cycle, name)
+    # The pedestrians
+    names = ("WALKER_ACCEL WALKER_DECEL WALKER_GAP_M WALKER_REACTION_S SUBLANE_M WALKWAY_EDGE_M WALKER_ASIDE_MPS "
+             "OVERTAKE_SLOWER_MPS OVERTAKE_NEAR_M OVERTAKE_CLEAR_M WALK_PLAN_M MAX_PLANNED_WALKWAYS PAUSE_CHANCE "
+             "PAUSE_MIN_S PAUSE_MAX_S CROSSINGS_DUE_MIN CROSSINGS_DUE_MAX TAKE_CROSSING_CHANCE KERB_WAIT_BACK_M DECIDE_M "
+             "CLEAR_OF_ROAD_M SIGNAL_SAFETY_BUFFER_S WALK_CLEAR_S WALKER_LOOK_M ZEBRA_COURTESY_S ZEBRA_RELEASE_S "
+             "KERB_GIVE_UP_S CROSSING_ENTERED_M CROSSING_HELD_M SHUTTLE_BODY_STEP_M RAMP_DEPTH_M WALKING WAITING_AT_KERB "
+             "ON_CROSSING PAUSED WAITING_FLAG ON_ROAD_FLAG RAMP_FLAG PAUSED_FLAG").split()
+    for name in names:
+        values[name] = getattr(city_traffic, name)
+    values["WALKER_CELL_M"] = city_traffic._CELL_M
+    for name in ("WALKER_HALF_M", "SIGNAL", "ZEBRA", "UNCONTROLLED"):
+        values[name] = getattr(walk_network, name)
     return values
 
 
@@ -114,9 +128,6 @@ def engine() -> type:
     global _reported
     choice = requested()
     usable, reason = status()
-    if walk_network.enabled():
-        # Only the Python engine walks pedestrians so far
-        usable, reason = False, f"{walk_network.PEDESTRIANS_VARIABLE}=1 and the native engine has no pedestrians yet"
     if choice == "native" and not usable:
         raise RuntimeError(f"{ENGINE_VARIABLE}=1 but the native traffic engine cannot run: {reason}")
     chosen = NativeCityTraffic if usable and choice != "python" else CityTraffic
@@ -155,11 +166,15 @@ def native_network(network: RoadNetwork):
     return built
 
 
-def prepare(network: RoadNetwork) -> None:
-    """Builds a network's native copy and its sample's starting places ahead of the first session on it."""
+def prepare(network: RoadNetwork, walks: WalkNetwork | None = None) -> None:
+    """Builds a network's native copy and its sample's starting places ahead of the first session on it, and
+    its walk network's and walkers' with pedestrians."""
     if supported(network):
         native_network(network)
         _seeds(network)
+        if walks is not None and walks.network is network:
+            native_walks(walks)
+            _walker_seeds(walks)
 
 
 def _build_network(network: RoadNetwork):
@@ -192,13 +207,60 @@ def _seeds(network: RoadNetwork) -> list[tuple]:
     return known
 
 
-def native_route(route: ShuttleRoute):
-    """A shuttle route's geometry, natively, made the first time the native engine drives on it."""
-    made = route.native
-    if made is None:
-        made = route.native = _native.make_route(route.points, route.along, float(route.length), bool(route.closed),
-                                                 [(float(a), float(d)) for a, d in route.bends], route.sig)
-    return made
+def native_walks(walks: WalkNetwork):
+    """The native copy of a walk network, made once and shared by every session on it."""
+    built = getattr(walks, "_native", None)
+    if built is not None:
+        return built
+    network = native_network(walks.network)
+    with _network_lock:
+        built = getattr(walks, "_native", None)
+        if built is None:
+            built = walks._native = _build_walks(walks, network)
+    return built
+
+
+def _build_walks(walks: WalkNetwork, network):
+    ways = [(way.index, -1 if way.crossing is None else way.crossing.index, [float(x) for x in way.xs],
+             [float(y) for y in way.ys], [float(a) for a in way.along], float(way.length), float(way.width), int(way.mine),
+             int(way.from_node), int(way.to_node), int(way.back), float(way.kerb_in), float(way.kerb_out), float(way.sx),
+             float(way.sy), float(way.ex), float(way.ey)) for way in walks.ways]
+    crossings = [(c.index, int(c.control), str(c.junction), int(c.offset), int(c.phase), float(c.cx), float(c.cy),
+                  float(c.dx), float(c.dy), float(c.half_length), float(c.half_width),
+                  [(int(road), float(at), float(band), float(slant)) for road, at, band, slant in c.roads])
+                 for c in walks.crossings]
+    exits = [[way.index for way in leaving] for leaving in walks.exits]
+    by_road = [[(float(at), c.index, float(band), float(slant)) for at, c, band, slant in entries]
+               for entries in walks.by_road]
+    return _native.make_walk_network(network, walks.source_hash, ways, crossings, exits, by_road)
+
+
+def _walker_seeds(walks: WalkNetwork) -> list[tuple]:
+    """The walkers as CityTraffic places them before they walk: worked out once per walk network."""
+    known = getattr(walks, "_native_walkers", None)
+    if known is None:
+        sample = CityTraffic(walks.network, walks)
+        for seed in walks.seeds:
+            sample._add_walker(seed)
+        known = walks._native_walkers = [
+            (int(w.seed), str(w.id), w.way.index, float(w.distance), int(w.sublane), float(w.aside), float(w.speed),
+             float(w.target), float(w.desired), int(w.state), float(w.wait_s), float(w.kerb_wait_s), int(w.rng),
+             int(w.crossings_due), int(w.granted), [way.index for way in w.ahead])
+            for w in sample.walkers]
+    return known
+
+
+def native_route(route: ShuttleRoute, walks: WalkNetwork | None = None):
+    """A shuttle route's geometry, natively, made the first time the native engine drives on it, with the
+    crossings it passes over on a walk network."""
+    known = route.native
+    if known is None or known[0] is not walks:
+        crossings = [] if walks is None else [(float(at), crossing.index, float(band))
+                                              for at, crossing, band in walks.route_crossings(route)]
+        made = _native.make_route(route.points, route.along, float(route.length), bool(route.closed),
+                                  [(float(a), float(d)) for a, d in route.bends], route.sig, crossings)
+        known = route.native = (walks, made)
+    return known[1]
 
 
 # ---------------------------------------------------------------- views of the native state
@@ -273,7 +335,7 @@ class NativeShuttle:
 
     def __setattr__(self, name, value):
         if name == "route":
-            self._traffic._core.shuttle_route_set(self.id, None if value is None else native_route(value))
+            self._traffic._core.shuttle_route_set(self.id, None if value is None else self._traffic._route(value))
             if value is None:
                 self._traffic._routes.pop(self.id, None)
             else:
@@ -287,6 +349,32 @@ class NativeShuttle:
         return f"NativeShuttle({self.id!r})"
 
 
+class NativeWalker:
+    """One walker of the native traffic, with city_traffic.Walker's attributes, read as it is now."""
+
+    __slots__ = ("_traffic", "slot")
+
+    def __init__(self, traffic: NativeCityTraffic, slot: int):
+        self._traffic, self.slot = traffic, slot
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        fields = self._traffic._core.walker(self.slot)
+        if name not in fields:
+            raise AttributeError(name)
+        value = fields[name]
+        ways = self._traffic.walks.ways
+        if name == "way":
+            return ways[value]
+        if name == "ahead":
+            return [ways[index] for index in value]
+        return value
+
+    def __repr__(self) -> str:
+        return f"NativeWalker({self.slot}, {self.id!r})"
+
+
 # ---------------------------------------------------------------- the traffic
 
 class NativeCityTraffic:
@@ -294,9 +382,12 @@ class NativeCityTraffic:
 
     ENGINE = "native"
 
-    def __init__(self, network: RoadNetwork, core):
+    def __init__(self, network: RoadNetwork, core, walks: WalkNetwork | None = None):
         self.network = network
         self._core = core
+        # The walk network its pedestrians walk, or None without pedestrians
+        self.walks = walks
+        self._walker_views: list[NativeWalker] | None = None
         # As CityTraffic's: route key -> (the waypoints it was made from, its geometry)
         self._shuttle_routes: dict[str, tuple] = {}
         # Each shuttle's route, as given, so a shuttle reads back the object it was placed on
@@ -307,28 +398,43 @@ class NativeCityTraffic:
     # ------------------------------------------------ building and copying
 
     @classmethod
-    def start(cls, area: str):
+    def start(cls, area: str, pedestrians: bool | None = None):
+        """As CityTraffic.start: with pedestrians (by default as F9_PEDESTRIANS says), they walk too."""
         network = road_network(area)
-        return None if network is None else cls.on(network)
+        if network is None:
+            return None
+        if pedestrians is None:
+            pedestrians = walk_network.enabled()
+        return cls.on(network, walk_network.walk_network(area) if pedestrians else None)
 
     @classmethod
-    def on(cls, network: RoadNetwork):
+    def on(cls, network: RoadNetwork, walks: WalkNetwork | None = None):
         if not supported(network):
             LOG.warning("Network %s has junctions the native traffic engine cannot number; driving it in Python",
                         network.area)
-            return CityTraffic.on(network)
-        core = _native.Traffic(native_network(network))
+            return CityTraffic.on(network, walks)
+        if walks is not None and walks.network is not network:
+            LOG.warning("Walk network %s is not on the road network it is driven with; driving it in Python", walks.area)
+            return CityTraffic.on(network, walks)
+        core = _native.Traffic(native_network(network), None if walks is None else native_walks(walks))
         for seed in _seeds(network):
             core.add_vehicle(*seed)
         core.pose_all()
-        return cls(network, core)
+        if walks is not None:
+            for seed in _walker_seeds(walks):
+                core.add_walker(*seed)
+        return cls(network, core, walks)
 
     @classmethod
-    def from_state(cls, state: dict, network: RoadNetwork | None = None):
-        """Traffic as state() left it (either engine's), checked as CityTraffic.from_state checks it."""
-        traffic = cls.on(network) if network is not None else cls.start(state["area"])
+    def from_state(cls, state: dict, network: RoadNetwork | None = None, walks: WalkNetwork | None = None):
+        """Traffic as state() left it (either engine's), checked as CityTraffic.from_state checks it: its
+        walkers too, if it walks any, from where their seeds place them for a checkpoint without them."""
+        traffic = cls.on(network, walks) if network is not None else \
+            cls.start(state["area"], pedestrians=True if "walkers" in state else None)
         if traffic is not None and not isinstance(traffic, NativeCityTraffic):
-            return CityTraffic.from_state(state, traffic.network)
+            return CityTraffic.from_state(state, traffic.network, traffic.walks)
+        if traffic is not None and traffic._core.walker_count() and "walkers" in state:
+            traffic._load_walkers(state)
         if traffic is None or len(state["vehicles"]) != len(traffic.vehicles):
             raise ValueError("Traffic checkpoint does not match the area's sample")
         roads = traffic.network.roads
@@ -366,6 +472,25 @@ class NativeCityTraffic:
         core.load_events(pins, faults)
         return traffic
 
+    def _load_walkers(self, state: dict) -> None:
+        items = state["walkers"]
+        if state.get("walk_source") != self.walks.source_hash or len(items) != self._core.walker_count():
+            raise ValueError("Traffic checkpoint's walkers do not match the area's walk network")
+        count = len(self.walks.ways)
+        walkers = []
+        for way, distance, sublane, aside, speed, walker_state, wait_s, kerb_wait_s, rng, due, granted, ahead in items:
+            if not all(type(index) is int and 0 <= index < count for index in (way, *ahead)):
+                raise IndexError("Traffic checkpoint names a walkway the walk network does not have")
+            walkers.append((way, float(distance), int(sublane), float(aside), float(speed), int(walker_state), float(wait_s),
+                            float(kerb_wait_s), int(rng), int(due), int(granted), list(ahead)))
+        occupied, claimed, waits, releases = state["crossings"]
+        crossings = len(self.walks.crossings)
+        if not all(type(index) is int and 0 <= index < crossings
+                   for index in [*occupied, *claimed, *(i for i, _ in waits), *(i for i, _ in releases)]):
+            raise ValueError("Traffic checkpoint names a crossing the walk network does not have")
+        self._core.load_walkers(walkers, list(occupied), list(claimed), [(i, float(s)) for i, s in waits],
+                                [(i, float(until)) for i, until in releases])
+
     def __deepcopy__(self, memo) -> NativeCityTraffic:
         """A staged session copies its actor every tick: the copy shares the vehicles until either steps
         (as CityTraffic's copy does), so taking one costs next to nothing."""
@@ -378,6 +503,8 @@ class NativeCityTraffic:
         copy._routes = dict(self._routes)
         copy._vehicle_views = None
         copy._shuttle_views = {}
+        copy.walks = self.walks
+        copy._walker_views = None
         memo[id(self)] = copy
         return copy
 
@@ -403,6 +530,33 @@ class NativeCityTraffic:
         if self._vehicle_views is None:
             self._vehicle_views = [NativeVehicle(self, slot) for slot in range(self._core.vehicle_count())]
         return self._vehicle_views
+
+    @property
+    def walkers(self) -> list[NativeWalker]:
+        if self._walker_views is None:
+            self._walker_views = [NativeWalker(self, slot) for slot in range(self._core.walker_count())]
+        return self._walker_views
+
+    @property
+    def _occupied(self) -> set[int]:
+        return set(self._core.crossing_sets()[0])
+
+    @property
+    def _claimed(self) -> set[int]:
+        return set(self._core.crossing_sets()[1])
+
+    @property
+    def crossing_waits(self) -> dict[int, float]:
+        return dict(self._core.crossing_sets()[2])
+
+    @property
+    def crossing_releases(self) -> dict[int, float]:
+        return dict(self._core.crossing_sets()[3])
+
+    def _fault(self, junction: str) -> float | None:
+        """As CityTraffic._fault: when a junction's fault clears, while its lights are stuck; else None."""
+        until = self.signal_faults.get(junction)
+        return until if until is not None and self.time_s < until else None
 
     @property
     def shuttles(self) -> dict[str, NativeShuttle]:
@@ -463,17 +617,21 @@ class NativeCityTraffic:
         self._core.shuttle(shuttle_id, float(half_length), float(half_width))
         return self._shuttle_view(shuttle_id)
 
+    def _route(self, route: ShuttleRoute):
+        return native_route(route, self.walks)
+
     def plan_shuttle(self, shuttle, route: ShuttleRoute, along: float, cruise: float) -> ShuttlePlan:
-        limit, cap, held, bend = self._core.plan_shuttle(shuttle.id, native_route(route), float(along), float(cruise))
+        limit, cap, held, bend, pedestrians = self._core.plan_shuttle(shuttle.id, self._route(route), float(along),
+                                                                      float(cruise))
         plan = ShuttlePlan()
-        plan.limit_mps, plan.cap_m, plan.held, plan.bend_mps = limit, cap, held, bend
+        plan.limit_mps, plan.cap_m, plan.held, plan.bend_mps, plan.pedestrian_mps = limit, cap, held, bend, pedestrians
         return plan
 
     def place_shuttle(self, shuttle, route: ShuttleRoute | None, along: float, speed: float, dt: float,
                       *, held_by_traffic: bool = False, held_by_light: bool = False, in_traffic: bool = False,
                       point: tuple[float, float] | None = None) -> None:
         px, py = (0.0, 0.0) if route is not None else point
-        self._core.place_shuttle(shuttle.id, None if route is None else native_route(route), float(along), float(speed),
+        self._core.place_shuttle(shuttle.id, None if route is None else self._route(route), float(along), float(speed),
                                  float(dt), bool(held_by_traffic), bool(held_by_light), bool(in_traffic), float(px), float(py))
         if route is None:
             self._routes.pop(shuttle.id, None)
@@ -481,7 +639,7 @@ class NativeCityTraffic:
             self._routes[shuttle.id] = route
 
     def body_blocker(self, shuttle, route: ShuttleRoute, along: float):
-        kind, index, peer = self._core.body_blocker(shuttle.id, native_route(route), float(along))
+        kind, index, peer = self._core.body_blocker(shuttle.id, self._route(route), float(along))
         if kind == 1:
             return self.vehicles[index]
         if kind == 2:
@@ -512,15 +670,33 @@ class NativeCityTraffic:
                                  "speed_mps": round(s["speed"], 3)})
         return packed, count, shuttles
 
-    @staticmethod
-    def pedestrian_frame() -> tuple[bytes, int]:
-        """No walkers: the native engine walks none yet."""
-        return b"", 0
+    def pedestrian_frame(self) -> tuple[bytes, int]:
+        """The walkers for the 3D view, packed as city_traffic.PED_RECORD after PED_RECORD, and how many."""
+        count = self._core.walker_count()
+        return (self._core.pedestrian_frame(), count) if count else (b"", 0)
 
     def report(self) -> dict:
         driving, outside, overlaps, red_light_runs, mean_speed = self._core.report()
-        return {"driving": driving, "outside": outside, "overlaps": overlaps, "red_light_runs": red_light_runs,
-                "mean_speed_mps": mean_speed, "shuttle_overlaps": self.shuttle_overlaps()}
+        report = {"driving": driving, "outside": outside, "overlaps": overlaps, "red_light_runs": red_light_runs,
+                  "mean_speed_mps": mean_speed, "shuttle_overlaps": self.shuttle_overlaps()}
+        if self._core.walker_count():
+            walking, waiting, crossing, mean_walk = self._core.walker_report()
+            report.update(walkers_walking=walking, walkers_waiting=waiting, walkers_crossing=crossing,
+                          walker_mean_speed_mps=mean_walk)
+            report["pedestrian_hits"], report["footpath_overlaps"] = self._walker_contacts()
+        return report
+
+    def pedestrian_hits(self) -> list[tuple[str, str]]:
+        """As CityTraffic.pedestrian_hits: each vehicle or shuttle touching a walker on a crossing's road part."""
+        return self._walker_contacts()[0]
+
+    def footpath_overlaps(self) -> list[tuple[str, str]]:
+        """As CityTraffic.footpath_overlaps."""
+        return self._walker_contacts()[1]
+
+    def _walker_contacts(self) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+        found, overhangs = self._core.walker_contacts()
+        return [tuple(pair) for pair in found], [tuple(pair) for pair in overhangs]
 
     def shuttle_overlaps(self) -> list[tuple[str, str]]:
         return [tuple(pair) for pair in self._core.shuttle_overlaps()]

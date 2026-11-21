@@ -405,6 +405,9 @@ class IntegratedSessionActor(SessionActor):
         self.domain = self.generate_snapshot()
         # How each shuttle was held this step, for the traffic around it; never outlives the step
         self.traffic_holds = {}
+        # What held each shuttle the traffic held at its last step, by vehicle id ("traffic" or "pedestrians"),
+        # for the 3D view to say why it stands (traffic_frame); presentation only, never checkpointed
+        self.hold_reasons = {}
         # The tick of the traffic's latest checkpoint; None before its first (see traffic_checkpoint)
         self.traffic_saved_tick = None
         if self.TRAFFIC:
@@ -1249,13 +1252,17 @@ class IntegratedSessionActor(SessionActor):
         end = max(progress, min(stop_at, progress+speed*self.STEP_S, progress+plan.cap_m))
         # Whatever the rules allow, a step that would put its body into another is cut short
         held = plan.held
+        blocked = False
         if end > progress+EPSILON and self.traffic.body_blocker(record, path, end) is not None:
-            held = True
+            held = blocked = True
             end = next((progress+(end-progress)*share for share in (0.5, 0.2)
                         if self.traffic.body_blocker(record, path, progress+(end-progress)*share) is None), progress)
         # A light far up the road is not what holds it up now
         near_light = light is not None and light-progress <= PLAN_AHEAD_M
-        self.traffic_holds[shuttle.ID] = (held, near_light, rules <= limit and rules < cruise)
+        # Held for the walkers on, or waiting at, a crossing on its way: they, not a vehicle or a light, are
+        # what holds it back most
+        by_pedestrians = held and not blocked and plan.pedestrian_mps < cruise and plan.pedestrian_mps <= rules
+        self.traffic_holds[shuttle.ID] = (held, near_light, rules <= limit and rules < cruise, by_pedestrians)
         return end
 
     def _traffic_shuttle(self, shuttle):
@@ -1363,14 +1370,19 @@ class IntegratedSessionActor(SessionActor):
         A shuttle held by the traffic, a light or another shuttle is in the traffic, so vehicles queue
         behind it; one standing at its stop or in a bay is passed.
         """
+        reasons = {}
         for shuttle in self.shuttles:
-            held_by_traffic, held_by_light, in_traffic = self.traffic_holds.get(shuttle.ID, (False, False, False))
+            held_by_traffic, held_by_light, in_traffic, held_by_pedestrians = \
+                self.traffic_holds.get(shuttle.ID, (False, False, False, False))
             route = self._routes[shuttle.route_ID]
             self.traffic.place_shuttle(self._traffic_shuttle(shuttle),
                                        self.traffic.shuttle_route(shuttle.route_ID, route["waypoints"]),
                                        shuttle.progress, moved.get(shuttle.ID, 0.0)/self.STEP_S, self.STEP_S,
                                        held_by_traffic=held_by_traffic, held_by_light=held_by_light,
                                        in_traffic=in_traffic or shuttle.ID in blocked)
+            if held_by_traffic:
+                reasons[self.domain.vehicles[shuttle.ID].vehicle_id] = "pedestrians" if held_by_pedestrians else "traffic"
+        self.hold_reasons = reasons
         self.traffic_holds = {}
 
     def traffic_frame(self):
@@ -1385,6 +1397,11 @@ class IntegratedSessionActor(SessionActor):
         if self.traffic is None:
             return None
         vehicles, count, shuttles = self.traffic.frame()
+        # Why a shuttle the traffic holds stands: a vehicle or the walkers on a crossing (held_by_pedestrians)
+        for shuttle in shuttles:
+            reason = self.hold_reasons.get(shuttle["vehicle_id"])
+            if reason is not None:
+                shuttle["held_by"] = reason
         # The junctions whose lights are stuck on red, so the 3D view draws them so
         faults = [{"junction_id": junction, "mode": signal_cycle.FAULT_MODE, "until_s": round(until, 3)}
                   for junction, until in sorted(self.traffic.signal_faults.items()) if until > self.timestamp_second]
@@ -2065,6 +2082,7 @@ class IntegratedSessionActor(SessionActor):
                 raise TrainingStoreError("CORRUPT_CHECKPOINT", "Traffic checkpoint is invalid") from error
         self.traffic_saved_tick = saved_tick if self.traffic is not None else None
         self.traffic_holds = {}
+        self.hold_reasons = {}
         self.domain = snapshot.model_copy(deep=True)
         if set(self.modes) != set(range(5)) or [s.ID for s in self.shuttles] != list(range(5)):
             raise TrainingStoreError("CORRUPT_CHECKPOINT", "Workflow roster is invalid")

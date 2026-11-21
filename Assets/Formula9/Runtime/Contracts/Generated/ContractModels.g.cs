@@ -1381,11 +1381,13 @@ namespace Formula9.Contracts
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
-    /// <summary>StreamTrafficShuttle from the shared v2 contract.</summary>
+    /// <summary>A shuttle's body in a traffic step. held_by (2.x, optional) says what the background traffic holds it</summary>
     public sealed partial class StreamTrafficShuttle
     {
         [JsonProperty("heading_deg", Required = Required.Always)]
         public double HeadingDeg { get; set; }
+        [JsonProperty("held_by", Required = Required.Default)]
+        public string HeldBy { get; set; }
         [JsonProperty("speed_mps", Required = Required.Always)]
         public double SpeedMps { get; set; }
         [JsonProperty("vehicle_id", Required = Required.Always)]

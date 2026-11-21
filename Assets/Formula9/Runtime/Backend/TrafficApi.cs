@@ -9,11 +9,16 @@ using Newtonsoft.Json.Linq;
 namespace Formula9.Backend
 {
     // A shuttle's body as the backend drives it through the traffic: its middle in local metres, the way
-    // it faces in degrees anticlockwise from east, and its speed.
+    // it faces in degrees anticlockwise from east, and its speed. HeldBy is what the traffic holds it up
+    // for when it does: HeldByTraffic (a vehicle) or HeldByPedestrians (walkers on or waiting at a
+    // crossing on its way); null when nothing does, or from a backend that does not say.
     public sealed class TrafficShuttlePose
     {
+        public const string HeldByTraffic = "traffic", HeldByPedestrians = "pedestrians";
+
         public string VehicleId;
         public double XM, YM, HeadingDeg, SpeedMps;
+        public string HeldBy;
     }
 
     // One step of the traffic the backend drives: the vehicles on the roads and the shuttles' bodies, at
@@ -259,6 +264,7 @@ namespace Formula9.Backend
                             YM = (double)shuttle["y_m"],
                             HeadingDeg = (double)shuttle["heading_deg"],
                             SpeedMps = (double)shuttle["speed_mps"],
+                            HeldBy = (string)shuttle["held_by"],
                         });
                     // A backend from before signal faults sends none
                     foreach (var fault in item["signal_faults"] as JArray ?? new JArray())

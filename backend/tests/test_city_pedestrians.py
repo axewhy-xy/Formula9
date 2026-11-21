@@ -1,6 +1,7 @@
 """
-Tests for the pedestrians the backend's traffic walks (phase 3 of sidewalks_plan.md): the walk network
-(backend/src/traffic/walk_network.py) and the walkers of CityTraffic (city_traffic.py).
+Tests for the pedestrians the backend's traffic walks (phases 3 and 4 of sidewalks_plan.md): the walk
+network (backend/src/traffic/walk_network.py) and the walkers of both traffic engines (city_traffic.py,
+native_traffic.py).
 
 Description:
     On small made-up roads and walkways: a walker steps off a signalled crossing only on the red of the
@@ -9,8 +10,10 @@ Description:
     long; a car turning into a road stops for a walker on a crossing there; and a shuttle stops short of
     an occupied crossing on its route. On the real Toa Payoh network: no vehicle or shuttle ever touches a
     walker, through signal faults and incidents too; the walkers survive a checkpoint and a staged copy
-    exactly; and the 3D view gets them in the traffic frames. The walkers are walked by the Python engine
-    only, so these run on it alone.
+    exactly; and the 3D view gets them in the traffic frames, with a shuttle the walkers hold up saying so.
+    Each runs on both engines (the native one where it is built), but for those that retune the walkers'
+    constants in Python, which the native engine has compiled in. test_native_traffic holds the two
+    engines' walkers to each other bit for bit.
 """
 
 import base64
@@ -25,11 +28,23 @@ from src.services.integrated_actor import IntegratedSessionActor
 from src.traffic import city_traffic, native_traffic, signal_cycle, walk_network
 from src.traffic.city_traffic import (ON_CROSSING, PED_RECORD, WAITING_AT_KERB, ZEBRA_COURTESY_S, ZEBRA_RELEASE_S,
                                       CityTraffic, ShuttleRoute, light)
+from src.traffic.native_traffic import NativeCityTraffic
 from src.traffic.road_network import RoadNetwork
 from src.traffic.walk_network import WalkNetwork
 
 MODELS = {"car": {"length_m": 4.5, "width_m": 1.8, "height_m": 1.5}}
 DT = 0.1
+
+
+@pytest.fixture(params=["python", "native"])
+def engine(request):
+    """The traffic class of each engine; the native one where it is built."""
+    if request.param == "native":
+        usable, reason = native_traffic.status()
+        if not usable:
+            pytest.skip(f"native traffic engine unavailable: {reason}")
+        return NativeCityTraffic
+    return CityTraffic
 
 
 def road(identifier, points, start, end, *, oneway=True, lanes=1, speed_kph=50):
@@ -71,9 +86,11 @@ def walks_on(network, nodes, ways, seeds, junctions=()):
     return WalkNetwork("test", data, network, junctions)
 
 
-def traffic_with(roads, cars, nodes, ways, seeds, junctions=()):
+def traffic_with(roads, cars, nodes, ways, seeds, junctions=(), engine=CityTraffic):
     network = RoadNetwork("test", {"models": MODELS, "vehicles": cars, "roads": roads}, tuple(junctions))
-    return CityTraffic.on(network, walks_on(network, nodes, ways, seeds, junctions))
+    traffic = engine.on(network, walks_on(network, nodes, ways, seeds, junctions))
+    assert type(traffic) is engine
+    return traffic
 
 
 def vehicle(traffic, identifier):
@@ -135,22 +152,23 @@ def test_a_signalled_crossing_without_its_light_is_left_out():
     assert len(with_light.crossings) == 1 and with_light.crossings[0].offset == 7
 
 
-def test_pedestrians_are_off_unless_switched_on(monkeypatch):
+def test_pedestrians_walk_unless_switched_off(monkeypatch, engine):
     monkeypatch.delenv(walk_network.PEDESTRIANS_VARIABLE, raising=False)
-    traffic = CityTraffic.start("toa-payoh")
+    assert len(engine.start("toa-payoh").walkers) == 600
+    monkeypatch.setenv(walk_network.PEDESTRIANS_VARIABLE, "0")
+    traffic = engine.start("toa-payoh")
     assert traffic.walkers == [] and "walkers" not in traffic.state()
     assert traffic.pedestrian_frame() == (b"", 0)
-    monkeypatch.setenv(walk_network.PEDESTRIANS_VARIABLE, "1")
-    assert len(CityTraffic.start("toa-payoh").walkers) == 600
+    monkeypatch.setenv(walk_network.PEDESTRIANS_VARIABLE, "sometimes")
+    with pytest.raises(ValueError):
+        engine.start("toa-payoh")
 
 
-def test_only_the_python_engine_walks_pedestrians(monkeypatch):
+def test_the_native_engine_walks_pedestrians_too(monkeypatch):
     monkeypatch.setenv(walk_network.PEDESTRIANS_VARIABLE, "1")
     monkeypatch.setenv(native_traffic.ENGINE_VARIABLE, "auto")
-    assert native_traffic.engine() is CityTraffic
-    monkeypatch.setenv(native_traffic.ENGINE_VARIABLE, "1")
-    with pytest.raises(RuntimeError, match=walk_network.PEDESTRIANS_VARIABLE):
-        native_traffic.engine()
+    expected = NativeCityTraffic if native_traffic.status()[0] else CityTraffic
+    assert native_traffic.engine() is expected
 
 
 # ---------------------------------------------------------------- crossing
@@ -176,12 +194,12 @@ def test_a_walker_steps_off_a_signalled_crossing_only_on_red_and_is_over_before_
     assert started >= 5
 
 
-def test_at_a_zebra_a_car_that_can_stop_gives_way_and_one_that_cannot_drives_on():
+def test_at_a_zebra_a_car_that_can_stop_gives_way_and_one_that_cannot_drives_on(engine):
     nodes, ways = crossing_at(300.0)
     # The near car's front is 8 m short of the crossing at 40 km/h, too close to stop; the far one 60 m.
     # A slow walker, so the far one comes before it is over
     traffic = traffic_with(EAST, [car("near", "east", 288.0, speed_kph=40), car("far", "east", 238.0, speed_kph=40)],
-                           nodes, ways, [(0, 0.0, 0.6)])
+                           nodes, ways, [(0, 0.0, 0.6)], engine=engine)
     start, end = band_of(traffic, "east|1")
     near, far, walker = vehicle(traffic, "near"), vehicle(traffic, "far"), traffic.walkers[0]
     near_slowest, far_stopped, crossed, waited = math.inf, False, False, False
@@ -226,12 +244,12 @@ def test_a_steady_stream_over_a_zebra_holds_a_car_only_so_long(always_crossing):
     assert 0 < longest <= ZEBRA_COURTESY_S + ZEBRA_RELEASE_S + clear_s + 1.0
 
 
-def test_a_car_turning_into_a_road_stops_for_a_walker_on_a_crossing_there():
+def test_a_car_turning_into_a_road_stops_for_a_walker_on_a_crossing_there(engine):
     roads = [road("north", [(310.0, -100.0), (310.0, 0.0)], 9, 1), road("east", [(310.0, 0.0), (600.0, 0.0)], 1, 2),
              road("on", [(600.0, 0.0), (900.0, 0.0)], 2, 3)]
     nodes, ways = crossing_at(320.0)
     # A slow walker, so the car comes before it is over
-    traffic = traffic_with(roads, [car("car", "north", 40.0, speed_kph=40)], nodes, ways, [(0, 0.0, 0.5)])
+    traffic = traffic_with(roads, [car("car", "north", 40.0, speed_kph=40)], nodes, ways, [(0, 0.0, 0.5)], engine=engine)
     start, _ = band_of(traffic, "east|1")
     turning, walker = vehicle(traffic, "car"), traffic.walkers[0]
     stood = False
@@ -245,9 +263,9 @@ def test_a_car_turning_into_a_road_stops_for_a_walker_on_a_crossing_there():
     assert turning.road.road_id != "north"
 
 
-def test_a_shuttle_stops_short_of_a_crossing_a_walker_is_on():
+def test_a_shuttle_stops_short_of_a_crossing_a_walker_is_on(engine):
     nodes, ways = crossing_at(300.0)
-    traffic = traffic_with(EAST, [], nodes, ways, [(0, 0.0, 1.0)])
+    traffic = traffic_with(EAST, [], nodes, ways, [(0, 0.0, 1.0)], engine=engine)
     traffic.step(DT, DT)
     assert traffic.walkers[0].state == ON_CROSSING
     start, _ = band_of(traffic, "east|1")
@@ -257,6 +275,8 @@ def test_a_shuttle_stops_short_of_a_crossing_a_walker_is_on():
     plan = traffic.plan_shuttle(shuttle, route, 280.0, 10.0)
     assert plan.held and plan.cap_m == pytest.approx(start - 6.0 - city_traffic.STOP_MARGIN_M - 280.0)
     assert plan.limit_mps < 8.0
+    # The walker is what holds it up, and the plan says so
+    assert plan.pedestrian_mps == plan.limit_mps
     # At the place it stops it may go no further, and no faster than standing
     stop_at = start - 6.0 - city_traffic.STOP_MARGIN_M
     shuttle.speed = 0.0
@@ -266,8 +286,8 @@ def test_a_shuttle_stops_short_of_a_crossing_a_walker_is_on():
 
 # ---------------------------------------------------------------- the whole area
 
-def test_on_toa_payoh_walkers_cross_signals_only_on_red_and_nothing_touches_them():
-    traffic = CityTraffic.start("toa-payoh", pedestrians=True)
+def test_on_toa_payoh_walkers_cross_signals_only_on_red_and_nothing_touches_them(engine):
+    traffic = engine.start("toa-payoh", pedestrians=True)
     junction = next(c.junction for c in traffic.walks.crossings if c.control == walk_network.SIGNAL)
     # A fault sticks one junction's lights on red: its crossings become crossings without priority
     traffic.set_signal_fault(junction, 60.0)
@@ -292,12 +312,12 @@ def test_on_toa_payoh_walkers_cross_signals_only_on_red_and_nothing_touches_them
     assert 0.8 < report["walker_mean_speed_mps"] < 1.6
 
 
-def test_walkers_survive_a_checkpoint_and_a_staged_copy_exactly():
-    traffic = CityTraffic.start("toa-payoh", pedestrians=True)
+def test_walkers_survive_a_checkpoint_and_a_staged_copy_exactly(engine):
+    traffic = engine.start("toa-payoh", pedestrians=True)
     for i in range(100):
         traffic.step(DT, (i + 1) * DT)
     state = json.dumps(traffic.state())
-    restored = CityTraffic.from_state(json.loads(state))
+    restored = engine.from_state(json.loads(state))
     assert json.dumps(restored.state()) == state
     copy = deepcopy(traffic)
     for i in range(100, 200):
@@ -309,21 +329,27 @@ def test_walkers_survive_a_checkpoint_and_a_staged_copy_exactly():
     assert restored.state() == traffic.state() == copy.state()
 
 
-def test_a_checkpoint_from_before_pedestrians_starts_them_from_their_seeds():
-    without = CityTraffic.start("toa-payoh", pedestrians=False)
+def test_a_checkpoint_from_before_pedestrians_starts_them_from_their_seeds(engine):
+    without = engine.start("toa-payoh", pedestrians=False)
     without.step(DT, DT)
-    restored = CityTraffic.from_state(without.state(), without.network, walk_network.walk_network("toa-payoh"))
-    fresh = CityTraffic.start("toa-payoh", pedestrians=True)
+    restored = engine.from_state(without.state(), without.network, walk_network.walk_network("toa-payoh"))
+    fresh = engine.start("toa-payoh", pedestrians=True)
     assert restored.state()["walkers"] == fresh.state()["walkers"]
     # One whose walkers do not match the network is not trusted
-    state = fresh.state()
-    state["walkers"] = state["walkers"][:-1]
-    with pytest.raises(ValueError):
-        CityTraffic.from_state(state, fresh.network, fresh.walks)
+    for damage in ("count", "source", "crossing"):
+        state = fresh.state()
+        if damage == "count":
+            state["walkers"] = state["walkers"][:-1]
+        elif damage == "source":
+            state["walk_source"] = "another"
+        else:
+            state["crossings"][0] = [len(fresh.walks.crossings)]
+        with pytest.raises(ValueError):
+            engine.from_state(state, fresh.network, fresh.walks)
 
 
-def test_packed_walkers_are_where_the_traffic_has_them():
-    traffic = CityTraffic.start("toa-payoh", pedestrians=True)
+def test_packed_walkers_are_where_the_traffic_has_them(engine):
+    traffic = engine.start("toa-payoh", pedestrians=True)
     for i in range(50):
         traffic.step(DT, (i + 1) * DT)
     packed, count = traffic.pedestrian_frame()
@@ -340,18 +366,21 @@ def test_packed_walkers_are_where_the_traffic_has_them():
 # ---------------------------------------------------------------- the live session
 
 @pytest.mark.traffic
-def test_a_session_with_pedestrians_sends_them_and_never_runs_one_over(monkeypatch):
+def test_a_session_with_pedestrians_sends_them_and_never_runs_one_over(monkeypatch, engine):
     monkeypatch.setenv(walk_network.PEDESTRIANS_VARIABLE, "1")
+    monkeypatch.setenv(native_traffic.ENGINE_VARIABLE, "1" if engine is NativeCityTraffic else "0")
     actor = IntegratedSessionActor(0, session_id="pedestrian-test")
-    assert isinstance(actor.traffic, CityTraffic) and len(actor.traffic.walkers) == 600
+    assert type(actor.traffic) is engine and len(actor.traffic.walkers) == 600
     actor.is_paused = False
     actor.modes = {s.ID: "IN_SERVICE" for s in actor.shuttles}
     # A signal fault on the junctions of the first few signalled crossings, as a world event would
     for junction in sorted({c.junction for c in actor.traffic.walks.crossings if c.control == walk_network.SIGNAL})[:5]:
         actor.traffic.set_signal_fault(junction, 120.0)
-    frames = 0
+    frames, held_for_walkers = 0, 0
     for tick in range(6000):  # Five minutes
         actor.tick()
+        # Shuttles stop for the walkers at the crossings on their routes, and say so
+        held_for_walkers += sum(1 for reason in actor.hold_reasons.values() if reason == "pedestrians")
         if tick % 10 == 0:
             # A shuttle's 4.6 m body reaches over the kerb from a kerb lane, and a long truck's round a
             # bend, over a walker on the footpath now and then: the rectangles' shape, counted apart
@@ -365,7 +394,12 @@ def test_a_session_with_pedestrians_sends_them_and_never_runs_one_over(monkeypat
             StreamTrafficFrame.model_validate(frame)
             packed = base64.b64decode(frame["pedestrians"])
             assert frame["pedestrian_count"] == 600 and len(packed) == 600 * PED_RECORD.size
+            # A shuttle the traffic holds says what for, as the actor last placed it
+            assert {s["vehicle_id"]: s["held_by"] for s in frame["shuttles"] if "held_by" in s} == actor.hold_reasons
             frames += 1
     assert frames > 0
+    assert held_for_walkers > 0, "a shuttle stopped for the walkers on a crossing on its route"
+    report = actor.traffic.report()
+    assert report["red_light_runs"] == 0 and report["overlaps"] == 0 and report["pedestrian_hits"] == []
     moved = sum(1 for w, seed in zip(actor.traffic.walkers, actor.traffic.walks.seeds) if w.way is not seed[2])
     assert moved > 300, "the walkers walk"

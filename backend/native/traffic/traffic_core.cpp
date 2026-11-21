@@ -11,6 +11,10 @@
 // C library's (math.hypot, float %, float ** 2, sum, math.atan2's special cases). Change the driving in
 // city_traffic.py and here together.
 //
+// The pedestrians are city_traffic.py's walkers in the same way: they walk the area's walk network (a
+// WalkNet, shared and never changed, as a Network is) in the same step as the vehicles, decide at the kerb
+// from the traffic as it stood at the step's start, and the vehicles and shuttles give way to them.
+//
 // What a session calls every tick (step, plan_shuttle, place_shuttle, body_blocker) runs without the GIL,
 // so several sessions in one process tick on several cores at once. Everything a Traffic holds belongs to
 // the one session that owns it; the only state shared between sessions is a Network, which never changes
@@ -37,6 +41,7 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -94,6 +99,34 @@ constexpr double CELL_M = 40.0, MATCH_M = 5.0;
 constexpr int GREEN_S = 30, YELLOW_S = 3, ALL_RED_S = 2, PHASES = 2;
 constexpr int PHASE_S = GREEN_S + YELLOW_S + ALL_RED_S, CYCLE_S = PHASES * PHASE_S;
 constexpr int AMBER_S = GREEN_S + YELLOW_S;
+
+// Pedestrians (city_traffic.py's walkers, on walk_network.py's walk network)
+constexpr double WALKER_ACCEL = 1.0, WALKER_DECEL = 4.0;
+constexpr double WALKER_GAP_M = 0.8, WALKER_REACTION_S = 1.0;
+constexpr double SUBLANE_M = 0.75, WALKWAY_EDGE_M = 0.2, WALKER_ASIDE_MPS = 0.6;
+constexpr double OVERTAKE_SLOWER_MPS = 0.2, OVERTAKE_NEAR_M = 3.0, OVERTAKE_CLEAR_M = 2.0;
+constexpr double WALK_PLAN_M = 15.0;
+constexpr int MAX_PLANNED_WALKWAYS = 3;
+constexpr double PAUSE_CHANCE = 0.04, PAUSE_MIN_S = 0.8, PAUSE_MAX_S = 3.4;
+constexpr int CROSSINGS_DUE_MIN = 4, CROSSINGS_DUE_MAX = 12;
+constexpr double TAKE_CROSSING_CHANCE = 0.6;
+constexpr double KERB_WAIT_BACK_M = 0.6, DECIDE_M = 0.5, CLEAR_OF_ROAD_M = 1.0;
+constexpr double SIGNAL_SAFETY_BUFFER_S = 0.45;
+constexpr double WALK_CLEAR_S = 1.0;
+constexpr double WALKER_LOOK_M = 60.0;
+constexpr double ZEBRA_COURTESY_S = 8.0, ZEBRA_RELEASE_S = 4.0;
+constexpr double KERB_GIVE_UP_S = 120.0;
+constexpr double CROSSING_ENTERED_M = 1.0;
+constexpr double CROSSING_HELD_M = 5.0;
+constexpr double SHUTTLE_BODY_STEP_M = 0.5;
+constexpr double RAMP_DEPTH_M = 1.5;
+constexpr int WALKING = 0, WAITING_AT_KERB = 1, ON_CROSSING = 2, PAUSED = 3;
+constexpr int WAITING_FLAG = 1, ON_ROAD_FLAG = 2, RAMP_FLAG = 4, PAUSED_FLAG = 8;
+// city_traffic._CELL_M: the grid the walkers find vehicles near them by
+constexpr double WALKER_CELL_M = 20.0;
+// walk_network: half a walker's body, and how a crossing is controlled
+constexpr double WALKER_HALF_M = 0.25;
+constexpr int SIGNAL = 0, ZEBRA = 1, UNCONTROLLED = 2;
 
 // ---------------------------------------------------------------- CPython's float arithmetic
 
@@ -468,7 +501,88 @@ private:
     mutable std::unordered_map<std::pair<Movement, Movement>, bool, ConflictKeyHash, ConflictKeyEq> conflicts_;
 };
 
+// ---------------------------------------------------------------- the walk network (walk_network.py)
+
+// walk_network._unit: zero for a direction too short to have one
+Vec2 walk_unit(double x, double y) {
+    double length = py_hypot(x, y);
+    if (length > 1e-9) return {x / length, y / length};
+    return {0.0, 0.0};
+}
+
+// One way along one walkway (walk_network.Walkway)
+struct Way {
+    int index = 0;
+    int crossing = -1;  // the crossing it walks over, or -1
+    std::vector<double> xs, ys, along;
+    double length = 0.0, width = 1.5;
+    int mine = 1, from_node = 0, to_node = 0, back = -1;
+    double kerb_in = 0.0, kerb_out = 0.0, sx = 0.0, sy = 0.0, ex = 0.0, ey = 0.0;
+    // Each segment's direction as sample works it out, worked out once (index i: points i to i + 1)
+    std::vector<Vec2> tangents;
+
+    void prepare() {
+        tangents.clear();
+        for (size_t i = 1; i < xs.size(); ++i) {
+            Vec2 tangent = walk_unit(xs[i] - xs[i - 1], ys[i] - ys[i - 1]);
+            if (tangent.x == 0.0 && tangent.y == 0.0) tangent = {sx, sy};
+            tangents.push_back(tangent);
+        }
+    }
+
+    Pose sample(double distance, double left) const {
+        double d = std::min(std::max(distance, 0.0), length);
+        size_t index = 1, last = along.size() - 1;
+        while (index < last && along[index] < d) ++index;
+        double ax = xs[index - 1], ay = ys[index - 1], bx = xs[index], by = ys[index];
+        double segment = along[index] - along[index - 1];
+        double t = segment > 1e-9 ? (d - along[index - 1]) / segment : 0.0;
+        Vec2 tangent = tangents[index - 1];
+        return {ax + (bx - ax) * t - tangent.y * left, ay + (by - ay) * t + tangent.x * left, tangent.x, tangent.y};
+    }
+};
+
+// A road a crossing cuts: how far along it, the band either side and the slant (walk_network.Crossing.roads)
+struct CrossingRoad {
+    int road;
+    double at, band, slant;
+};
+
+// A crossing as the traffic sees it (walk_network.Crossing)
+struct WalkCrossing {
+    int index = 0, control = UNCONTROLLED;
+    std::string junction;
+    int offset = 0, phase = 0;
+    double cx = 0.0, cy = 0.0, dx = 0.0, dy = 0.0, half_length = 0.0, half_width = 0.0;
+    std::vector<CrossingRoad> roads;
+};
+
+// A crossing along a road (walk_network.WalkNetwork.by_road)
+struct RoadCrossing {
+    double at;
+    int crossing;
+    double band, slant;
+};
+
+// An area's walk network, shared by every session on it and never changed
+class WalkNet {
+public:
+    std::string source_hash;
+    std::vector<Way> ways;
+    std::vector<WalkCrossing> crossings;
+    std::vector<std::vector<int>> exits;              // by walk node: the ways leaving it
+    std::vector<std::vector<RoadCrossing>> by_road;   // by road index
+    std::vector<std::vector<int>> arriving;           // by dense road node: the roads ending there, in road order
+};
+
 // ---------------------------------------------------------------- a shuttle's route
+
+// A crossing a shuttle route passes over (walk_network.WalkNetwork.route_crossings)
+struct RouteCrossing {
+    double at;
+    int crossing;
+    double band;
+};
 
 class Route {
 public:
@@ -478,6 +592,7 @@ public:
     bool closed = false;
     std::vector<std::pair<double, double>> bends;
     std::string sig;
+    std::vector<RouteCrossing> crossings;
 
     Vec2 point(double at) const {
         if (length <= 0) return points[0];
@@ -628,7 +743,115 @@ struct Shuttle {
 struct Plan {
     double limit_mps = INF, cap_m = INF, bend_mps = INF;
     bool held = false;
+    // The speed the crossings walkers are on or wait at allow, of limit_mps
+    double pedestrian_mps = INF;
 };
+
+// A walker's planned walkways, kept in the walker (never more than MAX_PLANNED_WALKWAYS are planned), so
+// a staged copy of the walkers is one flat copy
+struct Ahead {
+    static constexpr int CAPACITY = 4;
+    int items[CAPACITY] = {0, 0, 0, 0};
+    int n = 0;
+
+    bool empty() const { return n == 0; }
+    size_t size() const { return static_cast<size_t>(n); }
+    int front() const { return items[0]; }
+    int back() const { return items[n - 1]; }
+    int operator[](size_t i) const { return items[i]; }
+    const int* begin() const { return items; }
+    const int* end() const { return items + n; }
+    void clear() { n = 0; }
+    void push_back(int way) {
+        if (n == CAPACITY) throw std::invalid_argument("a walker plans more walkways than the traffic walks");
+        items[n++] = way;
+    }
+    void pop_front() {
+        for (int i = 1; i < n; ++i) items[i - 1] = items[i];
+        --n;
+    }
+    std::vector<int> to_vector() const { return std::vector<int>(begin(), end()); }
+};
+static_assert(Ahead::CAPACITY > MAX_PLANNED_WALKWAYS, "room for every walkway a walker plans");
+
+// One pedestrian (city_traffic.Walker)
+struct Walker {
+    int slot = 0, seed = 0;
+    uint32_t rng = 1;
+    int way = 0;
+    double distance = 0.0;
+    int sublane = 0;
+    double aside = 0.0, speed = 0.0, target = 0.0, desired = 0.0;
+    int state = WALKING;
+    double wait_s = 0.0, kerb_wait_s = 0.0;
+    int crossings_due = 0, granted = -1;
+    Ahead ahead;
+    int lane_index = 0;
+    double x = 0.0, y = 0.0, fx = 0.0, fy = 0.0;
+};
+static_assert(std::is_trivially_copyable<Walker>::value, "the walkers copy flat");
+
+// The walkers, which a staged copy shares until either steps them (city_traffic's _own_walkers)
+struct Crowd {
+    std::vector<Walker> walkers;
+};
+
+// A set of crossing indices, as one of city_traffic's sets of them: members, and the order they came in
+struct IndexSet {
+    std::vector<char> flag;
+    std::vector<int> items;
+
+    void reset(size_t count) {
+        flag.assign(count, 0);
+        items.clear();
+    }
+    bool has(int index) const { return index >= 0 && static_cast<size_t>(index) < flag.size() && flag[index]; }
+    void add(int index) {
+        if (!flag[index]) {
+            flag[index] = 1;
+            items.push_back(index);
+        }
+    }
+    void clear() {
+        for (int index : items) flag[index] = 0;
+        items.clear();
+    }
+    bool empty() const { return items.empty(); }
+    std::vector<int> sorted() const {
+        std::vector<int> out = items;
+        std::sort(out.begin(), out.end());
+        return out;
+    }
+};
+
+// Crossing index -> seconds, kept in the order a Python dict keeps its keys
+struct Timed {
+    std::vector<std::pair<int, double>> items;
+
+    int find(int index) const {
+        for (size_t i = 0; i < items.size(); ++i)
+            if (items[i].first == index) return static_cast<int>(i);
+        return -1;
+    }
+    bool has(int index) const { return find(index) >= 0; }
+    // Assigning a key it has keeps its place; a new one goes last
+    void set(int index, double value) {
+        int at = find(index);
+        if (at >= 0)
+            items[at].second = value;
+        else
+            items.emplace_back(index, value);
+    }
+    void erase(int index) {
+        int at = find(index);
+        if (at >= 0) items.erase(items.begin() + at);
+    }
+    bool empty() const { return items.empty(); }
+};
+
+// Vehicles by the 20 m cell they are in (city_traffic._cells), each cell's in the vehicles' order
+using Cells = std::unordered_map<std::pair<int64_t, int64_t>, std::vector<int>, PairHash>;
+using IdPairs = std::vector<std::pair<std::string, std::string>>;
 
 struct Span {
     double start, end;
@@ -674,11 +897,20 @@ struct Blocker {
 
 class Traffic {
 public:
-    explicit Traffic(std::shared_ptr<const Network> network)
-        : net_(std::move(network)), sample_(std::make_shared<Sample>()), fleet_(std::make_shared<Fleet>()) {
+    explicit Traffic(std::shared_ptr<const Network> network, std::shared_ptr<const WalkNet> walks = nullptr)
+        : net_(std::move(network)),
+          sample_(std::make_shared<Sample>()),
+          fleet_(std::make_shared<Fleet>()),
+          walks_(std::move(walks)),
+          crowd_(std::make_shared<Crowd>()),
+          walker_ids_(std::make_shared<std::vector<std::string>>()) {
         fleet_->claims_by_node.resize(net_->node_ids.size());
         hazards_ = empty_hazards();
         fault_until_.assign(net_->junctions.size(), std::numeric_limits<double>::quiet_NaN());
+        size_t crossings = walks_ ? walks_->crossings.size() : 0;
+        occupied_.reset(crossings);
+        claimed_.reset(crossings);
+        held_.reset(crossings);
     }
 
     // ------------------------------------------------ building and copying
@@ -701,6 +933,7 @@ public:
         vehicle.lane = lane;
         vehicle.distance = distance;
         vehicle.speed = speed;
+        reach_m_ = std::max(reach_m_, std::hypot(half, half_width));
         fleet_->vehicles.push_back(std::move(vehicle));
         auto sample = std::const_pointer_cast<Sample>(sample_);
         sample->ids.push_back(id);
@@ -713,11 +946,42 @@ public:
         for (Vehicle& vehicle : fleet_->vehicles) pose(vehicle);
     }
 
-    // A staged session's copy: it shares the vehicles until either changes them (city_traffic's
-    // __deepcopy__ and _own_vehicles)
+    // A walker where CityTraffic._add_walker put it (worked out on the Python side): its seed index and id,
+    // and its state as a checkpoint has it
+    void add_walker(int seed, const std::string& id, int way, double distance, int sublane, double aside, double speed, double target,
+                    double desired, int state, double wait_s, double kerb_wait_s, uint32_t rng, int crossings_due, int granted,
+                    const std::vector<int>& ahead) {
+        if (!walks_) throw std::invalid_argument("traffic without a walk network walks no one");
+        own_walkers();
+        if (walker_ids_.use_count() > 1) walker_ids_ = std::make_shared<std::vector<std::string>>(*walker_ids_);
+        Walker w;
+        w.slot = static_cast<int>(crowd_->walkers.size());
+        w.seed = seed;
+        w.way = way_checked(way);
+        w.distance = distance;
+        w.sublane = sublane;
+        w.aside = aside;
+        w.speed = speed;
+        w.target = target;
+        w.desired = desired;
+        w.state = state;
+        w.wait_s = wait_s;
+        w.kerb_wait_s = kerb_wait_s;
+        w.rng = rng;
+        w.crossings_due = crossings_due;
+        w.granted = granted;
+        for (int next : ahead) w.ahead.push_back(way_checked(next));
+        pose_walker(w);
+        crowd_->walkers.push_back(std::move(w));
+        std::const_pointer_cast<std::vector<std::string>>(walker_ids_)->push_back(id);
+    }
+
+    // A staged session's copy: it shares the vehicles and the walkers until either changes them
+    // (city_traffic's __deepcopy__, _own_vehicles and _own_walkers)
     std::unique_ptr<Traffic> copy() {
         auto twin = std::unique_ptr<Traffic>(new Traffic(*this));
         owns_ = twin->owns_ = false;
+        owns_walkers_ = twin->owns_walkers_ = false;
         return twin;
     }
 
@@ -866,6 +1130,14 @@ public:
             if (v.outside || (caught(v) && !pinned_[v.slot])) enter(v);
         clear_shuttle_jams();
         fill_lanes();
+        bool walking = has_walkers();
+        if (walking) {
+            // Walkers at a kerb decide from the traffic as it stands before anything moves this step
+            own_walkers();
+            cells_valid_ = false;
+            fill_walkways();
+            walkers_decide();
+        }
         for (Vehicle& v : vehicles) {
             if (v.outside || pinned_[v.slot]) continue;
             release_claims(v);
@@ -875,6 +1147,10 @@ public:
         answer_junctions(dt);
         for (Vehicle& v : vehicles)
             if (!v.outside) v.target_speed = pinned_[v.slot] ? 0.0 : safe_speed(v);
+        if (walking) {
+            count_crossing_waits(dt);
+            walker_speeds();
+        }
         for (Vehicle& v : vehicles) {
             if (v.outside) continue;
             if (pinned_[v.slot]) {
@@ -885,6 +1161,13 @@ public:
         }
         bodies_.clear();
         for (Vehicle& v : vehicles) pose(v);
+        if (walking) {
+            for (Walker& w : crowd_->walkers) {
+                move_walker(w, dt);
+                pose_walker(w);
+            }
+            cells_valid_ = false;
+        }
     }
 
     // ------------------------------------------------ shuttles
@@ -927,6 +1210,7 @@ public:
         shuttle.gives_way_to.clear();
         double look = std::max(SHUTTLE_LOOK_M, speed * speed / (2 * COMFORT_BRAKE) + speed * REACTION_S + CLAIM_MARGIN_M);
         if (!route.closed) look = std::min(look, route.length - along);
+        if (has_walkers() && (!occupied_.empty() || !claimed_.empty())) shuttle_crossings(shuttle, route, along, look, cruise, plan);
         look_.clear();
         double d = 0.0;
         while (true) {
@@ -1189,7 +1473,147 @@ public:
         return found;
     }
 
+    // The walkers, packed as city_traffic.PED_RECORD after PED_RECORD
+    std::string pedestrian_frame() const {
+        std::string packed;
+        const auto& walkers = crowd_->walkers;
+        packed.reserve(walkers.size() * 14);
+        for (const Walker& w : walkers) {
+            uint16_t seed = static_cast<uint16_t>(w.seed);
+            int32_t x = static_cast<int32_t>(clamp_int32(std::nearbyint(w.x * 100)));
+            int32_t y = static_cast<int32_t>(clamp_int32(std::nearbyint(w.y * 100)));
+            int16_t heading = static_cast<int16_t>(std::nearbyint(RAD_TO_DEG * py_atan2(w.fy, w.fx) * 10));
+            uint8_t speed = static_cast<uint8_t>(std::min(std::nearbyint(w.speed * 50), 255.0));
+            uint8_t flags = static_cast<uint8_t>(walker_flags(w));
+            char record[14];
+            std::memcpy(record, &seed, 2);
+            std::memcpy(record + 2, &x, 4);
+            std::memcpy(record + 6, &y, 4);
+            std::memcpy(record + 10, &heading, 2);
+            std::memcpy(record + 12, &speed, 1);
+            std::memcpy(record + 13, &flags, 1);
+            packed.append(record, 14);
+        }
+        return packed;
+    }
+
+    // How many walkers walk (or stand a while), wait at a kerb and cross, and their mean speed
+    std::tuple<int, int, int, double> walker_report() const {
+        int walking = 0, waiting = 0, crossing = 0;
+        std::vector<double> speeds;
+        for (const Walker& w : crowd_->walkers) {
+            if (w.state == WALKING || w.state == PAUSED) ++walking;
+            else if (w.state == WAITING_AT_KERB) ++waiting;
+            else if (w.state == ON_CROSSING) ++crossing;
+            speeds.push_back(w.speed);
+        }
+        double mean = speeds.empty() ? 0.0 : py_sum(speeds) / static_cast<double>(speeds.size());
+        return {walking, waiting, crossing, mean};
+    }
+
+    // Each vehicle or shuttle touching a walker on a crossing's road part, and each reaching over one
+    // elsewhere, by (its id, the walker's id): city_traffic._walker_contacts
+    std::pair<IdPairs, IdPairs> walker_contacts() const {
+        IdPairs found, overhangs;
+        if (!has_walkers()) return {found, overhangs};
+        Cells cells;
+        fill_cells(cells);
+        std::vector<const Shuttle*> shuttles;
+        for (const Shuttle& s : shuttles_)
+            if (s.placed) shuttles.push_back(&s);
+        std::unordered_map<int, Pose> bodies;
+        const auto& vehicles = fleet_->vehicles;
+        const auto& ids = *walker_ids_;
+        for (const Walker& w : crowd_->walkers) {
+            bool on_road = (walker_flags(w) & ON_ROAD_FLAG) != 0;
+            for_near(cells, w.x, w.y, 12.0, [&](int slot) {
+                const Vehicle& v = vehicles[slot];
+                if (!overlap(w.x, w.y, w.fx, w.fy, WALKER_HALF_M, WALKER_HALF_M, v.x, v.y, v.fx, v.fy, v.half + 2.0, v.half_width))
+                    return false;
+                auto known = bodies.find(slot);
+                if (known == bodies.end()) known = bodies.emplace(slot, path_body(v)).first;
+                const Pose& body = known->second;
+                if (overlap(w.x, w.y, w.fx, w.fy, WALKER_HALF_M, WALKER_HALF_M, body.x, body.y, body.fx, body.fy, v.half, v.half_width))
+                    (on_road ? found : overhangs).emplace_back(sample_->ids[slot], ids[w.slot]);
+                return false;
+            });
+            for (const Shuttle* s : shuttles) {
+                if (std::fabs(s->x - w.x) < 30 && std::fabs(s->y - w.y) < 30 &&
+                    overlap(w.x, w.y, w.fx, w.fy, WALKER_HALF_M, WALKER_HALF_M, s->x, s->y, s->fx, s->fy, s->half_length, s->half_width))
+                    (on_road ? found : overhangs).emplace_back(s->id, ids[w.slot]);
+            }
+        }
+        return {found, overhangs};
+    }
+
     // ------------------------------------------------ for the Python side
+
+    bool has_walks() const { return walks_ != nullptr; }
+    const WalkNet& walks() const { return *walks_; }
+    const std::vector<Walker>& walkers() const { return crowd_->walkers; }
+    const std::vector<std::string>& walker_ids() const { return *walker_ids_; }
+    const IndexSet& occupied() const { return occupied_; }
+    const IndexSet& claimed() const { return claimed_; }
+    const Timed& crossing_waits() const { return waits_; }
+    const Timed& crossing_releases() const { return releases_; }
+
+    const Walker& walker_checked(int slot) const {
+        if (slot < 0 || static_cast<size_t>(slot) >= crowd_->walkers.size()) throw nb::index_error();
+        return crowd_->walkers[slot];
+    }
+
+    int way_checked(int way) const {
+        if (!walks_ || way < 0 || static_cast<size_t>(way) >= walks_->ways.size()) throw nb::index_error("no such walkway");
+        return way;
+    }
+
+    // A checkpoint's walkers, already read and checked by the Python side: as (way, distance, sublane,
+    // aside, speed, state, wait_s, kerb_wait_s, rng, crossings_due, granted, ahead), in the seeds' order;
+    // then the crossings walkers are on and wait at, and the zebras' waits and releases
+    using WalkerState = std::tuple<int, double, int, double, double, int, double, double, uint32_t, int, int, std::vector<int>>;
+
+    void load_walkers(const std::vector<WalkerState>& walkers, const std::vector<int>& occupied, const std::vector<int>& claimed,
+                      const std::vector<std::pair<int, double>>& waits, const std::vector<std::pair<int, double>>& releases) {
+        own_walkers();
+        if (walkers.size() != crowd_->walkers.size())
+            throw std::invalid_argument("Traffic checkpoint's walkers do not match the area's walk network");
+        int count = static_cast<int>(walks_->crossings.size());
+        auto check = [&](int index) {
+            if (index < 0 || index >= count) throw std::invalid_argument("Traffic checkpoint names a crossing the walk network does not have");
+            return index;
+        };
+        for (int index : occupied) check(index);
+        for (int index : claimed) check(index);
+        for (const auto& item : waits) check(item.first);
+        for (const auto& item : releases) check(item.first);
+        for (size_t i = 0; i < walkers.size(); ++i) {
+            const auto& [way, distance, sublane, aside, speed, state, wait_s, kerb_wait_s, rng, due, granted, ahead] = walkers[i];
+            Walker& w = crowd_->walkers[i];
+            w.way = way_checked(way);
+            w.distance = distance;
+            w.sublane = sublane;
+            w.aside = aside;
+            w.speed = speed;
+            w.target = speed;
+            w.state = state;
+            w.wait_s = wait_s;
+            w.kerb_wait_s = kerb_wait_s;
+            w.rng = rng;
+            w.crossings_due = due;
+            w.granted = granted;
+            w.ahead.clear();
+            for (int next : ahead) w.ahead.push_back(way_checked(next));
+            pose_walker(w);
+        }
+        occupied_.clear();
+        claimed_.clear();
+        for (int index : occupied) occupied_.add(index);
+        for (int index : claimed) claimed_.add(index);
+        waits_.items.clear();
+        releases_.items.clear();
+        for (const auto& [index, s] : waits) waits_.set(index, s);
+        for (const auto& [index, until] : releases) releases_.set(index, until);
+    }
 
     const Network& network() const { return *net_; }
     const std::vector<Vehicle>& vehicles() const { return fleet_->vehicles; }
@@ -1291,7 +1715,25 @@ private:
           pins_(other.pins_),
           pinned_(other.pinned_),
           faults_(other.faults_),
-          fault_until_(other.fault_until_) {}
+          fault_until_(other.fault_until_),
+          walks_(other.walks_),
+          crowd_(other.crowd_),
+          walker_ids_(other.walker_ids_),
+          owns_walkers_(false),
+          occupied_(other.occupied_),
+          claimed_(other.claimed_),
+          waits_(other.waits_),
+          releases_(other.releases_) {
+        held_.reset(walks_ ? walks_->crossings.size() : 0);
+    }
+
+    bool has_walkers() const { return walks_ && !crowd_->walkers.empty(); }
+
+    void own_walkers() {
+        if (owns_walkers_) return;
+        crowd_ = std::make_shared<Crowd>(*crowd_);
+        owns_walkers_ = true;
+    }
 
     std::shared_ptr<const Hazards> empty_hazards() const {
         auto hazards = std::make_shared<Hazards>();
@@ -1642,6 +2084,7 @@ private:
         double half = v.half;
         int road = v.road, lane = v.lane;
         double road_start = -v.distance;
+        bool walking = has_walkers();
         size_t i = 0;
         while (true) {
             const Road& here = roads[road];
@@ -1660,6 +2103,10 @@ private:
             for (const Stop& stop : here.stops)
                 if (must_stop(stop, road_start + stop.at - half, speed))
                     limit = std::min(limit, krauss(speed, road_start + stop.at - half - STOP_MARGIN_M, 0.0));
+            if (walking) {
+                const std::vector<RoadCrossing>& crossings = walks_->by_road[road];
+                if (!crossings.empty()) limit = crossing_limit(crossings, road_start, half, v.half_width, speed, limit);
+            }
             if (i >= v.ahead.size()) break;
             int next = v.ahead[i];
             double to_node = road_start + here.length;
@@ -1958,6 +2405,584 @@ private:
         return false;
     }
 
+    // ------------------------------------------------ pedestrians (city_traffic.py's, step for step)
+
+    // A vehicle's limit for the crossings along a road ahead of it (city_traffic._crossing_limit)
+    double crossing_limit(const std::vector<RoadCrossing>& crossings, double road_start, double half, double half_width, double speed,
+                          double limit) {
+        if (occupied_.empty() && claimed_.empty()) return limit;
+        for (const RoadCrossing& c : crossings) {
+            double front_gap = road_start + c.at - c.band - half - half_width * c.slant;
+            if (front_gap < -CROSSING_ENTERED_M) continue;
+            if (front_gap > PLAN_AHEAD_M) break;
+            int index = c.crossing;
+            double gap = front_gap - STOP_MARGIN_M;
+            if (occupied_.has(index) || (claimed_.has(index) && speed * speed <= 2 * COMFORT_BRAKE * gap)) {
+                limit = std::min(limit, krauss(speed, gap, 0.0));
+                if (speed < STOPPED_MPS && front_gap < CROSSING_HELD_M) held_.add(index);
+            }
+        }
+        return limit;
+    }
+
+    // A shuttle gives way at the crossings on its route as the vehicles do (city_traffic._shuttle_crossings)
+    void shuttle_crossings(const Shuttle& shuttle, const Route& route, double along, double look, double cruise, Plan& plan) const {
+        double speed = shuttle.speed;
+        int count = static_cast<int>(walks_->crossings.size());
+        for (const RouteCrossing& rc : route.crossings) {
+            int index = rc.crossing;
+            if (index < 0 || index >= count) continue;
+            if (!occupied_.has(index) && !claimed_.has(index)) continue;
+            const WalkCrossing& crossing = walks_->crossings[index];
+            double front_gap = route.ahead(rc.at, along) - rc.band - shuttle.half_length;
+            if (front_gap < -CROSSING_ENTERED_M || front_gap > look + shuttle.half_length) continue;
+            double gap = std::max(0.0, front_gap - STOP_MARGIN_M);
+            while (gap > 0 && body_meets(shuttle, route, along + gap, crossing)) gap = std::max(0.0, gap - SHUTTLE_BODY_STEP_M);
+            if (gap == 0 && body_meets(shuttle, route, along, crossing)) {
+                // Already over it: on through one a walker waits at, but never on into one a walker is on
+                if (!occupied_.has(index)) continue;
+            }
+            if (occupied_.has(index) || speed * speed <= 2 * COMFORT_BRAKE * gap) {
+                double limit = krauss(speed, gap, 0.0);
+                if (limit < cruise) plan.held = true;
+                plan.limit_mps = std::min(plan.limit_mps, limit);
+                plan.cap_m = std::min(plan.cap_m, std::max(0.0, gap));
+                plan.pedestrian_mps = std::min(plan.pedestrian_mps, limit);
+            }
+        }
+    }
+
+    static bool body_meets(const Shuttle& shuttle, const Route& route, double along, const WalkCrossing& crossing) {
+        Pose at = route.body(along, shuttle.aside, shuttle.half_length);
+        return overlap(crossing.cx, crossing.cy, crossing.dx, crossing.dy, crossing.half_length, crossing.half_width + STOP_MARGIN_M, at.x,
+                       at.y, at.fx, at.fy, shuttle.half_length, shuttle.half_width);
+    }
+
+    static double walker_aside(const Way& way, int sublane) {
+        int lane = std::min(std::max(sublane, 0), way.mine - 1);
+        return std::min(SUBLANE_M * (0.5 + lane), std::max(0.0, way.width / 2 - WALKWAY_EDGE_M));
+    }
+
+    void plan_walk(Walker& w) {
+        const auto& ways = walks_->ways;
+        double reach = ways[w.way].length - w.distance;
+        for (int way : w.ahead) reach += ways[way].length;
+        while (w.ahead.empty() || (reach < WALK_PLAN_M && static_cast<int>(w.ahead.size()) < MAX_PLANNED_WALKWAYS)) {
+            int next = choose_next_way(w, w.ahead.empty() ? w.way : w.ahead.back());
+            if (next < 0) break;
+            w.ahead.push_back(next);
+            reach += ways[next].length;
+        }
+    }
+
+    // The walkway a walker takes on from the end of another (city_traffic._choose_next_way)
+    int choose_next_way(Walker& w, int origin_index) {
+        const auto& ways = walks_->ways;
+        const Way& origin = ways[origin_index];
+        const std::vector<int>& exits = walks_->exits[origin.to_node];
+        std::vector<int> options;
+        for (int way : exits)
+            if (way != origin.back) options.push_back(way);
+        if (options.empty()) options = exits;
+        std::vector<int> walk, cross;
+        for (int way : options) (ways[way].crossing < 0 ? walk : cross).push_back(way);
+        w.rng = rng_step(w.rng);
+        const std::vector<int>* pool;
+        if (!cross.empty() && w.crossings_due <= 0 && (walk.empty() || random01(w.rng) < TAKE_CROSSING_CHANCE))
+            pool = &cross;
+        else
+            pool = !walk.empty() ? &walk : &cross;
+        if (pool->empty()) return -1;
+        int pick = (*pool)[0];
+        if (pool->size() > 1) {
+            std::vector<double> weights;
+            for (int way : *pool)
+                weights.push_back(lerp(0.3, 1.0, inverse_lerp(180.0, 0.0, angle_deg(origin.ex, origin.ey, ways[way].sx, ways[way].sy))));
+            w.rng = rng_step(w.rng);
+            double left = random01(w.rng) * py_sum(weights);
+            pick = pool->back();
+            for (size_t i = 0; i < pool->size(); ++i) {
+                left -= weights[i];
+                if (left <= 0) {
+                    pick = (*pool)[i];
+                    break;
+                }
+            }
+        }
+        if (ways[pick].crossing >= 0) {
+            w.rng = rng_step(w.rng);
+            w.crossings_due = CROSSINGS_DUE_MIN + static_cast<int>(random01(w.rng) * (CROSSINGS_DUE_MAX - CROSSINGS_DUE_MIN));
+        } else if (w.crossings_due > 0) {
+            w.crossings_due -= 1;
+        }
+        return pick;
+    }
+
+    // Each walkway's walkers in each sub-lane, back to front: city_traffic._fill_walkways's buckets, by
+    // way * 8 + sub-lane, as spans of one array
+    void fill_walkways() {
+        for (int key : lane_keys_) lane_count_[key] = 0;
+        lane_keys_.clear();
+        auto& walkers = crowd_->walkers;
+        for (const Walker& w : walkers) {
+            size_t key = static_cast<size_t>(w.way) * 8 + static_cast<size_t>(w.sublane);
+            if (lane_count_.size() <= key) {
+                size_t size = std::max(key + 1, walks_->ways.size() * 8);
+                lane_count_.resize(size, 0);
+                lane_start_.resize(size, 0);
+            }
+            if (lane_count_[key]++ == 0) lane_keys_.push_back(static_cast<int>(key));
+        }
+        // Each span's end, then filled from the back: the order within a span is the sort's
+        int at = 0;
+        for (int key : lane_keys_) {
+            at += lane_count_[key];
+            lane_start_[key] = at;
+        }
+        lane_slots_.resize(walkers.size());
+        for (const Walker& w : walkers) lane_slots_[--lane_start_[static_cast<size_t>(w.way) * 8 + static_cast<size_t>(w.sublane)]] = w.slot;
+        for (int key : lane_keys_) {
+            int* first = lane_slots_.data() + lane_start_[key];
+            int* last = first + lane_count_[key];
+            if (last - first > 1)
+                std::sort(first, last, [&](int a, int b) {
+                    if (walkers[a].distance != walkers[b].distance) return walkers[a].distance < walkers[b].distance;
+                    return a < b;
+                });
+            for (int* slot = first; slot != last; ++slot) walkers[*slot].lane_index = static_cast<int>(slot - first);
+        }
+    }
+
+    // A sub-lane's walkers as the step's start left them, back to front
+    struct LaneSpan {
+        const int* first = nullptr;
+        size_t n = 0;
+        const int* begin() const { return first; }
+        const int* end() const { return first + n; }
+        size_t size() const { return n; }
+        int operator[](size_t i) const { return first[i]; }
+        explicit operator bool() const { return n > 0; }
+    };
+
+    LaneSpan walk_lane(int way, int sublane) const {
+        if (sublane < 0) return {};
+        size_t key = static_cast<size_t>(way) * 8 + static_cast<size_t>(sublane);
+        if (key >= lane_count_.size() || lane_count_[key] == 0) return {};
+        return {lane_slots_.data() + lane_start_[key], static_cast<size_t>(lane_count_[key])};
+    }
+
+    struct Approach {
+        bool found;
+        int way;
+        double d;
+    };
+
+    // The crossing a walker is on or about to walk onto, and how far along it the walker is
+    Approach approach(const Walker& w) const {
+        const auto& ways = walks_->ways;
+        const Way& way = ways[w.way];
+        if (way.crossing >= 0 && w.distance <= way.kerb_out + WALKER_HALF_M) return {true, w.way, w.distance};
+        if (!w.ahead.empty() && ways[w.ahead[0]].crossing >= 0) return {true, w.ahead[0], w.distance - way.length};
+        return {false, -1, 0.0};
+    }
+
+    void walkers_decide() {
+        const auto& ways = walks_->ways;
+        occupied_.clear();
+        claimed_.clear();
+        held_.clear();
+        double now = time_s;
+        if (!releases_.empty()) {
+            auto& items = releases_.items;
+            items.erase(std::remove_if(items.begin(), items.end(), [&](const std::pair<int, double>& item) { return item.second <= now; }),
+                        items.end());
+        }
+        for (Walker& w : crowd_->walkers) {
+            if (w.state == PAUSED) continue;
+            Approach found = approach(w);
+            if (!found.found) continue;
+            const Way& way = ways[found.way];
+            double d = found.d;
+            const WalkCrossing& crossing = walks_->crossings[way.crossing];
+            if (w.granted == way.index) {
+                if (d <= way.kerb_out + WALKER_HALF_M) occupied_.add(crossing.index);
+                continue;
+            }
+            if (d > way.kerb_in) {
+                // On the road without having been let on, as from a checkpoint of another network: it finishes crossing
+                w.granted = way.index;
+                w.state = ON_CROSSING;
+                occupied_.add(crossing.index);
+                continue;
+            }
+            if (d < way.kerb_in - KERB_WAIT_BACK_M - DECIDE_M) {
+                if (w.state == WAITING_AT_KERB) w.state = WALKING;
+                continue;
+            }
+            if (may_step_off(w, way, d)) {
+                w.granted = way.index;
+                w.state = ON_CROSSING;
+                w.kerb_wait_s = 0.0;
+                occupied_.add(crossing.index);
+                continue;
+            }
+            w.state = WAITING_AT_KERB;
+            if (crossing.control == ZEBRA && !releases_.has(crossing.index)) claimed_.add(crossing.index);
+            if (w.kerb_wait_s > KERB_GIVE_UP_S) turn_back(w);
+        }
+        for (auto& item : releases_.items)
+            if (occupied_.has(item.first)) item.second = now + ZEBRA_RELEASE_S;
+    }
+
+    void turn_back(Walker& w) {
+        const auto& ways = walks_->ways;
+        const Way& way = ways[w.way];
+        w.way = way.back;
+        w.distance = std::max(0.0, way.length - w.distance);
+        w.sublane = std::min(w.sublane, ways[w.way].mine - 1);
+        w.state = WALKING;
+        w.kerb_wait_s = 0.0;
+        w.granted = -1;
+        w.crossings_due = std::max(w.crossings_due, CROSSINGS_DUE_MIN);
+        w.ahead.clear();
+        plan_walk(w);
+    }
+
+    // Whether a junction's lights are stuck now, by its id: a crossing's junction need not be one a stop
+    // line of the roads names
+    bool fault_named(const std::string& junction) const {
+        for (const Fault& fault : faults_)
+            if (fault.junction == junction) return time_s < fault.until;
+        return false;
+    }
+
+    bool may_step_off(const Walker& w, const Way& way, double d) {
+        const WalkCrossing& crossing = walks_->crossings[way.crossing];
+        double clear_s = (way.kerb_out - d) / std::max(w.desired, 0.5);
+        double within_s = clear_s + WALK_CLEAR_S;
+        bool priority = crossing.control != UNCONTROLLED;
+        if (crossing.control == SIGNAL) {
+            if (!faults_.empty() && fault_named(crossing.junction)) {
+                priority = false;
+            } else {
+                double into = py_mod(time_s + crossing.offset - crossing.phase * PHASE_S, CYCLE_S);
+                if (into < AMBER_S || CYCLE_S - into < clear_s + SIGNAL_SAFETY_BUFFER_S) return false;
+            }
+        } else if (crossing.control == ZEBRA && releases_.has(crossing.index)) {
+            return false;
+        }
+        if (in_crossing(crossing)) return false;
+        for (const CrossingRoad& r : crossing.roads)
+            if (traffic_coming(r.road, r.at - r.band, r.band, r.slant, within_s, priority)) return false;
+        return !shuttle_coming(crossing, within_s, priority);
+    }
+
+    static bool unsafe(double speed, double front_gap, double through, double within_s, bool priority) {
+        if (front_gap < 0) return front_gap > -through;
+        if (speed * speed > 2 * YELLOW_BRAKE * (front_gap - STOP_MARGIN_M) && front_gap < speed * within_s) return true;
+        return !priority && speed > STANDING_MPS && front_gap < speed * within_s;
+    }
+
+    struct Lookback {
+        int road;
+        double at;
+        int count;
+        std::array<int, 3> path;
+    };
+
+    // Whether a vehicle on a road a crossing cuts, or on the roads leading to it, rules out stepping off
+    bool traffic_coming(int road, double edge, double band, double slant, double within_s, bool priority) {
+        const auto& vehicles = fleet_->vehicles;
+        const auto& roads = net_->roads;
+        std::vector<Lookback>& stack = lookback_;
+        stack.clear();
+        stack.push_back({road, edge, 0, {}});
+        while (!stack.empty()) {
+            Lookback item = stack.back();
+            stack.pop_back();
+            const Road& r = roads[item.road];
+            for (int lane = 0; lane < r.lanes; ++lane) {
+                for (int slot : lane_of(item.road, lane)) {
+                    const Vehicle& v = vehicles[slot];
+                    if (item.count) {
+                        bool plans = true;
+                        size_t n = std::min(static_cast<size_t>(item.count), v.ahead.size());
+                        for (size_t i = 0; i < n && plans; ++i) plans = v.ahead[i] == item.path[i];
+                        if (!plans) continue;
+                    }
+                    double corner = v.half_width * slant;
+                    if (unsafe(v.speed, item.at - v.distance - v.half - corner, 2 * (band + corner) + v.length, within_s, priority))
+                        return true;
+                }
+            }
+            if (item.at < WALKER_LOOK_M && item.count < 3) {
+                for (int before : walks_->arriving[r.from_node]) {
+                    Lookback next{before, roads[before].length + item.at, item.count + 1, {}};
+                    next.path[0] = item.road;
+                    for (int i = 0; i < item.count; ++i) next.path[i + 1] = item.path[i];
+                    stack.push_back(next);
+                }
+            }
+        }
+        return false;
+    }
+
+    bool shuttle_coming(const WalkCrossing& c, double within_s, bool priority) const {
+        for (const Shuttle& s : shuttles_) {
+            if (!s.placed) continue;
+            if (std::fabs(s.x - c.cx) > SHUTTLE_LOOK_M || std::fabs(s.y - c.cy) > SHUTTLE_LOOK_M) continue;
+            double speed = s.speed;
+            double reach = speed > 0 ? std::min(speed * speed / (2 * YELLOW_BRAKE) + STOP_MARGIN_M, speed * within_s) : 0.0;
+            if (!priority && speed > STANDING_MPS) reach = std::max(reach, speed * within_s);
+            double d = 0.0;
+            while (true) {
+                if (overlap(c.cx, c.cy, c.dx, c.dy, c.half_length, c.half_width, s.x + s.fx * d, s.y + s.fy * d, s.fx, s.fy, s.half_length,
+                            s.half_width))
+                    return true;
+                if (d >= reach) break;
+                d = std::min(d + 1.0, reach);
+            }
+        }
+        return false;
+    }
+
+    void fill_cells(Cells& cells) const {
+        cells.clear();
+        for (const Vehicle& v : fleet_->vehicles) {
+            if (!v.placed) continue;
+            std::pair<int64_t, int64_t> key{static_cast<int64_t>(std::floor(v.x / WALKER_CELL_M)),
+                                            static_cast<int64_t>(std::floor(v.y / WALKER_CELL_M))};
+            cells[key].push_back(v.slot);
+        }
+    }
+
+    // Calls visit with each vehicle in the cells within reach of a point, as city_traffic._near yields
+    // them, until it returns true; whether one did
+    template <typename Visit>
+    static bool for_near(const Cells& cells, double x, double y, double reach, Visit visit) {
+        int64_t low_x = static_cast<int64_t>(std::floor((x - reach) / WALKER_CELL_M));
+        int64_t low_y = static_cast<int64_t>(std::floor((y - reach) / WALKER_CELL_M));
+        int64_t high_x = static_cast<int64_t>(std::floor((x + reach) / WALKER_CELL_M));
+        int64_t high_y = static_cast<int64_t>(std::floor((y + reach) / WALKER_CELL_M));
+        for (int64_t cx = low_x; cx <= high_x; ++cx)
+            for (int64_t cy = low_y; cy <= high_y; ++cy) {
+                auto found = cells.find({cx, cy});
+                if (found == cells.end()) continue;
+                for (int slot : found->second)
+                    if (visit(slot)) return true;
+            }
+        return false;
+    }
+
+    // Whether a vehicle's or a shuttle's body stands in a crossing's road part.
+    //
+    // city_traffic._in_crossing tries the vehicles in the 20 m cells within 12 m of the crossing's reach.
+    // A vehicle whose body overlaps the crossing has its middle within the two bodies' half diagonals of
+    // the crossing's middle, so where no vehicle's half diagonal is over 12 m every such vehicle is within
+    // that square, and trying those in it (all placed vehicles, one flat scan) finds what the cells would.
+    bool in_crossing(const WalkCrossing& c) {
+        const auto& vehicles = fleet_->vehicles;
+        double reach = c.half_length + c.half_width + 12.0;
+        auto hits = [&](int slot) {
+            const Vehicle& v = vehicles[slot];
+            return overlap(c.cx, c.cy, c.dx, c.dy, c.half_length, c.half_width, v.x, v.y, v.fx, v.fy, v.half, v.half_width);
+        };
+        if (reach_m_ < 12.0) {
+            if (!cells_valid_) {
+                spots_.clear();
+                for (const Vehicle& v : vehicles)
+                    if (v.placed) spots_.push_back({v.x, v.y, v.slot});
+                cells_valid_ = true;
+            }
+            for (const Spot& spot : spots_)
+                if (std::fabs(spot.x - c.cx) <= reach && std::fabs(spot.y - c.cy) <= reach && hits(spot.slot)) return true;
+        } else {
+            if (!cells_valid_) {
+                fill_cells(cells_);
+                cells_valid_ = true;
+            }
+            if (for_near(cells_, c.cx, c.cy, reach, hits)) return true;
+        }
+        for (const Shuttle& s : shuttles_)
+            if (s.placed &&
+                overlap(c.cx, c.cy, c.dx, c.dy, c.half_length, c.half_width, s.x, s.y, s.fx, s.fy, s.half_length, s.half_width))
+                return true;
+        return false;
+    }
+
+    void count_crossing_waits(double dt) {
+        auto& items = waits_.items;
+        items.erase(std::remove_if(items.begin(), items.end(), [&](const std::pair<int, double>& item) { return !held_.has(item.first); }),
+                    items.end());
+        for (int index : held_.sorted()) {
+            if (walks_->crossings[index].control != ZEBRA) continue;
+            int at = waits_.find(index);
+            double waited = (at >= 0 ? items[at].second : 0.0) + dt;
+            if (waited > ZEBRA_COURTESY_S) {
+                waits_.erase(index);
+                releases_.set(index, time_s + ZEBRA_RELEASE_S);
+            } else {
+                waits_.set(index, waited);
+            }
+        }
+    }
+
+    // Each walker's speed this step, from where every walker was at its start (city_traffic._walker_speeds)
+    void walker_speeds() {
+        const auto& ways = walks_->ways;
+        auto& walkers = crowd_->walkers;
+        for (Walker& w : walkers) {
+            if (w.state == PAUSED) {
+                w.target = 0.0;
+                continue;
+            }
+            const Way& way = ways[w.way];
+            double target = w.desired;
+            if (w.granted == way.index && w.distance <= way.kerb_out + CLEAR_OF_ROAD_M) {
+                w.target = target;
+                continue;
+            }
+            LaneSpan bucket = walk_lane(way.index, w.sublane);
+            int leader = -1;
+            double gap = 0.0;
+            if (bucket) {
+                size_t i = static_cast<size_t>(w.lane_index);
+                if (i < bucket.size() && bucket[i] == w.slot) {
+                    leader = i + 1 < bucket.size() ? bucket[i + 1] : -1;
+                } else {
+                    for (int slot : bucket)
+                        if (walkers[slot].distance > w.distance) {
+                            leader = slot;
+                            break;
+                        }
+                }
+                if (leader >= 0) gap = walkers[leader].distance - w.distance;
+            }
+            if (leader < 0 && !w.ahead.empty()) {
+                const Way& next = ways[w.ahead[0]];
+                LaneSpan onward = walk_lane(next.index, std::min(w.sublane, next.mine - 1));
+                if (onward) {
+                    leader = onward[0];
+                    gap = way.length - w.distance + walkers[leader].distance;
+                }
+            }
+            if (leader >= 0) {
+                target = std::min(target, std::max(0.0, (gap - WALKER_GAP_M) / WALKER_REACTION_S));
+                const Walker& l = walkers[leader];
+                if (l.way == way.index && way.mine > 1 && gap < OVERTAKE_NEAR_M && l.speed < w.desired - OVERTAKE_SLOWER_MPS) overtake(w);
+            }
+            Approach found = approach(w);
+            if (found.found && w.granted != found.way) {
+                double stop = ways[found.way].kerb_in - KERB_WAIT_BACK_M - found.d;
+                target = std::min(target, std::sqrt(2 * WALKER_DECEL * std::max(0.0, stop)));
+            }
+            w.target = target;
+        }
+    }
+
+    void overtake(Walker& w) {
+        const Way& way = walks_->ways[w.way];
+        const auto& walkers = crowd_->walkers;
+        const int sides[2] = {w.sublane + 1, w.sublane - 1};
+        for (int sublane : sides) {
+            if (!(0 <= sublane && sublane < way.mine)) continue;
+            LaneSpan others = walk_lane(way.index, sublane);
+            bool clear = true;
+            if (others)
+                for (int slot : others)
+                    if (!(std::fabs(walkers[slot].distance - w.distance) >= OVERTAKE_CLEAR_M)) {
+                        clear = false;
+                        break;
+                    }
+            if (clear) {
+                w.sublane = sublane;
+                return;
+            }
+        }
+    }
+
+    void move_walker(Walker& w, double dt) {
+        const auto& ways = walks_->ways;
+        if (w.state == PAUSED) {
+            w.wait_s -= dt;
+            if (w.wait_s <= 0) {
+                w.wait_s = 0.0;
+                w.state = WALKING;
+            }
+            return;
+        }
+        double rate = w.target > w.speed ? WALKER_ACCEL : WALKER_DECEL;
+        w.speed = move_towards(w.speed, w.target, rate * dt);
+        w.aside = move_towards(w.aside, walker_aside(ways[w.way], w.sublane), WALKER_ASIDE_MPS * dt);
+        if (w.state == WAITING_AT_KERB) w.kerb_wait_s += dt;
+        w.distance += w.speed * dt;
+        int safety = 0;
+        while (w.distance > ways[w.way].length && safety < 4) {
+            safety += 1;
+            int leaving = w.way;
+            if (w.ahead.empty()) plan_walk(w);
+            if (w.ahead.empty()) break;
+            int next = w.ahead.front();
+            w.ahead.pop_front();
+            w.distance -= ways[leaving].length;
+            w.way = next;
+            w.sublane = std::min(w.sublane, ways[next].mine - 1);
+            if (w.granted == leaving) {
+                w.granted = -1;
+                w.state = WALKING;
+                w.kerb_wait_s = 0.0;
+            }
+            plan_walk(w);
+            // Now and then it stands a while where two sidewalks meet, never at a crossing
+            if (ways[leaving].crossing < 0 && ways[next].crossing < 0 && w.state == WALKING) {
+                w.rng = rng_step(w.rng);
+                if (random01(w.rng) < PAUSE_CHANCE) {
+                    w.rng = rng_step(w.rng);
+                    w.state = PAUSED;
+                    w.wait_s = PAUSE_MIN_S + (PAUSE_MAX_S - PAUSE_MIN_S) * random01(w.rng);
+                    w.distance = 0.0;
+                    w.speed = w.target = 0.0;
+                    break;
+                }
+            }
+        }
+    }
+
+    void pose_walker(Walker& w) const {
+        Pose p = walks_->ways[w.way].sample(w.distance, w.aside);
+        w.x = p.x;
+        w.y = p.y;
+        w.fx = p.fx;
+        w.fy = p.fy;
+    }
+
+    int walker_flags(const Walker& w) const {
+        int flags = 0;
+        if (w.state == WAITING_AT_KERB)
+            flags |= WAITING_FLAG;
+        else if (w.state == PAUSED)
+            flags |= PAUSED_FLAG;
+        const Way& way = walks_->ways[w.way];
+        if (way.crossing >= 0) {
+            double d = w.distance;
+            if (way.kerb_in <= d && d <= way.kerb_out)
+                flags |= ON_ROAD_FLAG;
+            else if ((way.kerb_in - RAMP_DEPTH_M <= d && d < way.kerb_in) || (way.kerb_out < d && d <= way.kerb_out + RAMP_DEPTH_M))
+                flags |= RAMP_FLAG;
+        }
+        return flags;
+    }
+
+    // A vehicle's body as it drives its way (city_traffic._path_body)
+    Pose path_body(const Vehicle& v) const {
+        Pose front = future(v, v.half);
+        const Road& road = net_->roads[v.road];
+        Pose back = road.sample(v.distance - v.half, road.lane_offset(v.lane) + v.aside);
+        double length = py_hypot(front.x - back.x, front.y - back.y);
+        if (length < 1e-6) return {v.x, v.y, v.fx, v.fy};
+        return {(front.x + back.x) / 2, (front.y + back.y) / 2, (front.x - back.x) / length, (front.y - back.y) / length};
+    }
+
     std::shared_ptr<const Network> net_;
     std::shared_ptr<const Sample> sample_;
     std::shared_ptr<Fleet> fleet_;
@@ -1968,7 +2993,30 @@ private:
     std::vector<char> pinned_;
     std::vector<Fault> faults_;
     std::vector<double> fault_until_;
+    // The pedestrians: the walk network (null for traffic that walks no one), the walkers and their ids
+    std::shared_ptr<const WalkNet> walks_;
+    std::shared_ptr<Crowd> crowd_;
+    std::shared_ptr<const std::vector<std::string>> walker_ids_;
+    bool owns_walkers_ = true;
+    // Crossings a walker has been let onto, and zebras a walker waits at, as the last step left them
+    IndexSet occupied_, claimed_;
+    // Zebras a vehicle has stood at for a walker, for how long, and zebras whose walkers hold back until a time
+    Timed waits_, releases_;
     // Working space for one step, never shared with a copy
+    IndexSet held_;
+    std::vector<int> lane_count_, lane_start_, lane_slots_, lane_keys_;
+    // The vehicles near a crossing, for the walkers deciding at its kerbs: where each placed vehicle is (or
+    // the cells, for vehicles longer than the flat scan allows), made at most once a step
+    struct Spot {
+        double x, y;
+        int slot;
+    };
+    std::vector<Spot> spots_;
+    Cells cells_;
+    bool cells_valid_ = false;
+    // The largest half diagonal of the sample's vehicles
+    double reach_m_ = 0.0;
+    std::vector<Lookback> lookback_;
     std::vector<std::vector<std::vector<int>>> lanes_;
     std::vector<int> filled_;
     std::vector<char> filled_flag_;
@@ -2041,7 +3089,8 @@ std::shared_ptr<Network> make_network(const std::string& area, nb::list roads, c
 }
 
 std::shared_ptr<Route> make_route(const std::vector<std::pair<double, double>>& points, const std::vector<double>& along, double length, bool closed,
-                    const std::vector<std::pair<double, double>>& bends, const std::string& sig) {
+                    const std::vector<std::pair<double, double>>& bends, const std::string& sig,
+                    const std::vector<std::tuple<double, int, double>>& crossings) {
     if (points.size() < 2 || points.size() != along.size()) throw std::invalid_argument("malformed route");
     auto route = std::make_shared<Route>();
     for (const auto& [x, y] : points) route->points.push_back({x, y});
@@ -2050,7 +3099,92 @@ std::shared_ptr<Route> make_route(const std::vector<std::pair<double, double>>& 
     route->closed = closed;
     route->bends = bends;
     route->sig = sig;
+    for (const auto& [at, crossing, band] : crossings) route->crossings.push_back({at, crossing, band});
     return route;
+}
+
+// An area's walk network from walk_network.WalkNetwork's: its directed walkways, crossings, the walkways
+// leaving each node and the crossings along each road, all by index
+std::shared_ptr<WalkNet> make_walk_network(std::shared_ptr<Network> network, const std::string& source_hash, nb::list ways,
+                                           nb::list crossings, const std::vector<std::vector<int>>& exits, nb::list by_road) {
+    auto walks = std::make_shared<WalkNet>();
+    walks->source_hash = source_hash;
+    int road_count = static_cast<int>(network->roads.size());
+    for (nb::handle item : crossings) {
+        nb::tuple source = nb::cast<nb::tuple>(item);
+        WalkCrossing c;
+        c.index = nb::cast<int>(source[0]);
+        if (c.index != static_cast<int>(walks->crossings.size())) throw std::invalid_argument("crossings out of order");
+        c.control = nb::cast<int>(source[1]);
+        c.junction = nb::cast<std::string>(source[2]);
+        c.offset = nb::cast<int>(source[3]);
+        c.phase = nb::cast<int>(source[4]);
+        c.cx = nb::cast<double>(source[5]);
+        c.cy = nb::cast<double>(source[6]);
+        c.dx = nb::cast<double>(source[7]);
+        c.dy = nb::cast<double>(source[8]);
+        c.half_length = nb::cast<double>(source[9]);
+        c.half_width = nb::cast<double>(source[10]);
+        for (nb::handle cut : nb::cast<nb::list>(source[11])) {
+            auto [road, at, band, slant] = nb::cast<std::tuple<int, double, double, double>>(cut);
+            if (road < 0 || road >= road_count) throw std::invalid_argument("unknown road");
+            c.roads.push_back({road, at, band, slant});
+        }
+        walks->crossings.push_back(std::move(c));
+    }
+    int crossing_count = static_cast<int>(walks->crossings.size());
+    for (nb::handle item : ways) {
+        nb::tuple source = nb::cast<nb::tuple>(item);
+        Way way;
+        way.index = nb::cast<int>(source[0]);
+        if (way.index != static_cast<int>(walks->ways.size())) throw std::invalid_argument("walkways out of order");
+        way.crossing = nb::cast<int>(source[1]);
+        if (way.crossing < -1 || way.crossing >= crossing_count) throw std::invalid_argument("unknown crossing");
+        way.xs = nb::cast<std::vector<double>>(source[2]);
+        way.ys = nb::cast<std::vector<double>>(source[3]);
+        way.along = nb::cast<std::vector<double>>(source[4]);
+        way.length = nb::cast<double>(source[5]);
+        way.width = nb::cast<double>(source[6]);
+        way.mine = nb::cast<int>(source[7]);
+        way.from_node = nb::cast<int>(source[8]);
+        way.to_node = nb::cast<int>(source[9]);
+        way.back = nb::cast<int>(source[10]);
+        way.kerb_in = nb::cast<double>(source[11]);
+        way.kerb_out = nb::cast<double>(source[12]);
+        way.sx = nb::cast<double>(source[13]);
+        way.sy = nb::cast<double>(source[14]);
+        way.ex = nb::cast<double>(source[15]);
+        way.ey = nb::cast<double>(source[16]);
+        if (way.xs.size() < 2 || way.xs.size() != way.ys.size() || way.xs.size() != way.along.size() || way.mine < 1)
+            throw std::invalid_argument("malformed walkway");
+        way.prepare();
+        walks->ways.push_back(std::move(way));
+    }
+    int way_count = static_cast<int>(walks->ways.size());
+    walks->exits = exits;
+    for (const Way& way : walks->ways) {
+        if (way.back < 0 || way.back >= way_count) throw std::invalid_argument("walkway without its way back");
+        if (way.from_node < 0 || static_cast<size_t>(way.from_node) >= exits.size() || way.to_node < 0 ||
+            static_cast<size_t>(way.to_node) >= exits.size())
+            throw std::invalid_argument("unknown walk node");
+    }
+    for (const auto& leaving : walks->exits)
+        for (int way : leaving)
+            if (way < 0 || way >= way_count) throw std::invalid_argument("unknown walkway");
+    walks->by_road.resize(network->roads.size());
+    size_t road = 0;
+    for (nb::handle item : by_road) {
+        if (road >= walks->by_road.size()) throw std::invalid_argument("more roads than the network has");
+        for (nb::handle entry : nb::cast<nb::list>(item)) {
+            auto [at, crossing, band, slant] = nb::cast<std::tuple<double, int, double, double>>(entry);
+            if (crossing < 0 || crossing >= crossing_count) throw std::invalid_argument("unknown crossing");
+            walks->by_road[road].push_back({at, crossing, band, slant});
+        }
+        ++road;
+    }
+    walks->arriving.resize(network->node_ids.size());
+    for (const Road& r : network->roads) walks->arriving[r.to_node].push_back(r.index);
+    return walks;
 }
 
 nb::dict vehicle_dict(const Traffic& traffic, const Vehicle& v) {
@@ -2241,7 +3375,79 @@ nb::dict traffic_state(Traffic& traffic) {
     state["hazards"] = hazards;
     state["pins"] = pins;
     state["signal_faults"] = faults;
+    if (traffic.has_walks()) {
+        // Only with pedestrians, so a checkpoint without them is as it always was
+        nb::list walkers;
+        for (const Walker& w : traffic.walkers()) {
+            nb::list ahead;
+            for (int way : w.ahead) ahead.append(way);
+            nb::list item;
+            item.append(w.way);
+            item.append(w.distance);
+            item.append(w.sublane);
+            item.append(w.aside);
+            item.append(w.speed);
+            item.append(w.state);
+            item.append(w.wait_s);
+            item.append(w.kerb_wait_s);
+            item.append(w.rng);
+            item.append(w.crossings_due);
+            item.append(w.granted);
+            item.append(ahead);
+            walkers.append(item);
+        }
+        auto listed = [](const std::vector<int>& indices) {
+            nb::list out;
+            for (int index : indices) out.append(index);
+            return out;
+        };
+        auto timed = [](const Timed& times) {
+            nb::list out;
+            for (const auto& [index, s] : times.items) {
+                nb::list pair;
+                pair.append(index);
+                pair.append(s);
+                out.append(pair);
+            }
+            return out;
+        };
+        nb::list crossings;
+        crossings.append(listed(traffic.occupied().sorted()));
+        crossings.append(listed(traffic.claimed().sorted()));
+        crossings.append(timed(traffic.crossing_waits()));
+        crossings.append(timed(traffic.crossing_releases()));
+        state["walk_source"] = traffic.walks().source_hash;
+        state["walkers"] = walkers;
+        state["crossings"] = crossings;
+    }
     return state;
+}
+
+nb::dict walker_dict(const Traffic& traffic, const Walker& w) {
+    nb::dict d;
+    d["slot"] = w.slot;
+    d["seed"] = w.seed;
+    d["id"] = traffic.walker_ids()[w.slot];
+    d["rng"] = w.rng;
+    d["way"] = w.way;
+    d["distance"] = w.distance;
+    d["sublane"] = w.sublane;
+    d["aside"] = w.aside;
+    d["speed"] = w.speed;
+    d["target"] = w.target;
+    d["desired"] = w.desired;
+    d["state"] = w.state;
+    d["wait_s"] = w.wait_s;
+    d["kerb_wait_s"] = w.kerb_wait_s;
+    d["crossings_due"] = w.crossings_due;
+    d["granted"] = w.granted;
+    d["ahead"] = w.ahead.to_vector();
+    d["lane_index"] = w.lane_index;
+    d["x"] = w.x;
+    d["y"] = w.y;
+    d["fx"] = w.fx;
+    d["fy"] = w.fy;
+    return d;
 }
 
 nb::dict constants() {
@@ -2307,6 +3513,50 @@ nb::dict constants() {
     F9_CONSTANT(YELLOW_S);
     F9_CONSTANT(ALL_RED_S);
     F9_CONSTANT(PHASES);
+    F9_CONSTANT(WALKER_ACCEL);
+    F9_CONSTANT(WALKER_DECEL);
+    F9_CONSTANT(WALKER_GAP_M);
+    F9_CONSTANT(WALKER_REACTION_S);
+    F9_CONSTANT(SUBLANE_M);
+    F9_CONSTANT(WALKWAY_EDGE_M);
+    F9_CONSTANT(WALKER_ASIDE_MPS);
+    F9_CONSTANT(OVERTAKE_SLOWER_MPS);
+    F9_CONSTANT(OVERTAKE_NEAR_M);
+    F9_CONSTANT(OVERTAKE_CLEAR_M);
+    F9_CONSTANT(WALK_PLAN_M);
+    F9_CONSTANT(MAX_PLANNED_WALKWAYS);
+    F9_CONSTANT(PAUSE_CHANCE);
+    F9_CONSTANT(PAUSE_MIN_S);
+    F9_CONSTANT(PAUSE_MAX_S);
+    F9_CONSTANT(CROSSINGS_DUE_MIN);
+    F9_CONSTANT(CROSSINGS_DUE_MAX);
+    F9_CONSTANT(TAKE_CROSSING_CHANCE);
+    F9_CONSTANT(KERB_WAIT_BACK_M);
+    F9_CONSTANT(DECIDE_M);
+    F9_CONSTANT(CLEAR_OF_ROAD_M);
+    F9_CONSTANT(SIGNAL_SAFETY_BUFFER_S);
+    F9_CONSTANT(WALK_CLEAR_S);
+    F9_CONSTANT(WALKER_LOOK_M);
+    F9_CONSTANT(ZEBRA_COURTESY_S);
+    F9_CONSTANT(ZEBRA_RELEASE_S);
+    F9_CONSTANT(KERB_GIVE_UP_S);
+    F9_CONSTANT(CROSSING_ENTERED_M);
+    F9_CONSTANT(CROSSING_HELD_M);
+    F9_CONSTANT(SHUTTLE_BODY_STEP_M);
+    F9_CONSTANT(RAMP_DEPTH_M);
+    F9_CONSTANT(WALKING);
+    F9_CONSTANT(WAITING_AT_KERB);
+    F9_CONSTANT(ON_CROSSING);
+    F9_CONSTANT(PAUSED);
+    F9_CONSTANT(WAITING_FLAG);
+    F9_CONSTANT(ON_ROAD_FLAG);
+    F9_CONSTANT(RAMP_FLAG);
+    F9_CONSTANT(PAUSED_FLAG);
+    F9_CONSTANT(WALKER_CELL_M);
+    F9_CONSTANT(WALKER_HALF_M);
+    F9_CONSTANT(SIGNAL);
+    F9_CONSTANT(ZEBRA);
+    F9_CONSTANT(UNCONTROLLED);
 #undef F9_CONSTANT
     return d;
 }
@@ -2365,12 +3615,56 @@ NB_MODULE(_traffic_native, m) {
             Pose p = r.body(at, aside, half_length);
             return std::make_tuple(p.x, p.y, p.fx, p.fy);
         });
-    m.def("make_route", &make_route, "points"_a, "along"_a, "length"_a, "closed"_a, "bends"_a, "sig"_a);
+    m.def("make_route", &make_route, "points"_a, "along"_a, "length"_a, "closed"_a, "bends"_a, "sig"_a,
+          "crossings"_a = std::vector<std::tuple<double, int, double>>());
+
+    nb::class_<WalkNet>(m, "WalkNetwork")
+        .def_ro("source_hash", &WalkNet::source_hash)
+        .def_prop_ro("way_count", [](const WalkNet& w) { return w.ways.size(); })
+        .def_prop_ro("crossing_count", [](const WalkNet& w) { return w.crossings.size(); })
+        .def("sample", [](const WalkNet& w, int way, double distance, double left) {
+            Pose p = w.ways.at(way).sample(distance, left);
+            return std::make_tuple(p.x, p.y, p.fx, p.fy);
+        });
+    m.def("make_walk_network", &make_walk_network, "network"_a, "source_hash"_a, "ways"_a, "crossings"_a, "exits"_a, "by_road"_a);
 
     nb::class_<Traffic>(m, "Traffic")
-        .def("__init__", [](Traffic* self, std::shared_ptr<Network> network) { new (self) Traffic(std::move(network)); })
+        .def("__init__",
+             [](Traffic* self, std::shared_ptr<Network> network, std::shared_ptr<WalkNet> walks) {
+                 new (self) Traffic(std::move(network), std::move(walks));
+             },
+             "network"_a, "walks"_a.none() = nb::none())
         .def("add_vehicle", &Traffic::add_vehicle, "seed"_a, "id"_a, "model"_a, "length"_a, "half"_a, "half_width"_a, "large"_a,
              "accel"_a, "speed_factor"_a, "rng"_a, "road"_a, "lane"_a, "distance"_a, "speed"_a)
+        .def("add_walker", &Traffic::add_walker, "seed"_a, "id"_a, "way"_a, "distance"_a, "sublane"_a, "aside"_a, "speed"_a, "target"_a,
+             "desired"_a, "state"_a, "wait_s"_a, "kerb_wait_s"_a, "rng"_a, "crossings_due"_a, "granted"_a, "ahead"_a)
+        .def("walker_count", [](const Traffic& t) { return t.walkers().size(); })
+        .def("walker", [](const Traffic& t, int slot) { return walker_dict(t, t.walker_checked(slot)); })
+        .def("crossing_sets",
+             [](const Traffic& t) {
+                 std::vector<std::pair<int, double>> waits(t.crossing_waits().items), releases(t.crossing_releases().items);
+                 return std::make_tuple(t.occupied().sorted(), t.claimed().sorted(), waits, releases);
+             })
+        .def("load_walkers", &Traffic::load_walkers)
+        .def("pedestrian_frame",
+             [](const Traffic& t) {
+                 std::string packed;
+                 {
+                     nb::gil_scoped_release unlocked;
+                     packed = t.pedestrian_frame();
+                 }
+                 return nb::bytes(packed.data(), packed.size());
+             })
+        .def("walker_report", &Traffic::walker_report)
+        .def("walker_contacts",
+             [](const Traffic& t) {
+                 std::pair<IdPairs, IdPairs> found;
+                 {
+                     nb::gil_scoped_release unlocked;
+                     found = t.walker_contacts();
+                 }
+                 return found;
+             })
         .def("pose_all", &Traffic::pose_all)
         .def("copy", &Traffic::copy)
         .def_rw("time_s", &Traffic::time_s)
@@ -2454,7 +3748,7 @@ NB_MODULE(_traffic_native, m) {
                      nb::gil_scoped_release unlocked;
                      plan = t.plan_shuttle(s, *route, along, cruise);
                  }
-                 return std::make_tuple(plan.limit_mps, plan.cap_m, plan.held, plan.bend_mps);
+                 return std::make_tuple(plan.limit_mps, plan.cap_m, plan.held, plan.bend_mps, plan.pedestrian_mps);
              })
         .def(
             "place_shuttle",
