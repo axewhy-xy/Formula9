@@ -2283,7 +2283,8 @@
             "INVALID_REFERENCE",
             "INVALID_TRANSITION",
             "UNSUPPORTED_VERSION",
-            "INVALID_PAYLOAD"
+            "INVALID_PAYLOAD",
+            "ASSESSMENT_NOT_READY"
           ],
           "title": "Code",
           "type": "string"

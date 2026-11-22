@@ -2,10 +2,10 @@
 
 Author: Nur Syazliyarni Binte Zazali
 Date Created: 15/11/2026
-Last Modified: 15/11/2026
+Last Modified: 23/11/2026
 """
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, FiniteFloat, NonNegativeInt
 
@@ -37,6 +37,7 @@ class SessionAssessment(WireModel):
     session_id: Id
     scenario_revision_id: Id
     rubric_revision: Id | None
+    duration_s: Annotated[int, Field(gt=0)] | None = None
     status: Literal["PRACTICE", "IN_PROGRESS", "INCOMPLETE", "PASS", "FAIL"]
     points: FiniteFloat | None
     maximum: NonNegativeInt | None

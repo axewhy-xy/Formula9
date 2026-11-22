@@ -679,7 +679,7 @@ namespace Formula9.UI
         //     admin action, and the dialog says so. SessionController.ArchiveAllAsync does the
         //     work and reports how many were really archived.
         private void ConfirmArchiveAll() => Confirm(
-            "Archive all live sessions you can change? This includes shared practice sessions and your own scored attempts. Archived sessions release their slots and keep their history.",
+            "Archive all visible live sessions you can manage? Archived sessions release their slots and keep their history and assessment results.",
             "Archive all", () => Cleanup("Archiving live sessions…", async () =>
             {
                 var (live, archived) = await session.ArchiveAllAsync();
@@ -723,7 +723,7 @@ namespace Formula9.UI
                 ShowMessage(TrainingPresenter.PurgeQuestion(list, KeptByPurge));
                 return;
             }
-            Confirm($"Delete old finished practice sessions? The {KeptByPurge} newest finished practice sessions, every scored attempt and every live session are kept.",
+            Confirm(TrainingPresenter.PurgeQuestion(list, KeptByPurge),
                 "Delete old practice sessions", () => Cleanup(
                 "Deleting old sessions…",
                 async () => TrainingPresenter.Purged(await api.PurgeSessionsAsync(KeptByPurge))));
@@ -989,13 +989,13 @@ namespace Formula9.UI
             public AssessmentDeadlineLookup(string sessionId) => SessionId = sessionId;
         }
 
-        /// <summary>Look up the pinned rubric once when an older backend omits the duration.</summary>
+        /// <summary>Read the attempt's saved duration when its snapshot omits it.</summary>
         private async Task LoadAssessmentDeadline(AssessmentDeadlineLookup lookup)
         {
             try
             {
                 var grade = await api.GetAssessmentAsync(lookup.SessionId);
-                lookup.DurationS = TrainingPresenter.LegacyAssessmentDuration(grade.RubricRevision);
+                lookup.DurationS = grade.DurationS;
             }
             catch (Exception error) when (error is BackendErrorException || error is NoReplyException || error is ContractException)
             {

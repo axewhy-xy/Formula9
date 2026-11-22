@@ -2,7 +2,7 @@
 
 Author: Nur Syazliyarni Binte Zazali
 Date Created: 15/11/2026
-Last Modified: 16/11/2026
+Last Modified: 23/11/2026
 
 Evaluators read the bounded, committed event journal at finalization. They
 return points (or unavailable), a plain-language reason and evidence IDs.
@@ -13,6 +13,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import InitVar, dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, NonNegativeInt, PositiveInt, model_validator
 
@@ -51,6 +52,7 @@ class Rubric(BaseModel):
     metadata: dict[str, str]
     revision: Id
     evaluator_version: Id = "assessment-v1"
+    identity_version: Literal["semantic-v1"] | None = None
     pass_mark: PositiveInt
     rules: dict[str, RuleSettings]
     automatic_fails: list[str]
@@ -64,6 +66,7 @@ class Rubric(BaseModel):
     incident_duration_s: PositiveInt
     charging_decision_s: PositiveInt
     charging_observation_s: PositiveInt
+    charging_offer_deadline_s: PositiveInt | None = None
     safety_opportunity_s: PositiveInt
     exercise_limit_s: PositiveInt
     short_exercise: ShortExercise | None = None
@@ -93,6 +96,9 @@ class Rubric(BaseModel):
         if not (0 < self.charging_initial_kwh <= 40 and self.safety_opportunity_s <= self.charging_decision_s
                 < self.charging_observation_s <= self.exercise_limit_s):
             raise ValueError("Invalid charging or exercise window")
+        if (self.charging_offer_deadline_s is not None and
+                self.charging_offer_deadline_s + self.charging_observation_s > self.exercise_limit_s):
+            raise ValueError("The latest charging offer and observation window must fit inside the exercise")
         return self
 
 
@@ -559,6 +565,6 @@ def finalize(plan: AssessmentPlan, snapshot: FullSnapshot, events: Iterable[Even
     else:
         status, explanation = "FAIL", f"The score is below the {rubric.pass_mark}-point pass mark."
     return SessionAssessment(session_id=snapshot.session_id, scenario_revision_id=snapshot.session.scenario_revision_id,
-        rubric_revision=rubric.revision, status=status, points=score, maximum=100, pass_mark=rubric.pass_mark,
+        rubric_revision=rubric.revision, duration_s=rubric.exercise_limit_s, status=status, points=score, maximum=100, pass_mark=rubric.pass_mark,
         through_tick=snapshot.tick, through_event_sequence=snapshot.event_sequence, explanation=explanation,
         criteria=criteria, automatic_failures=failures)

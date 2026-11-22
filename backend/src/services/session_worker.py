@@ -267,6 +267,12 @@ async def _serve(connection, config: dict) -> None:
         result = await runtime.approve_route(payload["actor_id"], payload["session_id"], request)
         return {"status": result.model_dump_json(), "removed": payload["session_id"] not in runtime.sessions}
 
+    async def expire_assessment(payload):
+        """Expiry shares the command lock and normal durable publication path."""
+        command = DispatcherCommand.model_validate_json(payload["command"])
+        archived = await runtime._expire_assessment(payload["actor_id"], command, payload["cutoff"])
+        return {"archived": archived, "removed": command.session_id not in runtime.sessions}
+
     async def signal_state(payload):
         return runtime.signal_state(payload["session_id"])
 
@@ -284,7 +290,8 @@ async def _serve(connection, config: dict) -> None:
                 "sessions": sorted(runtime.sessions)}
 
     handlers = {"create": create, "restore": restore, "submit": submit, "approve_route": approve_route,
-                "signal_state": signal_state, "step": step, "trace": trace, "status": status}
+                "signal_state": signal_state, "step": step, "trace": trace, "status": status,
+                "expire_assessment": expire_assessment}
 
     def on_message(kind: str, request_id: int, payload: Any) -> None:
         if kind == "shutdown":

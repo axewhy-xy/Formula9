@@ -81,7 +81,7 @@ def test_scored_attempt_recovers_and_finalizes_once(tmp_path):
         service = TrainingSessionService(store)
         actor = service._restore_session(snapshot, state).actor
         assert actor.observations.charging_offer_tick is not None
-        assert actor.assessment_plan.rubric.revision == "toa-payoh-rubric-r2"
+        assert actor.assessment_plan.rubric.revision == "toa-payoh-rubric-r3"
         _, actor = service._submit_staged(actor, owner, session_control(snapshot, "RESUME"), False)
         paused = session_control(store.snapshot(sid), "PAUSE")
         assert store.accept(owner, paused).status == "QUEUED"
@@ -95,6 +95,11 @@ def test_scored_attempt_recovers_and_finalizes_once(tmp_path):
         assert [e.event_type for e in store.replay(sid, terminal.event_sequence - 2).events] == [
             "SESSION_COMPLETED", "COMMAND_EXPIRED"]
         assert store.accept(owner, paused).status == "EXPIRED"
+        with pytest.raises(TrainingStoreError, match="already ended"):
+            store.accept(owner, session_control(terminal, "ARCHIVE"))
+        with pytest.raises(TrainingStoreError, match="already ended"):
+            store.accept(owner, session_control(terminal, "RESUME").model_copy(
+                update={"command_id": "resume-after-end", "idempotency_key": "resume-after-end"}))
         assert sid not in store.runtime_ids() and sid not in store.expired_session_ids(0)
     with TrainingStore(path) as store:
         assert store.assessment(sid, "trainee") == saved
@@ -108,9 +113,10 @@ def test_archiving_a_scored_attempt_preserves_incomplete_report(tmp_path):
         report = store.assessment(snapshot.session_id, "trainee")
         assert report.status == "INCOMPLETE"
         assert store.accept("trainee", control) == result
-        with pytest.raises(TrainingStoreError, match="assigned trainee"):
+        with pytest.raises(TrainingStoreError, match="records are retained"):
             store.delete_session(snapshot.session_id, actor_id="observer")
-        store.delete_session(snapshot.session_id, actor_id="trainee")
+        with pytest.raises(TrainingStoreError, match="records are retained"):
+            store.delete_session(snapshot.session_id, actor_id="trainee")
 
 
 @pytest.mark.parametrize("assessment_v5", [False, True])
@@ -141,7 +147,7 @@ def test_database_upgrade_from_either_branch_preserves_assessments(tmp_path, ass
         with TrainingStore(path) as store:
             with store._reading() as connection:
                 assert "boundary_json" in {row[1] for row in connection.execute("PRAGMA table_info(sessions)")}
-                assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 6
+                assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 7
                 assert connection.execute("SELECT COUNT(*) FROM session_assessments").fetchone()[0] == int(assessment_v5)
             if assessment_v5:
                 assert store.snapshot(snapshot.session_id) == snapshot
@@ -150,7 +156,7 @@ def test_database_upgrade_from_either_branch_preserves_assessments(tmp_path, ass
 
 def legacy_rubric():
     """Reproduce the pinned rubric in checkpoints made before the two-minute exercise."""
-    data = load_rubric().model_dump(exclude={"short_exercise", "evaluator_version"})
+    data = load_rubric().model_dump(exclude={"short_exercise", "evaluator_version", "identity_version", "charging_offer_deadline_s"})
     data["metadata"].update(last_modified="15/11/2026",
                             description="Grading rules and exercise parameters for the first scored Toa Payoh exercise.")
     data.update(revision="toa-payoh-rubric-r1", incident_duration_s=85, charging_decision_s=120,
@@ -303,7 +309,8 @@ def test_legacy_checkpoint_keeps_the_original_exercise_clock():
     actor = ScoredSessionActor(rubric, session_id="legacy-attempt")
     snapshot = actor.generate_snapshot()
     state = checkpoint(actor)
-    state["assessment_plan"]["rubric"].pop("short_exercise")
+    for key in ("short_exercise", "identity_version", "charging_offer_deadline_s"):
+        state["assessment_plan"]["rubric"].pop(key)
     # Checkpoints saved before the countdown carried the duration only in the pinned rubric.
     state["workflow"]["domain"]["scenario"].pop("assessment_duration_s")
     snapshot.scenario.assessment_duration_s = None
@@ -350,14 +357,14 @@ def test_closure_cache_expires_without_changing_the_previous_tick():
     motion[shuttle.ID] += 2
     closure.active_until_tick = 2
     actor.current_tick = 1
-    actor._observe_motion(motion)
+    actor.observe_motion(motion)
     assert [event.data["edge_id"] for event in actor.pending_events] == [edge]
     staged = deepcopy(actor)
     assert staged.assessment_plan is actor.assessment_plan
     assert staged.observations is not actor.observations
     staged.current_tick = 2
     staged.pending_events.clear()
-    staged._observe_motion(motion)
+    staged.observe_motion(motion)
     assert staged.pending_events == []
     assert len(actor.pending_events) == 1
 

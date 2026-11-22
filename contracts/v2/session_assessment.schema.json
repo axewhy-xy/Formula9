@@ -111,6 +111,19 @@
       "title": "Criteria",
       "type": "array"
     },
+    "duration_s": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Duration S"
+    },
     "explanation": {
       "title": "Explanation",
       "type": "string"

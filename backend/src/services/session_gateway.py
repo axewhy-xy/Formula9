@@ -809,6 +809,20 @@ class GatewaySessionService(SessionServiceBase):
                           failure_code=result.failure_code)
             return result
 
+    async def _expire_assessment(self, actor_id: str, command: DispatcherCommand, cutoff: str) -> bool:
+        """Have the owning worker recheck inactivity under its session lock before archiving."""
+        session = self.sessions.get(command.session_id)
+        if session is None or self._unavailable(session) or self.closed:
+            return False
+        try:
+            reply = await self._request(session.worker, "expire_assessment",
+                {"actor_id": actor_id, "command": command.model_dump_json(), "cutoff": cutoff}, REQUEST_TIMEOUT_S)
+        except ChannelClosed:
+            return False  # Recovery restores the activity timestamp; the next sweep retries.
+        if reply["removed"]:
+            self._remove(session)
+        return reply["archived"]
+
     async def _submit(self, actor_id: str, command: DispatcherCommand) -> CommandStatus:
         session = self.sessions.get(command.session_id)
         if session is None:
@@ -902,6 +916,7 @@ class GatewaySessionService(SessionServiceBase):
 
     async def close(self) -> None:
         self.closed = True
+        await self._close_assessment_maintenance()
         if self._monitor is not None:
             self._monitor.cancel()
         # Recoveries too: one waiting to try again would otherwise hold up the drain below

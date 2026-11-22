@@ -3,17 +3,24 @@
   "live_count": 1,
   "sessions": [
     {
+      "can_archive": null,
+      "can_delete": null,
+      "is_assessment": false,
       "occupies_capacity": true,
       "scenario_revision_id": "scenario-r1",
       "session_id": "session-001",
       "status": "RUNNING"
     },
     {
+      "can_archive": null,
+      "can_delete": null,
+      "is_assessment": false,
       "occupies_capacity": false,
       "scenario_revision_id": "scenario-r1",
       "session_id": "session-old",
       "status": "ARCHIVED"
     }
   ],
+  "terminal_practice_count": null,
   "total": 2
 }

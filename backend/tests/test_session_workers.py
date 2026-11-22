@@ -104,7 +104,7 @@ def test_assessment_finishes_and_releases_its_worker_slot(tmp_path):
             assert report.status != "IN_PROGRESS" and len(report.criteria) == 10
             assert report.through_event_sequence == terminal.event_sequence
             assert store.accept("trainee", pause).status == "EXPIRED"
-            with pytest.raises(TrainingStoreError, match="assigned trainee"):
+            with pytest.raises(TrainingStoreError, match="records are retained"):
                 await service.delete(sid, "observer")
             assert store.assessment(sid, "trainee") == report
         with TrainingStore(tmp_path / "assessment.sqlite") as recovered:

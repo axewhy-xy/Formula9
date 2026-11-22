@@ -1238,6 +1238,8 @@ namespace Formula9.Contracts
         public List<AssessmentFailure> AutomaticFailures { get; set; } = new List<AssessmentFailure>();
         [JsonProperty("criteria", Required = Required.Default)]
         public List<AssessmentCriterion> Criteria { get; set; } = new List<AssessmentCriterion>();
+        [JsonProperty("duration_s", Required = Required.Default)]
+        public long? DurationS { get; set; }
         [JsonProperty("explanation", Required = Required.Always)]
         public string Explanation { get; set; }
         [JsonProperty("maximum", Required = Required.AllowNull)]
@@ -1265,6 +1267,12 @@ namespace Formula9.Contracts
     /// <summary>SessionListEntry from the shared v2 contract.</summary>
     public sealed partial class SessionListEntry
     {
+        [JsonProperty("can_archive", Required = Required.Default)]
+        public bool? CanArchive { get; set; }
+        [JsonProperty("can_delete", Required = Required.Default)]
+        public bool? CanDelete { get; set; }
+        [JsonProperty("is_assessment", Required = Required.Default)]
+        public bool IsAssessment { get; set; } = false;
         [JsonProperty("occupies_capacity", Required = Required.Always)]
         public bool OccupiesCapacity { get; set; }
         [JsonProperty("scenario_revision_id", Required = Required.Always)]
@@ -1286,6 +1294,8 @@ namespace Formula9.Contracts
         public long LiveCount { get; set; }
         [JsonProperty("sessions", Required = Required.Always)]
         public List<SessionListEntry> Sessions { get; set; }
+        [JsonProperty("terminal_practice_count", Required = Required.Default)]
+        public long? TerminalPracticeCount { get; set; }
         [JsonProperty("total", Required = Required.Always)]
         public long Total { get; set; }
         // Additive 2.x fields from a newer backend are kept, not rejected.

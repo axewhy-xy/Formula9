@@ -681,7 +681,7 @@ namespace Formula9.Session
         public async Task<(int Live, int Archived)> ArchiveAllAsync()
         {
             var listed = await api.ListSessionsAsync(ArchiveListPage, lifetime.Token);
-            var live = listed.Sessions.Where(s => s.OccupiesCapacity).Select(s => s.SessionId).ToList();
+            var live = listed.Sessions.Where(s => s.OccupiesCapacity && s.CanArchive != false).Select(s => s.SessionId).ToList();
             foreach (var id in live)
             {
                 try

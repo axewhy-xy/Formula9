@@ -21,8 +21,9 @@ from typing import Any, Callable
 
 from contracts.v2.models import CommandStatus, DispatcherCommand, Event, FullSnapshot
 from src.services.assessment import AssessmentPlan
+from src.services.assessment_policy import configured_policy
 from src.core.training_telemetry import TrainingTrace
-from src.persistence.training_store import _TERMINAL, TrainingStore, TrainingStoreError, _EncodedRuntime
+from src.persistence.training_store import _TERMINAL, PreparedAssessment, TrainingStore, TrainingStoreError, _EncodedRuntime
 
 
 class _Open:
@@ -34,6 +35,8 @@ class StoreClient(TrainingStore):
     """TrainingStore's interface over a call to the gateway's writer. call(kind, payload) sends one
     request and returns its answer, raising TrainingStoreError as the gateway's store raised it."""
 
+    owns_writer = False
+
     def __init__(self, path: Path, call: Callable[[str, Any], Any], *, trace: TrainingTrace | None = None,
                  validate_publications: bool | None = None):
         # No TrainingStore.__init__: no lock file, writer thread or migrations; the gateway owns those
@@ -41,6 +44,8 @@ class StoreClient(TrainingStore):
         if validate_publications is None:
             validate_publications = os.environ.get("F9_VALIDATE_PUBLICATIONS", "") not in {"", "0"}
         self.validate_publications = validate_publications
+        self.assessment_policy = configured_policy()
+        self._assessment_owners = {}
         self._published: dict[str, str] = {}
         self.trace = trace if trace is not None else TrainingTrace()
         self.path = Path(path).resolve()
@@ -86,11 +91,16 @@ class StoreClient(TrainingStore):
     def _apply(self, command_id: str, proposed: FullSnapshot | None = None,
                domain_events: tuple[Event, ...] = (), *, rejection_code: str | None = None,
                expected_snapshot_id: str | None = None, runtime_state: dict | None = None,
-               trace_fields: dict) -> CommandStatus:
+               trace_fields: dict, prepared_assessment: PreparedAssessment | None = None) -> CommandStatus:
+        # Evaluate terminal decisions in the owning worker, before asking the shared writer to commit.
+        prepared = prepared_assessment
+        if prepared is None and proposed is not None:
+            prepared = self.prepare_assessment(proposed, domain_events)
         reply = self._call("apply", {
             "command_id": command_id, "proposed": proposed.model_dump_json() if proposed is not None else None,
             "events": [event.model_dump_json() for event in domain_events], "rejection_code": rejection_code,
-            "expected_snapshot_id": expected_snapshot_id, "runtime": _EncodedRuntime.of(runtime_state)})
+            "expected_snapshot_id": expected_snapshot_id, "runtime": _EncodedRuntime.of(runtime_state),
+            "assessment": prepared})
         trace_fields.update(reply["trace"])
         result = CommandStatus.model_validate_json(reply["status"])
         if "published" in reply:  # Absent when the command was already settled: nothing was published
@@ -145,7 +155,8 @@ def serve_store_call(store: TrainingStore, kind: str, payload: Any) -> Any:
                               tuple(Event.model_validate_json(event) for event in payload["events"]),
                               rejection_code=payload["rejection_code"],
                               expected_snapshot_id=payload["expected_snapshot_id"],
-                              runtime_state=payload["runtime"], trace_fields=fields, published=published)
+                              runtime_state=payload["runtime"], trace_fields=fields, published=published,
+                              prepared_assessment=payload.get("assessment"))
         reply = {"status": result.model_dump_json(), "trace": fields}
         if "raw" in published:
             reply["published"] = published["raw"]

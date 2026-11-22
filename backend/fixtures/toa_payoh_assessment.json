@@ -2,11 +2,12 @@
   "metadata": {
     "author": "Nur Syazliyarni Binte Zazali",
     "date_created": "15/11/2026",
-    "last_modified": "16/11/2026",
+    "last_modified": "23/11/2026",
     "description": "Grading rules and exercise parameters for the two-minute scored Toa Payoh exercise."
   },
-  "revision": "toa-payoh-rubric-r2",
+  "revision": "toa-payoh-rubric-r3",
   "evaluator_version": "assessment-v2",
+  "identity_version": "semantic-v1",
   "pass_mark": 75,
   "rules": {
     "route_approval": {"maximum": 10},
@@ -30,7 +31,8 @@
   "incident_start_delay_s": 5,
   "incident_duration_s": 40,
   "charging_decision_s": 35,
-  "charging_observation_s": 110,
+  "charging_observation_s": 90,
+  "charging_offer_deadline_s": 20,
   "safety_opportunity_s": 10,
   "exercise_limit_s": 120,
   "short_exercise": {

@@ -1945,8 +1945,7 @@ class IntegratedSessionActor(SessionActor):
         charging = {s.ID for s in self.shuttles if self.modes[s.ID] == "CHARGING"}
         proposed = {s.ID: self._prepare_motion(s) for s in self.shuttles}
         proposed, blocked = self._resolve_motion(proposed)
-        if self._observe_motion is not None:
-            self._observe_motion(proposed)
+        self.observe_motion(proposed)
         moved = {}
         for shuttle in self.shuttles:
             mode = self.modes[shuttle.ID]
@@ -2022,9 +2021,6 @@ class IntegratedSessionActor(SessionActor):
         self._refresh_exposure()
         if self.traffic is not None:
             self._place_in_traffic(moved, blocked)
-
-    # The scored actor can inspect the step's movement after collision and stop checks.
-    _observe_motion = None
 
     def workflow_state(self, *, traffic: bool = True):
         """The session's private state. With traffic False, the traffic is left to traffic_checkpoint

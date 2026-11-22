@@ -208,23 +208,15 @@ namespace Formula9.UI
             snapshot?.Scenario?.AssessmentDurationS != null ||
             snapshot?.Session?.ScenarioRevisionId?.StartsWith("scored-toa-payoh-", StringComparison.Ordinal) == true;
 
-        /// <summary>Recover the pinned duration for rubrics published before snapshots carried it.</summary>
-        internal static long? LegacyAssessmentDuration(string rubricRevision) => rubricRevision switch
-        {
-            "toa-payoh-rubric-r1" => 960,
-            "toa-payoh-rubric-r2" => 120,
-            _ => null,
-        };
-
         /// <summary>Show the server's remaining simulation time, including paused or offline readings.</summary>
         public static (string Text, bool Urgent) AssessmentClock(FullSnapshot snapshot, bool available,
-            long? legacyDurationS = null, bool loading = false)
+            long? savedDurationS = null, bool loading = false)
         {
             if (!IsAssessment(snapshot)) return (null, false);
             var state = snapshot.Session?.Status;
             if (state == "COMPLETED") return ("Time’s up · 0:00", false);
             if (state != "RUNNING" && state != "PAUSED" && state != "RECOVERING") return (null, false);
-            if (!((snapshot.Scenario?.AssessmentDurationS ?? legacyDurationS) is long limit))
+            if (!((snapshot.Scenario?.AssessmentDurationS ?? savedDurationS) is long limit))
                 return (loading ? "Loading timer…" : "Timer unavailable", false);
 
             var seconds = (long)Math.Ceiling(Math.Max(0, limit - snapshot.SimulationTimeS));
@@ -689,7 +681,10 @@ namespace Formula9.UI
         // Returns:
         //     bool: True when it may be deleted.
         public static bool CanDelete(SessionListEntry entry) =>
-            entry != null && !entry.OccupiesCapacity && (entry.Status == "ARCHIVED" || entry.Status == "COMPLETED" || entry.Status == "FAILED");
+            entry != null && !entry.OccupiesCapacity &&
+            (entry.CanDelete ?? !(entry.IsAssessment ||
+                entry.ScenarioRevisionId?.StartsWith("scored-toa-payoh-", StringComparison.Ordinal) == true)) &&
+            (entry.Status == "ARCHIVED" || entry.Status == "COMPLETED" || entry.Status == "FAILED");
 
         // -----------------------------------------------------------------------------------
         // Function: Reclaimed
@@ -753,7 +748,8 @@ namespace Formula9.UI
         //
         // Returns:
         //     long: How many would be deleted.
-        public static long PurgeCount(SessionListResponse list, int keep) => Math.Max(0, list.Total - list.LiveCount - keep);
+        public static long PurgeCount(SessionListResponse list, int keep) =>
+            Math.Max(0, (list.TerminalPracticeCount ?? (list.Total - list.LiveCount)) - keep);
 
         // -----------------------------------------------------------------------------------
         // Function: PurgeQuestion
@@ -771,7 +767,11 @@ namespace Formula9.UI
         public static string PurgeQuestion(SessionListResponse list, int keep)
         {
             var deleted = PurgeCount(list, keep);
-            var finished = list.Total - list.LiveCount;
+            var finished = list.TerminalPracticeCount ?? (list.Total - list.LiveCount);
+            if (list.TerminalPracticeCount.HasValue)
+                return deleted == 0 ? $"No old practice sessions to delete. The {keep} newest are kept." :
+                    $"Permanently delete {Count(deleted, "old finished practice session")}? The {keep} newest finished practice sessions " +
+                    "and all assessment records are kept. Their history is removed for everyone. This cannot be undone.";
             if (deleted == 0)
                 return $"Nothing to delete: there {(finished == 1 ? "is" : "are")} {Count(finished, "finished session")}, " +
                        $"and the {keep} newest are always kept.";
@@ -824,6 +824,8 @@ namespace Formula9.UI
                     if (outcome.TargetType == "CHARGER") return $"Charger {outcome.TargetId} reserved";
                     return $"Decision {outcome.CommandId} APPLIED for {outcome.TargetId} at tick {outcome.AppliedTick?.ToString() ?? "unknown"}.";
                 case "REJECTED":
+                    if (outcome.FailureCode == "ASSESSMENT_NOT_READY")
+                        return "The assessment's charging task is unavailable. Create a fresh assessment, then try again.";
                     if (outcome.TargetType == "SESSION" && outcome.FailureCode == "UNKNOWN_CONSTRAINT")
                         return "Can't start yet: a shuttle's route crosses a closed road. Approve a detour, then start again.";
                     if (outcome.CommandType == "SCHEDULE_CHARGE" || outcome.CommandType == "CANCEL_CHARGE_BOOKING")

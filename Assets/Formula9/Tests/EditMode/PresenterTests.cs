@@ -433,11 +433,11 @@ namespace Formula9.Tests
         }
 
         // Replay the time in a scored snapshot from before the duration field was introduced.
-        [TestCase("toa-payoh-rubric-r2", false, "0:47 left")]
-        [TestCase("toa-payoh-rubric-r1", false, "14:47 left")]
+        [TestCase(120L, false, "0:47 left")]
+        [TestCase(960L, false, "14:47 left")]
         [TestCase(null, true, "Loading timer…")]
-        [TestCase("unknown-rubric", false, "Timer unavailable")]
-        public void CountdownUsesPinnedLegacyRubric(string revision, bool loading, string text)
+        [TestCase(null, false, "Timer unavailable")]
+        public void CountdownUsesTheSavedAttemptDuration(long? duration, bool loading, string text)
         {
             var snapshot = new FullSnapshot
             {
@@ -445,11 +445,10 @@ namespace Formula9.Tests
                 Session = new TrainingSession { ScenarioRevisionId = "scored-toa-payoh-legacy", Status = "RUNNING" },
                 SimulationTimeS = 73.45,
             };
-            var legacyDuration = TrainingPresenter.LegacyAssessmentDuration(revision);
-            Assert.AreEqual(text, TrainingPresenter.AssessmentClock(snapshot, true, legacyDuration, loading).Text);
+            Assert.AreEqual(text, TrainingPresenter.AssessmentClock(snapshot, true, duration, loading).Text);
 
             snapshot.Scenario.AssessmentDurationS = 120;
-            Assert.AreEqual("0:47 left", TrainingPresenter.AssessmentClock(snapshot, true, legacyDuration, loading).Text);
+            Assert.AreEqual("0:47 left", TrainingPresenter.AssessmentClock(snapshot, true, duration, loading).Text);
         }
 
         // -----------------------------------------------------------------------------------
@@ -522,6 +521,26 @@ namespace Formula9.Tests
                 TrainingPresenter.PurgeQuestion(list, 20));
             Assert.AreEqual("Deleted 1 old training session.", TrainingPresenter.Purged(1));
             Assert.AreEqual("No old sessions to delete.", TrainingPresenter.Purged(0));
+        }
+
+        [Test]
+        public void AssessmentRetentionUsesServerPermissionsAndPracticeCounts()
+        {
+            StringAssert.Contains("charging task", TrainingPresenter.Outcome(new CommandOutcome
+                { Status = "REJECTED", FailureCode = "ASSESSMENT_NOT_READY" }));
+            var entry = new SessionListEntry { IsAssessment = true, Status = "COMPLETED" };
+            Assert.IsFalse(TrainingPresenter.CanDelete(entry));
+            entry.IsAssessment = false;
+            entry.ScenarioRevisionId = "scored-toa-payoh-earlier";
+            Assert.IsFalse(TrainingPresenter.CanDelete(entry));
+            entry.CanDelete = true;
+            Assert.IsTrue(TrainingPresenter.CanDelete(entry));
+            var list = new SessionListResponse { LiveCount = 1, Total = 100, TerminalPracticeCount = 22 };
+            Assert.AreEqual(2, TrainingPresenter.PurgeCount(list, 20));
+            StringAssert.Contains("2 old finished practice sessions", TrainingPresenter.PurgeQuestion(list, 20));
+            StringAssert.Contains("cannot be undone", TrainingPresenter.PurgeQuestion(list, 20));
+            list.TerminalPracticeCount = 2;
+            Assert.AreEqual(0, TrainingPresenter.PurgeCount(list, 20));
         }
 
         // -----------------------------------------------------------------------------------

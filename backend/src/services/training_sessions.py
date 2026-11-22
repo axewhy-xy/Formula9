@@ -9,7 +9,7 @@ from collections.abc import Coroutine
 from contextvars import Context
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 import logging
@@ -23,8 +23,8 @@ from src.persistence.training_store import TrainingStore, TrainingStoreError
 from src.core.training_telemetry import SessionProgress, boundary
 from src.schemas.shuttle_data import Shuttle
 from src.services.asset_loader import load_routes_from_json
-from src.services.assessment import AssessmentPlan, SCORED_SCENARIO, load_rubric
-from src.services.scored_actor import Observations, ScoredSessionActor
+from src.services.assessment import SCORED_SCENARIO, load_rubric
+from src.services.scored_actor import ScoredSessionActor
 from src.services.session_actor import SessionActor
 from src.services.session_stream import SnapshotFeed
 from src.services.integrated_actor import (IntegratedSessionActor, SCENARIO_SELECTOR, SIGNAL_AREA, get_workflow_definition,
@@ -162,12 +162,10 @@ def checkpoint(actor: SessionActor, *, traffic: bool = True) -> dict:
         # keeps it apart, so the publications in between leave out its 65-100 KB. Version 4 holds each
         # incident's world event and the scenario timeline's place; version 3 is converted on restore.
         state.update(version=4, workflow=actor.workflow_state(traffic=False))
-        if isinstance(actor, ScoredSessionActor):
-            state.update(assessment_plan=actor.assessment_plan.model_dump(mode="json"),
-                         assessment_observations=asdict(actor.observations))
         saved = actor.traffic_checkpoint() if traffic else None
         if saved is not None:
             state["traffic"] = saved
+    state.update(actor.checkpoint_extension())
     return state
 
 
@@ -245,6 +243,7 @@ class SessionServiceBase:
         self._creation_lock = asyncio.Lock()
         self._operations: set[asyncio.Task] = set()
         self._snapshot_feed: SnapshotFeed | None = None
+        self._assessment_maintenance: asyncio.Task | None = None
 
     async def _complete(self, operation: Coroutine[Any, Any, T]) -> T:
         # A disconnected caller must not cancel work between its durable commit
@@ -270,6 +269,50 @@ class SessionServiceBase:
     async def initialize(self) -> None:
         if not self._initialized:
             await self._complete(self._initialize())
+        if self.store.owns_writer and self._assessment_maintenance is None and not self.closed:
+            # Worker processes share the gateway's store and leave expiry to the gateway.
+            self._assessment_maintenance = asyncio.create_task(self._maintain_assessments())
+
+    async def _maintain_assessments(self) -> None:
+        interval = min(30.0, self.store.assessment_policy.inactivity_timeout_s / 2)
+        while not self.closed:
+            try:
+                await self.expire_inactive_assessments()
+            except (TrainingStoreError, sqlite3.Error):
+                logger.exception("Assessment inactivity cleanup will retry")
+            await asyncio.sleep(interval)
+
+    async def expire_inactive_assessments(self, *, now: datetime | None = None) -> int:
+        """Archive abandoned ready or paused attempts through their normal actor and commit path."""
+        cutoff = ((now or datetime.now(UTC)) - timedelta(
+            seconds=self.store.assessment_policy.inactivity_timeout_s)).isoformat()
+        inactive = await asyncio.to_thread(self.store.inactive_assessments, cutoff)
+        archived = 0
+        for record in inactive:
+            sid = record["session_id"]
+            if not self.owns(sid):
+                continue
+            snapshot = await asyncio.to_thread(self.store.snapshot, sid)
+            command = DispatcherCommand(
+                contract_version="2.0", command_id=uuid4().hex, idempotency_key=uuid4().hex, session_id=sid,
+                command_type="ARCHIVE", expected_epoch=snapshot.session_epoch,
+                expected_revision=snapshot.session.aggregate_revision, target_type="SESSION", target_id=sid,
+                reason="Assessment archived after the configured inactivity limit.", payload={})
+            try:
+                archived += bool(await self._expire_assessment(record["trainee_id"], command, cutoff))
+            except TrainingStoreError as error:
+                if error.code not in {"STALE_REVISION", "INVALID_TRANSITION", "SESSION_RECOVERING", "INVALID_REFERENCE"}:
+                    raise
+        return archived
+
+    async def _expire_assessment(self, actor_id: str, command: DispatcherCommand, cutoff: str) -> bool:
+        raise NotImplementedError
+
+    async def _close_assessment_maintenance(self) -> None:
+        if self._assessment_maintenance is not None:
+            self._assessment_maintenance.cancel()
+            await asyncio.gather(self._assessment_maintenance, return_exceptions=True)
+            self._assessment_maintenance = None
 
     async def _initialize(self) -> None:
         raise NotImplementedError
@@ -510,9 +553,7 @@ class TrainingSessionService(SessionServiceBase):
             raise TrainingStoreError("CORRUPT_CHECKPOINT", "Actor clocks must be nonnegative integers")
         if state["version"] in (3, 4) and snapshot.spatial is None:
             if "assessment_plan" in state:
-                plan = AssessmentPlan.model_validate(state["assessment_plan"])
-                actor = ScoredSessionActor(plan.rubric, session_id=snapshot.session_id, plan=plan)
-                actor.observations = Observations(**state["assessment_observations"])
+                actor = ScoredSessionActor.from_checkpoint(snapshot.session_id, state)
             else:
                 actor = IntegratedSessionActor(seed=state["seed"], session_id=snapshot.session_id)
             if state["version"] == 3:
@@ -597,7 +638,7 @@ class TrainingSessionService(SessionServiceBase):
         snapshot = actor.generate_snapshot()
         snapshot.session.status = "READY"
         snapshot = self.store.create_session(snapshot, runtime_state=checkpoint(actor), creation=(actor_id, key, digest),
-            assessment_plan=actor.assessment_plan if isinstance(actor, ScoredSessionActor) else None)
+                                             **actor.admission_options())
         return snapshot, actor
 
     def traffic_sessions(self) -> int:
@@ -661,13 +702,19 @@ class TrainingSessionService(SessionServiceBase):
                           failure_code=result.failure_code)
             return result
 
-    async def _submit(self, actor_id: str, command: DispatcherCommand) -> CommandStatus:
+    async def _submit(self, actor_id: str, command: DispatcherCommand, *,
+                      idle_before: str | None = None) -> CommandStatus | None:
         session = self.sessions.get(command.session_id)
         if session is None:
+            if idle_before is not None:
+                return None
             # Terminal runtimes release their slot, but their committed command
             # receipts remain available (including a retry of ARCHIVE).
             return await asyncio.to_thread(self.store.accept, actor_id, command)
         async with session.lock:
+            if idle_before is not None and not await asyncio.to_thread(
+                    self.store.assessment_is_inactive, command.session_id, idle_before):
+                return None
             unavailable = session.failed or session.task is None or session.task.done() or self.closed
             result, staged = await asyncio.to_thread(self._submit_staged, session.actor, actor_id, command, unavailable)
             if staged is not None:
@@ -682,6 +729,11 @@ class TrainingSessionService(SessionServiceBase):
                 session.task.cancel()
                 self._session_removed(command.session_id)
             return result
+
+    async def _expire_assessment(self, actor_id: str, command: DispatcherCommand, cutoff: str) -> bool:
+        """Apply expiry only if no newer action changed the persisted activity timestamp."""
+        result = await self._submit(actor_id, command, idle_before=cutoff)
+        return result is not None and result.status == "APPLIED"
 
     def _submit_staged(self, actor: SessionActor, actor_id: str, command: DispatcherCommand,
                        unavailable: bool) -> tuple[CommandStatus, SessionActor | None]:
@@ -771,7 +823,7 @@ class TrainingSessionService(SessionServiceBase):
         # publishes; it is taken once the tick is done, so it shows what the tick installs
         frame_due = (isinstance(staged, IntegratedSessionActor) and staged.current_tick != actor.current_tick
                      and staged.traffic_frame_due())
-        if staged.should_emit_snapshot() or (isinstance(staged, ScoredSessionActor) and staged.assessment_due):
+        if staged.publication_due():
             if baseline is None:
                 baseline = self.store.snapshot(actor.session_id)
             if baseline.session.status != "RUNNING":
@@ -902,6 +954,7 @@ class TrainingSessionService(SessionServiceBase):
 
     async def close(self) -> None:
         self.closed = True
+        await self._close_assessment_maintenance()
         tasks = list(self._tasks)
         for task in tasks:
             task.cancel()

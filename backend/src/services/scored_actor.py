@@ -2,7 +2,7 @@
 
 Author: Nur Syazliyarni Binte Zazali
 Date Created: 15/11/2026
-Last Modified: 16/11/2026
+Last Modified: 23/11/2026
 
 Uses the same traffic, commands and validation as the integrated exercise.
 Only the scored scenario sets a fixed route closure, designated incident,
@@ -11,11 +11,14 @@ checkpoint, so recovery preserves minima and opportunity windows.
 """
 
 from copy import copy
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
 
-from contracts.v2.models import Disruption, FullSnapshot
+from uuid import uuid4
+
+from contracts.v2.models import Disruption, Event, FullSnapshot
+from src.persistence.training_store import TrainingStoreError
 from contracts.v2.route_edit import RouteEditRequest
 from src.energy.decisions import IN_SERVICE_STATES
 from src.energy.forecast import reserve_kwh
@@ -48,12 +51,20 @@ class Observations:
 class ScoredSessionActor(IntegratedSessionActor):
     """A fixed route, incident and charging exercise in the integrated simulator."""
 
+    @classmethod
+    def from_checkpoint(cls, session_id: str, state: dict):
+        """Restore scenario-owned data without exposing its observation fields to the session host."""
+        plan = AssessmentPlan.model_validate(state["assessment_plan"])
+        actor = cls(plan.rubric, session_id=session_id, plan=plan)
+        actor.observations = Observations(**state["assessment_observations"])
+        return actor
+
     def __init__(self, rubric: Rubric, *, session_id: str, plan: AssessmentPlan | None = None):
         super().__init__(seed=rubric.seed, session_id=session_id)
         self.observations = Observations()
-        # Include the rubric in the scenario identity while keeping the same map and incident rubric.
-        # Omit the optional short-exercise settings to preserve earlier checkpoint identities.
-        identity = json.dumps(rubric.model_dump(mode="json", exclude_none=True), sort_keys=True)
+        # Keep earlier pinned identities reproducible. New identities include behavioral settings.
+        excluded = {"metadata"} if rubric.identity_version == "semantic-v1" else set()
+        identity = json.dumps(rubric.model_dump(mode="json", exclude_none=True, exclude=excluded), sort_keys=True)
         self.scenario_revision = "scored-toa-payoh-" + sha256(f"{self.scenario_revision}:{identity}".encode()).hexdigest()[:24]
         self.domain.scenario.revision_id = self.domain.session.scenario_revision_id = self.scenario_revision
         self.domain.scenario.assessment_duration_s = rubric.exercise_limit_s
@@ -115,6 +126,27 @@ class ScoredSessionActor(IntegratedSessionActor):
         memo[id(self._closure_crossings)] = self._closure_crossings
         return super().__deepcopy__(memo)
 
+    def checkpoint_extension(self) -> dict:
+        return {"assessment_plan": self.assessment_plan.model_dump(mode="json"),
+                "assessment_observations": asdict(self.observations)}
+
+    def admission_options(self) -> dict:
+        return {"assessment_plan": self.assessment_plan}
+
+    def publication_due(self) -> bool:
+        return super().publication_due() or self.assessment_due
+
+    def before_publication(self, snapshot, events):
+        """End the exercise at its pinned boundary while keeping normal session commits generic."""
+        if self.assessment_due and snapshot.session.status == "RUNNING":
+            snapshot.session.status = "COMPLETED"
+            snapshot.session.aggregate_revision += 1
+            completed = Event(event_id=uuid4().hex, event_sequence=0, tick=snapshot.tick,
+                entity_type="SESSION", entity_id=snapshot.session_id, entity_revision=snapshot.session.aggregate_revision,
+                event_type="SESSION_COMPLETED", source=snapshot.source, data={"status": "COMPLETED"})
+            return (*events, completed)
+        return events
+
     @property
     def assessment_due(self):
         """Finish on the last published boundary of the exercise's active simulation time."""
@@ -155,7 +187,7 @@ class ScoredSessionActor(IntegratedSessionActor):
         return {"kind": "ROAD_BLOCK", "duration_s": rubric.incident_duration_s,
                 "event_id": SCORED_INCIDENT, "vehicle_id": rubric.route_vehicle_id, "minimum_distance_m": 35}
 
-    def _observe_motion(self, proposed):
+    def observe_motion(self, proposed):
         """Check actual front crossings using one active closure set per step."""
         tick = self.current_tick
         pretrip = next((d for d in self.domain.disruptions if d.disruption_id == PRETRIP_CLOSURE
@@ -248,11 +280,18 @@ class ScoredSessionActor(IntegratedSessionActor):
         if evidence.charging_offer_tick is None:
             booking = next((e for e in events if e.event_type == "CHARGE_SCHEDULED"
                             and e.data.get("vehicle_id") == rubric.charging_vehicle_id), None)
-            if not usable and booking is None:
+            existing_booking = next((b for b in snapshot.charge_bookings
+                                     if b.vehicle_id == rubric.charging_vehicle_id
+                                     and b.status in {"SCHEDULED", "ACTIVE"} and b.origin != "SAFETY_RETURN"), None)
+            continued = rubric.charging_vehicle_id in snapshot.charge_decision_deferrals
+            if not usable and booking is None and existing_booking is None and not continued:
+                if rubric.charging_offer_deadline_s is not None and self.current_tick == 0:
+                    raise TrainingStoreError("ASSESSMENT_NOT_READY",
+                        "The assessment cannot start while its charging task is unavailable. Create a fresh assessment.")
                 return
             evidence.charging_offer_tick = self.current_tick
             self._event(shuttle, "ASSESSMENT_CHARGING_OFFERED", option_id=option.option_id if usable else None,
-                        booking_id=booking.data["booking_id"] if booking else None)
+                        booking_id=booking.data["booking_id"] if booking else existing_booking.booking_id if existing_booking else None)
         if usable:
             if evidence.usable_charge_since is None:
                 evidence.usable_charge_since = self.current_tick

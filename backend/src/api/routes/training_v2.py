@@ -43,13 +43,6 @@ def get_training_store() -> TrainingStore:
         return _store
 
 
-async def bind_training_trace(request: Request, store: TrainingStore = Depends(get_training_store)) -> None:
-    request.scope["training_trace"] = store.trace
-
-
-router = APIRouter(prefix="/v2/sessions", tags=["training-v2"], dependencies=[Depends(bind_training_trace)])
-
-
 def close_training_store() -> None:
     global _store
     with _store_lock:
@@ -67,6 +60,17 @@ def get_actor_id(request: Request) -> str:
     if not actor_id:
         raise TrainingStoreError("ROLE_DENIED", "Authenticated actor has no stable identity")
     return str(actor_id)
+
+
+async def bind_training_trace(request: Request, store: TrainingStore = Depends(get_training_store),
+                              actor_id: str = Depends(get_actor_id)) -> None:
+    request.scope["training_trace"] = store.trace
+    session_id = request.path_params.get("session_id")
+    if session_id is not None:
+        await asyncio.to_thread(store.check_read_access, session_id, actor_id)
+
+
+router = APIRouter(prefix="/v2/sessions", tags=["training-v2"], dependencies=[Depends(bind_training_trace)])
 
 
 async def initialize_training_service(application: FastAPI, store: TrainingStore) -> SessionServiceBase:
@@ -104,7 +108,7 @@ async def get_training_service(request: Request, store: TrainingStore = Depends(
 async def list_sessions(limit: Annotated[int, Query(ge=1, le=500)] = 100, offset: Annotated[int, Query(ge=0)] = 0,
                         actor_id: str = Depends(get_actor_id),
                         service: SessionServiceBase = Depends(get_training_service)) -> dict:
-    page = await asyncio.to_thread(service.store.session_page, limit, offset)
+    page = await asyncio.to_thread(service.store.session_page, limit, offset, actor_id=actor_id)
     return {**page, "capacity": service.MAX_SESSIONS}
 
 
@@ -250,7 +254,7 @@ async def submit_command(session_id: str, command: DispatcherCommand,
         # Terminal attempts still replay their receipt through accept(). The
         # store must not queue an archive for an unrelated fixture to execute.
         baseline = await asyncio.to_thread(store.snapshot, session_id)
-        if baseline.session.status not in {"ARCHIVED", "FAILED"}:
+        if baseline.session.status not in {"COMPLETED", "ARCHIVED", "FAILED"}:
             raise TrainingStoreError("INVALID_TRANSITION", "Only live fleet attempts support archive")
         return (await asyncio.to_thread(store.accept, actor_id, command)).model_dump(mode="json")
     if command.command_type == "APPROVE_ROUTE":
