@@ -3,7 +3,7 @@
  *
  * Author: Choo Jian Wei
  * Date Created: 30/10/2026
- * Last Modified: 30/10/2026
+ * Last Modified: 22/11/2026
  *
  * Description:
  *     Part of NAT-M2-07. A port of the Qt client's AlertGate and TrainingAlerts. Only events listed
@@ -159,6 +159,24 @@ namespace Formula9.Audio
                 if (cue != null) play?.Invoke(cue);
             }
         }
+
+        // -----------------------------------------------------------------------------------
+        // Function: OnCommandFinished
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function plays the rejected cue when the backend refuses a command. A refusal comes
+        //     back only as the command's status (COMMAND_STATUS), never as a COMMAND_REJECTED event,
+        //     so the cue table alone would never play it. The session reports each final status once.
+        //
+        // Args:
+        //     status (string): The command's status, for example REJECTED or APPLIED.
+        public void OnCommandFinished(string status)
+        {
+            if (status == "REJECTED" && !Muted) play?.Invoke(RejectedCue);
+        }
+
+        // The cue the cue table names for a refused command.
+        public const string RejectedCue = "command_rejected";
 
         // Called once for each live event the first time it arrives, muted or not, so the screen can
         // say what an alert is about (TrainingPresenter.IncidentHeadline).

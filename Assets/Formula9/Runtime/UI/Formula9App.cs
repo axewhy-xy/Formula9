@@ -5,7 +5,7 @@
  * Contributors: Rishika (page layout, fleet cards, map/3D switch),
  *     Lau Xiang Yang (training workspace, session list and cleanup, exit)
  * Date Created: 30/10/2026
- * Last Modified: 18/11/2026
+ * Last Modified: 22/11/2026
  *
  * Description:
  *     Part of the Unity client's UI. Wires the UI Toolkit screens to the login and session layers,
@@ -165,6 +165,7 @@ namespace Formula9.UI
             muteToggle.SetValueWithoutNotify(mute.Muted);
             muteToggle.RegisterValueChangedCallback(change => mute.Muted = change.newValue);
             session.EventsAccepted += events => alerts.OnEvents(events, true);
+            session.CommandFinished += outcome => alerts.OnCommandFinished(outcome.Status);
             session.EventsAccepted += _ => { if (session.Store.Snapshot != null) world.SetIncidentEvents(session.Store.Events); };
             session.RecoveryEventsReceived += _ => { if (session.Store.Snapshot != null) world.SetIncidentEvents(session.Store.Events); };
             session.RecoveryEventsReceived += events => alerts.OnEvents(events, true);
