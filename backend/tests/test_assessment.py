@@ -2,7 +2,7 @@
 
 Author: Nur Syazliyarni Binte Zazali
 Date Created: 15/11/2026
-Last Modified: 16/11/2026
+Last Modified: 23/11/2026
 
 Tests the scoring rules against explicit evidence and exercises the real
 command, session completion and SQLite recovery paths without a live network.
@@ -12,6 +12,7 @@ from copy import deepcopy
 from dataclasses import replace
 from hashlib import sha256
 import json
+import sqlite3
 from uuid import uuid4
 
 import pytest
@@ -19,7 +20,7 @@ import pytest
 from contracts.v2.models import DispatcherCommand, Event
 from contracts.v2.route_edit import RouteApprovalRequest, RouteEditRequest
 from contracts.v2.sessions import CreateSessionRequest
-from src.persistence.training_store import TrainingStore, TrainingStoreError
+from src.persistence.training_store import _MIGRATIONS, TrainingStore, TrainingStoreError
 from src.services.assessment import (EVALUATOR_VERSIONS, SCORED_INCIDENT, SCORED_SCENARIO, Criterion, Rubric,
                                      finalize, load_rubric)
 from src.services.integrated_actor import SHUTTLE_FRONT_M, IntegratedSessionActor
@@ -110,6 +111,41 @@ def test_archiving_a_scored_attempt_preserves_incomplete_report(tmp_path):
         with pytest.raises(TrainingStoreError, match="assigned trainee"):
             store.delete_session(snapshot.session_id, actor_id="observer")
         store.delete_session(snapshot.session_id, actor_id="trainee")
+
+
+@pytest.mark.parametrize("assessment_v5", [False, True])
+def test_database_upgrade_from_either_branch_preserves_assessments(tmp_path, assessment_v5):
+    """Both branches shipped v5. Keep main's boundary column and any existing saved grade."""
+    path = tmp_path / "branch-v5.sqlite"
+    plan, snapshot, events, _ = scored_evidence()
+    saved = finalize(plan, snapshot, events)
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at_utc TEXT NOT NULL)")
+        for migration in sorted(_MIGRATIONS.glob("*.sql")):
+            version = int(migration.name[:4])
+            if version < 5:
+                connection.executescript(migration.read_text())
+                connection.execute("INSERT INTO schema_migrations VALUES (?, 'before-merge')", (version,))
+        migration = "0006_session_assessments.sql" if assessment_v5 else "0005_snapshot_boundary.sql"
+        connection.executescript((_MIGRATIONS / migration).read_text())
+        connection.execute("INSERT INTO schema_migrations VALUES (5, 'before-merge')")
+        if assessment_v5:
+            raw = snapshot.model_dump_json()
+            connection.execute("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (snapshot.session_id, snapshot.session.scenario_revision_id, snapshot.session_epoch,
+                 snapshot.session.status, snapshot.tick, snapshot.event_sequence, snapshot.event_sequence,
+                 raw, sha256(raw.encode()).hexdigest()))
+            connection.execute("INSERT INTO session_assessments VALUES (?, ?, ?, ?)",
+                (snapshot.session_id, "trainee", plan.model_dump_json(), saved.model_dump_json()))
+    for _ in range(2):
+        with TrainingStore(path) as store:
+            with store._reading() as connection:
+                assert "boundary_json" in {row[1] for row in connection.execute("PRAGMA table_info(sessions)")}
+                assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 6
+                assert connection.execute("SELECT COUNT(*) FROM session_assessments").fetchone()[0] == int(assessment_v5)
+            if assessment_v5:
+                assert store.snapshot(snapshot.session_id) == snapshot
+                assert store.assessment(snapshot.session_id, "trainee") == saved
 
 
 def legacy_rubric():

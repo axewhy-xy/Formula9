@@ -102,7 +102,9 @@ namespace Formula9.Contracts
         };
 
         private static readonly JsonSerializer Serializer = JsonSerializer.Create(Settings);
-        private static readonly Dictionary<string, JObject> Documents = new Dictionary<string, JObject>();
+        // Every embedded schema, parsed once when the parser is first used and only read after, so
+        // replies can be parsed on any thread (TrainingApi.ParseInBackground)
+        private static readonly IReadOnlyDictionary<string, JObject> Documents = LoadDocuments();
 
         // -----------------------------------------------------------------------------------
         // Function: ParseMessage
@@ -120,9 +122,25 @@ namespace Formula9.Contracts
         // Throws:
         //     ContractException: If the JSON is invalid, of an unknown message type, or breaks the
         //         contract.
-        public static IContractMessage ParseMessage(string json)
+        public static IContractMessage ParseMessage(string json) => ParseMessage(Read(json));
+
+        // -----------------------------------------------------------------------------------
+        // Function: ParseMessage (token)
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function works like ParseMessage on JSON already read with ReadJson, as the
+        //     snapshot inside a session stream message is.
+        //
+        // Args:
+        //     token (JToken): The message, read with ReadJson.
+        //
+        // Returns:
+        //     IContractMessage: The validated message.
+        //
+        // Throws:
+        //     ContractException: If it is of an unknown message type or breaks the contract.
+        public static IContractMessage ParseMessage(JToken token)
         {
-            var token = Read(json);
             if (!(token is JObject message) || !(message["message_type"] is JValue kind) || kind.Type != JTokenType.String
                 || !Messages.TryGetValue((string)kind, out var type))
                 throw new ContractException("$.message_type is not a known training message");
@@ -166,6 +184,23 @@ namespace Formula9.Contracts
             Validate(token, typeof(T));
             return token.ToString(Formatting.None);
         }
+
+        // -----------------------------------------------------------------------------------
+        // Function: ReadJson
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function reads JSON as the contract messages are read (see Read), for a
+        //     document that wraps one, such as a session stream message: timestamps stay strings.
+        //
+        // Args:
+        //     json (string): The text.
+        //
+        // Returns:
+        //     JToken: The parsed JSON.
+        //
+        // Throws:
+        //     ContractException: If the text is empty or not valid JSON.
+        public static JToken ReadJson(string json) => Read(json);
 
         // -----------------------------------------------------------------------------------
         // Function: Read
@@ -255,22 +290,28 @@ namespace Formula9.Contracts
         // Function: Document
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function returns an embedded schema document, parsing it once and then caching
-        //     it.
+        //     This function returns an embedded schema document.
         //
         // Args:
         //     name (string): The schema file name.
         //
         // Returns:
         //     JObject: The schema document.
-        private static JObject Document(string name)
+        private static JObject Document(string name) => Documents[name];
+
+        // -----------------------------------------------------------------------------------
+        // Function: LoadDocuments
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function parses every embedded schema document.
+        //
+        // Returns:
+        //     IReadOnlyDictionary<string, JObject>: The documents by file name.
+        private static IReadOnlyDictionary<string, JObject> LoadDocuments()
         {
-            lock (Documents)
-            {
-                if (!Documents.TryGetValue(name, out var document))
-                    Documents[name] = document = JObject.Parse(ContractSchemas.Documents[name]);
-                return document;
-            }
+            var documents = new Dictionary<string, JObject>();
+            foreach (var entry in ContractSchemas.Documents) documents[entry.Key] = JObject.Parse(entry.Value);
+            return documents;
         }
 
         // -----------------------------------------------------------------------------------

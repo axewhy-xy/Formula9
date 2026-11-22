@@ -1415,7 +1415,8 @@
                 "BREAKDOWN",
                 "COLLISION",
                 "SIGNAL_FAULT",
-                "ROAD_CLOSURE"
+                "ROAD_CLOSURE",
+                "PEDESTRIAN_ON_ROAD"
               ],
               "type": "string"
             },

@@ -242,9 +242,10 @@ planning, incident response, and charging under **Reports → Assessment**. See 
 exercise, point rules and automatic failures.
 
 All seven remaining Qt client workflows are available in Unity. The workspace tabs beside
-the world view are **Fleet**, **Route planning**, **Charging**, **Incidents** and **Reports**.
+the world view are **Fleet**, **Route planning**, **Charging** and **Reports**. Incidents are
+decided on Route planning, and reviewed in Reports.
 
-- **Route planning:** the exercise runs Problem, Detour, Check, Approve, Outcome. The map shows
+- **Route planning:** before the start, the exercise runs Problem, Detour, Check, Approve, Outcome. The map shows
   the closure and every road of the operating network. Click roads to send the shuttle along
   them; the backend plans the loop through them and the stops, and each change is checked
   straight away. A failed check says why in plain words and highlights the road (**Show** brings
@@ -260,11 +261,13 @@ the world view are **Fleet**, **Route planning**, **Charging**, **Incidents** an
   consequences. Select a passing, unexpired option, enter a reason, then use
   **Reserve / Continue service**. The backend applies the decision and determines all motion
   and energy consequences.
-- **Incidents:** select an incident and offered option, enter a reason, preview, then approve.
-  The hypothetical branch has its own labelled map. **History** shows committed historical
-  samples with a sample slider and reports missing evidence; **Debrief** shows the backend's
-  provisional rubric, decisions and outcomes. These views never replace the live fleet or
-  replay alert sounds. **Focus incident shuttle** selects and focuses its 3D vehicle.
+- **Incidents:** an incident a shuttle will reach shows a notification over the map. **Decide**
+  opens Route planning on that shuttle, where **Needs a decision** lists every shuttle waiting,
+  soonest first. The Problem card says what and where the incident is, when the shuttle reaches it
+  and what keeping its route costs. Choose **Keep route**, **Hold at a stop**, **Request
+  assistance** or **Re-route on the map**, give a reason and confirm; Re-route opens the route
+  editor for that shuttle. An option the backend doesn't offer is greyed out with the reason, and
+  all of them wait while the session is paused.
 - **Reports:** inspect the latest 1,000 events and 200 commands observed in the selected
   session by this running client, including pending confirmation, refusal and final status.
   Search each tab by IDs, event type, target, status or failure code; every search word must
@@ -272,6 +275,10 @@ the world view are **Fleet**, **Route planning**, **Charging**, **Incidents** an
   dropdown, review the matching count, or use **Clear filters**. Filters survive incoming
   records and reset when switching sessions.
   These are bounded client records; they are not a server-wide ledger or an export.
+  The **Incidents** tab lists the session's incidents and what was decided. **History** replays
+  the simulation around one on a map, a sample at a time, and **Debrief** shows the backend's
+  provisional rubric, decisions and outcomes. These views never replace the live fleet or replay
+  alert sounds.
 - **3D interaction:** click rendered geometry to select an entity; select a fleet row and use
   **Follow selected** or **Overview**. Right-drag orbits, middle-drag pans and the wheel zooms.
   For route drafting, select **Draft in 3D** and the road surface/lane/deck, then click a node
@@ -401,16 +408,18 @@ so they only run against an isolated backend and are skipped unless
 `FORMULA9_E2E_BACKEND_URL` is set:
 
 ```
-backend\.venv\Scripts\python Tools/isolated_backend.py  # in-memory accounts, temporary sessions, port 8010
+backend\.venv\Scripts\python Tools/isolated_backend.py --seed-incidents  # in-memory accounts, temporary sessions, port 8010
 set FORMULA9_E2E_BACKEND_URL=http://127.0.0.1:8010
 ```
 
-Never point `FORMULA9_E2E_BACKEND_URL` at the team's shared backend. The `Render` test draws the real scene and needs a GPU,
+`--seed-incidents` schedules a known collision and signal fault in every session, beside the
+random ones. The incident end-to-end test decides the seeded collision, so without the flag it
+fails after waiting 60 seconds for it. Never point `FORMULA9_E2E_BACKEND_URL` at the team's shared backend. The `Render` test draws the real scene and needs a GPU,
 so it is skipped under `-nographics`; set `FORMULA9_RENDER_OUT` to a `.png` path to keep the
 image. `RouteWalkthrough`, in the same category, plays the routing exercise through the real UI in Play
 mode and keeps a picture and a log line per step in `FORMULA9_WALKTHROUGH_OUT`. It signs up
 throwaway users too, so it is skipped unless `FORMULA9_BACKEND_URL` is also set, at the isolated
-backend.
+backend. It decides the seeded incidents, so that backend must also run with `--seed-incidents`.
 
 The workflow tests also cover stale route graph replies, inclusive offer expiry ticks,
 lost approval replies, readiness payloads, and canonical mesh picks against the shared

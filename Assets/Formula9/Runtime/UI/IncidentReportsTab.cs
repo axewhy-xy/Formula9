@@ -8,7 +8,7 @@
  * Description:
  *     Part of the Unity client's Reports page. Replays the historical simulation around an
  *     incident on a map, one sample at a time, and shows its debrief. Moved here from the
- *     Incident Monitor, which is being removed (issue #86).
+ *     Incident Monitor, which was removed (issue #86).
  */
 
 using System;
@@ -19,6 +19,7 @@ using Formula9.Backend;
 using Formula9.Contracts;
 using Formula9.Session;
 using Formula9.World;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using UnityEngine.UIElements;
 
@@ -118,7 +119,7 @@ namespace Formula9.UI
                     historySample.style.display = historySnapshots.Count > 1 ? DisplayStyle.Flex : DisplayStyle.None;
                     ShowSample();
                 }
-                report.text = (showDebrief ? "DEBRIEF · provisional / uncalibrated\n" : "HISTORICAL SIMULATION · complete: " + result["complete"] + "\n" + result["unavailable_reason"] + "\n") + TrainingWorkspace.FormatDocument(result);
+                report.text = (showDebrief ? "DEBRIEF · provisional / uncalibrated\n" : "HISTORICAL SIMULATION · complete: " + result["complete"] + "\n" + result["unavailable_reason"] + "\n") + FormatDocument(result);
             }
             // A report from an earlier session leaves busy alone: it was freed then, and may belong to a newer request now
             finally { if (stamp == boundary) busy = false; UpdateActions(); }
@@ -137,6 +138,18 @@ namespace Formula9.UI
             var sample = historySnapshots[Math.Min(historySample.value, historySnapshots.Count - 1)];
             evidenceMap.Show(sample); evidenceMap.style.display = DisplayStyle.Flex;
             evidenceStatus.text = $"Historical simulation · sample {historySample.value + 1}/{historySnapshots.Count} · tick {sample.Tick}.";
+        }
+
+        // Human-readable nested fields preserve the backend's assumptions, evidence and rubric.
+        private static string FormatDocument(JToken token, int depth = 0)
+        {
+            if (token == null) return "Unavailable";
+            if (token is JObject obj) return string.Join("\n", obj.Properties().Where(p => p.Name != "snapshots").Select(p =>
+                new string(' ', depth * 2) + p.Name.Replace('_', ' ') + ": " + (p.Value is JContainer ? "\n" : "") + FormatDocument(p.Value, depth + 1))) +
+                (obj["snapshots"] is JArray snapshots ? "\nHistory samples:\n" + string.Join("\n", snapshots.Select(s => $"tick {s["tick"]} · simulation time {s["simulation_time_s"]} s\n" +
+                    string.Join("\n", (s["vehicles"] as JArray ?? new JArray()).Select(v => $"  {v["vehicle_id"]}: {v["service_state"]} · {v["battery_kwh"]} kWh · position {v["position"]?.ToString(Formatting.None)}")))) : "");
+            if (token is JArray array) return string.Join("\n", array.Select(t => FormatDocument(t, depth)));
+            return token.Type == JTokenType.Null ? "Unavailable" : token.ToString();
         }
     }
 }

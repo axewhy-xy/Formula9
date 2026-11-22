@@ -100,9 +100,11 @@ namespace Formula9.World
             foreach (var path in plan.Slowed) Ribbon(scene, "Slowed road", path, SlowedColor, SlowedColor, SlowedWidthM, SlowedHeightM);
             foreach (var lane in plan.Lanes)
                 scene.Ribbons.Add(new LaneRibbon { Lane = lane, Line = Ribbon(scene, "Backed up " + lane.EdgeId, new Vector2[0], QueueNear, QueueFar, RibbonWidthM, RibbonHeightM) });
-            // A signal fault has no wreck or barrier: its junction's lights show it, and the beacon marks it
+            // A signal fault has no wreck or barrier: its junction's lights show it, and the beacon marks it. Nor
+            // has a pedestrian on the road: the backend's traffic frames draw the walker crossing it
             if (plan.Record.Kind == IncidentSimulation.Block) BuildClosure(scene);
-            else if (plan.Record.Kind != IncidentSimulation.SignalFault) BuildAccident(scene);
+            else if (plan.Record.Kind != IncidentSimulation.SignalFault && plan.Record.EventType != IncidentSimulation.PedestrianOnRoad)
+                BuildAccident(scene);
             var post = Part(scene, PrimitiveType.Cylinder, new Vector3(1.6f, BeaconHeightM / 2, 1.6f), scene.Beacon, "Incident beacon post");
             post.position = Ground(plan.Site, BeaconHeightM / 2);
             var head = Part(scene, PrimitiveType.Sphere, Vector3.one * BeaconRadiusM, scene.Beacon, "Incident beacon");

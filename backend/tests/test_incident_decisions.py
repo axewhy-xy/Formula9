@@ -9,7 +9,7 @@ import pytest
 
 from contracts.v2.models import Disruption
 
-from backend.tests.test_training_integration import advance, advance_until, approve, read, runtime, send, stage_boundary
+from backend.tests.test_training_integration import advance, advance_until, approve, preview, read, runtime, send, stage_boundary
 from src.services.incident_scenarios.world_events import ScheduledEvent
 from src.services.incidents import detour_route_id, is_detour_of
 
@@ -106,6 +106,36 @@ def test_a_detour_round_a_collision_keeps_off_its_road(runtime, monkeypatch):
     advance_until(runtime, lambda s: s.vehicles[0].service_state == "DWELLING", limit=4000)
     advance_until(runtime, lambda s: s.vehicles[0].service_state != "DWELLING", limit=4000)
     assert read(runtime)["vehicles"][0]["service_state"] == "DETOURING"
+
+
+def test_a_drafted_detour_round_a_collision_answers_the_live_closures(runtime, monkeypatch):
+    # The planner closes the collision's road for a moment to go round it. The preview must still report the
+    # session's own closures, or the client takes it for stale and never lets the operator approve it.
+    edge, _ = schedule(runtime, monkeypatch)
+    snapshot = read(runtime)
+    route = next(r for r in snapshot["routes"] if r["route_id"] == snapshot["vehicles"][0]["route_id"])
+    drafted = preview(runtime, route_id=route["route_id"], expected_route_revision=route["revision"])
+    assert drafted["approvable"], drafted["checks"]
+    assert edge not in drafted["directed_edge_ids"]
+    assert drafted["closure_revisions"] == {d["disruption_id"]: d["aggregate_revision"] for d in snapshot["disruptions"]}
+
+
+def test_a_detour_planned_round_a_scene_reports_the_sessions_closures(runtime, monkeypatch):
+    # Every caller that plans round an incident's scene (a drafted detour, the offered ROAD_DETOUR option) passes
+    # the session's snapshot as live, so the planner's temporary closure never reaches the preview.
+    client, store, service, session_id = runtime
+    edge, _ = schedule(runtime, monkeypatch)
+    actor = service.sessions[session_id].actor
+    live = actor.generate_snapshot()
+    planning = live.model_copy(deep=True)
+    planning.disruptions.append(Disruption(
+        disruption_id="scene", aggregate_revision=1, affected_edge_ids=[edge],
+        active_from_tick=live.tick, active_until_tick=live.tick + 1, reason="Plan round the scene", provenance=live.source))
+    routes = actor.definition.routes.for_route(live, live.vehicles[0].route_id)
+    assert "scene" in routes.continuation_preview(planning, "shuttle-01").closure_revisions
+    planned = routes.continuation_preview(planning, "shuttle-01", live=live)
+    assert edge not in planned.directed_edge_ids
+    assert planned.closure_revisions == {d.disruption_id: d.aggregate_revision for d in live.disruptions}
 
 
 def test_assistance_shortens_a_collision_for_the_traffic_and_everyone(runtime, monkeypatch):

@@ -141,6 +141,7 @@ namespace Formula9.Tests
             Assert.IsNull(IncidentRecord.Reach(new List<IncidentExposure>()));
             Assert.AreEqual("Collision", IncidentRecord.Name(record.EventType, record.Kind));
             Assert.AreEqual("Road accident", IncidentRecord.Name(null, IncidentSimulation.Accident), "a backend without world events");
+            Assert.AreEqual("Pedestrian on road", IncidentRecord.Name(IncidentSimulation.PedestrianOnRoad, IncidentSimulation.Accident));
             // An older backend's event says none of it
             Assert.IsTrue(IncidentRecord.TryRead(MarkerEvent("INCIDENT_DETECTED", new JObject()), out var old));
             Assert.IsNull(old.EventType);

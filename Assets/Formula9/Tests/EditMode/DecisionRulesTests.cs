@@ -105,6 +105,13 @@ namespace Formula9.Tests
                 ContractParser.Serialize(command);
             }
 
+            // A preview must answer the live closures exactly: one listing a closure the session doesn't
+            // have (the planner's own, round an incident's scene) is stale, and Approve stays disabled
+            var planned = DraftFor(s, "shuttle-03");
+            planned.ClosureRevisions[Collision + "-scene"] = 1;
+            Assert.IsFalse(DecisionRules.RoutePreviewMatches(s, "shuttle-03", planned));
+            Assert.IsTrue(DecisionRules.RoutePreviewMatches(s, "shuttle-03", DraftFor(s, "shuttle-03")));
+
             // One shuttle's draft never answers for another, nor for a shuttle with no detour on offer
             var drafted03 = DraftFor(s, "shuttle-03");
             Assert.IsFalse(DecisionRules.RoutePreviewMatches(s, "shuttle-04", drafted03));
