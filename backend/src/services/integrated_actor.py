@@ -3,7 +3,7 @@ Authoritative planar fleet and domain state for the BE-M2-06 integrated slice.
 
 Author: Nur Syazliyarni Binte Zazali
 Date Created: 28/10/2026
-Last Modified: 28/10/2026
+Last Modified: 23/11/2026
 
 Description:
     Reuses BE-M2-02 separation/motion and BE-M2-04/05 validation, incident and
@@ -1008,8 +1008,9 @@ class IntegratedSessionActor(SessionActor):
     def depot_distances(self):
         return {self.domain.vehicles[shuttle.ID].vehicle_id: self.depot_choice(shuttle)[1] for shuttle in self.shuttles}
 
-    # Scenario-specific warning thresholds are a separate concern from the battery reserve.
-    charge_offer_limits = None
+    def charging_offer_loop_limits(self) -> dict[str, int]:
+        """Scenario-specific warning thresholds, separate from the battery reserve."""
+        return {}
 
     def battery_decisions(self, model, snapshot, *, in_place=False):
         choices = {self.domain.vehicles[shuttle.ID].vehicle_id: self.depot_choice(shuttle) for shuttle in self.shuttles}
@@ -1025,7 +1026,7 @@ class IntegratedSessionActor(SessionActor):
                 for shuttle, vehicle in zip(self.shuttles, snapshot.vehicles)
                 for charger_id in self.definition.bay_positions},
             depot_choices={vehicle_id: depot["depot_id"] for vehicle_id, (depot, _) in choices.items()},
-            return_distances_m=returns, offer_loop_limits=self.charge_offer_limits, in_place=in_place)
+            return_distances_m=returns, offer_loop_limits=self.charging_offer_loop_limits(), in_place=in_place)
 
     def generate_snapshot(self, *, in_place: bool = False) -> FullSnapshot:
         """The public snapshot of where the session is now: a copy of the domain, or with in_place the

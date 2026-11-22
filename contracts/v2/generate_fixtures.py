@@ -32,7 +32,7 @@ session_list_schema["$id"] = "https://formula9.local/contracts/v2/session_list.s
 save("session_list.json", SessionListResponse(sessions=[
     {"session_id": "session-001", "scenario_revision_id": "scenario-r1", "status": "RUNNING", "occupies_capacity": True},
     {"session_id": "session-old", "scenario_revision_id": "scenario-r1", "status": "ARCHIVED", "occupies_capacity": False},
-], live_count=1, total=2, capacity=16).model_dump(mode="json"))
+], live_count=1, total=2, capacity=16, terminal_practice_count=1).model_dump(mode="json"))
 
 
 schema = TypeAdapter(Message).json_schema()

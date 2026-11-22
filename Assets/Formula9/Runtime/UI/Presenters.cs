@@ -4,7 +4,7 @@
  * Author: Choo Jian Wei
  * Contributors: Rishika (fleet cards, next stop and ETA), Lau Xiang Yang (session list and cleanup, exit)
  * Date Created: 30/10/2026
- * Last Modified: 10/11/2026
+ * Last Modified: 23/11/2026
  *
  * Description:
  *     Part of the Unity client's UI. Pure functions that turn login results, snapshots, session
@@ -203,21 +203,20 @@ namespace Formula9.UI
     //     joined.
     public static class TrainingPresenter
     {
-        /// <summary>Recognize the assessment deadline, with a revision fallback for older saved attempts.</summary>
+        /// <summary>Recognize assessment mode from the joined scenario.</summary>
         public static bool IsAssessment(FullSnapshot snapshot) =>
             snapshot?.Scenario?.AssessmentDurationS != null ||
             snapshot?.Session?.ScenarioRevisionId?.StartsWith("scored-toa-payoh-", StringComparison.Ordinal) == true;
 
         /// <summary>Show the server's remaining simulation time, including paused or offline readings.</summary>
-        public static (string Text, bool Urgent) AssessmentClock(FullSnapshot snapshot, bool available,
-            long? savedDurationS = null, bool loading = false)
+        public static (string Text, bool Urgent) AssessmentClock(FullSnapshot snapshot, bool available)
         {
             if (!IsAssessment(snapshot)) return (null, false);
             var state = snapshot.Session?.Status;
             if (state == "COMPLETED") return ("Time’s up · 0:00", false);
             if (state != "RUNNING" && state != "PAUSED" && state != "RECOVERING") return (null, false);
-            if (!((snapshot.Scenario?.AssessmentDurationS ?? savedDurationS) is long limit))
-                return (loading ? "Loading timer…" : "Timer unavailable", false);
+            if (!(snapshot.Scenario?.AssessmentDurationS is long limit))
+                return ("Timer unavailable", false);
 
             var seconds = (long)Math.Ceiling(Math.Max(0, limit - snapshot.SimulationTimeS));
             var remaining = FormattableString.Invariant($"{seconds / 60}:{seconds % 60:00} left");
@@ -739,8 +738,8 @@ namespace Formula9.UI
         // Function: PurgeCount
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function works out how many finished sessions a purge keeping the keep newest
-        //     would delete: every session that is not live, less those kept.
+        //     Use the backend's whole-database count of finished practice sessions. A missing
+        //     count waits for a list refresh before the client offers a purge.
         //
         // Args:
         //     list (SessionListResponse): The session list, for its counts.
@@ -749,7 +748,7 @@ namespace Formula9.UI
         // Returns:
         //     long: How many would be deleted.
         public static long PurgeCount(SessionListResponse list, int keep) =>
-            Math.Max(0, (list.TerminalPracticeCount ?? (list.Total - list.LiveCount)) - keep);
+            Math.Max(0, (list.TerminalPracticeCount ?? 0) - keep);
 
         // -----------------------------------------------------------------------------------
         // Function: PurgeQuestion
@@ -767,16 +766,11 @@ namespace Formula9.UI
         public static string PurgeQuestion(SessionListResponse list, int keep)
         {
             var deleted = PurgeCount(list, keep);
-            var finished = list.TerminalPracticeCount ?? (list.Total - list.LiveCount);
-            if (list.TerminalPracticeCount.HasValue)
-                return deleted == 0 ? $"No old practice sessions to delete. The {keep} newest are kept." :
-                    $"Permanently delete {Count(deleted, "old finished practice session")}? The {keep} newest finished practice sessions " +
-                    "and all assessment records are kept. Their history is removed for everyone. This cannot be undone.";
-            if (deleted == 0)
-                return $"Nothing to delete: there {(finished == 1 ? "is" : "are")} {Count(finished, "finished session")}, " +
-                       $"and the {keep} newest are always kept.";
-            return $"Permanently delete the {Count(deleted, "oldest finished session")}? The {keep} newest finished sessions " +
-                   "and every live session are kept. Their history is removed for everyone. This cannot be undone.";
+            if (!list.TerminalPracticeCount.HasValue)
+                return "Refresh the session list to load the number of finished practice sessions.";
+            return deleted == 0 ? $"No old practice sessions to delete. The {keep} newest are kept." :
+                $"Permanently delete {Count(deleted, "old finished practice session")}? The {keep} newest finished practice sessions " +
+                "and all assessment records are kept. Their history is removed for everyone. This cannot be undone.";
         }
 
         // -----------------------------------------------------------------------------------

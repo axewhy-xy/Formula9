@@ -4,7 +4,7 @@
  * Author: Choo Jian Wei
  * Contributors: Rishika (fleet card tests), Lau Xiang Yang (session cleanup tests)
  * Date Created: 30/10/2026
- * Last Modified: 30/10/2026
+ * Last Modified: 23/11/2026
  *
  * Description:
  *     Checks what the screens show, using the shared snapshot fixture: login and command messages
@@ -403,7 +403,7 @@ namespace Formula9.Tests
             StringAssert.StartsWith("Singapore", TrainingPresenter.Title(snapshot));
             Assert.IsFalse(TrainingPresenter.IsAssessment(snapshot));
             Assert.IsNull(TrainingPresenter.AssessmentClock(snapshot, true).Text);
-            snapshot.Session.ScenarioRevisionId = "scored-toa-payoh-legacy";
+            snapshot.Session.ScenarioRevisionId = "scored-toa-payoh-example";
             Assert.IsTrue(TrainingPresenter.IsAssessment(snapshot));
             StringAssert.Contains("scored", TrainingPresenter.Title(snapshot));
         }
@@ -415,7 +415,7 @@ namespace Formula9.Tests
         [TestCase("PAUSED", 120, 92.25, true, "Paused · 0:28 left", false)]
         [TestCase("RUNNING", 120, 92.25, false, "Last seen · 0:28 left", false)]
         [TestCase("RECOVERING", 120, 92.25, false, "Last seen · 0:28 left", false)]
-        [TestCase("RUNNING", 960, 30.0, true, "15:30 left", false)]
+        [TestCase("RUNNING", 300, 30.0, true, "4:30 left", false)]
         [TestCase("COMPLETED", 120, 120, true, "Time’s up · 0:00", false)]
         [TestCase("ARCHIVED", 120, 22, true, null, false)]
         public void CountdownFollowsTheScoredSnapshot(string status, int duration, double elapsed, bool available,
@@ -432,23 +432,20 @@ namespace Formula9.Tests
             Assert.AreEqual(urgent, clock.Urgent);
         }
 
-        // Replay the time in a scored snapshot from before the duration field was introduced.
-        [TestCase(120L, false, "0:47 left")]
-        [TestCase(960L, false, "14:47 left")]
-        [TestCase(null, true, "Loading timer…")]
-        [TestCase(null, false, "Timer unavailable")]
-        public void CountdownUsesTheSavedAttemptDuration(long? duration, bool loading, string text)
+        // A missing deadline stays visible as a diagnostic. A completed attempt has finished its clock.
+        [TestCase("RUNNING", "Timer unavailable")]
+        [TestCase("PAUSED", "Timer unavailable")]
+        [TestCase("RECOVERING", "Timer unavailable")]
+        [TestCase("COMPLETED", "Time’s up · 0:00")]
+        public void CountdownRequiresTheSnapshotDeadline(string status, string text)
         {
             var snapshot = new FullSnapshot
             {
                 Scenario = new ScenarioRevision(),
-                Session = new TrainingSession { ScenarioRevisionId = "scored-toa-payoh-legacy", Status = "RUNNING" },
+                Session = new TrainingSession { ScenarioRevisionId = "scored-toa-payoh-example", Status = status },
                 SimulationTimeS = 73.45,
             };
-            Assert.AreEqual(text, TrainingPresenter.AssessmentClock(snapshot, true, duration, loading).Text);
-
-            snapshot.Scenario.AssessmentDurationS = 120;
-            Assert.AreEqual("0:47 left", TrainingPresenter.AssessmentClock(snapshot, true, duration, loading).Text);
+            Assert.AreEqual(text, TrainingPresenter.AssessmentClock(snapshot, true).Text);
         }
 
         // -----------------------------------------------------------------------------------
@@ -509,15 +506,18 @@ namespace Formula9.Tests
         [Test]
         public void PurgeKeepsTheNewestAndSaysHowManyGo()
         {
-            var list = new SessionListResponse { LiveCount = 16, Capacity = 16, Total = 37, Sessions = new System.Collections.Generic.List<SessionListEntry>() };
+            var list = new SessionListResponse { LiveCount = 16, Capacity = 16, Total = 37, TerminalPracticeCount = 21,
+                Sessions = new System.Collections.Generic.List<SessionListEntry>() };
             Assert.AreEqual(1, TrainingPresenter.PurgeCount(list, 20), "21 finished, 20 kept");
-            Assert.AreEqual("Permanently delete the 1 oldest finished session? The 20 newest finished sessions and every live session are kept. " +
+            Assert.AreEqual("Permanently delete 1 old finished practice session? The 20 newest finished practice sessions and all assessment records are kept. " +
                             "Their history is removed for everyone. This cannot be undone.", TrainingPresenter.PurgeQuestion(list, 20));
             list.Total = 50;
-            StringAssert.StartsWith("Permanently delete the 14 oldest finished sessions?", TrainingPresenter.PurgeQuestion(list, 20));
+            list.TerminalPracticeCount = 34;
+            StringAssert.StartsWith("Permanently delete 14 old finished practice sessions?", TrainingPresenter.PurgeQuestion(list, 20));
             list.Total = 30;
+            list.TerminalPracticeCount = 14;
             Assert.AreEqual(0, TrainingPresenter.PurgeCount(list, 20));
-            Assert.AreEqual("Nothing to delete: there are 14 finished sessions, and the 20 newest are always kept.",
+            Assert.AreEqual("No old practice sessions to delete. The 20 newest are kept.",
                 TrainingPresenter.PurgeQuestion(list, 20));
             Assert.AreEqual("Deleted 1 old training session.", TrainingPresenter.Purged(1));
             Assert.AreEqual("No old sessions to delete.", TrainingPresenter.Purged(0));
@@ -541,6 +541,12 @@ namespace Formula9.Tests
             StringAssert.Contains("cannot be undone", TrainingPresenter.PurgeQuestion(list, 20));
             list.TerminalPracticeCount = 2;
             Assert.AreEqual(0, TrainingPresenter.PurgeCount(list, 20));
+            list.Total = 30;
+            list.TerminalPracticeCount = 20; // Twenty practice attempts and ten retained assessments.
+            Assert.AreEqual(0, TrainingPresenter.PurgeCount(list, 20));
+            list.TerminalPracticeCount = null;
+            Assert.AreEqual(0, TrainingPresenter.PurgeCount(list, 20));
+            StringAssert.StartsWith("Refresh the session list", TrainingPresenter.PurgeQuestion(list, 20));
         }
 
         // -----------------------------------------------------------------------------------

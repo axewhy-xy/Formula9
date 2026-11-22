@@ -5,7 +5,7 @@
  * Contributors: Rishika (page layout, fleet cards, map/3D switch),
  *     Lau Xiang Yang (training workspace, session list and cleanup, exit)
  * Date Created: 30/10/2026
- * Last Modified: 18/11/2026
+ * Last Modified: 23/11/2026
  *
  * Description:
  *     Part of the Unity client's UI. Wires the UI Toolkit screens to the login and session layers,
@@ -68,7 +68,6 @@ namespace Formula9.UI
         private TextField username, password, confirm, sessionId;
         private Label signUpHint, loginError, title, user, capacity, status, message, sessionBadge, worldNotice;
         private Label assessmentBadge, assessmentTimer;
-        private AssessmentDeadlineLookup assessmentDeadline;
         private string sessionBadgeClass;
         private readonly SessionStatusPresenter sessionStatusPresenter = new SessionStatusPresenter();
         private Button forgot, submit, modeSwitch, start, pause, resume, archive, refreshSessions;
@@ -207,7 +206,6 @@ namespace Formula9.UI
         //     This function stops the session controller and polling.
         private void OnDisable()
         {
-            assessmentDeadline = null;
             session?.Shutdown();
             StopAllCoroutines();
         }
@@ -467,7 +465,7 @@ namespace Formula9.UI
             createPractice.clicked += () => Run(Create(SessionController.IntegratedScenario));
             assessmentMode.clicked += () => Run(Create(SessionController.ScoredScenario));
             root.Q<Button>("join").clicked += () => Run(Join(sessionId.value.Trim()));
-            root.Q<Button>("refresh").clicked += () => Run(RefreshCurrentSession());
+            root.Q<Button>("refresh").clicked += () => Run(session.RefreshAsync());
             refreshSessions.clicked += () => Run(RefreshSessionList());
             start.clicked += () => Run(session.SendControlAsync("START"));
             pause.clicked += () => Run(session.SendControlAsync("PAUSE"));
@@ -575,7 +573,6 @@ namespace Formula9.UI
         //     clean login screen; an expired login explains that the work is kept.
         private void OnLoginEnded()
         {
-            assessmentDeadline = null;
             ShowLogin(loggingOut ? null : LoginMessages.Expired);
             loggingOut = false;
         }
@@ -885,14 +882,6 @@ namespace Formula9.UI
             return RefreshSessionList();
         }
 
-        /// <summary>Let a manual refresh retry a legacy deadline lookup that did not resolve.</summary>
-        private Task RefreshCurrentSession()
-        {
-            if (assessmentDeadline != null && !assessmentDeadline.Pending && assessmentDeadline.DurationS == null)
-                assessmentDeadline = null;
-            return session.RefreshAsync();
-        }
-
         // -----------------------------------------------------------------------------------
         // Function: Render
         // -----------------------------------------------------------------------------------
@@ -957,56 +946,10 @@ namespace Formula9.UI
             sessionCard.EnableInClassList("assessment-active", assessed);
             start.text = assessed ? "Start assessment" : "Start scenario";
 
-            if (!assessed || ended || snapshot.Scenario?.AssessmentDurationS != null || session.SignedInUsername == null)
-                assessmentDeadline = null;
-            else
-            {
-                if (assessmentDeadline?.SessionId != snapshot.SessionId) assessmentDeadline = null;
-                if (assessmentDeadline == null && session.Available)
-                {
-                    assessmentDeadline = new AssessmentDeadlineLookup(snapshot.SessionId);
-                    Run(LoadAssessmentDeadline(assessmentDeadline));
-                }
-            }
-            RenderAssessmentClock(snapshot);
-        }
-
-        private void RenderAssessmentClock(FullSnapshot snapshot)
-        {
-            var clock = TrainingPresenter.AssessmentClock(snapshot, session.Available,
-                assessmentDeadline?.DurationS, assessmentDeadline?.Pending == true);
+            var clock = TrainingPresenter.AssessmentClock(snapshot, session.Available);
             if (assessmentTimer.text != clock.Text) assessmentTimer.text = clock.Text;
             assessmentTimer.style.display = clock.Text == null ? DisplayStyle.None : DisplayStyle.Flex;
             assessmentTimer.EnableInClassList("assessment-timer-urgent", clock.Urgent);
-        }
-
-        private sealed class AssessmentDeadlineLookup
-        {
-            public readonly string SessionId;
-            public bool Pending = true;
-            public long? DurationS;
-
-            public AssessmentDeadlineLookup(string sessionId) => SessionId = sessionId;
-        }
-
-        /// <summary>Read the attempt's saved duration when its snapshot omits it.</summary>
-        private async Task LoadAssessmentDeadline(AssessmentDeadlineLookup lookup)
-        {
-            try
-            {
-                var grade = await api.GetAssessmentAsync(lookup.SessionId);
-                lookup.DurationS = grade.DurationS;
-            }
-            catch (Exception error) when (error is BackendErrorException || error is NoReplyException || error is ContractException)
-            {
-                // The clock reports an unavailable deadline. The session status still comes from snapshots.
-            }
-            finally
-            {
-                lookup.Pending = false;
-                // Leaving the session or ending the login invalidates any in-flight lookup.
-                if (assessmentDeadline == lookup) RenderAssessmentClock(session.Store.Snapshot);
-            }
         }
 
         // Keep the operator's state readable: badge, tooltip and one-line summary.

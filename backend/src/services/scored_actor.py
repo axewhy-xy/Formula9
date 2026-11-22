@@ -33,14 +33,12 @@ PRETRIP_CLOSURE = "assessment-pretrip-closure"
 class Observations:
     """Scalar observations copied independently for each staged tick."""
 
-    route_loop_finished: bool = False
     charging_offer_tick: int | None = None
     usable_charge_since: int | None = None
     charging_actionable: bool = False
     minimum_kwh: float | None = None
     minimum_in_service: int | None = None
     below_reserve: bool = False
-    target_booking_id: str | None = None
     charging_finished: bool = False
     assessment_stop_served: bool = False
     incident_service_m: float = 0.0
@@ -53,16 +51,21 @@ class ScoredSessionActor(IntegratedSessionActor):
 
     @classmethod
     def from_checkpoint(cls, session_id: str, state: dict):
-        """Restore scenario-owned data without exposing its observation fields to the session host."""
+        """Restore the pinned rubric and observations from a saved checkpoint."""
         plan = AssessmentPlan.model_validate(state["assessment_plan"])
         actor = cls(plan.rubric, session_id=session_id, plan=plan)
-        actor.observations = Observations(**state["assessment_observations"])
+        observations = dict(state["assessment_observations"])
+        # Discard retired fields from saved v2 observations.
+        observations.pop("route_loop_finished", None)
+        observations.pop("target_booking_id", None)
+        actor.observations = Observations(**observations)
         return actor
 
     def __init__(self, rubric: Rubric, *, session_id: str, plan: AssessmentPlan | None = None):
+        self._charge_offer_limits = {rubric.charging_vehicle_id: rubric.charging_offer_loops}
         super().__init__(seed=rubric.seed, session_id=session_id)
         self.observations = Observations()
-        # Keep earlier pinned identities reproducible. New identities include behavioral settings.
+        # Exclude descriptive metadata from semantic identities; preserve existing version hashes.
         excluded = {"metadata"} if rubric.identity_version == "semantic-v1" else set()
         identity = json.dumps(rubric.model_dump(mode="json", exclude_none=True, exclude=excluded), sort_keys=True)
         self.scenario_revision = "scored-toa-payoh-" + sha256(f"{self.scenario_revision}:{identity}".encode()).hexdigest()[:24]
@@ -74,16 +77,15 @@ class ScoredSessionActor(IntegratedSessionActor):
             raise ValueError("The graded route and charging tasks must name distinct shuttles on the assigned routes")
         self._graded_shuttle_ids = tuple(sorted((self.graded_route, self.graded_charge)))
         short = rubric.short_exercise
-        if short:
-            # The stop approach lies on the common section of the original and approved routes.
-            shuttle = self.shuttles[self.graded_route]
-            stop_positions = self.stop_names[shuttle.route_ID]
-            at = next((distance for distance, stop in stop_positions.items() if stop == short.stop_id), None)
-            if at is None:
-                raise ValueError("The designated assessment stop must be on the graded route")
-            distance = self._routes[shuttle.route_ID]["total_length"] if at == "end" else float(at)
-            shuttle.progress = max(0, distance - short.approach_m)
-            shuttle.position = self._route_evaluation(shuttle.route_ID, shuttle.progress)
+        # The stop approach lies on the common section of the original and approved routes.
+        shuttle = self.shuttles[self.graded_route]
+        stop_positions = self.stop_names[shuttle.route_ID]
+        at = next((distance for distance, stop in stop_positions.items() if stop == short.stop_id), None)
+        if at is None:
+            raise ValueError("The designated assessment stop must be on the graded route")
+        distance = self._routes[shuttle.route_ID]["total_length"] if at == "end" else float(at)
+        shuttle.progress = max(0, distance - short.approach_m)
+        shuttle.position = self._route_evaluation(shuttle.route_ID, shuttle.progress)
         for shuttle in self.shuttles:
             # Only the designated shuttle begins near its low-battery decision threshold.
             if shuttle.ID == self.graded_charge or shuttle.battery < 50:
@@ -109,13 +111,12 @@ class ScoredSessionActor(IntegratedSessionActor):
         self._charge_window_ticks = plan.ticks(rubric.charging_observation_s)
         self._safety_opportunity_ticks = plan.ticks(rubric.safety_opportunity_s)
         self._reserve_kwh = reserve_kwh(ENERGY_R1, self.BATTERY_CAPACITY_KWH)
-        follow_through = rubric.rules.get("charging_follow_through")
-        self._target_kwh = (self.BATTERY_CAPACITY_KWH * follow_through.charge_target_fraction
-                            if follow_through is not None and short is None else None)
         self._active_closures = ()
         self._closure_crossings = {}
-        self.charge_offer_limits = {rubric.charging_vehicle_id: rubric.charging_offer_loops}
         self.domain = self.generate_snapshot()
+
+    def charging_offer_loop_limits(self) -> dict[str, int]:
+        return self._charge_offer_limits
 
     def __deepcopy__(self, memo):
         """Reuse read-only assessment data and detach the scalar observations."""
@@ -137,7 +138,7 @@ class ScoredSessionActor(IntegratedSessionActor):
         return super().publication_due() or self.assessment_due
 
     def before_publication(self, snapshot, events):
-        """End the exercise at its pinned boundary while keeping normal session commits generic."""
+        """Complete the attempt and append its lifecycle event at the assessment deadline."""
         if self.assessment_due and snapshot.session.status == "RUNNING":
             snapshot.session.status = "COMPLETED"
             snapshot.session.aggregate_revision += 1
@@ -152,18 +153,11 @@ class ScoredSessionActor(IntegratedSessionActor):
         """Finish on the last published boundary of the exercise's active simulation time."""
         return self.current_tick >= self._end_tick
 
-    def _note_loop_finished(self, shuttle):
-        complete = shuttle.ID == self.graded_route and shuttle.ID in self.loop_started
-        super()._note_loop_finished(shuttle)
-        if complete and not self.assessment_plan.rubric.short_exercise and not self.observations.route_loop_finished:
-            self.observations.route_loop_finished = True
-            self._queue_assessment_incident()
-
     def _note_stop(self, shuttle):
         pending_before = len(self.pending_events)
         super()._note_stop(shuttle)
         short = self.assessment_plan.rubric.short_exercise
-        if (short and shuttle.ID == self.graded_route and not self.observations.assessment_stop_served
+        if (shuttle.ID == self.graded_route and not self.observations.assessment_stop_served
                 and len(self.pending_events) > pending_before
                 and self.pending_events[-1].data.get("stop_id") == short.stop_id):
             self.observations.assessment_stop_served = True
@@ -178,8 +172,8 @@ class ScoredSessionActor(IntegratedSessionActor):
         """The scored exercise has its own incident and no ambient scripted events."""
 
     def _schedule_incident(self):
-        """Use the existing guided closure placement after the designated route milestone."""
-        if (self.observations.route_loop_finished or self.observations.assessment_stop_served) and self.random_incident is None:
+        """Schedule the road closure after the assessed stop has been served."""
+        if self.observations.assessment_stop_served and self.random_incident is None:
             super()._schedule_incident()
 
     def _incident_opening(self):
@@ -200,14 +194,12 @@ class ScoredSessionActor(IntegratedSessionActor):
             self._active_closures = closures
             self._closure_crossings = {}
         short = self.assessment_plan.rubric.short_exercise
-        if not closures and not short:
-            return
         shuttles = self.shuttles if closures else (self.shuttles[i] for i in self._graded_shuttle_ids)
         for shuttle in shuttles:
             destination = proposed[shuttle.ID]
             if destination <= shuttle.progress:
                 continue
-            if short and shuttle.ID in self._graded_shuttle_ids:
+            if shuttle.ID in self._graded_shuttle_ids:
                 self._observe_milestone_progress(shuttle, destination - shuttle.progress, short)
             if not closures:
                 continue
@@ -318,12 +310,6 @@ class ScoredSessionActor(IntegratedSessionActor):
         if level < reserve - EPSILON and not evidence.below_reserve:
             self._event(shuttle, "ASSESSMENT_BELOW_RESERVE", battery_kwh=level, reserve_kwh=reserve)
         evidence.below_reserve = level < reserve - EPSILON
-        if self._target_kwh is not None and level >= self._target_kwh and self.modes[shuttle.ID] == "CHARGING":
-            vehicle_id = self.domain.vehicles[shuttle.ID].vehicle_id
-            booking = next((b for b in self.domain.charge_bookings if b.vehicle_id == vehicle_id and b.status == "ACTIVE"), None)
-            if booking is not None and booking.booking_id != evidence.target_booking_id:
-                evidence.target_booking_id = booking.booking_id
-                self._event(shuttle, "ASSESSMENT_CHARGE_TARGET_REACHED", booking_id=booking.booking_id, battery_kwh=level)
         if self.current_tick >= evidence.charging_offer_tick + self._charge_window_ticks:
             evidence.charging_finished = True
             self._event(shuttle, "ASSESSMENT_CHARGING_OBSERVED", minimum_kwh=evidence.minimum_kwh,

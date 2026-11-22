@@ -33,6 +33,9 @@ def test_private_reads_and_retention_use_the_authenticated_actor(tmp_path):
     with TrainingStore(tmp_path / "private.sqlite", assessment_policy=policy) as store:
         snapshot, _ = create_attempt(store)
         sid = snapshot.session_id
+        request = CreateSessionRequest(scenario_revision_id="scenario-m2-r1")
+        practice, _ = TrainingSessionService(store)._create_initial(
+            request, "another-trainee", "shared-practice", TrainingSessionService._creation_digest(request))
         actor = ["trainee"]
         previous = dict(app.dependency_overrides)
         app.dependency_overrides[get_training_store] = lambda: store
@@ -44,7 +47,9 @@ def test_private_reads_and_retention_use_the_authenticated_actor(tmp_path):
                 for suffix in ("snapshot", "events", "assessment", "traffic", "signals/state",
                                "routes/route-peer-a/editor", "incidents/assessment-road-block/history"):
                     assert client.get(f"/api/v2/sessions/{sid}/{suffix}").status_code == 403, suffix
-                assert client.get("/api/v2/sessions").json()["sessions"] == []
+                assert client.get(f"/api/v2/sessions/{practice.session_id}/snapshot").status_code == 200
+                assert client.get(f"/api/v2/sessions/{practice.session_id}/events").status_code == 200
+                assert [row["session_id"] for row in client.get("/api/v2/sessions").json()["sessions"]] == [practice.session_id]
                 with client.websocket_connect(f"/api/v2/sessions/{sid}/stream") as websocket:
                     assert websocket.receive_json()["error"]["code"] == "ROLE_DENIED"
 
@@ -58,12 +63,57 @@ def test_private_reads_and_retention_use_the_authenticated_actor(tmp_path):
                 actor[0] = "trainee"
                 assert client.get(f"/api/v2/sessions/{sid}/assessment").json()["status"] == "INCOMPLETE"
                 assert client.delete(f"/api/v2/sessions/{sid}").status_code == 403
-                assert client.get("/api/v2/sessions").json()["sessions"][0]["can_delete"] is False
+                entries = client.get("/api/v2/sessions").json()["sessions"]
+                assert next(row for row in entries if row["session_id"] == sid)["can_delete"] is False
                 actor[0] = "supervisor"
                 assert client.delete(f"/api/v2/sessions/{sid}").status_code == 204
         finally:
             app.dependency_overrides.clear()
             app.dependency_overrides.update(previous)
+
+
+def test_archive_after_auto_completion_reports_that_the_attempt_already_ended(tmp_path):
+    with TrainingStore(tmp_path / "completed-archive.sqlite") as store:
+        initial, actor = create_attempt(store)
+        actor = approve_and_start(store, initial, actor)
+        actor.current_tick = actor.assessment_plan.ticks(actor.assessment_plan.rubric.exercise_limit_s) - 1
+        _, terminal, _ = TrainingSessionService(store)._step_staged(actor, None)
+        saved = store.assessment(initial.session_id, "trainee")
+        previous = dict(app.dependency_overrides)
+        app.dependency_overrides[get_training_store] = lambda: store
+        app.dependency_overrides[get_actor_id] = lambda: "trainee"
+        try:
+            with TestClient(app) as client:
+                response = client.post(f"/api/v2/sessions/{initial.session_id}/commands",
+                    json=session_control(terminal, "ARCHIVE").model_dump())
+                assert response.status_code == 400
+                assert response.json()["error"]["code"] == "INVALID_TRANSITION"
+                assert "already ended" in response.json()["error"]["message"]
+                assert store.assessment(initial.session_id, "trainee") == saved
+        finally:
+            app.dependency_overrides.clear()
+            app.dependency_overrides.update(previous)
+
+
+def test_practice_purge_excludes_retained_assessments_from_its_count(tmp_path):
+    with TrainingStore(tmp_path / "mixed-purge.sqlite") as store:
+        service = TrainingSessionService(store)
+        assessment_ids = []
+        for index in range(30):
+            assessed = index >= 20
+            request = CreateSessionRequest(scenario_revision_id=SCORED_SCENARIO if assessed else "scenario-m2-r1")
+            snapshot, actor = service._create_initial(
+                request, "trainee", f"attempt-{index}", service._creation_digest(request))
+            archive = session_control(snapshot, "ARCHIVE").model_copy(
+                update={"command_id": f"archive-{index}", "idempotency_key": f"archive-{index}"})
+            receipt, _ = service._submit_staged(actor, "trainee", archive, False)
+            assert receipt.status == "APPLIED"
+            if assessed:
+                assessment_ids.append(snapshot.session_id)
+        page = store.session_page(1, actor_id="trainee")
+        assert page["total"] == 30 and page["terminal_practice_count"] == 20
+        assert store.expired_session_ids(20) == []
+        assert all(store.assessment(sid, "trainee").status == "INCOMPLETE" for sid in assessment_ids)
 
 
 @pytest.mark.parametrize("paused", [False, True])

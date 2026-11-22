@@ -10,7 +10,7 @@ Click **Assessment mode** in the session header to create and join a scored Toa 
 
 The countdown appears in the header when the exercise starts and follows the **two-minute simulation clock**. It highlights the last 30 seconds and holds its reading when paused. If the client loses its connection, the header labels the remaining time from the last snapshot it received. Handle the charging decision for Shuttle 05 and the road block that affects Shuttle 01 shortly after it serves the Toa Payoh Police Centre stop. When the session completes, open **Reports → Assessment** for the result, deductions and evidence. The account that created the scored session can submit its commands and read its grade.
 
-Earlier attempts keep the duration from their original rubric. If a saved snapshot omits the duration, the client reads the attempt's saved duration from the assessment endpoint. If the header shows **Timer unavailable**, use **Session options → Refresh current** to retry.
+The timer reads the duration carried by the session snapshot. If it shows **Timer unavailable**, refresh the current session and check that the backend is running the matching version.
 
 ## Point rules
 
@@ -57,7 +57,7 @@ Supervisors can read results, archive abandoned attempts and explicitly delete r
 
 [The rubric fixture](../backend/fixtures/toa_payoh_assessment.json) supplies the point values, thresholds, enabled safety rules and exercise parameters. Bump its `revision` for an amendment. The backend validates the fixture and saves its contents with each new attempt. Existing live attempts finish against their pinned rules and saved results are returned directly from SQLite.
 
-New semantic scenario identities exclude author and date metadata. Earlier identities and evaluator versions remain available for recovering pinned attempts.
+New semantic scenario identities exclude author and date metadata. The supported evaluator is `assessment-v2`, using the stop, service-resumption and charging-trip milestones. Saved v2 results and pinned rubric settings remain readable.
 
 ### Adding a criterion
 
@@ -68,5 +68,7 @@ New semantic scenario identities exclude author and date metadata. Earlier ident
 An evaluator can use evidence already in the journal, such as `ROUTE_APPROVED` or `STOP_SERVED`. When a new criterion needs information the simulator doesn't record yet, publish that evidence at the point it occurs and test it through completion and recovery.
 
 Scenario extensions implement the actor's checkpoint, admission, motion and publication hooks. The shared session and workflow code calls those hooks without depending on the scored actor class.
+
+Charging warning thresholds use the actor's `charging_offer_loop_limits()` method. The integrated scenario supplies its default thresholds, and an assessment supplies its own vehicle limits.
 
 Evaluation reads a consistent event boundary and runs outside the shared writer. The writer checks that the snapshot and pinned plan still match before saving the prepared grade in the terminal transaction. A stale preparation is discarded through the normal revision checks.
