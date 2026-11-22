@@ -165,7 +165,6 @@ namespace Formula9.UI
             muteToggle.SetValueWithoutNotify(mute.Muted);
             muteToggle.RegisterValueChangedCallback(change => mute.Muted = change.newValue);
             session.EventsAccepted += events => alerts.OnEvents(events, true);
-            session.CommandFinished += outcome => alerts.OnCommandFinished(outcome.Status);
             session.EventsAccepted += _ => { if (session.Store.Snapshot != null) world.SetIncidentEvents(session.Store.Events); };
             session.RecoveryEventsReceived += _ => { if (session.Store.Snapshot != null) world.SetIncidentEvents(session.Store.Events); };
             session.RecoveryEventsReceived += events => alerts.OnEvents(events, true);

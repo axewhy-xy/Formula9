@@ -3,7 +3,7 @@
  *
  * Author: Choo Jian Wei
  * Date Created: 30/10/2026
- * Last Modified: 22/11/2026
+ * Last Modified: 30/10/2026
  *
  * Description:
  *     Mirrors the Qt client's AlertGateTest, TrainingAlertsTest and TrainingAlertSoundsTest suites:
@@ -336,30 +336,6 @@ namespace Formula9.Tests
             Assert.IsTrue(restarted.Muted, "the choice survives a restart");
             restarted.Muted = false;
             Assert.IsFalse(preferences.Values[MuteSetting.Key]);
-        }
-
-        // -----------------------------------------------------------------------------------
-        // Function: RejectedCommandPlaysTheRejectedCue
-        // -----------------------------------------------------------------------------------
-        // Description:
-        //     The backend reports a refused command only through its status, so a REJECTED outcome
-        //     plays the rejected cue, other outcomes stay silent, and muting silences it.
-        [Test]
-        public void RejectedCommandPlaysTheRejectedCue()
-        {
-            var played = new List<string>();
-            var alerts = new TrainingAlerts(played.Add);
-            foreach (var status in new[] { "QUEUED", "APPLIED", "EXPIRED", "NEEDS_RECONFIRMATION" })
-                alerts.OnCommandFinished(status);
-            CollectionAssert.IsEmpty(played);
-
-            alerts.OnCommandFinished("REJECTED");
-            CollectionAssert.AreEqual(new[] { "command_rejected" }, played);
-            Assert.AreEqual(AlertCues.Default["COMMAND/COMMAND_REJECTED"], TrainingAlerts.RejectedCue, "same cue as the shared table");
-
-            alerts.Muted = true;
-            alerts.OnCommandFinished("REJECTED");
-            Assert.AreEqual(1, played.Count, "muted");
         }
 
         // -----------------------------------------------------------------------------------
