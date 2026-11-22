@@ -3,7 +3,7 @@
  *
  * Author: Choo Jian Wei
  * Date Created: 30/10/2026
- * Last Modified: 03/11/2026
+ * Last Modified: 22/11/2026
  *
  * Description:
  *     Checks the sound consultation as applied to the Unity controls: the major buttons exist in
@@ -67,6 +67,38 @@ namespace Formula9.Tests
             sounds.MajorPressed();
             sounds.PointPicked();
             CollectionAssert.AreEqual(new[] { UiSound.MajorButton, UiSound.MapPoint }, played);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: PressingAGreyedOutButtonPlaysTheRefusedSound
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A press on a disabled button, or on its label, plays the refused sound; a press on an
+        //     enabled button, inside a disabled panel's enabled button, or on no button stays silent.
+        [Test]
+        public void PressingAGreyedOutButtonPlaysTheRefusedSound()
+        {
+            var panel = new VisualElement();
+            var off = new Button { text = "Apply" };
+            var label = new Label("inside");
+            off.Add(label);
+            off.SetEnabled(false);
+            var on = new Button();
+            panel.Add(off); panel.Add(on);
+
+            sounds.Pressed(off);
+            sounds.Pressed(label);
+            CollectionAssert.AreEqual(new[] { UiSound.Refused, UiSound.Refused }, played);
+
+            played.Clear();
+            sounds.Pressed(on);
+            sounds.Pressed(panel);
+            sounds.Pressed(null);
+            CollectionAssert.IsEmpty(played);
+
+            panel.SetEnabled(false);
+            sounds.Pressed(on);
+            CollectionAssert.AreEqual(new[] { UiSound.Refused }, played, "a button greyed out by its panel counts too");
         }
 
         // -----------------------------------------------------------------------------------

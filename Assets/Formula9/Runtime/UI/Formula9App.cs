@@ -185,6 +185,8 @@ namespace Formula9.UI
             uiPlayer.transform.SetParent(transform, false);
             var uiSounds = new UiSounds(uiPlayer.Play);
             foreach (var name in UiSounds.MajorButtons) root.Q<Button>(name).clicked += uiSounds.MajorPressed;
+            // A greyed-out button gets no events of its own, so presses are caught on the way down from the root.
+            root.RegisterCallback<PointerDownEvent>(e => uiSounds.Pressed(e.target as VisualElement), TrickleDown.TrickleDown);
             world.RouteNodeSelected += _ => uiSounds.PointPicked();
             world.RoadClicked += (_, __) => uiSounds.PointPicked();
             world.ViewChanged += Render;
