@@ -90,6 +90,7 @@ def test_scored_attempt_recovers_and_finalizes_once(tmp_path):
         saved = store.assessment(sid, owner)
         assert terminal.session.status == "COMPLETED"
         assert saved.status == "INCOMPLETE"
+        assert saved.disrupted is False
         assert saved.through_event_sequence == terminal.event_sequence
         assert [e.event_type for e in store.replay(sid, terminal.event_sequence - 2).events] == [
             "SESSION_COMPLETED", "COMMAND_EXPIRED"]
@@ -104,18 +105,45 @@ def test_scored_attempt_recovers_and_finalizes_once(tmp_path):
         assert store.assessment(sid, "trainee") == saved
 
 
-def test_archiving_a_scored_attempt_preserves_incomplete_report(tmp_path):
-    with TrainingStore(tmp_path / "training.sqlite") as store:
+@pytest.mark.parametrize("state", ["READY", "RUNNING", "PAUSED"])
+def test_archiving_a_scored_attempt_preserves_a_disrupted_report(tmp_path, state):
+    path = tmp_path / "training.sqlite"
+    with TrainingStore(path) as store:
         snapshot, actor = create_attempt(store)
+        service = TrainingSessionService(store)
+        if state != "READY":
+            actor = approve_and_start(store, snapshot, actor)
+            snapshot = store.snapshot(snapshot.session_id)
+        if state == "PAUSED":
+            result, actor = service._submit_staged(actor, "trainee", session_control(snapshot, "PAUSE"), False)
+            assert result.status == "APPLIED"
+            snapshot = store.snapshot(snapshot.session_id)
         control = session_control(snapshot, "ARCHIVE")
-        result, _ = TrainingSessionService(store)._submit_staged(actor, "trainee", control, False)
+        result, _ = service._submit_staged(actor, "trainee", control, False)
         report = store.assessment(snapshot.session_id, "trainee")
-        assert report.status == "INCOMPLETE"
+        assert report.status == "INCOMPLETE" and report.disrupted is True
+        assert report.explanation.startswith("Assessment disrupted")
+        assert report.points == (0 if state == "READY" else 18)
+        assert store.snapshot(snapshot.session_id).session.status == "ARCHIVED"
+        assert snapshot.session_id not in store.runtime_ids()
         assert store.accept("trainee", control) == result
         with pytest.raises(TrainingStoreError, match="records are retained"):
             store.delete_session(snapshot.session_id, actor_id="observer")
         with pytest.raises(TrainingStoreError, match="records are retained"):
             store.delete_session(snapshot.session_id, actor_id="trainee")
+    with TrainingStore(path) as store:
+        assert store.assessment(snapshot.session_id, "trainee") == report
+
+
+def test_archived_reports_without_a_disruption_flag_are_identified_from_the_session(tmp_path):
+    with TrainingStore(tmp_path / "saved-report.sqlite") as store:
+        snapshot, actor = create_attempt(store)
+        TrainingSessionService(store)._submit_staged(actor, "trainee", session_control(snapshot, "ARCHIVE"), False)
+        report = store.assessment(snapshot.session_id, "trainee")
+        saved = report.model_dump_json(exclude={"disrupted"})
+        store._submit(lambda connection: connection.execute(
+            "UPDATE session_assessments SET result_json=? WHERE session_id=?", (saved, snapshot.session_id)).rowcount)
+        assert store.assessment(snapshot.session_id, "trainee") == report
 
 
 @pytest.mark.parametrize("assessment_v5", [False, True])
@@ -195,12 +223,27 @@ def test_partial_credit_and_config_only_amendment():
         "incident_choice": 20, "incident_time": 5, "incident_service": 5, "battery_reserve": 8,
         "fleet_coverage": 5, "charging_follow_through": 5}
     assert grade.points == 76 and grade.status == "PASS"
+    assert grade.disrupted is False
     revised = plan.rubric.model_dump()
     revised["revision"] = "updated-rubric"
     revised["rules"]["incident_time"].update(full_s=10, zero_s=20)
     updated = finalize(plan.model_copy(update={"rubric": Rubric.model_validate(revised)}), snapshot, events)
     assert updated.points == 71 and updated.status == "FAIL"
     assert finalize(plan, snapshot, events) == grade
+
+
+@pytest.mark.parametrize("safety_breach", [False, True])
+def test_disrupted_attempt_retains_points_and_confirmed_safety_failures(safety_breach):
+    plan, snapshot, events, add = scored_evidence()
+    snapshot.session.status = "ARCHIVED"
+    if safety_breach:
+        add("ASSESSMENT_CLOSED_ROAD_ENTRY", "shuttle-01", 200, edge_id="example-closed-road",
+            route_id=plan.rubric.route_id, closed_from_tick=0, incident_id=None)
+    grade = finalize(plan, snapshot, events)
+    assert grade.disrupted is True and grade.points == 76
+    assert grade.status == ("FAIL" if safety_breach else "INCOMPLETE")
+    assert bool(grade.automatic_failures) == safety_breach
+    assert "disrupted" in grade.explanation.lower()
 
 
 def test_unpublished_evaluator_is_rejected():

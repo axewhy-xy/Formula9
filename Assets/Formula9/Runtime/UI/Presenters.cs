@@ -203,10 +203,30 @@ namespace Formula9.UI
     //     joined.
     public static class TrainingPresenter
     {
-        /// <summary>Recognize assessment mode from the joined scenario.</summary>
+        /// <summary>Identify scored sessions, including saved attempts viewed in Reports.</summary>
         public static bool IsAssessment(FullSnapshot snapshot) =>
             snapshot?.Scenario?.AssessmentDurationS != null ||
             snapshot?.Session?.ScenarioRevisionId?.StartsWith("scored-toa-payoh-", StringComparison.Ordinal) == true;
+
+        /// <summary>Keep assessment controls and highlighting limited to live scored attempts.</summary>
+        public static bool IsAssessmentActive(FullSnapshot snapshot) =>
+            IsAssessment(snapshot) && !IsTerminalSession(snapshot.Session?.Status);
+
+        /// <summary>Label interrupted attempts while preserving confirmed failures and earned points.</summary>
+        public static string AssessmentResult(SessionAssessment grade)
+        {
+            var text = grade.Status switch
+            {
+                "PASS" => "Pass",
+                "FAIL" => "Fail",
+                "INCOMPLETE" => "Incomplete",
+                "IN_PROGRESS" => "In progress",
+                _ => "Practice session",
+            };
+            if (grade.Disrupted)
+                text = grade.Status == "FAIL" ? "Assessment disrupted · Fail" : "Assessment disrupted";
+            return grade.Points.HasValue ? $"{text} · {grade.Points:0.##}/{grade.Maximum}" : text;
+        }
 
         /// <summary>Show the server's remaining simulation time, including paused or offline readings.</summary>
         public static (string Text, bool Urgent) AssessmentClock(FullSnapshot snapshot, bool available)

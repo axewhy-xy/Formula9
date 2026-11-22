@@ -72,7 +72,7 @@ namespace Formula9.UI
         private readonly SessionStatusPresenter sessionStatusPresenter = new SessionStatusPresenter();
         private Button forgot, submit, modeSwitch, start, pause, resume, archive, refreshSessions;
         private DropdownField sessions;
-        private Button createPractice, assessmentMode;
+        private Button createPractice, assessmentMode, quitAssessment;
         private bool creatingSession;
 
         private string incidentHistorySessionId;
@@ -405,6 +405,7 @@ namespace Formula9.UI
             sessions = root.Q<DropdownField>("sessions");
             createPractice = root.Q<Button>("create");
             assessmentMode = root.Q<Button>("assessment-mode");
+            quitAssessment = root.Q<Button>("quit-assessment");
             start = root.Q<Button>("start");
             pause = root.Q<Button>("pause");
             resume = root.Q<Button>("resume");
@@ -471,6 +472,7 @@ namespace Formula9.UI
             pause.clicked += () => Run(session.SendControlAsync("PAUSE"));
             resume.clicked += () => Run(session.SendControlAsync("RESUME"));
             archive.clicked += ConfirmArchive;
+            quitAssessment.clicked += ConfirmArchive;
 
             // The clock under the user's name in the sidebar, to the minute
             var clock = root.Q<Label>("clock");
@@ -730,14 +732,21 @@ namespace Formula9.UI
         // Function: ConfirmArchive
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function asks before archiving the joined session. Archive sits next to Start,
-        //     Pause and Resume, so a slip must not end the attempt. If the session can no longer
-        //     be archived by the time the trainee confirms, nothing is sent.
-        private void ConfirmArchive() => Confirm(
-            TrainingPresenter.IsAssessment(session.Store.Snapshot)
-                ? "End this scored attempt early? Reports will show it as incomplete unless a critical safety breach is already confirmed."
-                : "Archive this session? The attempt ends and its runtime slot is released. Its history remains available.",
-            "Archive session", () => archive.enabledSelf ? session.SendControlAsync("ARCHIVE") : Task.CompletedTask);
+        //     Confirm archiving or quitting an assessment. Send nothing if the selected session
+        //     changes or ends while the dialog is open.
+        private void ConfirmArchive()
+        {
+            var snapshot = session.Store.Snapshot;
+            if (snapshot == null) return;
+            var sessionId = snapshot.SessionId;
+            var assessed = TrainingPresenter.IsAssessmentActive(snapshot);
+            Confirm(assessed
+                    ? "Quit assessment mode? This archives the attempt and returns the screen to normal mode. Reports will show Assessment disrupted, with earned points and any confirmed safety failure retained."
+                    : "Archive this session? The attempt ends and its runtime slot is released. Its history remains available.",
+                assessed ? "Quit assessment mode" : "Archive session",
+                () => session.SessionId == sessionId && archive.enabledSelf
+                    ? session.SendControlAsync("ARCHIVE") : Task.CompletedTask);
+        }
 
         // -----------------------------------------------------------------------------------
         // Function: Confirm
@@ -935,16 +944,17 @@ namespace Formula9.UI
         /// <summary>Keep the mode indicator and countdown visible across the training pages.</summary>
         private void RenderAssessment(FullSnapshot snapshot)
         {
-            var assessed = TrainingPresenter.IsAssessment(snapshot);
-            var ended = TrainingPresenter.IsTerminalSession(snapshot?.Session?.Status);
+            var active = TrainingPresenter.IsAssessmentActive(snapshot);
             var pending = session.PendingCreationScenario;
             createPractice.SetEnabled(!creatingSession && (pending == null || pending == SessionController.IntegratedScenario));
             assessmentMode.SetEnabled(!creatingSession && (pending == null || pending == SessionController.ScoredScenario));
-            assessmentMode.style.display = !assessed || ended ? DisplayStyle.Flex : DisplayStyle.None;
-            assessmentMode.text = assessed && ended ? "New assessment" : "Assessment mode";
-            assessmentBadge.style.display = assessed ? DisplayStyle.Flex : DisplayStyle.None;
-            sessionCard.EnableInClassList("assessment-active", assessed);
-            start.text = assessed ? "Start assessment" : "Start scenario";
+            assessmentMode.style.display = active ? DisplayStyle.None : DisplayStyle.Flex;
+            quitAssessment.style.display = active ? DisplayStyle.Flex : DisplayStyle.None;
+            quitAssessment.SetEnabled(archive.enabledSelf);
+            archive.style.display = active ? DisplayStyle.None : DisplayStyle.Flex;
+            assessmentBadge.style.display = active ? DisplayStyle.Flex : DisplayStyle.None;
+            sessionCard.EnableInClassList("assessment-active", active);
+            start.text = active ? "Start assessment" : "Start scenario";
 
             var clock = TrainingPresenter.AssessmentClock(snapshot, session.Available);
             if (assessmentTimer.text != clock.Text) assessmentTimer.text = clock.Text;

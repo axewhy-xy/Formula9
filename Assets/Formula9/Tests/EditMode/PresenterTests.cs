@@ -408,6 +408,40 @@ namespace Formula9.Tests
             StringAssert.Contains("scored", TrainingPresenter.Title(snapshot));
         }
 
+        [TestCase("READY", true)]
+        [TestCase("RUNNING", true)]
+        [TestCase("PAUSED", true)]
+        [TestCase("RECOVERING", true)]
+        [TestCase("ARCHIVED", false)]
+        [TestCase("COMPLETED", false)]
+        [TestCase("FAILED", false)]
+        public void AssessmentModeEndsWithTheAttempt(string status, bool active)
+        {
+            var snapshot = new FullSnapshot
+            {
+                Scenario = new ScenarioRevision { AssessmentDurationS = 120 },
+                Session = new TrainingSession { ScenarioRevisionId = SessionController.IntegratedScenario, Status = status },
+            };
+            Assert.AreEqual(active, TrainingPresenter.IsAssessmentActive(snapshot));
+            Assert.IsTrue(TrainingPresenter.IsAssessment(snapshot), "Ended attempts remain identifiable in Reports.");
+            snapshot.Scenario.AssessmentDurationS = null;
+            Assert.IsFalse(TrainingPresenter.IsAssessmentActive(snapshot), "Practice sessions have no assessment controls.");
+            Assert.IsFalse(TrainingPresenter.IsAssessmentActive(null));
+        }
+
+        [TestCase("INCOMPLETE", true, 22d, "Assessment disrupted · 22/100")]
+        [TestCase("FAIL", true, 80d, "Assessment disrupted · Fail · 80/100")]
+        [TestCase("INCOMPLETE", false, 22d, "Incomplete · 22/100")]
+        [TestCase("PASS", false, 100d, "Pass · 100/100")]
+        [TestCase("FAIL", false, 70d, "Fail · 70/100")]
+        [TestCase("IN_PROGRESS", false, null, "In progress")]
+        public void AssessmentReportsDistinguishDisruptionFromMissingEvidence(string status, bool disrupted,
+            double? points, string expected)
+        {
+            var grade = new SessionAssessment { Status = status, Disrupted = disrupted, Points = points, Maximum = 100 };
+            Assert.AreEqual(expected, TrainingPresenter.AssessmentResult(grade));
+        }
+
         // The countdown follows simulation time and the deadline pinned to the joined attempt.
         [TestCase("READY", 120, 0, true, null, false)]
         [TestCase("RUNNING", 120, 0, true, "2:00 left", false)]

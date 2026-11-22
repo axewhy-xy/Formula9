@@ -39,6 +39,7 @@ class SessionAssessment(WireModel):
     rubric_revision: Id | None
     duration_s: Annotated[int, Field(gt=0)] | None = None
     status: Literal["PRACTICE", "IN_PROGRESS", "INCOMPLETE", "PASS", "FAIL"]
+    disrupted: bool = Field(default=False, description="The attempt was archived before completion.")
     points: FiniteFloat | None
     maximum: NonNegativeInt | None
     pass_mark: NonNegativeInt | None

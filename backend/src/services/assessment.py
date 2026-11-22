@@ -501,8 +501,13 @@ def finalize(plan: AssessmentPlan, snapshot: FullSnapshot, events: Iterable[Even
             event_ids=[event.event_id for event in supporting_events]))
     failures = [failure for name in rubric.automatic_fails for failure in version.safety[name](evidence)]
     score = round(sum(criterion.points or 0 for criterion in criteria), 2)
+    disrupted = snapshot.session.status == "ARCHIVED"
     if failures:
         status, explanation = "FAIL", "A confirmed safety breach overrides the points total."
+        if disrupted:
+            explanation += " The assessment was disrupted before completion."
+    elif disrupted:
+        status, explanation = "INCOMPLETE", "Assessment disrupted: the attempt was archived before completion."
     elif snapshot.session.status != "COMPLETED" or any(c.points is None for c in criteria):
         status, explanation = "INCOMPLETE", "This attempt ended with incomplete assessment evidence."
     elif score >= rubric.pass_mark:
@@ -510,6 +515,7 @@ def finalize(plan: AssessmentPlan, snapshot: FullSnapshot, events: Iterable[Even
     else:
         status, explanation = "FAIL", f"The score is below the {rubric.pass_mark}-point pass mark."
     return SessionAssessment(session_id=snapshot.session_id, scenario_revision_id=snapshot.session.scenario_revision_id,
-        rubric_revision=rubric.revision, duration_s=rubric.exercise_limit_s, status=status, points=score, maximum=100, pass_mark=rubric.pass_mark,
+        rubric_revision=rubric.revision, duration_s=rubric.exercise_limit_s, status=status, disrupted=disrupted,
+        points=score, maximum=100, pass_mark=rubric.pass_mark,
         through_tick=snapshot.tick, through_event_sequence=snapshot.event_sequence, explanation=explanation,
         criteria=criteria, automatic_failures=failures)

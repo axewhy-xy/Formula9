@@ -1238,6 +1238,9 @@ namespace Formula9.Contracts
         public List<AssessmentFailure> AutomaticFailures { get; set; } = new List<AssessmentFailure>();
         [JsonProperty("criteria", Required = Required.Default)]
         public List<AssessmentCriterion> Criteria { get; set; } = new List<AssessmentCriterion>();
+        /// <summary>The attempt was archived before completion.</summary>
+        [JsonProperty("disrupted", Required = Required.Default)]
+        public bool Disrupted { get; set; } = false;
         [JsonProperty("duration_s", Required = Required.Default)]
         public long? DurationS { get; set; }
         [JsonProperty("explanation", Required = Required.Always)]

@@ -50,6 +50,7 @@
                     </ui:VisualElement>
                     <ui:VisualElement class="session-utilities">
                         <ui:Button name="assessment-mode" text="Assessment mode" class="session-button assessment-mode-button" tooltip="Create and join a timed scored exercise." />
+                        <ui:Button name="quit-assessment" text="Quit assessment mode" class="session-button session-caution" tooltip="Archive this attempt and record the assessment as disrupted." style="display: none;" />
                         <ui:Button name="session-toggle" text="Session options" class="session-button session-quiet" tooltip="Show or hide session creation, joining and deletion." style="display: none;" />
                         <ui:Toggle name="mute" label="Mute alerts" class="mute" tooltip="Mute training audio alerts" />
                     </ui:VisualElement>

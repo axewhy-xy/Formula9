@@ -728,7 +728,7 @@ class TrainingStore:
         """Return assessment status or the saved immutable scoring breakdown."""
         with self._reading() as connection:
             record = connection.execute(
-                "SELECT s.scenario_revision_id, a.trainee_id, a.plan_json, a.result_json"
+                "SELECT s.scenario_revision_id, s.status, a.trainee_id, a.plan_json, a.result_json"
                 " FROM sessions s LEFT JOIN session_assessments a USING(session_id) WHERE s.session_id=?",
                 (session_id,)).fetchone()
             if record is None:
@@ -738,6 +738,8 @@ class TrainingStore:
                 result = SessionAssessment.model_validate_json(record["result_json"])
                 if result.duration_s is None:
                     result.duration_s = json.loads(record["plan_json"])["rubric"]["exercise_limit_s"]
+                # Archived snapshots also identify disruptions in reports saved without this flag.
+                result.disrupted = record["status"] == "ARCHIVED"
                 return result
             rubric = AssessmentPlan.model_validate_json(record["plan_json"]).rubric if record["plan_json"] is not None else None
             return SessionAssessment(session_id=session_id, scenario_revision_id=record["scenario_revision_id"],

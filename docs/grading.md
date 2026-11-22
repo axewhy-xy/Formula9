@@ -12,6 +12,8 @@ The countdown appears in the header when the exercise starts and follows the **t
 
 The timer reads the duration carried by the session snapshot. If it shows **Timer unavailable**, refresh the current session and check that the backend is running the matching version.
 
+Use **Quit assessment mode** to end an attempt early. Confirming archives the session, releases its runtime slot and returns the header to normal mode. Archiving through session maintenance has the same effect. The archived attempt stays selected so its report remains available. Reports shows **Assessment disrupted**, with earned points and any confirmed safety failure retained. An archive only exits assessment mode once the backend confirms it; a rejected command leaves the attempt active.
+
 ## Point rules
 
 | Criterion | Points | Evidence |
@@ -37,6 +39,8 @@ The pass mark is **75/100**. A recorded, attributable safety breach overrides th
 - **Preventable battery exhaustion** requires a recorded exhaustion of the assigned charging shuttle in service or on the way to a depot. A charge option must have been actionable for at least 10 simulation seconds, and the trainee must have chosen to continue or missed the decision.
 
 A missed task with a completed decision window earns zero. An unoffered decision, missing measurement, or early archive produces an incomplete result with the supported points retained. A confirmed automatic fail takes precedence over incomplete evidence. Rejected commands and duplicate submissions do not deduct points. Assessment records are retained across retakes and excluded from practice purges. Permanent deletion requires a configured supervisor.
+
+An archived assessment carries `disrupted: true` in its report. Its grading status remains `INCOMPLETE`, or `FAIL` when a safety breach is confirmed. A normally completed attempt with missing evidence remains incomplete without being marked disrupted.
 
 ## Access and abandoned attempts
 

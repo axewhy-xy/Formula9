@@ -3,7 +3,7 @@
  *
  * Author: Nur Syazliyarni Binte Zazali
  * Date Created: 15/11/2026
- * Last Modified: 16/11/2026
+ * Last Modified: 23/11/2026
  *
  * Description:
  *     Refreshes on selection changes or when the result is saved and discards replies for
@@ -89,15 +89,7 @@ namespace Formula9.UI
 
         private void Present(SessionAssessment grade)
         {
-            var status = grade.Status switch
-            {
-                "PASS" => "Pass",
-                "FAIL" => "Fail",
-                "INCOMPLETE" => "Incomplete",
-                "IN_PROGRESS" => "In progress",
-                _ => "Practice session",
-            };
-            result.text = grade.Points.HasValue ? $"{status} · {grade.Points:0.##}/{grade.Maximum}" : status;
+            result.text = TrainingPresenter.AssessmentResult(grade);
             context.text = grade.RubricRevision == null ? grade.Explanation :
                 $"{grade.Explanation}  Rubric {grade.RubricRevision} · Pass mark {grade.PassMark}/{grade.Maximum}";
             breakdown.Clear();

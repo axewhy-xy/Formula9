@@ -111,6 +111,12 @@
       "title": "Criteria",
       "type": "array"
     },
+    "disrupted": {
+      "default": false,
+      "description": "The attempt was archived before completion.",
+      "title": "Disrupted",
+      "type": "boolean"
+    },
     "duration_s": {
       "anyOf": [
         {
