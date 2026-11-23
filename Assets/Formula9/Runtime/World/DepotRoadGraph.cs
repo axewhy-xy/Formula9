@@ -57,12 +57,13 @@ namespace Formula9.World
 
         private struct Candidate { public Edge Edge; public float Lateral, Remaining, Score; }
 
-        private readonly List<Edge> edges;                       // every directed road piece
-        private readonly Dictionary<long, List<Edge>> incoming;  // junction -> the edges that END there
-        private readonly Dictionary<long, Vector2> nodes;        // junction -> its position
-        private readonly List<Vector2> depots;                   // depot positions
-        private readonly HashSet<string> closed;                 // closed road IDs
-        private Dictionary<long, float> toDepot;                 // junction -> metres to the nearest depot
+        private readonly List<Edge> edges = new List<Edge>();
+        private readonly Dictionary<long, List<Edge>> incoming = new Dictionary<long, List<Edge>>();
+        private readonly Dictionary<long, Vector2> nodes = new Dictionary<long, Vector2>();
+        private readonly List<Vector2> depots = new List<Vector2>();
+        private readonly HashSet<string> closed = new HashSet<string>();
+        private readonly List<Candidate> scratch = new List<Candidate>();
+        private Dictionary<long, float> toDepot = new Dictionary<long, float>();
 
         // -----------------------------------------------------------------------------------
         // Function: DepotRoadGraph (constructor)
