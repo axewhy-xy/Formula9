@@ -53,6 +53,8 @@ namespace Formula9.UI
         private long liveSessions = -1;
         private bool cleanupBusy;
         private UiSounds uiSounds;
+        // The root the greyed-out button sound listens on; the UIDocument may have dropped it by OnDisable
+        private VisualElement listenedRoot;
         private Button moreSessions, archiveAll, deleteSession, purgeSessions, reclaimDisk, dialogCancel, dialogConfirm;
         private VisualElement dialogOverlay;
         private Label dialogText;
@@ -183,10 +185,14 @@ namespace Formula9.UI
             var root = GetComponent<UIDocument>().rootVisualElement;
             var uiPlayer = new GameObject("Interface sounds").AddComponent<UiSoundPlayer>();
             uiPlayer.transform.SetParent(transform, false);
-            // A button greyed out only while something is being sent has not refused anything, so it stays silent.
+            // A button greyed out only while something is being sent has not refused anything, so it stays
+            // silent. The check is app-wide on purpose: while any command, login, cleanup or route preview is
+            // on its way, even a button greyed out for a real reason stays silent. No sound is safer than a
+            // "no" for something that worked, and a queued command can keep this silent for a few seconds.
             uiSounds = new UiSounds(uiPlayer.Play, () => busy || cleanupBusy || session?.HasPendingCommand == true || workspace?.Busy == true);
             foreach (var name in UiSounds.MajorButtons) root.Q<Button>(name).clicked += uiSounds.MajorPressed;
             uiSounds.Listen(root);
+            listenedRoot = root;
             world.RouteNodeSelected += _ => uiSounds.PointPicked();
             world.RoadClicked += (_, __) => uiSounds.PointPicked();
             world.ViewChanged += Render;
@@ -201,13 +207,15 @@ namespace Formula9.UI
         // Function: OnDisable
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function stops the session controller and polling, and stops catching presses
-        //     for the greyed-out button sound so enabling again does not catch them twice.
+        //     This function stops the session controller and polling, then stops catching presses
+        //     for the greyed-out button sound. It uses the root it listened on rather than asking the
+        //     UIDocument again, which may already be switched off with no root.
         private void OnDisable()
         {
-            uiSounds?.Unlisten(GetComponent<UIDocument>().rootVisualElement);
             session?.Shutdown();
             StopAllCoroutines();
+            uiSounds?.Unlisten(listenedRoot);
+            listenedRoot = null;
         }
 
         // -----------------------------------------------------------------------------------

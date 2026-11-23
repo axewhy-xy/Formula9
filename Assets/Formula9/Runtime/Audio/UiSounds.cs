@@ -66,7 +66,7 @@ namespace Formula9.Audio
         // Args:
         //     play (Action<UiSound>): Plays a sound, normally UiSoundPlayer.Play.
         //     busy (Func<bool>): True while a command, login or preview is being sent; greyed-out
-        //         presses stay silent then. Optional.
+        //         presses stay silent then, even on a button greyed out for a real reason. Optional.
         public UiSounds(Action<UiSound> play, Func<bool> busy = null)
         {
             this.play = play;
@@ -90,11 +90,12 @@ namespace Formula9.Audio
         // Function: Unlisten
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function stops catching presses under a root, undoing Listen.
+        //     This function stops catching presses under a root, undoing Listen. A null root (one
+        //     already gone) is ignored.
         //
         // Args:
         //     root (VisualElement): The root passed to Listen.
-        public void Unlisten(VisualElement root) => root.UnregisterCallback(onPointerDown, TrickleDown.TrickleDown);
+        public void Unlisten(VisualElement root) => root?.UnregisterCallback(onPointerDown, TrickleDown.TrickleDown);
 
         // -----------------------------------------------------------------------------------
         // Function: MajorPressed

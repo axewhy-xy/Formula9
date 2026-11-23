@@ -167,6 +167,7 @@ namespace Formula9.Tests
                 sounds.Unlisten(root);
                 Press(off, 0);
                 CollectionAssert.IsEmpty(played, "Unlisten stops the sound");
+                Assert.DoesNotThrow(() => sounds.Unlisten(null), "a root already gone is ignored");
             }
             finally
             {
@@ -175,14 +176,21 @@ namespace Formula9.Tests
             }
         }
 
-        // Sends a pointer press with the given mouse button straight to an element.
+        // Sends a pointer press and its release with the given mouse button straight to an element,
+        // so the pointer is not left marked as pressed for later tests.
         private static void Press(VisualElement target, int button)
         {
-            var mouse = new Event { type = EventType.MouseDown, button = button, mousePosition = Vector2.zero };
-            using (var press = PointerDownEvent.GetPooled(mouse))
+            var down = new Event { type = EventType.MouseDown, button = button, mousePosition = Vector2.zero };
+            using (var press = PointerDownEvent.GetPooled(down))
             {
                 press.target = target;
                 target.SendEvent(press);
+            }
+            var up = new Event { type = EventType.MouseUp, button = button, mousePosition = Vector2.zero };
+            using (var release = PointerUpEvent.GetPooled(up))
+            {
+                release.target = target;
+                target.SendEvent(release);
             }
         }
 
