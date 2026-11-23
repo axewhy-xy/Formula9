@@ -73,8 +73,9 @@ namespace Formula9.Tests
         // Function: PressingAGreyedOutButtonPlaysTheRefusedSound
         // -----------------------------------------------------------------------------------
         // Description:
-        //     A press on a disabled button, or on its label, plays the refused sound; a press on an
-        //     enabled button, inside a disabled panel's enabled button, or on no button stays silent.
+        //     A press on a disabled button, or on its label, plays the refused sound, and so does a
+        //     press on a button greyed out by its disabled panel; a press on an enabled button, or on
+        //     no button, stays silent.
         [Test]
         public void PressingAGreyedOutButtonPlaysTheRefusedSound()
         {
