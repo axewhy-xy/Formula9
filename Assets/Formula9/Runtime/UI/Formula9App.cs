@@ -5,7 +5,7 @@
  * Contributors: Rishika (page layout, fleet cards, map/3D switch),
  *     Lau Xiang Yang (training workspace, session list and cleanup, exit)
  * Date Created: 30/10/2026
- * Last Modified: 22/11/2026
+ * Last Modified: 23/11/2026
  *
  * Description:
  *     Part of the Unity client's UI. Wires the UI Toolkit screens to the login and session layers,
@@ -52,6 +52,7 @@ namespace Formula9.UI
         private int sessionListLimit = SessionListPage;
         private long liveSessions = -1;
         private bool cleanupBusy;
+        private UiSounds uiSounds;
         private Button moreSessions, archiveAll, deleteSession, purgeSessions, reclaimDisk, dialogCancel, dialogConfirm;
         private VisualElement dialogOverlay;
         private Label dialogText;
@@ -182,10 +183,10 @@ namespace Formula9.UI
             var root = GetComponent<UIDocument>().rootVisualElement;
             var uiPlayer = new GameObject("Interface sounds").AddComponent<UiSoundPlayer>();
             uiPlayer.transform.SetParent(transform, false);
-            var uiSounds = new UiSounds(uiPlayer.Play);
+            // A button greyed out only while something is being sent has not refused anything, so it stays silent.
+            uiSounds = new UiSounds(uiPlayer.Play, () => busy || cleanupBusy || session?.HasPendingCommand == true || workspace?.Busy == true);
             foreach (var name in UiSounds.MajorButtons) root.Q<Button>(name).clicked += uiSounds.MajorPressed;
-            // A greyed-out button gets no events of its own, so presses are caught on the way down from the root.
-            root.RegisterCallback<PointerDownEvent>(e => uiSounds.Pressed(e.target as VisualElement), TrickleDown.TrickleDown);
+            uiSounds.Listen(root);
             world.RouteNodeSelected += _ => uiSounds.PointPicked();
             world.RoadClicked += (_, __) => uiSounds.PointPicked();
             world.ViewChanged += Render;
@@ -200,9 +201,11 @@ namespace Formula9.UI
         // Function: OnDisable
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function stops the session controller and polling.
+        //     This function stops the session controller and polling, and stops catching presses
+        //     for the greyed-out button sound so enabling again does not catch them twice.
         private void OnDisable()
         {
+            uiSounds?.Unlisten(GetComponent<UIDocument>().rootVisualElement);
             session?.Shutdown();
             StopAllCoroutines();
         }

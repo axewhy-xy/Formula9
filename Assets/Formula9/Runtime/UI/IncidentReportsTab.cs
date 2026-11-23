@@ -3,7 +3,7 @@
  *
  * Author: Jian Wei
  * Date Created: 14/11/2026
- * Last Modified: 14/11/2026
+ * Last Modified: 23/11/2026
  *
  * Description:
  *     Part of the Unity client's Reports page. Replays the historical simulation around an
@@ -40,6 +40,9 @@ namespace Formula9.UI
         private bool busy;
         // What the incident table shows, so it is only rebuilt when that changes
         private string shownRows;
+
+        // True while an incident's history is being loaded
+        public bool Busy => busy;
 
         public IncidentReportsTab(VisualElement root, TrainingApi api, SessionController session, WorldView world, Action<Task> run)
         {
