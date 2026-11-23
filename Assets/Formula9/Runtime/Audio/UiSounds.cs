@@ -3,19 +3,22 @@
  *
  * Author: Choo Jian Wei
  * Date Created: 30/10/2026
- * Last Modified: 03/11/2026
+ * Last Modified: 23/11/2026
  *
  * Description:
  *     Applies the consultation's rules to the Unity controls: buttons make no hover sound and most
  *     presses stay silent. Only the major buttons (Start scenario, Start and watch in 3D, Approve
  *     route and the Charging page's Apply) play an electric click, and picking a point for a route
- *     plays the map point sound. Interface sounds are separate from training alerts, so Mute
- *     alerts does not silence them.
+ *     plays the map point sound. Clicking a button that is greyed out plays the command rejected
+ *     sound, so the app says no out loud, unless the app is busy sending something: a button greyed
+ *     out only while a command, login or preview is on its way has not refused anything. Interface sounds are separate from training alerts, so
+ *     Mute alerts does not silence them.
  */
 
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 namespace Formula9.Audio
 {
@@ -24,7 +27,7 @@ namespace Formula9.Audio
     // -----------------------------------------------------------------------------------
     // Description:
     //     This enum lists the interface sounds. UiSounds.Files maps each to its clip.
-    public enum UiSound { MajorButton, MapPoint }
+    public enum UiSound { MajorButton, MapPoint, Refused }
 
     // -----------------------------------------------------------------------------------
     // Class: UiSounds
@@ -47,9 +50,12 @@ namespace Formula9.Audio
         {
             [UiSound.MajorButton] = "ui_major_button",  // App SFX: UI Button Click Positive_1.wav
             [UiSound.MapPoint] = "ui_map_point",        // UI Hover New 1.wav
+            [UiSound.Refused] = "alert_command_rejected", // the training alert's clip, reused for a greyed-out button
         };
 
         private readonly Action<UiSound> play;
+        private readonly Func<bool> busy;
+        private readonly EventCallback<PointerDownEvent> onPointerDown;
 
         // -----------------------------------------------------------------------------------
         // Function: UiSounds (constructor)
@@ -59,10 +65,37 @@ namespace Formula9.Audio
         //
         // Args:
         //     play (Action<UiSound>): Plays a sound, normally UiSoundPlayer.Play.
-        public UiSounds(Action<UiSound> play)
+        //     busy (Func<bool>): True while a command, login or preview is being sent; greyed-out
+        //         presses stay silent then, even on a button greyed out for a real reason. Optional.
+        public UiSounds(Action<UiSound> play, Func<bool> busy = null)
         {
             this.play = play;
+            this.busy = busy;
+            onPointerDown = e => { if (e.button == 0) Pressed(e.target as VisualElement); };
         }
+
+        // -----------------------------------------------------------------------------------
+        // Function: Listen
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function catches presses under a root. A greyed-out button gets no events of its
+        //     own, so presses are caught on the way down from the root. Only the primary button (or
+        //     a touch) counts; a right or middle click is not a press.
+        //
+        // Args:
+        //     root (VisualElement): The screen's root element.
+        public void Listen(VisualElement root) => root.RegisterCallback(onPointerDown, TrickleDown.TrickleDown);
+
+        // -----------------------------------------------------------------------------------
+        // Function: Unlisten
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function stops catching presses under a root, undoing Listen. A null root (one
+        //     already gone) is ignored.
+        //
+        // Args:
+        //     root (VisualElement): The root passed to Listen.
+        public void Unlisten(VisualElement root) => root?.UnregisterCallback(onPointerDown, TrickleDown.TrickleDown);
 
         // -----------------------------------------------------------------------------------
         // Function: MajorPressed
@@ -78,6 +111,43 @@ namespace Formula9.Audio
         //     This function plays the map point sound (UI Hover New 1) when a road is picked for a
         //     route.
         public void PointPicked() => play?.Invoke(UiSound.MapPoint);
+
+        // -----------------------------------------------------------------------------------
+        // Function: Pressed
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function plays the refused sound when a press lands on a greyed-out button. A
+        //     disabled button gets no click of its own, so Listen calls this for every press, with
+        //     the element under the pointer. Nothing plays while the app is busy, since a button
+        //     may be greyed out only until the work in flight finishes.
+        //
+        // Args:
+        //     target (VisualElement): The element pressed, or one inside a button such as its label.
+        public void Pressed(VisualElement target)
+        {
+            if (busy?.Invoke() == true) return;
+            if (DisabledButton(target)) play?.Invoke(UiSound.Refused);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: DisabledButton
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function tells whether an element is, or sits inside, a button that is greyed out.
+        //     Only buttons count: they are what send commands, so they are what can be refused. A
+        //     greyed-out field, toggle or dropdown stays silent.
+        //
+        // Args:
+        //     target (VisualElement): The element pressed.
+        //
+        // Returns:
+        //     bool: True when the nearest button is disabled.
+        public static bool DisabledButton(VisualElement target)
+        {
+            for (var element = target; element != null; element = element.parent)
+                if (element is Button) return !element.enabledInHierarchy;
+            return false;
+        }
     }
 
     // -----------------------------------------------------------------------------------

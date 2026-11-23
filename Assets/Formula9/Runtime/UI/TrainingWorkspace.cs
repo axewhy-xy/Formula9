@@ -225,6 +225,10 @@ namespace Formula9.UI
 
         public void SelectVehicle(string id) => world.SelectEntity(id);
 
+        // True while a route is being loaded or previewed, or a charging or incident request is on
+        // its way: buttons greyed out then are waiting, not refusing
+        public bool Busy => routeBusy || charging.Busy || incidentReports.Busy;
+
         // The operator picking a shuttle in the fleet table or the Fleet List. Open cameras move to it,
         // except on Route Planning to a shuttle other than the one it is for: they stay on that one.
         public void PickVehicle(string id)
