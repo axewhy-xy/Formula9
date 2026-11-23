@@ -3,7 +3,7 @@ Authoritative planar fleet and domain state for the BE-M2-06 integrated slice.
 
 Author: Nur Syazliyarni Binte Zazali
 Date Created: 28/10/2026
-Last Modified: 28/10/2026
+Last Modified: 23/11/2026
 
 Description:
     Reuses BE-M2-02 separation/motion and BE-M2-04/05 validation, incident and
@@ -41,12 +41,13 @@ from src.services.asset_loader import MAX_ROUTE_WAYPOINTS, validate_routes
 from src.services.incidents import (FIXTURE_PATH as INCIDENT_FIXTURE, IncidentService, detouring, holding_at_stop,
                                     is_detour_of, vehicle_label)
 from src.services.incident_scenarios.simulated_catalog import SimulatedIncidentCatalog
-from src.services.incident_scenarios.world_events import KIND_EVENTS, WorldEvent, legacy_event
+from src.services.incident_scenarios.world_events import KIND_EVENTS, ONE_ROAD_EVENTS, WorldEvent, legacy_event
 from src.services.route_edit import RouteEditService
 from src.services.session_actor import SessionActor
 from src.traffic import incident_hazards, route_signals, signal_cycle
 from src.traffic.city_traffic import COMFORT_BRAKE, HARD_BRAKE, PINNED_PASS_MPS, PLAN_AHEAD_M, SHUTTLE_ACCEL, \
-    CityTraffic, fnv_hash, move_towards
+    fnv_hash, move_towards
+from src.traffic.native_traffic import engine as traffic_engine
 
 logger = logging.getLogger(__name__)
 
@@ -404,10 +405,14 @@ class IntegratedSessionActor(SessionActor):
         self.domain = self.generate_snapshot()
         # How each shuttle was held this step, for the traffic around it; never outlives the step
         self.traffic_holds = {}
+        # What held each shuttle the traffic held at its last step, by vehicle id ("traffic" or "pedestrians"),
+        # for the 3D view to say why it stands (traffic_frame); presentation only, never checkpointed
+        self.hold_reasons = {}
         # The tick of the traffic's latest checkpoint; None before its first (see traffic_checkpoint)
         self.traffic_saved_tick = None
         if self.TRAFFIC:
-            self.traffic = CityTraffic.start(SIGNAL_AREA)
+            # Native when it is built, else the same traffic in Python (src.traffic.native_traffic)
+            self.traffic = traffic_engine().start(SIGNAL_AREA)
             if self.traffic is not None:
                 self._place_in_traffic({})
                 self.traffic.clear_shuttles()
@@ -1003,6 +1008,10 @@ class IntegratedSessionActor(SessionActor):
     def depot_distances(self):
         return {self.domain.vehicles[shuttle.ID].vehicle_id: self.depot_choice(shuttle)[1] for shuttle in self.shuttles}
 
+    def charging_offer_loop_limits(self) -> dict[str, int]:
+        """Scenario-specific warning thresholds, separate from the battery reserve."""
+        return {}
+
     def battery_decisions(self, model, snapshot, *, in_place=False):
         choices = {self.domain.vehicles[shuttle.ID].vehicle_id: self.depot_choice(shuttle) for shuttle in self.shuttles}
         # From each loop's end, the way in to the furthest depot it must keep in reach (see _safety_returns)
@@ -1017,7 +1026,7 @@ class IntegratedSessionActor(SessionActor):
                 for shuttle, vehicle in zip(self.shuttles, snapshot.vehicles)
                 for charger_id in self.definition.bay_positions},
             depot_choices={vehicle_id: depot["depot_id"] for vehicle_id, (depot, _) in choices.items()},
-            return_distances_m=returns, in_place=in_place)
+            return_distances_m=returns, offer_loop_limits=self.charging_offer_loop_limits(), in_place=in_place)
 
     def generate_snapshot(self, *, in_place: bool = False) -> FullSnapshot:
         """The public snapshot of where the session is now: a copy of the domain, or with in_place the
@@ -1247,13 +1256,17 @@ class IntegratedSessionActor(SessionActor):
         end = max(progress, min(stop_at, progress+speed*self.STEP_S, progress+plan.cap_m))
         # Whatever the rules allow, a step that would put its body into another is cut short
         held = plan.held
+        blocked = False
         if end > progress+EPSILON and self.traffic.body_blocker(record, path, end) is not None:
-            held = True
+            held = blocked = True
             end = next((progress+(end-progress)*share for share in (0.5, 0.2)
                         if self.traffic.body_blocker(record, path, progress+(end-progress)*share) is None), progress)
         # A light far up the road is not what holds it up now
         near_light = light is not None and light-progress <= PLAN_AHEAD_M
-        self.traffic_holds[shuttle.ID] = (held, near_light, rules <= limit and rules < cruise)
+        # Held for the walkers on, or waiting at, a crossing on its way: they, not a vehicle or a light, are
+        # what holds it back most
+        by_pedestrians = held and not blocked and plan.pedestrian_mps < cruise and plan.pedestrian_mps <= rules
+        self.traffic_holds[shuttle.ID] = (held, near_light, rules <= limit and rules < cruise, by_pedestrians)
         return end
 
     def _traffic_shuttle(self, shuttle):
@@ -1297,6 +1310,9 @@ class IntegratedSessionActor(SessionActor):
         for record, until in live:
             event = record.get("event") or {}
             kind = incident_hazards.event_type(record)
+            if kind == "PEDESTRIAN_ON_ROAD" and event.get("edge_id") in edges:
+                self._jaywalk(event.get("event_id") or record["incident_id"], edges[event["edge_id"]], until)
+                continue
             if kind not in PINNED_VEHICLES or event.get("edge_id") not in edges:
                 continue
             key = event.get("event_id") or record["incident_id"]
@@ -1310,6 +1326,17 @@ class IntegratedSessionActor(SessionActor):
             # Which lane it happens in is the event's own, so a replay picks the same one
             lane = fnv_hash(key) % road.lanes
             self.traffic.pin_vehicle(key, road, distance, lane, until*self.STEP_S, PINNED_VEHICLES[kind])
+
+    def _jaywalk(self, key, edge, until):
+        """A pedestrian on the road: the traffic sends the walker nearest the middle of the event's road across
+        it there (CityTraffic.jaywalk), once, trying again at the next refresh while no walker is near. With
+        no pedestrians in the traffic it has only its kind's fallback."""
+        if getattr(self.traffic, "walks", None) is None or key in self.traffic.jaywalks:
+            return
+        place = self.traffic.locate([tuple(p) for p in edge["path"]])
+        if place is not None:
+            road, distance = place
+            self.traffic.jaywalk(key, road, distance, until*self.STEP_S)
 
     def _signal_faults(self):
         """The junctions whose lights a live signal fault has stuck on red, and the second each clears."""
@@ -1361,14 +1388,19 @@ class IntegratedSessionActor(SessionActor):
         A shuttle held by the traffic, a light or another shuttle is in the traffic, so vehicles queue
         behind it; one standing at its stop or in a bay is passed.
         """
+        reasons = {}
         for shuttle in self.shuttles:
-            held_by_traffic, held_by_light, in_traffic = self.traffic_holds.get(shuttle.ID, (False, False, False))
+            held_by_traffic, held_by_light, in_traffic, held_by_pedestrians = \
+                self.traffic_holds.get(shuttle.ID, (False, False, False, False))
             route = self._routes[shuttle.route_ID]
             self.traffic.place_shuttle(self._traffic_shuttle(shuttle),
                                        self.traffic.shuttle_route(shuttle.route_ID, route["waypoints"]),
                                        shuttle.progress, moved.get(shuttle.ID, 0.0)/self.STEP_S, self.STEP_S,
                                        held_by_traffic=held_by_traffic, held_by_light=held_by_light,
                                        in_traffic=in_traffic or shuttle.ID in blocked)
+            if held_by_traffic:
+                reasons[self.domain.vehicles[shuttle.ID].vehicle_id] = "pedestrians" if held_by_pedestrians else "traffic"
+        self.hold_reasons = reasons
         self.traffic_holds = {}
 
     def traffic_frame(self):
@@ -1377,16 +1409,28 @@ class IntegratedSessionActor(SessionActor):
 
         The vehicles are packed (city_traffic.FRAME_RECORD) and base64-encoded: a frame of the whole
         sample is read by the 3D view ten times a second, and thousands of JSON numbers made it hitch.
+        The pedestrians the traffic walks (F9_PEDESTRIANS) come packed the same way
+        (city_traffic.PED_RECORD); a frame without any leaves them out.
         """
         if self.traffic is None:
             return None
         vehicles, count, shuttles = self.traffic.frame()
+        # Why a shuttle the traffic holds stands: a vehicle or the walkers on a crossing (held_by_pedestrians)
+        for shuttle in shuttles:
+            reason = self.hold_reasons.get(shuttle["vehicle_id"])
+            if reason is not None:
+                shuttle["held_by"] = reason
         # The junctions whose lights are stuck on red, so the 3D view draws them so
         faults = [{"junction_id": junction, "mode": signal_cycle.FAULT_MODE, "until_s": round(until, 3)}
                   for junction, until in sorted(self.traffic.signal_faults.items()) if until > self.timestamp_second]
-        return {"tick": self.current_tick, "simulation_time_s": round(self.timestamp_second, 3),
-                "vehicle_count": count, "vehicles": base64.b64encode(vehicles).decode("ascii"), "shuttles": shuttles,
-                "signal_faults": faults}
+        frame = {"tick": self.current_tick, "simulation_time_s": round(self.timestamp_second, 3),
+                 "vehicle_count": count, "vehicles": base64.b64encode(vehicles).decode("ascii"), "shuttles": shuttles,
+                 "signal_faults": faults}
+        walkers, walker_count = self.traffic.pedestrian_frame()
+        if walker_count:
+            frame["pedestrian_count"] = walker_count
+            frame["pedestrians"] = base64.b64encode(walkers).decode("ascii")
+        return frame
 
     def signal_state(self) -> dict:
         """Every signalled junction's colours now, on the session's clock, with any fault on it: the lights
@@ -1508,9 +1552,10 @@ class IntegratedSessionActor(SessionActor):
         targets = [target for shuttle in self.shuttles
                    if (target := self._incident_target(shuttle, blocked)) is not None]
         # Settled incidents leave random_incidents, so an empty list is not "first".
-        opening = self.incident_catalog.opening if self.random_incident is None else None
+        opening = self._incident_opening() if self.random_incident is None else None
         if opening is not None:
-            targets = [target for target in targets if target["editable"] and not target["busy"]]
+            targets = [target for target in targets if target["editable"] and not target["busy"]
+                       and target["vehicle"].vehicle_id == opening.get("vehicle_id", target["vehicle"].vehicle_id)]
         if not targets:
             logger.debug("[INCIDENT DEBUG] incident delayed: no shuttle on its route")
             return
@@ -1526,7 +1571,9 @@ class IntegratedSessionActor(SessionActor):
                 return
             target = self.rng.choice(targets)
             vehicle = target["vehicle"]
-            eligible = [edge for edge, _ in target["ahead"]]
+            eligible = [edge for edge, distance in target["ahead"] if distance >= opening.get("minimum_distance_m", 0)]
+            if not eligible:
+                return
             edge = eligible[0]
             routes = self.definition.routes.for_route(self.domain, vehicle.route_id)
             for candidate in eligible:
@@ -1601,7 +1648,8 @@ class IntegratedSessionActor(SessionActor):
         # Only a closure on the remaining route of a shuttle that can be taken round it asks for a decision.
         requires_guidance = (is_closure and edge in target["remaining"] and target["editable"]
                              and not target["busy"])
-        event = WorldEvent(event_id=f"random-{template.kind.lower()}-{self.current_tick}",
+        event_id = (opening or {}).get("event_id", f"random-{template.kind.lower()}-{self.current_tick}")
+        event = WorldEvent(event_id=event_id,
                            event_type=KIND_EVENTS[template.kind], edge_id=edge, node_id=None,
                            start_tick=self.current_tick, duration_s=duration_s, warning_s=template.warning_s,
                            detection_delay_s=template.detection_delay_s, recovery_s=template.recovery_s)
@@ -1616,6 +1664,10 @@ class IntegratedSessionActor(SessionActor):
                      "guidance=%s next_due=%s", opening is not None, selection["incident_id"], vehicle.vehicle_id,
                      edge, selection["warning_m"], selection["impact_edge_ids"], requires_guidance,
                      self.incident_due_tick)
+
+    def _incident_opening(self):
+        """Provide the opening incident policy for this session."""
+        return self.incident_catalog.opening
 
     def _incident_record(self, event: WorldEvent, *, incident_id, disruption_id, target, requires_guidance, origin):
         """The checkpointed record of one placed world event: what the IncidentService stages, what slows the
@@ -1638,7 +1690,7 @@ class IntegratedSessionActor(SessionActor):
         else:
             # Congestion spreads one network hop; not an arbitrary spatial radius. A breakdown blocks one lane
             # of its own road only.
-            congested = {edge} if event.event_type == "BREAKDOWN" else self.definition.neighbours(edge)
+            congested = {edge} if event.event_type in ONE_ROAD_EVENTS else self.definition.neighbours(edge)
             affected = [edge]
             impacted = [candidate for candidate in target["remaining"] if candidate in congested] if target else []
             # World coordinates are the same planar metres as the route scene.
@@ -1894,6 +1946,7 @@ class IntegratedSessionActor(SessionActor):
         charging = {s.ID for s in self.shuttles if self.modes[s.ID] == "CHARGING"}
         proposed = {s.ID: self._prepare_motion(s) for s in self.shuttles}
         proposed, blocked = self._resolve_motion(proposed)
+        self.observe_motion(proposed)
         moved = {}
         for shuttle in self.shuttles:
             mode = self.modes[shuttle.ID]
@@ -1938,8 +1991,12 @@ class IntegratedSessionActor(SessionActor):
             elif shuttle.ID in charging and self._charge_finished(shuttle.ID, level):
                 # Retain the reservation until the finished shuttle has driven
                 # clear of the bay; a public free port must be physically usable.
+                vehicle_id = self.domain.vehicles[shuttle.ID].vehicle_id
+                booking = next((item for item in live_bookings(self.domain)
+                                if item.vehicle_id == vehicle_id and item.status == "ACTIVE"), None)
                 self._begin_parking(shuttle, port.charger_id)
                 self._event(shuttle, "CHARGING_FINISHED", charger_id=port.charger_id,
+                    booking_id=booking.booking_id if booking else None,
                     charged_s=self.charge_elapsed[shuttle.ID], energy_added_kwh=level-self.charge_started_kwh[shuttle.ID], battery_kwh=level)
             elif mode in {"IN_SERVICE", "DETOURING"} and shuttle.route_ID.startswith("depot-path-"):
                 if shuttle.progress >= self._routes[shuttle.route_ID]["total_length"]-EPSILON:
@@ -2051,11 +2108,12 @@ class IntegratedSessionActor(SessionActor):
         # area's sample now, as a new session's does
         if "traffic" in state:
             try:
-                self.traffic = CityTraffic.from_state(state["traffic"]) if state["traffic"] is not None else None
+                self.traffic = traffic_engine().from_state(state["traffic"]) if state["traffic"] is not None else None
             except (ValueError, KeyError, TypeError, IndexError, AttributeError) as error:
                 raise TrainingStoreError("CORRUPT_CHECKPOINT", "Traffic checkpoint is invalid") from error
         self.traffic_saved_tick = saved_tick if self.traffic is not None else None
         self.traffic_holds = {}
+        self.hold_reasons = {}
         self.domain = snapshot.model_copy(deep=True)
         if set(self.modes) != set(range(5)) or [s.ID for s in self.shuttles] != list(range(5)):
             raise TrainingStoreError("CORRUPT_CHECKPOINT", "Workflow roster is invalid")

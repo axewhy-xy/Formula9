@@ -14,6 +14,7 @@
  */
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -23,6 +24,7 @@ using Formula9.Contracts;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace Formula9.Tests
 {
@@ -228,6 +230,30 @@ namespace Formula9.Tests
             LogIn();
             transport.Reply = _ => Ok(Fixture("snapshot"));
             Assert.ThrowsAsync<ContractException>(() => training.GetSnapshotAsync("some-other-session"));
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: BackgroundParsingDeliversRepliesAndContractErrors
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     With ParseInBackground on, a snapshot parsed on a worker thread still arrives, and a
+        //     contract error still faults the task. The test waits frame by frame, as the app does:
+        //     blocking this thread would deadlock, since the reply resumes on it.
+        [UnityTest]
+        public IEnumerator BackgroundParsingDeliversRepliesAndContractErrors()
+        {
+            LogIn();
+            training.ParseInBackground = true;
+            var fixture = JObject.Parse(Fixture("snapshot"));
+            var id = (string)fixture["session_id"];
+            transport.Reply = _ => Ok(fixture.ToString());
+            var good = training.GetSnapshotAsync(id);
+            var bad = training.GetSnapshotAsync("some-other-session");
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (!(good.IsCompleted && bad.IsCompleted) && DateTime.UtcNow < deadline) yield return null;
+            Assert.IsTrue(good.IsCompleted && bad.IsCompleted, "both replies were parsed");
+            Assert.AreEqual(id, good.Result.SessionId);
+            Assert.IsInstanceOf<ContractException>(bad.Exception?.InnerException);
         }
 
         // -----------------------------------------------------------------------------------

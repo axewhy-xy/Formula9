@@ -22,6 +22,14 @@ namespace Formula9.Backend
             return value;
         }
 
+        /// <summary>Read the server's saved grade for the selected attempt.</summary>
+        public async Task<SessionAssessment> GetAssessmentAsync(string id, CancellationToken cancellation = default)
+        {
+            var value = ContractParser.Parse<SessionAssessment>(await SendTrainingAsync("GET", $"/{Segment(id)}/assessment", null, cancellation));
+            if (value.SessionId != id) throw new ContractException("Assessment is for another session");
+            return value;
+        }
+
         public async Task<RouteEditPreview> PreviewRouteAsync(string id, RouteEditRequest draft, CancellationToken cancellation = default)
         {
             var value = ContractParser.Parse<RouteEditPreview>(await SendTrainingAsync("POST", $"/{Segment(id)}/route-previews", ContractParser.Serialize(draft), cancellation));

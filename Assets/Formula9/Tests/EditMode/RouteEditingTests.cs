@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Formula9.Contracts;
+using Formula9.Session;
 using Formula9.UI;
 using Formula9.World;
 using NUnit.Framework;
@@ -77,9 +78,9 @@ namespace Formula9.Tests
         public void TheProblemIsSaidInNamesNotIds()
         {
             var snapshot = new FullSnapshot { Vehicles = new List<FleetVehicle> { new FleetVehicle { VehicleId = "shuttle-01", RouteId = "route-a" } } };
-            var text = RoutePresenter.Problem(Context(), snapshot);
+            var text = RoutePresenter.Problem(Context(), snapshot, "shuttle-01");
             StringAssert.Contains("Lorong 4 Toa Payoh is closed", text);
-            StringAssert.Contains("shuttle-01", text);
+            StringAssert.Contains("Shuttle 01", text);
             StringAssert.Contains("Toa Payoh Police Centre", text);
             StringAssert.DoesNotContain("main:0", text);
         }
@@ -95,7 +96,7 @@ namespace Formula9.Tests
             var snapshot = new FullSnapshot { Vehicles = new List<FleetVehicle> { new FleetVehicle { VehicleId = "shuttle-01", RouteId = "route-a" } } };
             var context = Context();
             context.OriginalDirectedEdgeIds = new List<string> { "side:0:forward" };
-            Assert.AreEqual("Lorong 4 Toa Payoh is closed. shuttle-01's route goes round it.", RoutePresenter.Problem(context, snapshot));
+            Assert.AreEqual("Lorong 4 Toa Payoh is closed. Shuttle 01's route goes round it.", RoutePresenter.Problem(context, snapshot, "shuttle-01"));
         }
 
         [Test]
@@ -132,22 +133,44 @@ namespace Formula9.Tests
         public void TheStagesFollowTheExercise(string status, bool closed, bool hasDraft, bool valid, int stage)
         {
             var snapshot = new FullSnapshot { Session = new TrainingSession { Status = status } };
-            Assert.AreEqual(stage, RoutePresenter.Stage(snapshot, closed, hasDraft, valid ? Preview("PASS", 150) : null));
+            Assert.AreEqual(stage, RoutePresenter.Stage(snapshot, "shuttle-01", closed, hasDraft, valid ? Preview("PASS", 150) : null));
         }
 
+        // Only the shuttle the detour is offered to goes back to it; another is at its outcome.
         [Test]
         public void AShuttleHeldAtAClosureSendsTheExerciseBackToItsDetour()
         {
             var snapshot = new FullSnapshot
             {
                 Session = new TrainingSession { Status = "RUNNING" },
-                Incidents = new List<Incident> { new Incident { IncidentId = "closure", State = "OPTIONS_READY" } },
+                Incidents = new List<Incident> { new Incident { IncidentId = "closure", VehicleId = "shuttle-01", State = "OPTIONS_READY" } },
                 Candidates = new List<Candidate> { new Candidate { IncidentId = "closure", Action = "ROAD_DETOUR" } },
             };
-            Assert.AreEqual(1, RoutePresenter.Stage(snapshot, true, false, null));
-            Assert.AreEqual(3, RoutePresenter.Stage(snapshot, true, true, Preview("PASS", 150)));
+            Assert.AreEqual(1, RoutePresenter.Stage(snapshot, "shuttle-01", true, false, null));
+            Assert.AreEqual(3, RoutePresenter.Stage(snapshot, "shuttle-01", true, true, Preview("PASS", 150)));
+            Assert.AreEqual(4, RoutePresenter.Stage(snapshot, "shuttle-02", true, false, null), "no detour for this shuttle");
             snapshot.Incidents[0].State = "EXECUTING";
-            Assert.AreEqual(4, RoutePresenter.Stage(snapshot, true, false, null));
+            Assert.AreEqual(4, RoutePresenter.Stage(snapshot, "shuttle-01", true, false, null));
+        }
+
+        [Test]
+        public void ThePickerAndStripNameShuttlesNotRoutes()
+        {
+            Assert.AreEqual("Shuttle 03", RoutePresenter.ShuttleName("shuttle-03"));
+            Assert.AreEqual("bus-7", RoutePresenter.ShuttleName("bus-7"), "another ID is shown as it is");
+            Assert.AreEqual("Shuttle 03 · route-peer-c", RoutePresenter.ShuttleChoice(new FleetVehicle { VehicleId = "shuttle-03", RouteId = "route-peer-c" }, false));
+            // A shuttle given a detour drives that route now, and the picker says so
+            StringAssert.StartsWith("Shuttle 01 · closure-detour-shuttle-01", RoutePresenter.ShuttleChoice(new FleetVehicle { VehicleId = "shuttle-01", RouteId = "closure-detour-shuttle-01" }, true));
+            StringAssert.EndsWith("● needs a decision", RoutePresenter.ShuttleChoice(new FleetVehicle { VehicleId = "shuttle-01", RouteId = "route-a" }, true));
+            Assert.AreEqual("Needs a decision (2)", RoutePresenter.PendingTitle(2));
+
+            PendingDecision Pending(double? eta) => new PendingDecision("shuttle-03", new Incident { IncidentId = "collision" },
+                eta == null ? null : new IncidentExposure { VehicleId = "shuttle-03", EtaS = eta.Value, DistanceM = 320 },
+                new Dictionary<string, Candidate>());
+            Assert.AreEqual("● Shuttle 03 · ~40 s", RoutePresenter.PendingChip(Pending(40)));
+            Assert.AreEqual("● Shuttle 03 · ~2 min 0 s", RoutePresenter.PendingChip(Pending(120)));
+            Assert.AreEqual("● Shuttle 03 · now", RoutePresenter.PendingChip(Pending(0.2)));
+            Assert.AreEqual("● Shuttle 03", RoutePresenter.PendingChip(Pending(null)), "no figure without an exposure");
         }
 
         [Test]

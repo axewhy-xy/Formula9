@@ -4,7 +4,7 @@
  * Author: Choo Jian Wei
  * Contributors: Rishika (fleet card tests), Lau Xiang Yang (session cleanup tests)
  * Date Created: 30/10/2026
- * Last Modified: 30/10/2026
+ * Last Modified: 23/11/2026
  *
  * Description:
  *     Checks what the screens show, using the shared snapshot fixture: login and command messages
@@ -256,6 +256,82 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
+        // Function: ARunningSessionBehindRealTimeSaysSo
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A backend running the session below real time is named in the summary, with its
+        //     factor, only while the session runs and the backend answers.
+        [Test]
+        public void ARunningSessionBehindRealTimeSaysSo()
+        {
+            var s = WithStatus("RUNNING");
+            var behind = TrainingPresenter.SessionStatus(s, true, 0.62);
+            Assert.IsTrue(behind.Behind);
+            Assert.AreEqual("Session: session-001 · Connected · Backend behind (0.6x)", behind.Summary);
+            StringAssert.Contains("0.6x real time", behind.Tooltip);
+            Assert.IsFalse(TrainingPresenter.SessionStatus(s, true, 0.99).Behind);
+            Assert.IsFalse(TrainingPresenter.SessionStatus(s, true, null).Behind);
+            Assert.IsFalse(TrainingPresenter.SessionStatus(s, false, 0.5).Behind, "offline says so instead");
+            Assert.IsFalse(TrainingPresenter.SessionStatus(WithStatus("PAUSED"), true, 0.5).Behind);
+
+            var presenter = new SessionStatusPresenter();
+            var first = presenter.Present(s, true, 0.62);
+            Assert.AreSame(first.Summary, presenter.Present(s, true, 0.61).Summary, "the same factor shown is not redrawn");
+            StringAssert.Contains("(0.4x)", presenter.Present(s, true, 0.4).Summary);
+            Assert.AreEqual("Session: session-001 · Connected", presenter.Present(s, true, 1.0).Summary);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: PaceIsSimulatedOverWallTimeWhileRunning
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The real-time factor is known once the snapshots span a few seconds, and starts
+        //     over when the session stops running or changes epoch.
+        [Test]
+        public void PaceIsSimulatedOverWallTimeWhileRunning()
+        {
+            var pace = new BackendPace();
+            var s = WithStatus("RUNNING");
+            for (var second = 0; second <= 3; second++)
+            {
+                s.SimulationTimeS = 100 + 0.5 * second;
+                pace.Observe(s, 1000 + second);
+            }
+            Assert.IsNull(pace.Factor, "three seconds is too short to tell");
+            Assert.IsFalse(pace.Behind);
+            for (var second = 4; second <= 30; second++)
+            {
+                s.SimulationTimeS = 100 + 0.5 * second;
+                pace.Observe(s, 1000 + second);
+            }
+            Assert.AreEqual(0.5, pace.Factor.Value, 1e-9);
+            Assert.IsTrue(pace.Behind);
+            // Only the last WindowS count: it caught up
+            for (var second = 31; second <= 45; second++)
+            {
+                s.SimulationTimeS += 1;
+                pace.Observe(s, 1000 + second);
+            }
+            Assert.AreEqual(1.0, pace.Factor.Value, 1e-9);
+            Assert.IsFalse(pace.Behind);
+            // A stalled backend repeats its last snapshot: the slowest pace there is
+            for (var second = 46; second <= 60; second++) pace.Observe(s, 1000 + second);
+            Assert.AreEqual(0.0, pace.Factor.Value, 1e-9);
+
+            s.Session.Status = "PAUSED";
+            pace.Observe(s, 1061);
+            Assert.IsNull(pace.Factor);
+            s.Session.Status = "RUNNING";
+            pace.Observe(s, 1062);
+            s.SessionEpoch++;
+            s.SimulationTimeS += 10;
+            pace.Observe(s, 1070);
+            Assert.IsNull(pace.Factor, "a new epoch starts over");
+            pace.Observe(null, 1071);
+            Assert.IsNull(pace.Factor);
+        }
+
+        // -----------------------------------------------------------------------------------
         // Function: StartWaitsWhileAnAssignedRouteCrossesAnActiveClosure
         // -----------------------------------------------------------------------------------
         // Description:
@@ -312,16 +388,98 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: OnlyTheSingaporeExerciseIsOffered
+        // Function: AssessmentModeUsesTheSessionMetadata
         // -----------------------------------------------------------------------------------
         // Description:
-        //     New sessions offer only the Singapore exercise.
+        //     The header reflects the joined exercise and still recognizes saved scored sessions.
         [Test]
-        public void OnlyTheSingaporeExerciseIsOffered()
+        public void AssessmentModeUsesTheSessionMetadata()
         {
-            Assert.AreEqual(1, TrainingPresenter.Scenarios.Count);
-            Assert.AreEqual(SessionController.IntegratedScenario, TrainingPresenter.Scenarios[0].Id);
-            StringAssert.StartsWith("Singapore", TrainingPresenter.ScenarioTitle(SessionController.IntegratedScenario));
+            var snapshot = new FullSnapshot
+            {
+                Scenario = new ScenarioRevision(),
+                Session = new TrainingSession { ScenarioRevisionId = SessionController.IntegratedScenario, Status = "RUNNING" },
+            };
+            StringAssert.StartsWith("Singapore", TrainingPresenter.Title(snapshot));
+            Assert.IsFalse(TrainingPresenter.IsAssessment(snapshot));
+            Assert.IsNull(TrainingPresenter.AssessmentClock(snapshot, true).Text);
+            snapshot.Session.ScenarioRevisionId = "scored-toa-payoh-example";
+            Assert.IsTrue(TrainingPresenter.IsAssessment(snapshot));
+            StringAssert.Contains("scored", TrainingPresenter.Title(snapshot));
+        }
+
+        [TestCase("READY", true)]
+        [TestCase("RUNNING", true)]
+        [TestCase("PAUSED", true)]
+        [TestCase("RECOVERING", true)]
+        [TestCase("ARCHIVED", false)]
+        [TestCase("COMPLETED", false)]
+        [TestCase("FAILED", false)]
+        public void AssessmentModeEndsWithTheAttempt(string status, bool active)
+        {
+            var snapshot = new FullSnapshot
+            {
+                Scenario = new ScenarioRevision { AssessmentDurationS = 120 },
+                Session = new TrainingSession { ScenarioRevisionId = SessionController.IntegratedScenario, Status = status },
+            };
+            Assert.AreEqual(active, TrainingPresenter.IsAssessmentActive(snapshot));
+            Assert.IsTrue(TrainingPresenter.IsAssessment(snapshot), "Ended attempts remain identifiable in Reports.");
+            snapshot.Scenario.AssessmentDurationS = null;
+            Assert.IsFalse(TrainingPresenter.IsAssessmentActive(snapshot), "Practice sessions have no assessment controls.");
+            Assert.IsFalse(TrainingPresenter.IsAssessmentActive(null));
+        }
+
+        [TestCase("INCOMPLETE", true, 22d, "Assessment disrupted · 22/100")]
+        [TestCase("FAIL", true, 80d, "Assessment disrupted · Fail · 80/100")]
+        [TestCase("INCOMPLETE", false, 22d, "Incomplete · 22/100")]
+        [TestCase("PASS", false, 100d, "Pass · 100/100")]
+        [TestCase("FAIL", false, 70d, "Fail · 70/100")]
+        [TestCase("IN_PROGRESS", false, null, "In progress")]
+        public void AssessmentReportsDistinguishDisruptionFromMissingEvidence(string status, bool disrupted,
+            double? points, string expected)
+        {
+            var grade = new SessionAssessment { Status = status, Disrupted = disrupted, Points = points, Maximum = 100 };
+            Assert.AreEqual(expected, TrainingPresenter.AssessmentResult(grade));
+        }
+
+        // The countdown follows simulation time and the deadline pinned to the joined attempt.
+        [TestCase("READY", 120, 0, true, null, false)]
+        [TestCase("RUNNING", 120, 0, true, "2:00 left", false)]
+        [TestCase("RUNNING", 120, 119.95, true, "0:01 left", true)]
+        [TestCase("PAUSED", 120, 92.25, true, "Paused · 0:28 left", false)]
+        [TestCase("RUNNING", 120, 92.25, false, "Last seen · 0:28 left", false)]
+        [TestCase("RECOVERING", 120, 92.25, false, "Last seen · 0:28 left", false)]
+        [TestCase("RUNNING", 300, 30.0, true, "4:30 left", false)]
+        [TestCase("COMPLETED", 120, 120, true, "Time’s up · 0:00", false)]
+        [TestCase("ARCHIVED", 120, 22, true, null, false)]
+        public void CountdownFollowsTheScoredSnapshot(string status, int duration, double elapsed, bool available,
+            string text, bool urgent)
+        {
+            var snapshot = new FullSnapshot
+            {
+                Scenario = new ScenarioRevision { AssessmentDurationS = duration },
+                Session = new TrainingSession { Status = status },
+                SimulationTimeS = elapsed,
+            };
+            var clock = TrainingPresenter.AssessmentClock(snapshot, available);
+            Assert.AreEqual(text, clock.Text);
+            Assert.AreEqual(urgent, clock.Urgent);
+        }
+
+        // A missing deadline stays visible as a diagnostic. A completed attempt has finished its clock.
+        [TestCase("RUNNING", "Timer unavailable")]
+        [TestCase("PAUSED", "Timer unavailable")]
+        [TestCase("RECOVERING", "Timer unavailable")]
+        [TestCase("COMPLETED", "Time’s up · 0:00")]
+        public void CountdownRequiresTheSnapshotDeadline(string status, string text)
+        {
+            var snapshot = new FullSnapshot
+            {
+                Scenario = new ScenarioRevision(),
+                Session = new TrainingSession { ScenarioRevisionId = "scored-toa-payoh-example", Status = status },
+                SimulationTimeS = 73.45,
+            };
+            Assert.AreEqual(text, TrainingPresenter.AssessmentClock(snapshot, true).Text);
         }
 
         // -----------------------------------------------------------------------------------
@@ -382,18 +540,47 @@ namespace Formula9.Tests
         [Test]
         public void PurgeKeepsTheNewestAndSaysHowManyGo()
         {
-            var list = new SessionListResponse { LiveCount = 16, Capacity = 16, Total = 37, Sessions = new System.Collections.Generic.List<SessionListEntry>() };
+            var list = new SessionListResponse { LiveCount = 16, Capacity = 16, Total = 37, TerminalPracticeCount = 21,
+                Sessions = new System.Collections.Generic.List<SessionListEntry>() };
             Assert.AreEqual(1, TrainingPresenter.PurgeCount(list, 20), "21 finished, 20 kept");
-            Assert.AreEqual("Permanently delete the 1 oldest finished session? The 20 newest finished sessions and every live session are kept. " +
+            Assert.AreEqual("Permanently delete 1 old finished practice session? The 20 newest finished practice sessions and all assessment records are kept. " +
                             "Their history is removed for everyone. This cannot be undone.", TrainingPresenter.PurgeQuestion(list, 20));
             list.Total = 50;
-            StringAssert.StartsWith("Permanently delete the 14 oldest finished sessions?", TrainingPresenter.PurgeQuestion(list, 20));
+            list.TerminalPracticeCount = 34;
+            StringAssert.StartsWith("Permanently delete 14 old finished practice sessions?", TrainingPresenter.PurgeQuestion(list, 20));
             list.Total = 30;
+            list.TerminalPracticeCount = 14;
             Assert.AreEqual(0, TrainingPresenter.PurgeCount(list, 20));
-            Assert.AreEqual("Nothing to delete: there are 14 finished sessions, and the 20 newest are always kept.",
+            Assert.AreEqual("No old practice sessions to delete. The 20 newest are kept.",
                 TrainingPresenter.PurgeQuestion(list, 20));
             Assert.AreEqual("Deleted 1 old training session.", TrainingPresenter.Purged(1));
             Assert.AreEqual("No old sessions to delete.", TrainingPresenter.Purged(0));
+        }
+
+        [Test]
+        public void AssessmentRetentionUsesServerPermissionsAndPracticeCounts()
+        {
+            StringAssert.Contains("charging task", TrainingPresenter.Outcome(new CommandOutcome
+                { Status = "REJECTED", FailureCode = "ASSESSMENT_NOT_READY" }));
+            var entry = new SessionListEntry { IsAssessment = true, Status = "COMPLETED" };
+            Assert.IsFalse(TrainingPresenter.CanDelete(entry));
+            entry.IsAssessment = false;
+            entry.ScenarioRevisionId = "scored-toa-payoh-earlier";
+            Assert.IsFalse(TrainingPresenter.CanDelete(entry));
+            entry.CanDelete = true;
+            Assert.IsTrue(TrainingPresenter.CanDelete(entry));
+            var list = new SessionListResponse { LiveCount = 1, Total = 100, TerminalPracticeCount = 22 };
+            Assert.AreEqual(2, TrainingPresenter.PurgeCount(list, 20));
+            StringAssert.Contains("2 old finished practice sessions", TrainingPresenter.PurgeQuestion(list, 20));
+            StringAssert.Contains("cannot be undone", TrainingPresenter.PurgeQuestion(list, 20));
+            list.TerminalPracticeCount = 2;
+            Assert.AreEqual(0, TrainingPresenter.PurgeCount(list, 20));
+            list.Total = 30;
+            list.TerminalPracticeCount = 20; // Twenty practice attempts and ten retained assessments.
+            Assert.AreEqual(0, TrainingPresenter.PurgeCount(list, 20));
+            list.TerminalPracticeCount = null;
+            Assert.AreEqual(0, TrainingPresenter.PurgeCount(list, 20));
+            StringAssert.StartsWith("Refresh the session list", TrainingPresenter.PurgeQuestion(list, 20));
         }
 
         // -----------------------------------------------------------------------------------
@@ -415,7 +602,7 @@ namespace Formula9.Tests
         // -----------------------------------------------------------------------------------
         // Description:
         //     A world event that names no shuttle still shows on the cards of the shuttles it
-        //     will reach, with their ETAs, and on the Incident Monitor with who reaches it.
+        //     will reach, with their ETAs, and in its description with who reaches it.
         [Test]
         public void AShuttleShowsAnIncidentItWillReachAndWhen()
         {
@@ -425,31 +612,30 @@ namespace Formula9.Tests
             Assert.AreEqual("! Incident scheduled-collision-1 · Detected · reaches it in ~110 s", rows["shuttle-04"].Incident);
             Assert.IsNull(rows["shuttle-05"].Incident);
             var world = snapshot.Incidents.Single(i => i.IncidentId == "scheduled-collision-1");
-            var summary = TrainingPresenter.IncidentSummary(world, false);
+            var summary = TrainingPresenter.IncidentDescription(world);
             StringAssert.StartsWith("COLLISION on Lorong 6 Toa Payoh | DETECTED", summary);
             StringAssert.Contains("It belongs to no shuttle.", summary);
             StringAssert.Contains("Shuttles reaching it: shuttle-03 in ~85 s, shuttle-04 in ~110 s.", summary);
-            StringAssert.Contains("No shuttle reaches it before it clears.", TrainingPresenter.IncidentSummary(new Incident
+            StringAssert.Contains("No shuttle reaches it before it clears.", TrainingPresenter.IncidentDescription(new Incident
             {
                 IncidentId = "random-road_block-9", State = "DETECTED", VehicleId = "shuttle-01", CandidateIds = new List<string>(),
-            }, false));
+            }));
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: TheIncidentMonitorSaysWhatWasDecidedForEachShuttle
+        // Function: TheDescriptionSaysWhatWasDecidedForEachShuttle
         // -----------------------------------------------------------------------------------
         // Description:
         //     Each shuttle's decision is listed, a late one marked, and the options are named
         //     for people.
         [Test]
-        public void TheIncidentMonitorSaysWhatWasDecidedForEachShuttle()
+        public void TheDescriptionSaysWhatWasDecidedForEachShuttle()
         {
             var snapshot = (FullSnapshot)ContractParser.ParseMessage(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/incident_decisions_snapshot.json")));
             var incident = snapshot.Incidents.Single(i => i.IncidentId == "scheduled-collision-1");
             Assert.AreEqual("shuttle-03 request assistance", TrainingPresenter.Responses(incident));
-            var summary = TrainingPresenter.IncidentSummary(incident, true);
+            var summary = TrainingPresenter.IncidentDescription(incident);
             StringAssert.Contains("Decided: shuttle-03 request assistance.", summary);
-            StringAssert.Contains("Decide for each shuttle that will reach it", summary);
             incident.Responses.Add(new IncidentResponse { VehicleId = "shuttle-04", Action = "KEEP_ROUTE", DecidedTick = 230, BeforeArrival = false });
             Assert.AreEqual("shuttle-03 request assistance, shuttle-04 keep route (late)", TrainingPresenter.Responses(incident));
             Assert.IsNull(TrainingPresenter.Responses(new Incident { IncidentId = "none" }));
@@ -462,7 +648,7 @@ namespace Formula9.Tests
         // -----------------------------------------------------------------------------------
         // Description:
         //     The Reports page describes an incident and what was decided, but asks nothing of
-        //     the operator; the Incident Monitor's summary is that description and its ask.
+        //     the operator.
         [Test]
         public void TheReportsDescribeAnIncidentWithoutAskingForADecision()
         {
@@ -472,8 +658,6 @@ namespace Formula9.Tests
             StringAssert.Contains("Decided: shuttle-03 request assistance.", description);
             StringAssert.DoesNotContain("Decide for each shuttle", description);
             StringAssert.DoesNotContain("No operator decision is required", description);
-            Assert.AreEqual(description + "\nNo operator decision is required for this incident now. Shuttles that reach it meet its queue.",
-                TrainingPresenter.IncidentSummary(incident, false));
         }
 
         // -----------------------------------------------------------------------------------

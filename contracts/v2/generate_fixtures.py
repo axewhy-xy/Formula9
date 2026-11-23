@@ -6,9 +6,11 @@ from pathlib import Path
 
 from pydantic import TypeAdapter
 
+from contracts.v2.assessment import SessionAssessment
 from contracts.v2.models import ChargeSchedulePreview, ChargeScheduleRequest, DispatcherCommand, Message, parse_message
 from contracts.v2.route_edit import RouteApprovalRequest, RouteEditPreview, RouteEditRequest, RouteEditorContext, RouteOutcome
 from contracts.v2.sessions import CreateSessionRequest, SessionListResponse
+from contracts.v2.stream import StreamMessage, StreamTrafficControl, stream_message_schema
 
 ROOT = Path(__file__).parent
 FIXTURES = ROOT / "fixtures"
@@ -30,7 +32,7 @@ session_list_schema["$id"] = "https://formula9.local/contracts/v2/session_list.s
 save("session_list.json", SessionListResponse(sessions=[
     {"session_id": "session-001", "scenario_revision_id": "scenario-r1", "status": "RUNNING", "occupies_capacity": True},
     {"session_id": "session-old", "scenario_revision_id": "scenario-r1", "status": "ARCHIVED", "occupies_capacity": False},
-], live_count=1, total=2, capacity=16).model_dump(mode="json"))
+], live_count=1, total=2, capacity=16, terminal_practice_count=1).model_dump(mode="json"))
 
 
 schema = TypeAdapter(Message).json_schema()
@@ -45,10 +47,13 @@ for name, model in (("route_edit_request", RouteEditRequest),
                     ("route_edit_preview", RouteEditPreview),
                     ("route_approval", RouteApprovalRequest),
                     ("route_outcome", RouteOutcome),
+                    ("session_assessment", SessionAssessment),
                     ("charge_schedule_request", ChargeScheduleRequest),
                     ("charge_schedule_preview", ChargeSchedulePreview)):
     route_schema = model.model_json_schema()
     route_schema["$id"] = f"https://formula9.local/contracts/v2/{name}.schema.json"
+    if name == "session_assessment":
+        route_schema["$comment"] = "Author: Nur Syazliyarni Binte Zazali. Generated from assessment.py."
     (ROOT / f"{name}.schema.json").write_text(
         json.dumps(route_schema, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -271,3 +276,31 @@ route_approval = {"contract_version": "2.0", "preview_id": "preview-m2-1",
                   "idempotency_key": "route-key-1", "reason": "Avoid closure",
                   "target_vehicle_ids": [f"shuttle-{index:02}" for index in range(1, 6)]}
 save("route_approval.json", RouteApprovalRequest.model_validate(route_approval).model_dump(mode="json"))
+
+# The live session stream (stream.py): one message of each type, and a client's traffic control
+stream_schema = stream_message_schema()
+stream_schema["$id"] = "https://formula9.local/contracts/v2/stream_message.schema.json"
+stream_schema["title"] = "Formula 9 training session stream message v2"
+(ROOT / "stream_message.schema.json").write_text(json.dumps(stream_schema, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+stream_adapter = TypeAdapter(StreamMessage)
+stream_frame = {"tick": 200, "simulation_time_s": 10.0, "vehicle_count": 1,
+                "vehicles": "AwCwBAAAPv7//4QD6AM=",
+                "shuttles": [{"vehicle_id": "shuttle-01", "x_m": 1.5, "y_m": -2.0, "heading_deg": 90.0, "speed_mps": 4.2},
+                             # Standing for the walkers on a crossing on its way
+                             {"vehicle_id": "shuttle-02", "x_m": 40.0, "y_m": 8.0, "heading_deg": 0.0, "speed_mps": 0.0,
+                              "held_by": "pedestrians"}],
+                "signal_faults": [{"junction_id": "junction-1", "mode": "STUCK_RED", "until_s": 40.0}],
+                # One walker: seed 3 at (12.34, -5.00) m heading 90 degrees at 1.3 m/s, waiting at a kerb
+                "pedestrian_count": 1, "pedestrians": "AwDSBAAADP7//4QDQQE="}
+stream_messages = [
+    {"type": "snapshot", "session_id": "session-001", "snapshot": snapshot},
+    {"type": "traffic", "session_id": "session-001", "frames": [stream_frame]},
+    {"type": "heartbeat", "session_id": "session-001"},
+    {"type": "error", "session_id": "session-001",
+     "error": {"code": "SESSION_RECOVERING", "message": "Training runtime is unavailable", "retryable": True}},
+]
+for message in stream_messages:
+    stream_adapter.validate_python(message)
+traffic_control = {"type": "traffic", "enabled": True, "after_tick": 198}
+StreamTrafficControl.model_validate(traffic_control)
+save("stream_messages.json", {"messages": stream_messages, "traffic_control": traffic_control})

@@ -8,6 +8,38 @@ using Newtonsoft.Json.Linq;
 
 namespace Formula9.Contracts
 {
+    /// <summary>Points and the durable simulation evidence supporting a single rule.</summary>
+    public sealed partial class AssessmentCriterion
+    {
+        [JsonProperty("event_ids", Required = Required.Always)]
+        public List<string> EventIds { get; set; }
+        [JsonProperty("explanation", Required = Required.Always)]
+        public string Explanation { get; set; }
+        [JsonProperty("label", Required = Required.Always)]
+        public string Label { get; set; }
+        [JsonProperty("maximum", Required = Required.Always)]
+        public long Maximum { get; set; }
+        [JsonProperty("points", Required = Required.AllowNull)]
+        public double? Points { get; set; }
+        [JsonProperty("rule_id", Required = Required.Always)]
+        public string RuleId { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>A confirmed safety breach that overrides the numerical grade.</summary>
+    public sealed partial class AssessmentFailure
+    {
+        [JsonProperty("event_ids", Required = Required.Always)]
+        public List<string> EventIds { get; set; }
+        [JsonProperty("explanation", Required = Required.Always)]
+        public string Explanation { get; set; }
+        [JsonProperty("rule_id", Required = Required.Always)]
+        public string RuleId { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
     /// <summary>CameraBookmark from the shared v2 contract.</summary>
     public sealed partial class CameraBookmark
     {
@@ -1104,6 +1136,9 @@ namespace Formula9.Contracts
     /// <summary>ScenarioRevision from the shared v2 contract.</summary>
     public sealed partial class ScenarioRevision
     {
+        /// <summary>Simulation seconds available in a scored attempt, pinned at creation.</summary>
+        [JsonProperty("assessment_duration_s", Required = Required.Default)]
+        public long? AssessmentDurationS { get; set; }
         [JsonProperty("energy_model_revision", Required = Required.Always)]
         public string EnergyModelRevision { get; set; }
         [JsonProperty("provenance", Required = Required.Always)]
@@ -1196,9 +1231,51 @@ namespace Formula9.Contracts
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
+    /// <summary>Current status or the persisted final report for one session.</summary>
+    public sealed partial class SessionAssessment
+    {
+        [JsonProperty("automatic_failures", Required = Required.Default)]
+        public List<AssessmentFailure> AutomaticFailures { get; set; } = new List<AssessmentFailure>();
+        [JsonProperty("criteria", Required = Required.Default)]
+        public List<AssessmentCriterion> Criteria { get; set; } = new List<AssessmentCriterion>();
+        /// <summary>The attempt was archived before completion.</summary>
+        [JsonProperty("disrupted", Required = Required.Default)]
+        public bool Disrupted { get; set; } = false;
+        [JsonProperty("duration_s", Required = Required.Default)]
+        public long? DurationS { get; set; }
+        [JsonProperty("explanation", Required = Required.Always)]
+        public string Explanation { get; set; }
+        [JsonProperty("maximum", Required = Required.AllowNull)]
+        public long? Maximum { get; set; }
+        [JsonProperty("pass_mark", Required = Required.AllowNull)]
+        public long? PassMark { get; set; }
+        [JsonProperty("points", Required = Required.AllowNull)]
+        public double? Points { get; set; }
+        [JsonProperty("rubric_revision", Required = Required.AllowNull)]
+        public string RubricRevision { get; set; }
+        [JsonProperty("scenario_revision_id", Required = Required.Always)]
+        public string ScenarioRevisionId { get; set; }
+        [JsonProperty("session_id", Required = Required.Always)]
+        public string SessionId { get; set; }
+        [JsonProperty("status", Required = Required.Always)]
+        public string Status { get; set; }
+        [JsonProperty("through_event_sequence", Required = Required.AllowNull)]
+        public long? ThroughEventSequence { get; set; }
+        [JsonProperty("through_tick", Required = Required.AllowNull)]
+        public long? ThroughTick { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
     /// <summary>SessionListEntry from the shared v2 contract.</summary>
     public sealed partial class SessionListEntry
     {
+        [JsonProperty("can_archive", Required = Required.Default)]
+        public bool? CanArchive { get; set; }
+        [JsonProperty("can_delete", Required = Required.Default)]
+        public bool? CanDelete { get; set; }
+        [JsonProperty("is_assessment", Required = Required.Default)]
+        public bool IsAssessment { get; set; } = false;
         [JsonProperty("occupies_capacity", Required = Required.Always)]
         public bool OccupiesCapacity { get; set; }
         [JsonProperty("scenario_revision_id", Required = Required.Always)]
@@ -1220,6 +1297,8 @@ namespace Formula9.Contracts
         public long LiveCount { get; set; }
         [JsonProperty("sessions", Required = Required.Always)]
         public List<SessionListEntry> Sessions { get; set; }
+        [JsonProperty("terminal_practice_count", Required = Required.Default)]
+        public long? TerminalPracticeCount { get; set; }
         [JsonProperty("total", Required = Required.Always)]
         public long Total { get; set; }
         // Additive 2.x fields from a newer backend are kept, not rejected.
@@ -1278,6 +1357,124 @@ namespace Formula9.Contracts
         public double SupportOffsetM { get; set; }
         [JsonProperty("support_surface_id", Required = Required.Always)]
         public string SupportSurfaceId { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>StreamError from the shared v2 contract.</summary>
+    public sealed partial class StreamError
+    {
+        [JsonProperty("error", Required = Required.Always)]
+        public StreamErrorBody Error { get; set; }
+        [JsonProperty("session_id", Required = Required.Always)]
+        public string SessionId { get; set; }
+        [JsonProperty("type", Required = Required.Always)]
+        public string Type { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>StreamErrorBody from the shared v2 contract.</summary>
+    public sealed partial class StreamErrorBody
+    {
+        [JsonProperty("code", Required = Required.Always)]
+        public string Code { get; set; }
+        [JsonProperty("message", Required = Required.Always)]
+        public string Message { get; set; }
+        [JsonProperty("retryable", Required = Required.Always)]
+        public bool Retryable { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>StreamHeartbeat from the shared v2 contract.</summary>
+    public sealed partial class StreamHeartbeat
+    {
+        [JsonProperty("session_id", Required = Required.Always)]
+        public string SessionId { get; set; }
+        [JsonProperty("type", Required = Required.Always)]
+        public string Type { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>StreamSignalFault from the shared v2 contract.</summary>
+    public sealed partial class StreamSignalFault
+    {
+        [JsonProperty("junction_id", Required = Required.Always)]
+        public string JunctionId { get; set; }
+        [JsonProperty("mode", Required = Required.Always)]
+        public string Mode { get; set; }
+        [JsonProperty("until_s", Required = Required.Always)]
+        public double UntilS { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>StreamSnapshot from the shared v2 contract.</summary>
+    public sealed partial class StreamSnapshot
+    {
+        [JsonProperty("session_id", Required = Required.Always)]
+        public string SessionId { get; set; }
+        [JsonProperty("snapshot", Required = Required.Always)]
+        public FullSnapshot Snapshot { get; set; }
+        [JsonProperty("type", Required = Required.Always)]
+        public string Type { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>StreamTraffic from the shared v2 contract.</summary>
+    public sealed partial class StreamTraffic
+    {
+        [JsonProperty("frames", Required = Required.Always)]
+        public List<StreamTrafficFrame> Frames { get; set; }
+        [JsonProperty("session_id", Required = Required.Always)]
+        public string SessionId { get; set; }
+        [JsonProperty("type", Required = Required.Always)]
+        public string Type { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>One traffic step. vehicles is base64 of vehicle_count records of 14 bytes, little-endian: uint16</summary>
+    public sealed partial class StreamTrafficFrame
+    {
+        [JsonProperty("pedestrian_count", Required = Required.Default)]
+        public long PedestrianCount { get; set; } = 0;
+        [JsonProperty("pedestrians", Required = Required.Default)]
+        public string Pedestrians { get; set; } = "";
+        [JsonProperty("shuttles", Required = Required.Always)]
+        public List<StreamTrafficShuttle> Shuttles { get; set; }
+        [JsonProperty("signal_faults", Required = Required.Default)]
+        public List<StreamSignalFault> SignalFaults { get; set; } = new List<StreamSignalFault>();
+        [JsonProperty("simulation_time_s", Required = Required.Always)]
+        public double SimulationTimeS { get; set; }
+        [JsonProperty("tick", Required = Required.Always)]
+        public long Tick { get; set; }
+        [JsonProperty("vehicle_count", Required = Required.Always)]
+        public long VehicleCount { get; set; }
+        [JsonProperty("vehicles", Required = Required.Always)]
+        public string Vehicles { get; set; }
+        // Additive 2.x fields from a newer backend are kept, not rejected.
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>A shuttle's body in a traffic step. held_by (2.x, optional) says what the background traffic holds it</summary>
+    public sealed partial class StreamTrafficShuttle
+    {
+        [JsonProperty("heading_deg", Required = Required.Always)]
+        public double HeadingDeg { get; set; }
+        [JsonProperty("held_by", Required = Required.Default)]
+        public string HeldBy { get; set; }
+        [JsonProperty("speed_mps", Required = Required.Always)]
+        public double SpeedMps { get; set; }
+        [JsonProperty("vehicle_id", Required = Required.Always)]
+        public string VehicleId { get; set; }
+        [JsonProperty("x_m", Required = Required.Always)]
+        public double XM { get; set; }
+        [JsonProperty("y_m", Required = Required.Always)]
+        public double YM { get; set; }
         // Additive 2.x fields from a newer backend are kept, not rejected.
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }

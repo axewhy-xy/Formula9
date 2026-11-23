@@ -9,7 +9,7 @@ from collections.abc import Coroutine
 from contextvars import Context
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 import logging
@@ -23,7 +23,10 @@ from src.persistence.training_store import TrainingStore, TrainingStoreError
 from src.core.training_telemetry import SessionProgress, boundary
 from src.schemas.shuttle_data import Shuttle
 from src.services.asset_loader import load_routes_from_json
+from src.services.assessment import SCORED_SCENARIO, load_rubric
+from src.services.scored_actor import ScoredSessionActor
 from src.services.session_actor import SessionActor
+from src.services.session_stream import SnapshotFeed
 from src.services.integrated_actor import (IntegratedSessionActor, SCENARIO_SELECTOR, SIGNAL_AREA, get_workflow_definition,
                                             upgrade_v3_workflow)
 from src.services.training_workflow import approve_workflow_route, publish_workflow, submit_workflow
@@ -38,7 +41,8 @@ LIFECYCLE = {"START": "RUNNING", "PAUSE": "PAUSED", "RESUME": "RUNNING", "ARCHIV
 T = TypeVar("T")
 
 # The first part of a readable session id: where the exercise takes place.
-SESSION_PLACES = {SCENARIO_SELECTOR: "toa-payoh", SPATIAL_SCENARIO_REVISION: "fleet-3d", SCENARIO_REVISION: "fleet-loop"}
+SESSION_PLACES = {SCENARIO_SELECTOR: "toa-payoh", SCORED_SCENARIO: "toa-payoh-scored",
+                  SPATIAL_SCENARIO_REVISION: "fleet-3d", SCENARIO_REVISION: "fleet-loop"}
 # A live session keeps this many of its latest traffic frames, one a traffic step (ten a second), for a
 # 3D view that asks again as soon as each reply arrives (wait_for_traffic) and draws a little behind them
 TRAFFIC_FRAMES = 30
@@ -117,7 +121,23 @@ def freeze_static_heap() -> None:
         return
     _static_heap_frozen = True
     get_workflow_definition()
-    road_network(SIGNAL_AREA)
+    network = road_network(SIGNAL_AREA)
+    # And the walk network its pedestrians walk, when sessions walk them
+    from src.traffic import walk_network
+    walks = None
+    try:
+        if walk_network.enabled():
+            walks = walk_network.walk_network(SIGNAL_AREA)
+    except ValueError:
+        pass  # A misconfigured switch is reported when a session starts its traffic
+    # And their native copies, when sessions drive the native traffic engine, so the first session does not
+    # build them (src.traffic.native_traffic)
+    from src.traffic import native_traffic
+    try:
+        if network is not None and native_traffic.engine() is native_traffic.NativeCityTraffic:
+            native_traffic.prepare(network, walks)
+    except (RuntimeError, ValueError):
+        pass  # A misconfigured engine is reported when a session starts its traffic
     gc.collect()
     gc.freeze()
 
@@ -145,6 +165,7 @@ def checkpoint(actor: SessionActor, *, traffic: bool = True) -> dict:
         saved = actor.traffic_checkpoint() if traffic else None
         if saved is not None:
             state["traffic"] = saved
+    state.update(actor.checkpoint_extension())
     return state
 
 
@@ -152,8 +173,23 @@ def _tuples(value):
     return tuple(_tuples(item) for item in value) if isinstance(value, list) else value
 
 
+class FrameFeed:
+    """A live session's latest traffic frames and the 3D views waiting for the next. The class using it
+    declares frames (a deque of (tick, JSON), maxlen TRAFFIC_FRAMES) and frame_signal (an asyncio.Event)."""
+    frames: deque
+    frame_signal: asyncio.Event
+
+    def add_frame(self, tick: int, frame: str) -> None:
+        self.frames.append((tick, frame))
+        self.wake_frame_waiters()
+
+    def wake_frame_waiters(self) -> None:
+        signal, self.frame_signal = self.frame_signal, asyncio.Event()
+        signal.set()
+
+
 @dataclass
-class LiveSession:
+class LiveSession(FrameFeed):
     actor: SessionActor
     baseline: FullSnapshot | None = None
     task: asyncio.Task | None = None
@@ -166,35 +202,48 @@ class LiveSession:
     # Set, and replaced by a fresh one, whenever a frame is added: wakes the 3D views waiting for one
     frame_signal: asyncio.Event = field(default_factory=asyncio.Event)
 
-    def add_frame(self, tick: int, frame: str) -> None:
-        self.frames.append((tick, frame))
-        self.wake_frame_waiters()
 
-    def wake_frame_waiters(self) -> None:
-        signal, self.frame_signal = self.frame_signal, asyncio.Event()
-        signal.set()
+def session_event(snapshot: FullSnapshot, event_type: str) -> Event:
+    return Event(
+        event_id=str(uuid4()), event_sequence=snapshot.event_sequence + 1, tick=snapshot.tick,
+        event_type=event_type, entity_type="SESSION", entity_id=snapshot.session_id,
+        entity_revision=snapshot.session.aggregate_revision, source=snapshot.source,
+        data={"status": snapshot.session.status},
+    )
 
 
-class TrainingSessionService:
+def commit_failure(store: TrainingStore, session_id: str, *, reason: str = "ACTOR_FAILED") -> None:
+    """Marks a session FAILED in the store with a SESSION_FAILED event, unless it already is."""
+    baseline = store.snapshot(session_id)
+    if baseline.session.status == "FAILED":
+        return
+    snapshot_id = baseline.snapshot_id
+    baseline.session.status = "FAILED"
+    baseline.session.aggregate_revision += 1
+    event = session_event(baseline, "SESSION_FAILED")
+    event.data["reason"] = reason
+    baseline.event_sequence += 1
+    store.commit_snapshot(baseline, (event,), expected_snapshot_id=snapshot_id)
+
+
+class SessionServiceBase:
+    """What the in-process session runtime (TrainingSessionService) and the gateway that runs sessions
+    in worker processes (session_gateway.GatewaySessionService) share: the routes' interface to live
+    sessions, and the work that only touches the store. Subclasses keep self.sessions, session ID to a
+    record with FrameFeed's frames, and define _initialize, _create, _unavailable and _traffic_session."""
     MAX_SESSIONS = 16
-    # Of those, sessions that drive the background traffic. Every session ticks on one core (the GIL),
-    # and one with traffic costs several times one without: some 5 ms of each 50 ms tick on a desktop
-    # (about 2.8 ms without traffic), so six running at once take about two thirds of a core and keep
-    # up. A slow laptop took 14.5 ms, so there fewer keep up: past a core, MAX_TICK_BACKLOG_S lets the
-    # missed ticks go. Recovery restores whatever was admitted; only new sessions are refused.
-    MAX_TRAFFIC_SESSIONS = 6
-    FAILURE_RETRY_S = 0.25
 
     def __init__(self, store: TrainingStore, *, retention_keep_latest: int | None = None):
         self.store = store
         self.retention_keep_latest = retention_keep_latest
-        self.sessions: dict[str, LiveSession] = {}
+        self.sessions: dict[str, Any] = {}
         self.closed = False
         self._initialized = False
         self._initialize_lock = asyncio.Lock()
         self._creation_lock = asyncio.Lock()
         self._operations: set[asyncio.Task] = set()
-        self._tasks: set[asyncio.Task] = set()
+        self._snapshot_feed: SnapshotFeed | None = None
+        self._assessment_maintenance: asyncio.Task | None = None
 
     async def _complete(self, operation: Coroutine[Any, Any, T]) -> T:
         # A disconnected caller must not cancel work between its durable commit
@@ -210,9 +259,261 @@ class TrainingSessionService:
         if not task.cancelled():
             task.exception()  # Also consume failures after the caller disconnects.
 
+    async def _drain_operations(self) -> None:
+        """Waits for every operation under way, including any started meanwhile. Only unfinished ones
+        are waited on: a finished one stays in _operations until its done callback runs, and awaiting
+        finished tasks never yields to the loop that would run it, so the drain would spin forever."""
+        while pending := [task for task in self._operations if not task.done()]:
+            await asyncio.wait(pending)
+
     async def initialize(self) -> None:
         if not self._initialized:
             await self._complete(self._initialize())
+        if self.store.owns_writer and self._assessment_maintenance is None and not self.closed:
+            # Worker processes share the gateway's store and leave expiry to the gateway.
+            self._assessment_maintenance = asyncio.create_task(self._maintain_assessments())
+
+    async def _maintain_assessments(self) -> None:
+        interval = min(30.0, self.store.assessment_policy.inactivity_timeout_s / 2)
+        while not self.closed:
+            try:
+                await self.expire_inactive_assessments()
+            except (TrainingStoreError, sqlite3.Error):
+                logger.exception("Assessment inactivity cleanup will retry")
+            await asyncio.sleep(interval)
+
+    async def expire_inactive_assessments(self, *, now: datetime | None = None) -> int:
+        """Archive abandoned ready or paused attempts through their normal actor and commit path."""
+        cutoff = ((now or datetime.now(UTC)) - timedelta(
+            seconds=self.store.assessment_policy.inactivity_timeout_s)).isoformat()
+        inactive = await asyncio.to_thread(self.store.inactive_assessments, cutoff)
+        archived = 0
+        for record in inactive:
+            sid = record["session_id"]
+            if not self.owns(sid):
+                continue
+            snapshot = await asyncio.to_thread(self.store.snapshot, sid)
+            command = DispatcherCommand(
+                contract_version="2.0", command_id=uuid4().hex, idempotency_key=uuid4().hex, session_id=sid,
+                command_type="ARCHIVE", expected_epoch=snapshot.session_epoch,
+                expected_revision=snapshot.session.aggregate_revision, target_type="SESSION", target_id=sid,
+                reason="Assessment archived after the configured inactivity limit.", payload={})
+            try:
+                archived += bool(await self._expire_assessment(record["trainee_id"], command, cutoff))
+            except TrainingStoreError as error:
+                if error.code not in {"STALE_REVISION", "INVALID_TRANSITION", "SESSION_RECOVERING", "INVALID_REFERENCE"}:
+                    raise
+        return archived
+
+    async def _expire_assessment(self, actor_id: str, command: DispatcherCommand, cutoff: str) -> bool:
+        raise NotImplementedError
+
+    async def _close_assessment_maintenance(self) -> None:
+        if self._assessment_maintenance is not None:
+            self._assessment_maintenance.cancel()
+            await asyncio.gather(self._assessment_maintenance, return_exceptions=True)
+            self._assessment_maintenance = None
+
+    async def _initialize(self) -> None:
+        raise NotImplementedError
+
+    async def _retain(self) -> None:
+        """After startup: delete the history beyond retention_keep_latest, if set."""
+        if self.retention_keep_latest is not None:
+            try:
+                purged = await self._purge(self.retention_keep_latest)
+                logger.info("Training retention deleted %d old sessions", purged["deleted_count"])
+            except (TrainingStoreError, sqlite3.Error):
+                # History left behind is retried at the next start; it must not block training.
+                logger.exception("Training retention failed")
+
+    async def create(self, request: CreateSessionRequest, actor_id: str, key: str) -> FullSnapshot:
+        await self.initialize()
+        return await self._complete(self._create(request, actor_id, key))
+
+    async def _create(self, request: CreateSessionRequest, actor_id: str, key: str) -> FullSnapshot:
+        raise NotImplementedError
+
+    @staticmethod
+    def _creation_digest(request: CreateSessionRequest) -> str:
+        return hashlib.sha256(request.model_dump_json().encode()).hexdigest()
+
+    @staticmethod
+    def _check_scenario(request: CreateSessionRequest) -> None:
+        if request.scenario_revision_id not in {SCENARIO_REVISION, SPATIAL_SCENARIO_REVISION, SCENARIO_SELECTOR, SCORED_SCENARIO}:
+            raise TrainingStoreError("INVALID_REFERENCE", "Scenario revision is not available")
+
+    def owns(self, session_id: str) -> bool:
+        return session_id in self.sessions
+
+    def traffic_sessions(self) -> int:
+        raise NotImplementedError
+
+    def live_ticks(self) -> dict[str, int | None]:
+        """Each live session's current tick, as far as this process knows, None for one unavailable."""
+        raise NotImplementedError
+
+    async def export_trace(self) -> dict:
+        """The trace of every process that runs this service's sessions, as TrainingTrace.export gives one."""
+        return self.store.trace.export()
+
+    async def delete(self, session_id: str, actor_id: str | None = None) -> None:
+        await self.initialize()
+        await self._complete(self._delete(session_id, actor_id))
+
+    async def _delete(self, session_id: str, actor_id: str | None = None) -> None:
+        if self.owns(session_id):
+            raise TrainingStoreError("INVALID_TRANSITION", "Archive the session before permanently deleting it")
+        await asyncio.to_thread(self.store.delete_session, session_id, actor_id=actor_id)
+
+    async def purge(self, keep_latest: int) -> dict:
+        await self.initialize()
+        return await self._complete(self._purge(keep_latest))
+
+    async def _purge(self, keep_latest: int) -> dict:
+        expired = await asyncio.to_thread(self.store.expired_session_ids, keep_latest)
+        deleted = 0
+        # One writer transaction per attempt, so running sessions' ticks interleave.
+        for session_id in expired:
+            if self.closed:
+                break
+            if not self.owns(session_id):
+                await asyncio.to_thread(self.store.delete_session, session_id)
+                deleted += 1
+        return {"deleted_count": deleted}
+
+    async def compact(self) -> dict:
+        await self.initialize()
+        return await self._complete(self._compact())
+
+    async def _compact(self) -> dict:
+        # Admission must not install a new actor while VACUUM owns the writer.
+        async with self._creation_lock:
+            if self.sessions:
+                raise TrainingStoreError("INVALID_TRANSITION", "Archive all sessions before reclaiming disk space")
+            return await asyncio.to_thread(self.store.compact)
+
+    def _unavailable(self, session) -> bool:
+        raise NotImplementedError
+
+    def _check_available(self, session_id: str) -> None:
+        session = self.sessions.get(session_id)
+        if session is not None and self._unavailable(session):
+            raise TrainingStoreError("SESSION_RECOVERING", "Training runtime is unavailable")
+
+    async def snapshot(self, session_id: str) -> FullSnapshot:
+        await self.initialize()
+        self._check_available(session_id)
+        snapshot = await asyncio.to_thread(self.store.snapshot, session_id)
+        self._check_available(session_id)
+        return snapshot
+
+    async def snapshot_json(self, session_id: str) -> str:
+        """As snapshot, but the JSON GET /snapshot sends. A live session's comes from memory as it was
+        committed, with no database read and no parsing, so polling it costs this process next to
+        nothing; any other session's is read from the store on a thread."""
+        await self.initialize()
+        self._check_available(session_id)
+        raw = self.store.published_snapshot_json(session_id)
+        if raw is None:
+            raw = await asyncio.to_thread(self.store.snapshot_json, session_id)
+            self._check_available(session_id)
+        return raw
+
+    def live_snapshot_json(self, session_id: str) -> str | None:
+        """As snapshot_json, but only from memory: None for a session whose snapshot is not kept there
+        (one ended, or not live). Never blocks; a stream checks with it between commits."""
+        self._check_available(session_id)
+        return self.store.published_snapshot_json(session_id)
+
+    def _traffic_session(self, session_id: str):
+        raise NotImplementedError
+
+    def _current_frame(self, session, after_tick: int) -> tuple[int, str] | None:
+        """(tick, JSON) of where the traffic stands now, for a session with none kept, if after after_tick."""
+        return None
+
+    def traffic_entries(self, session_id: str, after_tick: int) -> list[tuple[int, str]]:
+        """The latest traffic frames of a live session after a tick, oldest first, as (tick, JSON): at
+        most TRAFFIC_REPLY_FRAMES, the newest.
+
+        A session that has published none since this process started (one paused, or just recovered)
+        gives its current frame, so a 3D view can draw where the traffic stands. Presentation only:
+        the frames are not durable, and a session without traffic, or not live here, has none.
+        """
+        session = self._traffic_session(session_id)
+        entries = [entry for entry in session.frames if entry[0] > after_tick][-TRAFFIC_REPLY_FRAMES:]
+        if not session.frames:
+            current = self._current_frame(session, after_tick)
+            if current is not None:
+                entries.append(current)
+        return entries
+
+    def traffic(self, session_id: str, after_tick: int) -> list[str]:
+        """As traffic_entries, the frames' JSON alone."""
+        return [frame for _, frame in self.traffic_entries(session_id, after_tick)]
+
+    def newest_traffic_tick(self, session_id: str) -> int | None:
+        """The tick of the newest traffic frame a live session keeps, None with none kept. A stream
+        whose cursor is past it is on an older run of the session's clock (one before a recovery)."""
+        frames = self._traffic_session(session_id).frames
+        return frames[-1][0] if frames else None
+
+    async def wait_for_traffic_entries(self, session_id: str, after_tick: int,
+                                       wait_s: float) -> list[tuple[int, str]]:
+        """As traffic_entries, but with no frame after after_tick yet, waits up to wait_s for the next one.
+
+        A 3D view asks again as soon as each reply comes, so it hears of every frame as it is made,
+        rather than up to a polling interval late: what it draws then needs less of a lead over the
+        newest frame to never run out. A reply after wait_s with no frames means none came, as while
+        the session is paused; one sooner with none, that the session's frames were cleared or it
+        ended.
+        """
+        entries = self.traffic_entries(session_id, after_tick)
+        if entries or wait_s <= 0:
+            return entries
+        # Taken in the same turn of the event loop as the check above, so no frame can come between
+        signal = self.sessions[session_id].frame_signal
+        try:
+            await asyncio.wait_for(signal.wait(), wait_s)
+        except (TimeoutError, asyncio.TimeoutError):
+            pass
+        return self.traffic_entries(session_id, after_tick)
+
+    async def wait_for_traffic(self, session_id: str, after_tick: int, wait_s: float) -> list[str]:
+        """As wait_for_traffic_entries, the frames' JSON alone: what GET /traffic sends."""
+        return [frame for _, frame in await self.wait_for_traffic_entries(session_id, after_tick, wait_s)]
+
+    def snapshot_feed(self) -> SnapshotFeed:
+        """Wakes a live stream as each of a session's snapshots is committed (session_stream). Made on
+        first use, on the running event loop; close() ends it."""
+        if self._snapshot_feed is None:
+            self._snapshot_feed = SnapshotFeed(self.store, asyncio.get_running_loop())
+        return self._snapshot_feed
+
+    def _close_snapshot_feed(self) -> None:
+        """At close: the streams still open hear that no more snapshots will come."""
+        if self._snapshot_feed is not None:
+            self._snapshot_feed.close()
+
+
+class TrainingSessionService(SessionServiceBase):
+    """The session runtime: every live session's actor and its 20 Hz loop, in this process. The backend
+    uses it directly with F9_SESSION_WORKERS=0 (and tests do); otherwise each session worker process
+    hosts one (session_worker.WorkerRuntime) and the gateway forwards to it."""
+    # Of MAX_SESSIONS, sessions that drive the background traffic, when they all tick in this process.
+    # Every session ticks on one core (the GIL), and one with traffic costs several times one without:
+    # some 5 ms of each 50 ms tick on a desktop (about 2.8 ms without traffic), so six running at once
+    # take about two thirds of a core and keep up. A slow laptop took 14.5 ms, so there fewer keep up:
+    # past a core, MAX_TICK_BACKLOG_S lets the missed ticks go. Recovery restores whatever was admitted;
+    # only new sessions are refused. With session workers, each worker's measured load admits instead.
+    MAX_TRAFFIC_SESSIONS = 6
+    FAILURE_RETRY_S = 0.25
+
+    def __init__(self, store: TrainingStore, *, retention_keep_latest: int | None = None):
+        super().__init__(store, retention_keep_latest=retention_keep_latest)
+        self.sessions: dict[str, LiveSession] = {}
+        self._tasks: set[asyncio.Task] = set()
 
     async def _initialize(self) -> None:
         async with self._initialize_lock:
@@ -226,13 +527,7 @@ class TrainingSessionService:
             self._initialized = True
             for session in self.sessions.values():
                 self._start(session)
-            if self.retention_keep_latest is not None:
-                try:
-                    purged = await self._purge(self.retention_keep_latest)
-                    logger.info("Training retention deleted %d old sessions", purged["deleted_count"])
-                except (TrainingStoreError, sqlite3.Error):
-                    # History left behind is retried at the next start; it must not block training.
-                    logger.exception("Training retention failed")
+            await self._retain()
 
     def _restore(self) -> dict[str, LiveSession]:
         sessions = {}
@@ -257,7 +552,10 @@ class TrainingSessionService:
         if any(type(state[key]) is not int or state[key] < 0 for key in ("tick", "command_tick")):
             raise TrainingStoreError("CORRUPT_CHECKPOINT", "Actor clocks must be nonnegative integers")
         if state["version"] in (3, 4) and snapshot.spatial is None:
-            actor = IntegratedSessionActor(seed=state["seed"], session_id=snapshot.session_id)
+            if "assessment_plan" in state:
+                actor = ScoredSessionActor.from_checkpoint(snapshot.session_id, state)
+            else:
+                actor = IntegratedSessionActor(seed=state["seed"], session_id=snapshot.session_id)
             if state["version"] == 3:
                 state = {**state, "workflow": upgrade_v3_workflow(state["workflow"], state["tick"], actor.STEP_S,
                                                                   actor.incident_catalog.timeline)}
@@ -300,34 +598,37 @@ class TrainingSessionService:
             self._tasks.add(session.task)
             session.task.add_done_callback(self._tasks.discard)
 
-    async def create(self, request: CreateSessionRequest, actor_id: str, key: str) -> FullSnapshot:
-        await self.initialize()
-        return await self._complete(self._create(request, actor_id, key))
-
     async def _create(self, request: CreateSessionRequest, actor_id: str, key: str) -> FullSnapshot:
         async with self._creation_lock:
-            digest = hashlib.sha256(request.model_dump_json().encode()).hexdigest()
+            digest = self._creation_digest(request)
             prior = await asyncio.to_thread(self.store.creation, actor_id, key, digest)
             if prior is not None:
                 return prior
-            if request.scenario_revision_id not in {SCENARIO_REVISION, SPATIAL_SCENARIO_REVISION, SCENARIO_SELECTOR}:
-                raise TrainingStoreError("INVALID_REFERENCE", "Scenario revision is not available")
+            self._check_scenario(request)
             if self.closed or len(self.sessions) >= self.MAX_SESSIONS:
                 raise TrainingStoreError("QUEUE_FULL", "Training session capacity reached")
-            if (request.scenario_revision_id == SCENARIO_SELECTOR and IntegratedSessionActor.TRAFFIC
+            if (request.scenario_revision_id in {SCENARIO_SELECTOR, SCORED_SCENARIO} and IntegratedSessionActor.TRAFFIC
                     and self.traffic_sessions() >= self.MAX_TRAFFIC_SESSIONS):
                 raise TrainingStoreError("QUEUE_FULL", "Training capacity for sessions with traffic reached; "
                                                        "archive one to start another")
-            snapshot, actor = await asyncio.to_thread(self._create_initial, request, actor_id, key, digest)
-            session = LiveSession(actor, baseline=snapshot.model_copy(deep=True))
-            self.sessions[actor.session_id] = session
-            self._start(session)
-            return snapshot
+            return (await self._admit(request, actor_id, key, digest))[0]
+
+    async def _admit(self, request: CreateSessionRequest, actor_id: str, key: str,
+                     digest: str) -> tuple[FullSnapshot, LiveSession]:
+        """Creates the session in the store and starts its actor here, once admission allowed it."""
+        snapshot, actor = await asyncio.to_thread(self._create_initial, request, actor_id, key, digest)
+        session = LiveSession(actor, baseline=snapshot.model_copy(deep=True))
+        self.sessions[actor.session_id] = session
+        self._start(session)
+        return snapshot, session
 
     def _create_initial(self, request: CreateSessionRequest, actor_id: str, key: str,
                         digest: str) -> tuple[FullSnapshot, SessionActor]:
         session_id = readable_session_id(request.scenario_revision_id, self.store.next_session_number())
-        if request.scenario_revision_id == SCENARIO_SELECTOR:
+        if request.scenario_revision_id == SCORED_SCENARIO:
+            # The graded fixture pins its own seed so attempts share the same conditions.
+            actor = ScoredSessionActor(load_rubric(), session_id=session_id)
+        elif request.scenario_revision_id == SCENARIO_SELECTOR:
             actor = IntegratedSessionActor(seed=request.seed, session_id=session_id)
         elif request.scenario_revision_id == SPATIAL_SCENARIO_REVISION:
             actor = SpatialSessionActor(seed=request.seed, session_id=session_id)
@@ -336,65 +637,24 @@ class TrainingSessionService:
         actor.is_paused = True
         snapshot = actor.generate_snapshot()
         snapshot.session.status = "READY"
-        snapshot = self.store.create_session(snapshot, runtime_state=checkpoint(actor), creation=(actor_id, key, digest))
+        snapshot = self.store.create_session(snapshot, runtime_state=checkpoint(actor), creation=(actor_id, key, digest),
+                                             **actor.admission_options())
         return snapshot, actor
 
     def traffic_sessions(self) -> int:
         """How many live sessions drive the background traffic."""
-        return sum(isinstance(session.actor, IntegratedSessionActor) and session.actor.traffic is not None
-                   for session in self.sessions.values())
+        return sum(self._drives_traffic(session) for session in self.sessions.values())
 
-    def owns(self, session_id: str) -> bool:
-        return session_id in self.sessions
+    @staticmethod
+    def _drives_traffic(session: LiveSession) -> bool:
+        return isinstance(session.actor, IntegratedSessionActor) and session.actor.traffic is not None
 
-    async def delete(self, session_id: str) -> None:
-        await self.initialize()
-        await self._complete(self._delete(session_id))
+    def live_ticks(self) -> dict[str, int | None]:
+        return {session_id: None if self._unavailable(session) else session.actor.current_tick
+                for session_id, session in self.sessions.items()}
 
-    async def _delete(self, session_id: str) -> None:
-        if self.owns(session_id):
-            raise TrainingStoreError("INVALID_TRANSITION", "Archive the session before permanently deleting it")
-        await asyncio.to_thread(self.store.delete_session, session_id)
-
-    async def purge(self, keep_latest: int) -> dict:
-        await self.initialize()
-        return await self._complete(self._purge(keep_latest))
-
-    async def _purge(self, keep_latest: int) -> dict:
-        expired = await asyncio.to_thread(self.store.expired_session_ids, keep_latest)
-        deleted = 0
-        # One writer transaction per attempt, so running sessions' ticks interleave.
-        for session_id in expired:
-            if self.closed:
-                break
-            if not self.owns(session_id):
-                await asyncio.to_thread(self.store.delete_session, session_id)
-                deleted += 1
-        return {"deleted_count": deleted}
-
-    async def compact(self) -> dict:
-        await self.initialize()
-        return await self._complete(self._compact())
-
-    async def _compact(self) -> dict:
-        # Admission must not install a new actor while VACUUM owns the writer.
-        async with self._creation_lock:
-            if self.sessions:
-                raise TrainingStoreError("INVALID_TRANSITION", "Archive all sessions before reclaiming disk space")
-            return await asyncio.to_thread(self.store.compact)
-
-    def _check_available(self, session_id: str) -> None:
-        session = self.sessions.get(session_id)
-        if session is not None and not session.failure_committed and (
-                session.failed or session.task is None or session.task.done()):
-            raise TrainingStoreError("SESSION_RECOVERING", "Training runtime is unavailable")
-
-    async def snapshot(self, session_id: str) -> FullSnapshot:
-        await self.initialize()
-        self._check_available(session_id)
-        snapshot = await asyncio.to_thread(self.store.snapshot, session_id)
-        self._check_available(session_id)
-        return snapshot
+    def _unavailable(self, session: LiveSession) -> bool:
+        return not session.failure_committed and (session.failed or session.task is None or session.task.done())
 
     @staticmethod
     def _snapshot(actor: SessionActor, baseline: FullSnapshot, status: str) -> FullSnapshot:
@@ -430,14 +690,7 @@ class TrainingSessionService:
             session.progress.observe(self.store.trace, session.actor, committed=result)
             return result
 
-    @staticmethod
-    def _event(snapshot: FullSnapshot, event_type: str) -> Event:
-        return Event(
-            event_id=str(uuid4()), event_sequence=snapshot.event_sequence + 1, tick=snapshot.tick,
-            event_type=event_type, entity_type="SESSION", entity_id=snapshot.session_id,
-            entity_revision=snapshot.session.aggregate_revision, source=snapshot.source,
-            data={"status": snapshot.session.status},
-        )
+    _event = staticmethod(session_event)
 
     async def submit(self, actor_id: str, command: DispatcherCommand) -> CommandStatus:
         await self.initialize()
@@ -449,13 +702,19 @@ class TrainingSessionService:
                           failure_code=result.failure_code)
             return result
 
-    async def _submit(self, actor_id: str, command: DispatcherCommand) -> CommandStatus:
+    async def _submit(self, actor_id: str, command: DispatcherCommand, *,
+                      idle_before: str | None = None) -> CommandStatus | None:
         session = self.sessions.get(command.session_id)
         if session is None:
+            if idle_before is not None:
+                return None
             # Terminal runtimes release their slot, but their committed command
             # receipts remain available (including a retry of ARCHIVE).
             return await asyncio.to_thread(self.store.accept, actor_id, command)
         async with session.lock:
+            if idle_before is not None and not await asyncio.to_thread(
+                    self.store.assessment_is_inactive, command.session_id, idle_before):
+                return None
             unavailable = session.failed or session.task is None or session.task.done() or self.closed
             result, staged = await asyncio.to_thread(self._submit_staged, session.actor, actor_id, command, unavailable)
             if staged is not None:
@@ -468,7 +727,13 @@ class TrainingSessionService:
             if staged is not None and command.command_type == "ARCHIVE":
                 self.sessions.pop(command.session_id, None)
                 session.task.cancel()
+                self._session_removed(command.session_id)
             return result
+
+    async def _expire_assessment(self, actor_id: str, command: DispatcherCommand, cutoff: str) -> bool:
+        """Apply expiry only if no newer action changed the persisted activity timestamp."""
+        result = await self._submit(actor_id, command, idle_before=cutoff)
+        return result is not None and result.status == "APPLIED"
 
     def _submit_staged(self, actor: SessionActor, actor_id: str, command: DispatcherCommand,
                        unavailable: bool) -> tuple[CommandStatus, SessionActor | None]:
@@ -526,14 +791,20 @@ class TrainingSessionService:
             except Exception:
                 session.failed = True
                 session.progress.observe(self.store.trace, session.actor, running=False)
+                self._session_failed(session)
                 raise
             if staged is not None:
                 session.actor = staged
                 if frame is not None:
-                    session.add_frame(staged.current_tick, frame)
+                    self._frame_added(session, staged.current_tick, frame)
             session.baseline = baseline
             session.progress.observe(self.store.trace, session.actor, committed=baseline,
                                      sample_ns=sample_ns if staged is not None else None)
+            if baseline is not None and baseline.session.status == "COMPLETED":
+                # Release capacity and wake viewers as soon as the graded boundary is durable.
+                self.sessions.pop(session.actor.session_id, None)
+                session.wake_frame_waiters()
+                self._session_removed(session.actor.session_id)
 
     def _step_staged(self, actor: SessionActor, baseline: FullSnapshot | None, enqueued_ns: int | None = None
                      ) -> tuple[SessionActor | None, FullSnapshot | None, str | None]:
@@ -552,7 +823,7 @@ class TrainingSessionService:
         # publishes; it is taken once the tick is done, so it shows what the tick installs
         frame_due = (isinstance(staged, IntegratedSessionActor) and staged.current_tick != actor.current_tick
                      and staged.traffic_frame_due())
-        if staged.should_emit_snapshot():
+        if staged.publication_due():
             if baseline is None:
                 baseline = self.store.snapshot(actor.session_id)
             if baseline.session.status != "RUNNING":
@@ -598,38 +869,25 @@ class TrainingSessionService:
             raise TrainingStoreError("INVALID_REFERENCE", "No live signals for this training session")
         return {"session_id": session_id, **session.actor.signal_state()}
 
-    def traffic(self, session_id: str, after_tick: int) -> list[str]:
-        """The latest traffic frames of a live session after a tick, oldest first, as JSON: at most
-        TRAFFIC_REPLY_FRAMES, the newest.
+    def _current_frame(self, session: LiveSession, after_tick: int) -> tuple[int, str] | None:
+        if session.actor.current_tick <= after_tick:
+            return None
+        frame = self._frame_json(session.actor)
+        return None if frame is None else (session.actor.current_tick, frame)
 
-        A session that has published none since this process started (one paused, or just recovered)
-        gives its current frame, so a 3D view can draw where the traffic stands. Presentation only:
-        the frames are not durable, and a session without traffic, or not live here, has none.
-        """
-        session = self._traffic_session(session_id)
-        frames = [frame for tick, frame in session.frames if tick > after_tick][-TRAFFIC_REPLY_FRAMES:]
-        if not session.frames and session.actor.current_tick > after_tick:
-            frames.append(self._frame_json(session.actor))
-        return frames
+    # Where a worker process (session_worker.WorkerRuntime) tells the gateway what its sessions do; in
+    # one process there is nobody to tell.
+    def _frame_added(self, session: LiveSession, tick: int, frame: str) -> None:
+        session.add_frame(tick, frame)
 
-    async def wait_for_traffic(self, session_id: str, after_tick: int, wait_s: float) -> list[str]:
-        """As traffic, but with no frame after after_tick yet, waits up to wait_s for the next one.
+    def _session_failed(self, session: LiveSession) -> None:
+        pass
 
-        A 3D view asks again as soon as each reply comes, so it hears of every frame as it is made,
-        rather than up to a polling interval late: what it draws then needs less of a lead over the
-        newest frame to never run out. A reply after wait_s with no frames means none came, as while
-        the session is paused.
-        """
-        frames = self.traffic(session_id, after_tick)
-        if frames or wait_s <= 0:
-            return frames
-        # Taken in the same turn of the event loop as the check above, so no frame can come between
-        signal = self.sessions[session_id].frame_signal
-        try:
-            await asyncio.wait_for(signal.wait(), wait_s)
-        except (TimeoutError, asyncio.TimeoutError):
-            pass
-        return self.traffic(session_id, after_tick)
+    def _session_removed(self, session_id: str) -> None:
+        pass
+
+    def _tick_scheduled(self, session: LiveSession, lateness_ns: int, missed: int, running: bool) -> None:
+        pass
 
     async def _run(self, session: LiveSession) -> None:
         step_ns = round(SessionActor.STEP_S * 1e9)
@@ -652,17 +910,22 @@ class TrainingSessionService:
                         await self.step(session)
                 finally:
                     end = self.store.trace.clock()
+                    missed = max(0, (end-deadline) // step_ns)
                     self.store.trace.record("tick.schedule", start, start,
                                             session_id=session.actor.session_id, session_epoch=session.actor.session_epoch,
                                             tick=session.actor.current_tick, running=running, lateness_ms=lateness / 1e6,
                                             boundary_ms=(end-start)/1e6,
-                                            missed_deadlines=max(0, (end-deadline) // step_ns), **waiting)
+                                            missed_deadlines=missed, **waiting)
+                    self._tick_scheduled(session, lateness, missed, running)
+                if session.baseline is not None and session.baseline.session.status == "COMPLETED":
+                    return
                 deadline = next_deadline(deadline, self.store.trace.clock(), step_ns)
         except asyncio.CancelledError:
             raise
         except Exception:
             session.failed = True
             logger.exception("Training runtime failed for %s", session.actor.session_id)
+            self._session_failed(session)
         # Failed actors stop immediately. Until the terminal record is durable,
         # reads report SESSION_RECOVERING instead of advertising a frozen run.
         delay = self.FAILURE_RETRY_S
@@ -684,29 +947,23 @@ class TrainingSessionService:
             session.failure_committed = True
             session.progress.observe(self.store.trace, session.actor, running=False)
             self.sessions.pop(session.actor.session_id, None)
+            self._session_removed(session.actor.session_id)
 
     def _commit_failure(self, session_id: str, *, reason: str = "ACTOR_FAILED") -> None:
-        baseline = self.store.snapshot(session_id)
-        if baseline.session.status == "FAILED":
-            return
-        snapshot_id = baseline.snapshot_id
-        baseline.session.status = "FAILED"
-        baseline.session.aggregate_revision += 1
-        event = self._event(baseline, "SESSION_FAILED")
-        event.data["reason"] = reason
-        baseline.event_sequence += 1
-        self.store.commit_snapshot(baseline, (event,), expected_snapshot_id=snapshot_id)
+        commit_failure(self.store, session_id, reason=reason)
 
     async def close(self) -> None:
         self.closed = True
+        await self._close_assessment_maintenance()
         tasks = list(self._tasks)
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        while self._operations:
-            await asyncio.gather(*tuple(self._operations), return_exceptions=True)
+        await self._drain_operations()
         for session in self.sessions.values():
             session.progress.observe(self.store.trace, session.actor, running=False)
             # No more frames will come: a 3D view waiting for one hears so now
             session.wake_frame_waiters()
+        self._close_snapshot_feed()
 
+SessionRuntime = TrainingSessionService

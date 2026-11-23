@@ -4,7 +4,7 @@
  * Author: Choo Jian Wei
  * Contributors: Rishika (fleet cards, next stop and ETA), Lau Xiang Yang (session list and cleanup, exit)
  * Date Created: 30/10/2026
- * Last Modified: 10/11/2026
+ * Last Modified: 23/11/2026
  *
  * Description:
  *     Part of the Unity client's UI. Pure functions that turn login results, snapshots, session
@@ -114,18 +114,6 @@ namespace Formula9.UI
     }
 
     // -----------------------------------------------------------------------------------
-    // Class: ScenarioChoice
-    // -----------------------------------------------------------------------------------
-    // Description:
-    //     This struct is one scenario the trainee can create: its label, scenario revision ID and
-    //     description.
-    public readonly struct ScenarioChoice
-    {
-        public readonly string Label, Id, Description;
-        public ScenarioChoice(string label, string id, string description) { Label = label; Id = id; Description = description; }
-    }
-
-    // -----------------------------------------------------------------------------------
     // Class: SessionControls
     // -----------------------------------------------------------------------------------
     // Description:
@@ -156,23 +144,28 @@ namespace Formula9.UI
     public readonly struct SessionStatusView
     {
         public readonly string BadgeText, BadgeClass, Tooltip, Summary;
-        public readonly bool Offline;
-        public SessionStatusView(string badgeText, string badgeClass, string tooltip, string summary, bool offline)
-        { BadgeText = badgeText; BadgeClass = badgeClass; Tooltip = tooltip; Summary = summary; Offline = offline; }
+        // Behind: the backend runs the session slower than real time (BackendPace)
+        public readonly bool Offline, Behind;
+        public SessionStatusView(string badgeText, string badgeClass, string tooltip, string summary, bool offline,
+            bool behind = false)
+        { BadgeText = badgeText; BadgeClass = badgeClass; Tooltip = tooltip; Summary = summary; Offline = offline; Behind = behind; }
     }
 
     // Snapshot ticks change every poll; the operator's summary usually does not.
     public sealed class SessionStatusPresenter
     {
-        private (bool Joined, string Session, string State, bool Available)? statusKey;
+        private (bool Joined, string Session, string State, bool Available, double? Pace)? statusKey;
         private SessionStatusView status;
 
-        public SessionStatusView Present(FullSnapshot snapshot, bool available)
+        // pace: the session's real-time factor (BackendPace.Factor), or null while unknown
+        public SessionStatusView Present(FullSnapshot snapshot, bool available, double? pace = null)
         {
-            var key = (snapshot != null, snapshot?.SessionId, snapshot?.Session?.Status, snapshot != null && available);
+            // Only a pace shown changes the summary, to one decimal
+            var shown = pace < BackendPace.BehindBelow ? Math.Round(pace.Value, 1) : (double?)null;
+            var key = (snapshot != null, snapshot?.SessionId, snapshot?.Session?.Status, snapshot != null && available, shown);
             if (statusKey != key)
             {
-                status = TrainingPresenter.SessionStatus(snapshot, available);
+                status = TrainingPresenter.SessionStatus(snapshot, available, pace);
                 statusKey = key;
             }
             return status;
@@ -206,29 +199,51 @@ namespace Formula9.UI
     //     This class derives everything the training screen shows from the accepted snapshot. A
     //     port of the Qt TrainingWorkspace's refreshStatus, refreshViews and showCommandResult.
     //
-    //     Attributes: Scenarios lists what can be created; NoSession is shown when nothing is
+    //     Attributes: NoSession is shown when nothing is
     //     joined.
     public static class TrainingPresenter
     {
-        public static readonly IReadOnlyList<ScenarioChoice> Scenarios = new[]
-        {
-            new ScenarioChoice("Singapore, real streets (2D)", SessionController.IntegratedScenario, "Real streets and LTA bus stops, shuttles running from a bus interchange, with incidents, detours and charging."),
-        };
+        /// <summary>Identify scored sessions, including saved attempts viewed in Reports.</summary>
+        public static bool IsAssessment(FullSnapshot snapshot) =>
+            snapshot?.Scenario?.AssessmentDurationS != null ||
+            snapshot?.Session?.ScenarioRevisionId?.StartsWith("scored-toa-payoh-", StringComparison.Ordinal) == true;
 
-        // -----------------------------------------------------------------------------------
-        // Function: ScenarioTitle
-        // -----------------------------------------------------------------------------------
-        // Description:
-        //     This function names a scenario for the screen header.
-        //
-        // Args:
-        //     scenarioId (string): The scenario revision ID.
-        //
-        // Returns:
-        //     string: The title.
-        public static string ScenarioTitle(string scenarioId) => scenarioId == SessionController.IntegratedScenario
-            ? "Singapore, real streets · incidents, detours, charging"
-            : "3D fleet exercise · road, ramp and obstruction";
+        /// <summary>Keep assessment controls and highlighting limited to live scored attempts.</summary>
+        public static bool IsAssessmentActive(FullSnapshot snapshot) =>
+            IsAssessment(snapshot) && !IsTerminalSession(snapshot.Session?.Status);
+
+        /// <summary>Label interrupted attempts while preserving confirmed failures and earned points.</summary>
+        public static string AssessmentResult(SessionAssessment grade)
+        {
+            var text = grade.Status switch
+            {
+                "PASS" => "Pass",
+                "FAIL" => "Fail",
+                "INCOMPLETE" => "Incomplete",
+                "IN_PROGRESS" => "In progress",
+                _ => "Practice session",
+            };
+            if (grade.Disrupted)
+                text = grade.Status == "FAIL" ? "Assessment disrupted · Fail" : "Assessment disrupted";
+            return grade.Points.HasValue ? $"{text} · {grade.Points:0.##}/{grade.Maximum}" : text;
+        }
+
+        /// <summary>Show the server's remaining simulation time, including paused or offline readings.</summary>
+        public static (string Text, bool Urgent) AssessmentClock(FullSnapshot snapshot, bool available)
+        {
+            if (!IsAssessment(snapshot)) return (null, false);
+            var state = snapshot.Session?.Status;
+            if (state == "COMPLETED") return ("Time’s up · 0:00", false);
+            if (state != "RUNNING" && state != "PAUSED" && state != "RECOVERING") return (null, false);
+            if (!(snapshot.Scenario?.AssessmentDurationS is long limit))
+                return ("Timer unavailable", false);
+
+            var seconds = (long)Math.Ceiling(Math.Max(0, limit - snapshot.SimulationTimeS));
+            var remaining = FormattableString.Invariant($"{seconds / 60}:{seconds % 60:00} left");
+            if (!available || state == "RECOVERING") return ($"Last seen · {remaining}", false);
+            if (state == "PAUSED") return ($"Paused · {remaining}", false);
+            return (remaining, seconds <= 30);
+        }
 
         public const string NoSession = "Create or join a training session to begin.";
 
@@ -254,14 +269,25 @@ namespace Formula9.UI
             _ => ("Unknown", "session-badge-unknown"),
         };
 
-        public static SessionStatusView SessionStatus(FullSnapshot snapshot, bool available)
+        // pace is the session's real-time factor (BackendPace.Factor), or null while unknown. A
+        // running session below BackendPace.BehindBelow says so, as docs/performance.md section 5
+        // requires, rather than leaving its slow motion unexplained.
+        public static SessionStatusView SessionStatus(FullSnapshot snapshot, bool available, double? pace = null)
         {
             if (snapshot == null) return new SessionStatusView("No session", "session-badge-none", NoSession, NoSession, false);
             var known = SessionBadge(snapshot.Session?.Status);
             var offline = !available;
+            var behind = !offline && snapshot.Session?.Status == "RUNNING" && pace < BackendPace.BehindBelow;
+            var tooltip = (offline ? "Live updates unavailable. Last received simulation state: " : "Current simulation state: ") + known.Text.ToLowerInvariant() + ".";
+            var summary = $"Session: {snapshot.SessionId} · " + (offline ? "Offline · showing last received state" : "Connected");
+            if (behind)
+            {
+                var factor = pace.Value.ToString("0.0", CultureInfo.InvariantCulture);
+                summary += $" · Backend behind ({factor}x)";
+                tooltip += $" The backend is running this session at {factor}x real time, so the simulation and the 3D view move in slow motion. It has more running sessions than it can keep up with; archiving unused ones helps.";
+            }
             return new SessionStatusView(offline ? "Offline" : known.Text, offline ? "session-badge-offline" : known.Class,
-                (offline ? "Live updates unavailable. Last received simulation state: " : "Current simulation state: ") + known.Text.ToLowerInvariant() + ".",
-                $"Session: {snapshot.SessionId} · " + (offline ? "Offline · showing last received state" : "Connected"), offline);
+                tooltip, summary, offline, behind);
         }
 
         // -----------------------------------------------------------------------------------
@@ -276,9 +302,10 @@ namespace Formula9.UI
         //
         // Returns:
         //     string: The title.
-        public static string Title(FullSnapshot snapshot) => snapshot.Spatial != null
-            ? "3D fleet exercise · road, ramp and obstruction"
-            : "Singapore, real streets · incidents, detours, charging";
+        public static string Title(FullSnapshot snapshot) =>
+            IsAssessment(snapshot) ? "Toa Payoh · scored exercise" :
+            snapshot?.Spatial != null ? "3D fleet exercise · road, ramp and obstruction" :
+            "Singapore, real streets · incidents, detours, charging";
 
         // -----------------------------------------------------------------------------------
         // Function: Controls
@@ -320,14 +347,17 @@ namespace Formula9.UI
         //
         // Returns:
         //     bool: True when a detour must be approved first.
-        public static bool AssignedRouteIsClosed(FullSnapshot snapshot)
+        public static bool AssignedRouteIsClosed(FullSnapshot snapshot) => ClosedRouteVehicles(snapshot).Any();
+
+        // The shuttles whose own route crosses a road closed now, in snapshot order.
+        public static IEnumerable<string> ClosedRouteVehicles(FullSnapshot snapshot)
         {
             var closed = new HashSet<string>(snapshot.Disruptions
                 .Where(d => d.ActiveFromTick <= snapshot.Tick && (d.ActiveUntilTick == null || snapshot.Tick < d.ActiveUntilTick))
                 .SelectMany(d => d.AffectedEdgeIds));
             var routes = snapshot.Routes.ToDictionary(r => r.RouteId);
-            return snapshot.Vehicles.Any(v => v.RouteId != null && routes.TryGetValue(v.RouteId, out var route)
-                                              && route.DirectedEdgeIds.Any(closed.Contains));
+            return snapshot.Vehicles.Where(v => v.RouteId != null && routes.TryGetValue(v.RouteId, out var route)
+                                                && route.DirectedEdgeIds.Any(closed.Contains)).Select(v => v.VehicleId);
         }
 
         // -----------------------------------------------------------------------------------
@@ -522,12 +552,28 @@ namespace Formula9.UI
         }
 
         // -----------------------------------------------------------------------------------
+        // Function: IncidentName
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function names what an incident is, in capitals: "COLLISION", or the kind an
+        //     older backend's incident ID gives when it has no world event.
+        //
+        // Args:
+        //     incident (Incident): The incident.
+        //
+        // Returns:
+        //     string: The name.
+        public static string IncidentName(Incident incident) =>
+            World.IncidentRecord.Name(incident.EventType,
+                incident.IncidentId.Contains("road_accident") ? World.IncidentSimulation.Accident : World.IncidentSimulation.Block).ToUpperInvariant();
+
+        // -----------------------------------------------------------------------------------
         // Function: IncidentDescription
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function describes an incident: what and where it is, its state, which
-        //     shuttles will reach it and when, and what was decided. The Reports page shows it
-        //     as it is; the Incident Monitor adds what is asked of the operator.
+        //     shuttles will reach it and when, and what was decided. Reports → Incidents shows it;
+        //     it asks nothing of the operator, whose decisions are made on Route Planning.
         //
         // Args:
         //     incident (Incident): The incident.
@@ -536,35 +582,13 @@ namespace Formula9.UI
         //     string: The text.
         public static string IncidentDescription(Incident incident)
         {
-            var name = World.IncidentRecord.Name(incident.EventType,
-                incident.IncidentId.Contains("road_accident") ? World.IncidentSimulation.Accident : World.IncidentSimulation.Block).ToUpperInvariant();
+            var name = IncidentName(incident);
             var road = incident.Location?.RoadName != null ? $" on {incident.Location.RoadName}" : "";
             var reach = World.IncidentRecord.Reach(incident.Exposures, 5);
             var exposure = reach == null ? "No shuttle reaches it before it clears." : $"Shuttles reaching it: {reach}.";
             var owner = incident.VehicleId == null ? "It belongs to no shuttle. " : "";
             var decided = Responses(incident);
             return $"{name}{road} | {incident.State}\n{owner}{exposure}{(decided == null ? "" : $"\nDecided: {decided}.")}";
-        }
-
-        // -----------------------------------------------------------------------------------
-        // Function: IncidentSummary
-        // -----------------------------------------------------------------------------------
-        // Description:
-        //     This function describes the selected incident on the Incident Monitor, followed by
-        //     what is asked of the operator.
-        //
-        // Args:
-        //     incident (Incident): The incident.
-        //     hasOptions (bool): Whether it offers options to decide on.
-        //
-        // Returns:
-        //     string: The text.
-        public static string IncidentSummary(Incident incident, bool hasOptions)
-        {
-            var ask = hasOptions
-                ? "Decide for each shuttle that will reach it: keep its route, re-route it on the map, hold it at a stop before it, or request assistance (once, for every shuttle). Preview an option's consequences before approval; deciding before the shuttle gets there scores best."
-                : "No operator decision is required for this incident now. Shuttles that reach it meet its queue.";
-            return IncidentDescription(incident) + "\n" + ask;
         }
 
         // -----------------------------------------------------------------------------------
@@ -676,7 +700,10 @@ namespace Formula9.UI
         // Returns:
         //     bool: True when it may be deleted.
         public static bool CanDelete(SessionListEntry entry) =>
-            entry != null && !entry.OccupiesCapacity && (entry.Status == "ARCHIVED" || entry.Status == "COMPLETED" || entry.Status == "FAILED");
+            entry != null && !entry.OccupiesCapacity &&
+            (entry.CanDelete ?? !(entry.IsAssessment ||
+                entry.ScenarioRevisionId?.StartsWith("scored-toa-payoh-", StringComparison.Ordinal) == true)) &&
+            (entry.Status == "ARCHIVED" || entry.Status == "COMPLETED" || entry.Status == "FAILED");
 
         // -----------------------------------------------------------------------------------
         // Function: Reclaimed
@@ -731,8 +758,8 @@ namespace Formula9.UI
         // Function: PurgeCount
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function works out how many finished sessions a purge keeping the keep newest
-        //     would delete: every session that is not live, less those kept.
+        //     Use the backend's whole-database count of finished practice sessions. A missing
+        //     count waits for a list refresh before the client offers a purge.
         //
         // Args:
         //     list (SessionListResponse): The session list, for its counts.
@@ -740,7 +767,8 @@ namespace Formula9.UI
         //
         // Returns:
         //     long: How many would be deleted.
-        public static long PurgeCount(SessionListResponse list, int keep) => Math.Max(0, list.Total - list.LiveCount - keep);
+        public static long PurgeCount(SessionListResponse list, int keep) =>
+            Math.Max(0, (list.TerminalPracticeCount ?? 0) - keep);
 
         // -----------------------------------------------------------------------------------
         // Function: PurgeQuestion
@@ -758,12 +786,11 @@ namespace Formula9.UI
         public static string PurgeQuestion(SessionListResponse list, int keep)
         {
             var deleted = PurgeCount(list, keep);
-            var finished = list.Total - list.LiveCount;
-            if (deleted == 0)
-                return $"Nothing to delete: there {(finished == 1 ? "is" : "are")} {Count(finished, "finished session")}, " +
-                       $"and the {keep} newest are always kept.";
-            return $"Permanently delete the {Count(deleted, "oldest finished session")}? The {keep} newest finished sessions " +
-                   "and every live session are kept. Their history is removed for everyone. This cannot be undone.";
+            if (!list.TerminalPracticeCount.HasValue)
+                return "Refresh the session list to load the number of finished practice sessions.";
+            return deleted == 0 ? $"No old practice sessions to delete. The {keep} newest are kept." :
+                $"Permanently delete {Count(deleted, "old finished practice session")}? The {keep} newest finished practice sessions " +
+                "and all assessment records are kept. Their history is removed for everyone. This cannot be undone.";
         }
 
         // -----------------------------------------------------------------------------------
@@ -811,6 +838,8 @@ namespace Formula9.UI
                     if (outcome.TargetType == "CHARGER") return $"Charger {outcome.TargetId} reserved";
                     return $"Decision {outcome.CommandId} APPLIED for {outcome.TargetId} at tick {outcome.AppliedTick?.ToString() ?? "unknown"}.";
                 case "REJECTED":
+                    if (outcome.FailureCode == "ASSESSMENT_NOT_READY")
+                        return "The assessment's charging task is unavailable. Create a fresh assessment, then try again.";
                     if (outcome.TargetType == "SESSION" && outcome.FailureCode == "UNKNOWN_CONSTRAINT")
                         return "Can't start yet: a shuttle's route crosses a closed road. Approve a detour, then start again.";
                     if (outcome.CommandType == "SCHEDULE_CHARGE" || outcome.CommandType == "CANCEL_CHARGE_BOOKING")

@@ -75,6 +75,8 @@ namespace Formula9.World
         private readonly VisualElement busStopLegend, proposedLegend, notClearedLegend;
         private readonly Action<bool> showLegend;
         private readonly Label scale = new Label { pickingMode = PickingMode.Ignore };
+        // The compass, fit and zoom buttons in the bottom-right corner
+        private VisualElement controls;
         private readonly Label banner = new Label { pickingMode = PickingMode.Ignore };
         // Shuttles drive between snapshots along the road, as in the 3D view, instead of jumping to each one.
         private readonly ShuttleMotion motion = new ShuttleMotion();
@@ -105,6 +107,28 @@ namespace Formula9.World
         }
         public event Action<string> VehicleSelected;
 
+        // Lifts what sits on the map's bottom edge (the buttons, the scale bar and the credits) by
+        // this many points, so a panel laid over the bottom of the map does not hide them. 0 puts
+        // them back. A translate moves them without touching their own positions.
+        // While they are lifted, the legend (top-right, above the buttons) ends above them and
+        // scrolls instead, as the camera thumbnails do.
+        public void SetBottomInset(float points)
+        {
+            points = Mathf.Max(0, points);
+            var lift = new StyleTranslate(new Translate(0, -points));
+            controls.style.translate = lift;
+            scale.style.translate = lift;
+            credit.style.translate = lift;
+            var buttonsTop = points + ControlsBottom + controls.layout.height;
+            if (points > 0 && !float.IsNaN(buttonsTop) && layout.height > 0)
+                legend.style.maxHeight = Mathf.Max(LegendMinHeight, layout.height - LegendTop - buttonsTop - LegendGap);
+            else
+                legend.style.maxHeight = StyleKeyword.Null;
+        }
+
+        // As in .map-legend (top) and .map-controls (bottom); the legend keeps at least its title and a row
+        private const float LegendTop = 10, ControlsBottom = 8, LegendGap = 8, LegendMinHeight = 60;
+
         public FleetMap()
         {
             pickingMode = PickingMode.Position;
@@ -124,7 +148,12 @@ namespace Formula9.World
             banner.AddToClassList("map-banner"); banner.style.display = DisplayStyle.None; Add(banner);
             legend.AddToClassList("map-legend"); legend.style.display = DisplayStyle.None; Add(legend);
             // Click the title to fold the list away and see the map underneath.
-            var legendRows = new VisualElement { pickingMode = PickingMode.Ignore };
+            // It scrolls when the legend is held above the map's buttons (see SetBottomInset)
+            var legendRows = new ScrollView(ScrollViewMode.Vertical);
+            legendRows.AddToClassList("map-legend-rows");
+            // A wheel or touchpad scroll over the legend scrolls the legend only: stopped here, after
+            // the rows have used it, it never reaches the map's zoom below
+            legend.RegisterCallback<WheelEvent>(e => e.StopPropagation());
             var legendToggle = new Button { text = "Legend  -", tooltip = "Show or hide the legend" };
             showLegend = show =>
             {
@@ -149,7 +178,7 @@ namespace Formula9.World
             LegendRow(legendRows, "Shuttle's stop (its colour)", StopColor, "swatch-ring");
             LegendRow(legendRows, "Depot", DepotColor, "swatch-dot");
             busStopLegend = LegendRow(legendRows, "Other bus stop", BusStopColor, "swatch-dot");
-            var controls = new VisualElement { pickingMode = PickingMode.Ignore }; controls.AddToClassList("map-controls");
+            controls = new VisualElement { pickingMode = PickingMode.Ignore }; controls.AddToClassList("map-controls");
             var compass = new VisualElement { pickingMode = PickingMode.Ignore, tooltip = "The map is always north-up" }; compass.AddToClassList("map-compass");
             compass.Add(new Glyph(GlyphKind.Compass, RoadClosed, 14)); compass.Add(new Label("N") { pickingMode = PickingMode.Ignore }); controls.Add(compass);
             var fit = new Button(() => { pan = Vector2.zero; zoom = 1; Refresh(); }) { tooltip = "Fit the whole fleet" }; fit.AddToClassList("map-button");
@@ -633,7 +662,7 @@ namespace Formula9.World
                 foreach (var item in incidentMarkers)
                 {
                     var active = snapshot.Incidents.FirstOrDefault(i => i.IncidentId == item.Key);
-                    // A finished incident leaves the map; its record stays in the Incident Monitor
+                    // A finished incident leaves the map; its record stays in Reports → Incidents
                     if (active == null || IncidentEnded(active)) continue;
                     var at = Project(item.Value.Position.x, item.Value.Position.y);
                     var color = item.Value.Kind == "ROAD_ACCIDENT" ? ApprovedDetour : RoadClosed;

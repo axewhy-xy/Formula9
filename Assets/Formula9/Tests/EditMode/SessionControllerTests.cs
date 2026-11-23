@@ -36,7 +36,7 @@ namespace Formula9.Tests
     // -----------------------------------------------------------------------------------
     // Description:
     //     This class tests the session controller against a fake backend.
-    public class SessionControllerTests
+    public partial class SessionControllerTests
     {
         // -----------------------------------------------------------------------------------
         // Function: Fixture
@@ -287,6 +287,7 @@ namespace Formula9.Tests
 
         private FakeBackend backend;
         private AuthSession auth;
+        private TrainingApi api;
         private SessionController controller;
         private List<TimeSpan> waits;
         private List<string> errors;
@@ -311,7 +312,8 @@ namespace Formula9.Tests
             auth.Begin("trainee", "token-1", 3600);
             waits = new List<TimeSpan>();
             clock = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-            controller = new SessionController(new TrainingApi(backend, auth, new Uri("http://backend.test")), auth,
+            api = new TrainingApi(backend, auth, new Uri("http://backend.test"));
+            controller = new SessionController(api, auth,
                 delay: (wait, _) => { waits.Add(wait); return Task.CompletedTask; }, now: () => clock);
             errors = new List<string>();
             outcomes = new List<CommandOutcome>();

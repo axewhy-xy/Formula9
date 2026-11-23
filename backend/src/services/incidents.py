@@ -30,6 +30,7 @@ from contracts.v2.route_edit import RouteEditRequest
 from src.persistence.training_store import TrainingStore, TrainingStoreError
 from src.services.route_edit import RouteEditService, get_route_edit_service, scene_closed
 from src.services.incident_scenarios.simulated_catalog import SimulatedIncidentCatalog
+from src.services.incident_scenarios.world_events import NO_DETOUR_EVENTS
 
 
 FIXTURE_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "m2_incident.json"
@@ -59,7 +60,7 @@ DECIDABLE = {*ON_ITS_ROUTE, "DETOURING"}
 SETTLED = {"RESOLVED", "UNRESOLVED"}
 # How an alert names each world event type, and the type of a record from before world events
 EVENT_NAMES = {"BREAKDOWN": "a breakdown", "COLLISION": "a collision", "SIGNAL_FAULT": "a signal fault",
-               "ROAD_CLOSURE": "a road closure"}
+               "ROAD_CLOSURE": "a road closure", "PEDESTRIAN_ON_ROAD": "a pedestrian on the road"}
 LEGACY_TYPES = {"ROAD_ACCIDENT": "COLLISION", "ROAD_BLOCK": "ROAD_CLOSURE"}
 # The decision each state of an incident from before per-shuttle decisions stood for
 LEGACY_RESPONSES = {"WAITING": "KEEP_ROUTE", "ESCALATED": "ESCALATE", "EXECUTING": "ROAD_DETOUR"}
@@ -463,7 +464,7 @@ class IncidentService:
 
     def _road_preview(self, snapshot: FullSnapshot, vehicle_id: str):
         return self._route_service(snapshot, vehicle_id).continuation_preview(self._avoiding(snapshot, vehicle_id),
-                                                                              vehicle_id)
+                                                                              vehicle_id, live=snapshot)
 
     def _delays(self, snapshot: FullSnapshot, incident: Incident, vehicle_id: str) -> dict:
         """About how long each option but a detour holds one shuttle up from now, from what the actor last
@@ -508,9 +509,9 @@ class IncidentService:
         delays = self._delays(snapshot, incident, vehicle_id)
         allowed = [("KEEP_ROUTE" if action == "WAIT" else action) for action in self.config["reference_acceptable_actions"]]
         auxiliary_kw = self.routes._fixture["auxiliary_kw"]
-        # A signal fault holds up every approach to its junction, which the planner does not know of: a shuttle
-        # keeps its route, holds or gets assistance
-        detours = capable and "ROAD_DETOUR" in allowed and self._event_type() != "SIGNAL_FAULT"
+        # A signal fault holds up every approach to its junction, which the planner does not know of, and a
+        # pedestrian on the road is gone in moments: a shuttle keeps its route, holds or gets assistance
+        detours = capable and "ROAD_DETOUR" in allowed and self._event_type() not in NO_DETOUR_EVENTS
         road = self._road_preview(snapshot, vehicle_id) if detours else None
         baseline = road.original.model_dump(mode="json") if road is not None and road.original else None
         offered = []
@@ -1009,6 +1010,8 @@ class IncidentService:
         return result, {
             "command_id": command.command_id, "candidate_id": candidate_id, "action": action,
             "vehicle_id": vehicle_id, "reason": command.reason, "transitions": transitions,
+            "applied_route_id": shuttle.route_id if action == "ROAD_DETOUR" else None,
+            "directed_edge_ids": refreshed.directed_edge_ids if action == "ROAD_DETOUR" else [],
             "hold_stop_id": stop.get("stop_id"),
             "response_time_s": response_s, "before_arrival": before_arrival,
             "timing_basis": "SERVER_SIMULATION_CLOCK_EXCLUDES_PAUSES",

@@ -395,6 +395,42 @@ namespace Formula9.Backend
             this.session = session ?? throw new ArgumentNullException(nameof(session));
 
         // -----------------------------------------------------------------------------------
+        // Property: ParseInBackground
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     When true, the replies a joined session polls for (its snapshot, events and traffic
+        //     frames) are parsed and checked against the contract on a worker thread, so a large
+        //     snapshot never stalls a frame. The awaiting caller still resumes on its own context:
+        //     in the app, the main thread, which alone touches Unity objects. The app turns this
+        //     on; it is off by default because the caller must then never block its own thread on
+        //     these tasks (the resumption is queued to that thread, so blocking deadlocks), and
+        //     tests over fake transports rely on replies completing at once.
+        public bool ParseInBackground { get; set; }
+
+        // -----------------------------------------------------------------------------------
+        // Function: ParseAsync
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function runs a reply's parsing on a worker thread, or at once when
+        //     ParseInBackground is false. Parsing must only read shared state: the contract
+        //     parser's schemas are loaded once and never changed.
+        //
+        // Args:
+        //     parse (Func<T>): Parses and checks the reply.
+        //
+        // Returns:
+        //     Task<T>: The parsed reply, or the parser's exception.
+        private Task<T> ParseAsync<T>(Func<T> parse)
+        {
+            if (!ParseInBackground)
+            {
+                try { return Task.FromResult(parse()); }
+                catch (Exception error) { return Task.FromException<T>(error); }
+            }
+            return Task.Run(parse);
+        }
+
+        // -----------------------------------------------------------------------------------
         // Function: ListSessionsAsync
         // -----------------------------------------------------------------------------------
         // Description:
@@ -515,7 +551,8 @@ namespace Formula9.Backend
         //     ContractException: If the snapshot is for a different session.
         public async Task<FullSnapshot> GetSnapshotAsync(string sessionId, CancellationToken cancellation = default)
         {
-            var snapshot = Expect<FullSnapshot>(await SendTrainingAsync("GET", $"/{Segment(sessionId)}/snapshot", null, cancellation));
+            var reply = await SendTrainingAsync("GET", $"/{Segment(sessionId)}/snapshot", null, cancellation);
+            var snapshot = await ParseAsync(() => Expect<FullSnapshot>(reply));
             if (snapshot.SessionId != sessionId) throw new ContractException("Snapshot is for a different session");
             return snapshot;
         }
@@ -541,7 +578,8 @@ namespace Formula9.Backend
         public async Task<EventReplay> GetEventsAsync(string sessionId, long after, int limit = 100, CancellationToken cancellation = default)
         {
             if (after < 0 || limit < 1) throw new ArgumentOutOfRangeException(nameof(after));
-            var replay = Expect<EventReplay>(await SendTrainingAsync("GET", $"/{Segment(sessionId)}/events?after={after}&limit={limit}", null, cancellation));
+            var reply = await SendTrainingAsync("GET", $"/{Segment(sessionId)}/events?after={after}&limit={limit}", null, cancellation);
+            var replay = await ParseAsync(() => Expect<EventReplay>(reply));
             if (replay.SessionId != sessionId || replay.AfterSequence != after) throw new ContractException("Event replay does not match the request");
             return replay;
         }

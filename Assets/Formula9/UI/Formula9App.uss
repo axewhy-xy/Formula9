@@ -297,38 +297,15 @@
     padding: 12px 16px;
 }
 
-.top-bar {
-    flex-direction: row;
-    align-items: center;
-    flex-shrink: 0;
-    margin-bottom: 10px;
-    padding: 8px 16px 8px 10px;
-    border-width: 1px;
-    border-radius: 12px;
-    border-color: rgb(220, 230, 230);
-    background-color: rgb(255, 255, 255);
-}
-
-.app Button.section-item {
-    height: 40px;
-    padding: 0 18px;
-    color: rgb(51, 71, 75);
-    background-color: rgba(0, 0, 0, 0);
-    border-width: 0;
-    border-radius: 10px;
-}
-
-.app Button.section-item:hover { background-color: rgb(238, 244, 244); }
-
-.app Button.section-item-selected, .app Button.section-item-selected:hover {
-    color: rgb(15, 76, 92);
-    -unity-font-style: bold;
-    background-color: rgb(220, 239, 239);
-    border-bottom-width: 3px;
-    border-color: rgb(31, 122, 122);
-}
-
-.user { margin: 0 18px 0 6px; font-size: 14px; }
+/* Sidebar footer: the signed-in user and the time, then Log out and Exit styled as nav items.
+   Collapsed, only the icons stay, like the nav items above. */
+.nav-footer { flex-shrink: 0; padding-top: 10px; border-top-width: 1px; border-color: rgba(255, 255, 255, 0.18); }
+.nav-user { flex-direction: row; align-items: center; height: 44px; padding-left: 13px; margin-bottom: 6px; }
+.nav-user-text { margin-left: 0; min-width: 0; overflow: hidden; }
+.nav-user-name { font-size: 14px; -unity-font-style: bold; color: rgb(255, 255, 255); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0; margin: 0; }
+.nav-clock { font-size: 11px; color: rgb(185, 216, 218); white-space: nowrap; padding: 0; margin: 0; }
+.nav-panel.collapsed .nav-user { padding-left: 13px; }
+.nav-panel.collapsed .nav-user-text { display: none; }
 
 .content-card {
     flex-grow: 1;
@@ -351,7 +328,6 @@
     margin-bottom: 8px;
 }
 
-.scenario { min-width: 240px; margin-right: 8px; }
 .session-id { flex-grow: 1; flex-basis: 200px; min-width: 200px; margin-right: 8px; }
 .sessions { flex-grow: 1; flex-basis: 300px; margin-right: 8px; }
 .muted { color: rgb(74, 93, 97); white-space: normal; }
@@ -376,18 +352,32 @@
 .session-badge-running, .session-badge-completed { color: rgb(22, 101, 52); background-color: rgb(220, 245, 228); }
 .session-badge-paused, .session-badge-recovering { color: rgb(117, 76, 12); background-color: rgb(255, 242, 209); }
 .session-badge-offline, .session-badge-failed { color: rgb(151, 57, 57); background-color: rgb(252, 232, 232); }
+.assessment-active .session-header { border-bottom-color: rgb(112, 96, 175); }
+.assessment-mode-badge, .assessment-timer {
+    flex-shrink: 0;
+    padding: 4px 10px;
+    margin: 4px 8px 4px 0;
+    border-radius: 12px;
+    -unity-font-style: bold;
+    color: rgb(59, 37, 121);
+    background-color: rgb(237, 232, 252);
+}
+.assessment-mode-badge { font-size: 12px; }
+.assessment-timer { margin-left: 8px; font-size: 15px; }
+.assessment-timer-urgent { color: rgb(151, 42, 42); background-color: rgb(252, 225, 225); }
 .session-utilities, .session-playback { flex-direction: row; align-items: center; flex-shrink: 0; margin: 4px 0; }
 .session-utilities { padding-right: 16px; }
 .session-playback { margin-left: auto; padding-left: 16px; border-left-width: 1px; border-left-color: rgb(211, 222, 222); }
 .session-create-group, .session-join-group { flex-direction: row; flex-wrap: wrap; align-items: center; flex-grow: 1; flex-basis: 440px; margin: 4px 0; }
 .session-create-group { margin-right: 16px; }
-.session-create-group .scenario { flex-grow: 1; flex-shrink: 1; min-width: 200px; }
 .session-maintenance { flex-shrink: 0; margin-bottom: 8px; color: rgb(74, 93, 97); }
 .session-maintenance .row { margin-top: 8px; }
 
 .app Button.session-button { border-width: 1px; }
 .app Button.session-primary { color: rgb(255, 255, 255); background-color: rgb(26, 106, 106); border-color: rgb(26, 106, 106); -unity-font-style: bold; }
 .app Button.session-primary:hover { background-color: rgb(19, 85, 85); border-color: rgb(19, 85, 85); }
+.app Button.assessment-mode-button { color: rgb(255, 255, 255); background-color: rgb(74, 52, 145); border-color: rgb(74, 52, 145); -unity-font-style: bold; }
+.app Button.assessment-mode-button:hover { background-color: rgb(59, 37, 121); border-color: rgb(59, 37, 121); }
 .app Button.session-secondary { color: rgb(26, 106, 106); background-color: rgb(255, 255, 255); border-color: rgb(26, 106, 106); -unity-font-style: bold; }
 .app Button.session-secondary:hover { background-color: rgb(229, 243, 242); }
 .app Button.session-pause { color: rgb(88, 57, 10); background-color: rgb(250, 205, 111); border-color: rgb(210, 160, 60); -unity-font-style: bold; }
@@ -410,9 +400,11 @@
 .session-status-bar { flex-direction: row; flex-wrap: wrap; align-items: center; flex-shrink: 0; margin-bottom: 8px; }
 .session-summary { flex-grow: 1; flex-shrink: 1; flex-basis: 240px; margin: 0 12px 0 0; color: rgb(74, 93, 97); }
 .session-summary-offline { color: rgb(151, 57, 57); -unity-font-style: bold; }
+.session-summary-behind { color: rgb(150, 98, 18); -unity-font-style: bold; }
 .session-compact .session-header { padding-bottom: 0; margin-bottom: 8px; border-bottom-width: 0; }
 .session-compact .session-heading, .session-compact .session-utilities, .session-compact .session-playback,
-.session-compact .session-title, .session-compact .session-badge { margin-top: 0; margin-bottom: 0; }
+.session-compact .session-title, .session-compact .session-badge,
+.session-compact .assessment-mode-badge, .session-compact .assessment-timer { margin-top: 0; margin-bottom: 0; }
 .session-compact .session-status-bar { display: none; }
 
 .view-bar {
@@ -438,19 +430,13 @@
 /* 3D loading/failure notice; empty otherwise, it still pushes the Fleet List toggle to the right. */
 .world-notice { flex-grow: 1; flex-shrink: 1; min-width: 0; margin: 0 8px; white-space: normal; font-size: 12px; color: rgb(74, 93, 97); }
 
-.app Button.segment-round {
-    height: 40px;
-    margin: 0;
-    color: rgb(15, 76, 92);
-    background-color: rgb(232, 243, 243);
-    border-color: rgb(31, 122, 122);
-    border-radius: 20px;
-}
-
+/* Map and page side by side (Route Planning); on the Fleet page the list floats over the map (body-stacked). */
 .body { flex-grow: 1; flex-direction: row; min-height: 0; }
+.body.body-stacked { flex-direction: column; }
 
 .world {
     flex-grow: 3;
+    flex-shrink:1;
     flex-basis: 0;
     margin-right: 8px;
     border-radius: 8px;
@@ -464,15 +450,71 @@
 .fleet-panel {
     flex-grow: 2;
     flex-basis: 0;
+    min-width: 340px;
+    min-height: 0;
     padding: 12px;
     border-width: 1px;
     border-radius: 8px;
     border-color: rgb(220, 230, 230);
-    background-color: rgb(255, 255, 255);
-    min-width: 340px;
-    min-height: 0;
+    background-color: rgba(255, 255, 255, 0.95);
 }
 
+/* Fleet page: the Fleet List is a sheet over the bottom of the map. Collapsed, it is just its bar,
+   which sits in the space the map leaves below itself, so it hides nothing. Expanded, it rises over
+   the map, and the map's bottom controls move up above it. TrainingWorkspace.FitMapToFleetList
+   sets the map's bottom margin from the bar's measured height; 70px is only the starting value. */
+.body-stacked .world { margin-right: 0; margin-bottom: 70px; }
+.body-stacked .fleet-panel {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 45%;
+    min-height: 220px;
+    max-height: 100%;
+    min-width: 0;
+    border-color: rgb(200, 214, 214);
+    background-color: rgb(255, 255, 255);
+}
+.body-stacked .fleet-panel.fleet-panel-collapsed { height: auto; min-height: 0; }
+
+.fleet-table-header {
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+    margin-bottom: 4px;
+    padding: 6px 15px; /* matches a card's 14px side padding + 1px border so the columns line up */
+    border-radius: 6px;
+    background-color: rgb(15, 76, 92);
+}
+
+.fleet-th {
+    color: rgb(255, 255, 255);
+    -unity-font-style: bold;
+    font-size: 12px;
+}
+
+/* The icon column of a card is 28px wide plus 12px margin. */
+.fleet-th-icon { width: 40px; flex-shrink: 0; }
+
+/* Column widths shared by the header and every row. The route and ETA columns share what is
+   left; the incident column gives way first when the window is narrow. */
+.fleet-col { min-width: 0; }
+.fleet-col-id { width: 95px; flex-shrink: 0; }
+.fleet-col-status { width: 120px; flex-shrink: 0; flex-direction: row; align-items: center; }
+.fleet-col-battery { width: 90px; flex-shrink: 0; flex-direction: row; align-items: center; }
+.fleet-col-route, .fleet-col-eta { flex-grow: 1; flex-basis: 0; min-width: 100px; padding-left: 8px; padding-right: 8px; }
+.fleet-col-incident { flex-grow: 0; flex-shrink: 1; flex-basis: 180px; min-width: 60px; padding-left: 8px; }
+
+/* The Fleet page is collapsed: the panel shrinks to its header row so the map gets the room back.
+   The list is hidden rather than clipped, so the panel sizes to the header by itself. */
+.fleet-panel.fleet-panel-collapsed {
+    flex-grow: 0;
+    flex-shrink: 0;
+    flex-basis: auto;
+}
+/* page hosts normally take 0 height and grow; collapsed, the Fleet page's host must size to its header */
+.fleet-panel.fleet-panel-collapsed > .page-host { flex-grow: 0; flex-basis: auto; }
 .workspace-page { flex-grow: 1; min-height: 0; }
 .reports-help { white-space: normal; color: rgb(92, 107, 112); margin-bottom: 12px; }
 .reports-filters { flex-direction: row; flex-wrap: wrap; align-items: flex-end; margin-bottom: 8px; }
@@ -516,8 +558,10 @@
 .data-table .row { flex-wrap: nowrap; align-items: stretch; margin-bottom: 0; }
 
 .panel-title { font-size: 17px; -unity-font-style: bold; margin-bottom: 8px; flex-shrink: 0; }
-.fleet-search { flex-shrink: 0; margin: 0 0 8px 0; }
-.fleet { flex-grow: 1; min-height: 240px; }
+/* The search box gives way first when the header is narrow, down to 100px */
+.fleet-search { flex-grow: 0; flex-shrink: 1; flex-basis: 200px; min-width: 100px; margin: 0 8px 0 0; }
+.fleet-no-match { padding: 16px 4px; color: rgb(92, 107, 112); }
+.fleet { flex-grow: 1;flex-basis:0; min-height: 0; }
 
 .map-controls { position: absolute; right: 8px; bottom: 8px; width: 38px; }
 
@@ -562,6 +606,9 @@
     border-width: 0;
     background-color: rgba(0, 0, 0, 0);
 }
+.app Button.map-legend-title { flex-shrink: 0; }
+/* The rows shrink to the legend's height and scroll when FleetMap.SetBottomInset caps it */
+.map-legend-rows { flex-shrink: 1; min-height: 0; }
 .map-legend-row { flex-direction: row; align-items: center; margin-bottom: 3px; }
 .map-legend-key { width: 26px; align-items: center; justify-content: center; }
 .map-legend-row Label { font-size: 12px; color: rgb(30, 42, 46); }
@@ -597,8 +644,9 @@
 
 .fleet-card {
     flex-direction: row;
+    align-items: center;
     flex-shrink: 0;
-    padding: 8px 10px;
+    padding: 10px 14px;
     margin-bottom: 6px;
     border-width: 1px;
     border-radius: 6px;
@@ -616,21 +664,10 @@
 }
 
 .bus-icon {
-    width: 36px;
-    height: 36px;
-    margin-right: 10px;
+    width: 28px;
+    height: 28px;
+    margin-right: 12px;
     flex-shrink: 0;
-}
-
-.fleet-card-text {
-    flex-grow: 1;
-    flex-basis: 0;
-    min-width: 0;
-}
-
-.fleet-card-top {
-    flex-direction: row;
-    align-items: center;
 }
 
 .fleet-card-id {
@@ -652,11 +689,6 @@
     height: 100%;
 }
 
-.fleet-card-status {
-    flex-direction: row;
-    align-items: center;
-}
-
 .status-dot {
     width: 8px;
     height: 8px;
@@ -666,7 +698,9 @@
 
 .fleet-card-line {
     font-size: 12px;
-    white-space: normal;
+    white-space: nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
     color: rgb(96, 106, 116);
 }
 
@@ -676,7 +710,65 @@
     white-space: normal;
 }
 
-/* Full-width pages: Route Planning, Incident Monitor, Charging, Reports, Scenarios */
+/* Fleet Panel Toggle Button */
+.app Button.fleet-toggle-btn {
+    width: 28px;
+    height: 28px;
+    margin: 0;
+    padding: 0;
+    background-color: rgba(0, 0, 0, 0);
+    border-width: 0;
+    border-radius: 4px;
+    align-items: center;
+    justify-content: center;
+}
+
+.app Button.fleet-toggle-btn:hover {
+    background-color: rgb(228, 238, 238);
+}
+
+/* "‹" turned to point down (expanded: click to lower the list) or up (collapsed: click to raise it),
+   the same text chevron the sidebar toggle uses */
+.fleet-toggle-icon {
+    font-size: 20px;
+    color: rgb(15, 76, 92);
+    -unity-text-align: middle-center;
+    padding: 0;
+    margin: 0;
+    rotate: -90deg;
+    transition: rotate 0.2s ease;
+}
+
+/* Title on the left, search and buttons on the right. On a narrow window the search box shrinks,
+   then the tools wrap onto a second line; the map's margin follows the bar's measured height. */
+.fleet-panel-header { justify-content: space-between; align-items: center; flex-wrap: wrap; min-height: 36px; margin-bottom: 8px; }
+.fleet-header-title { flex-direction: row; align-items: center; flex-shrink: 0; margin-right: 12px; }
+.fleet-header-tools { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-end; flex-grow: 1; flex-shrink: 1; min-width: 0; }
+.fleet-header-tools Button { flex-shrink: 0; height: 30px; font-size: 11px; margin: 2px 4px 2px 0; }
+
+/* Fleet Overview Container Scoped Collapse (Only affects the Fleet page) */
+.workspace-page.fleet-overview-container {
+    flex-grow: 1;
+    flex-basis: 0;
+    min-height: 0;
+}
+
+.workspace-page.fleet-overview-container.collapsed {
+    flex-grow: 0;
+    flex-shrink: 0;
+    flex-basis: auto;
+}
+
+.workspace-page.fleet-overview-container.collapsed .fleet-panel-header { margin-bottom: 0; }
+
+.workspace-page.fleet-overview-container.collapsed .fleet-toggle-icon {
+    rotate: 90deg;
+}
+
+.fleet-body { flex-grow: 1; flex-basis: 0; min-height: 0; }
+.workspace-page.fleet-overview-container.collapsed .fleet-body { display: none; }
+
+/* Full-width pages: Route Planning, Charging, Reports, Scenarios */
 .page-title { font-size: 22px; -unity-font-style: bold; margin-bottom: 10px; flex-shrink: 0; }
 .tabs { flex-direction: row; flex-shrink: 0; margin-bottom: 10px; }
 
@@ -741,6 +833,94 @@
 .route-stage-done { color: rgb(15, 76, 92); background-color: rgb(209, 232, 226); }
 .route-stage-current { color: rgb(255, 255, 255); -unity-font-style: bold; background-color: rgb(15, 76, 92); }
 
+/* Every shuttle waiting for a decision, soonest first; a click opens that shuttle. */
+.route-pending { flex-shrink: 0; flex-direction: row; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.route-pending-title { -unity-font-style: bold; margin-right: 8px; color: rgb(190, 42, 44); }
+.route-pending-items { flex-direction: row; flex-wrap: wrap; }
+.app Button.route-pending-item {
+    height: 26px;
+    margin: 0 6px 4px 0;
+    padding: 0 10px;
+    font-size: 12px;
+    border-radius: 13px;
+    border-color: rgb(214, 48, 49);
+    background-color: rgb(253, 236, 236);
+}
+.app Button.route-pending-item-selected { color: rgb(255, 255, 255); background-color: rgb(190, 42, 44); }
+
+/* Incident notifications: a stack over the map's top-right corner; right is set from code. */
+.notifications { position: absolute; top: 10px; right: 10px; width: 320px; max-width: 60%; }
+.notifications-list { flex-direction: column; }
+.notification {
+    flex-shrink: 0;
+    margin-bottom: 8px;
+    padding: 10px 12px 8px 12px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-left-width: 5px;
+    border-color: rgb(232, 196, 196);
+    border-left-color: rgb(214, 48, 49);
+    background-color: rgba(255, 255, 255, 0.97);
+}
+.notification-options { border-left-color: rgb(31, 122, 122); }
+.notification-tag { font-size: 11px; -unity-font-style: bold; color: rgb(190, 42, 44); margin: 0 0 2px 0; padding: 0; }
+.notification-options .notification-tag { color: rgb(15, 76, 92); }
+.notification-title { font-size: 14px; -unity-font-style: bold; white-space: normal; color: rgb(30, 42, 46); margin: 0; padding: 0; }
+.notification-body { font-size: 12px; white-space: normal; color: rgb(52, 70, 74); margin: 2px 0 0 0; padding: 0; }
+.notification-actions { flex-direction: row; justify-content: flex-end; align-items: center; margin-top: 6px; }
+.app Button.notification-decide {
+    height: 28px;
+    margin: 0 6px 0 0;
+    padding: 0 12px;
+    font-size: 12px;
+    -unity-font-style: bold;
+    color: rgb(255, 255, 255);
+    border-width: 0;
+    border-radius: 14px;
+    background-color: rgb(190, 42, 44);
+}
+.app Button.notification-decide:hover { background-color: rgb(160, 32, 34); }
+.app Button.notification-close {
+    width: 28px;
+    height: 28px;
+    margin: 0;
+    padding: 0;
+    font-size: 16px;
+    color: rgb(74, 93, 97);
+    border-width: 0;
+    border-radius: 14px;
+    background-color: rgba(0, 0, 0, 0);
+}
+.app Button.notification-close:hover { background-color: rgb(236, 240, 240); }
+.app Button.notification-more {
+    align-self: flex-end;
+    height: 26px;
+    margin: 0;
+    padding: 0 12px;
+    font-size: 12px;
+    border-radius: 13px;
+    border-color: rgb(214, 48, 49);
+    background-color: rgb(253, 236, 236);
+}
+
+/* How many shuttles need a decision, on the Route Planning nav item; it stays when the panel collapses. */
+.nav-item .nav-badge {
+    position: absolute;
+    right: 8px;
+    top: 12px;
+    min-width: 20px;
+    height: 20px;
+    margin: 0;
+    padding: 0 6px;
+    border-radius: 10px;
+    font-size: 11px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-center;
+    color: rgb(255, 255, 255);
+    background-color: rgb(214, 48, 49);
+}
+.nav-panel.collapsed .nav-item .nav-badge { display: flex; opacity: 1; right: 2px; top: 2px; min-width: 16px; height: 16px; padding: 0 4px; font-size: 10px; }
+
 .route-card {
     flex-shrink: 0;
     margin-bottom: 10px;
@@ -757,6 +937,24 @@
 .route-verdict-good { color: rgb(24, 122, 76); }
 .route-verdict-bad { color: rgb(190, 42, 44); }
 .app Button.route-link { align-self: flex-start; height: 26px; margin: 0; padding: 0 10px; font-size: 12px; }
+/* Show on map, and how long the shuttle's options stand, at the far end. */
+.route-problem-actions { flex-direction: row; align-items: center; min-height: 26px; }
+.route-options-expiry { flex-grow: 1; -unity-text-align: middle-right; font-size: 12px; color: rgb(110, 120, 120); }
+
+/* One button per option the backend offers the shuttle; one it does not offer is greyed out, with why as its tooltip. */
+.route-card-options { border-left-width: 4px; border-left-color: rgb(15, 76, 92); }
+.route-option-buttons { flex-direction: row; flex-wrap: wrap; flex-shrink: 0; margin-bottom: 4px; }
+.app Button.route-option { height: 32px; margin: 0 6px 6px 0; padding: 0 12px; }
+.app Button.route-option.segment-selected, .app Button.route-option.segment-selected:hover {
+    color: rgb(255, 255, 255);
+    background-color: rgb(15, 76, 92);
+    border-color: rgb(15, 76, 92);
+}
+.route-options-hint { font-size: 12px; color: rgb(110, 120, 120); }
+.route-confirm { flex-shrink: 0; margin-top: 4px; padding-top: 8px; border-top-width: 1px; border-top-color: rgb(220, 230, 230); }
+.route-confirm-note { margin-top: 4px; color: rgb(110, 120, 120); }
+.route-confirm-refused { color: rgb(190, 42, 44); }
+.route-decide-head { flex-direction: row; align-items: center; justify-content: space-between; }
 
 .route-waypoints { flex-shrink: 0; margin-bottom: 6px; }
 .route-waypoint { flex-direction: row; align-items: center; margin-bottom: 4px; }
@@ -821,7 +1019,8 @@
     color: rgb(255, 255, 255);
     background-color: rgba(15, 30, 38, 0.85);
 }
-/* Shuttle cameras: they cover the whole 3D view, one camera large with the rest as thumbnails below. */
+/* Shuttle cameras: they cover the whole 3D view, one camera large with the rest as thumbnails in a
+   foldable rail over its top-left corner (kept high so the Fleet List sheet does not cover it). */
 .camera-panel {
     position: absolute;
     left: 0;
@@ -835,17 +1034,39 @@
     flex-grow: 1;
     -unity-background-scale-mode: scale-and-crop;
 }
-.camera-strip {
-    flex-direction: row;
-    flex-shrink: 0;
-    justify-content: center;
-    padding: 6px;
-    background-color: rgba(15, 30, 38, 0.9);
+/* Top-left, under the large camera's name label: incident notifications use the top-right corner */
+.camera-rail {
+    position: absolute;
+    top: 44px;
+    left: 10px;
+    bottom: 10px; /* WorldView.SetBottomInset raises it above the expanded Fleet List */
+    align-items: flex-start;
 }
+.app Button.camera-rail-toggle {
+    height: 28px;
+    margin: 0 0 6px 0;
+    padding: 0 10px;
+    font-size: 12px;
+    -unity-font-style: bold;
+    color: rgb(255, 255, 255);
+    border-width: 0;
+    border-radius: 6px;
+    background-color: rgba(15, 30, 38, 0.85);
+}
+.app Button.camera-rail-toggle:hover { background-color: rgba(15, 76, 92, 0.95); }
+.camera-strip {
+    flex-direction: column;
+    flex-shrink: 1; /* shrinks to the rail's height and scrolls */
+    min-height: 0;
+    padding: 6px 6px 0 6px;
+    border-radius: 8px;
+    background-color: rgba(15, 30, 38, 0.85);
+}
+.camera-rail-collapsed .camera-strip { display: none; }
 .camera-tile {
-    width: 160px;
-    height: 90px;
-    margin: 0 4px;
+    width: 144px;
+    height: 81px;
+    margin: 0 0 6px 0;
     border-radius: 4px;
     border-width: 2px;
     border-color: rgba(0, 0, 0, 0);

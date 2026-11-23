@@ -13,7 +13,7 @@ namespace Formula9.World
     public sealed class IncidentRecord
     {
         public string IncidentId, EdgeId, Kind, Impact;
-        // The world event behind it (BREAKDOWN, COLLISION, SIGNAL_FAULT or ROAD_CLOSURE), the road it is on
+        // The world event behind it (BREAKDOWN, COLLISION, SIGNAL_FAULT, ROAD_CLOSURE or PEDESTRIAN_ON_ROAD), the road it is on
         // and the alert's words when it was detected; null from a backend without world events.
         public string EventType, RoadName, Headline;
         public Vector2 Position, Start, End;
@@ -86,6 +86,7 @@ namespace Formula9.World
                 case "COLLISION": return "Collision";
                 case "SIGNAL_FAULT": return "Signal fault";
                 case "ROAD_CLOSURE": return "Road closure";
+                case "PEDESTRIAN_ON_ROAD": return "Pedestrian on road";
             }
             return kind == IncidentSimulation.Block ? "Road block" : kind == IncidentSimulation.Accident ? "Road accident" : "Incident";
         }
@@ -138,6 +139,8 @@ namespace Formula9.World
     public static class IncidentSimulation
     {
         public const string Block = "ROAD_BLOCK", Accident = "ROAD_ACCIDENT", SignalFault = "SIGNAL_FAULT";
+        // The world event type of a pedestrian crossing the road where there is no crossing
+        public const string PedestrianOnRoad = "PEDESTRIAN_ON_ROAD";
         public const float ReachM = 140, GrowthMps = 5, LaneOffsetM = 3.5f;
         private const float WreckClearM = 12, FirstCarM = 6, CarSpacingM = 9, CarJitterM = 3;
         private const float RollInS = 3, RollInMps = 8, CreepM = 0.8f, CreepRate = 0.9f, CreepWaveM = 0.06f;
