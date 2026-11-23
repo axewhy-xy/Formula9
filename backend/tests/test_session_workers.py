@@ -18,7 +18,8 @@ from contracts.v2.sessions import CreateSessionRequest
 from src.api.routes.training_v2 import get_actor_id, get_training_store
 from src.app import app
 from src.persistence.training_store import TrainingStore, TrainingStoreError
-from src.services.integrated_actor import SCENARIO_SELECTOR, IntegratedSessionActor
+from src.services.assessment import SCORED_SCENARIO
+from src.services.integrated_actor import SCENARIO_SELECTOR, IntegratedSessionActor, get_workflow_definition
 from src.services.session_gateway import GatewaySessionService, configured_workers, create_session_service
 from src.services.training_sessions import TrainingSessionService, checkpoint
 
@@ -73,6 +74,42 @@ def test_zero_workers_keeps_sessions_in_this_process(tmp_path):
     with TrainingStore(tmp_path / "s.sqlite") as store:
         assert type(create_session_service(store, workers=0)) is TrainingSessionService
         assert type(create_session_service(store, workers=2)) is GatewaySessionService
+
+
+def test_assessment_finishes_and_releases_its_worker_slot(tmp_path):
+    """Commit the pinned rubric and terminal grade through the gateway writer and worker IPC."""
+    async def run():
+        async with gateway(tmp_path / "assessment.sqlite", manual_clock=True) as (store, service):
+            snapshot = await service.create(CreateSessionRequest(scenario_revision_id=SCORED_SCENARIO),
+                                            "trainee", "assessment-create")
+            sid = snapshot.session_id
+            assert snapshot.scenario.assessment_duration_s == 120
+            assert store.assessment(sid, "trainee").status == "IN_PROGRESS"
+            routes = get_workflow_definition().routes.for_route(snapshot, "route-peer-a")
+            preview = routes.draft_preview(snapshot, RouteEditRequest(
+                route_id="route-peer-a", expected_route_revision=1, draft_revision=1))
+            approval = RouteApprovalRequest(
+                preview_id=preview.preview_id, preview_revision=preview.preview_revision, command_id="route",
+                idempotency_key="route", target_vehicle_ids=["shuttle-01"], reason="Assessment route")
+            assert (await service.approve_route("trainee", sid, approval)).status == "APPLIED"
+            assert (await service.submit("trainee", command(store, sid, "START"))).status == "APPLIED"
+            assert await service.step(sid, 2399) == 2399
+            pause = command(store, sid, "PAUSE")
+            assert store.accept("trainee", pause).status == "QUEUED"
+            assert await service.step(sid) == 2400
+            await until(lambda: not service.owns(sid), 5, "Completed assessment retained its worker slot")
+            terminal = store.snapshot(sid)
+            report = store.assessment(sid, "trainee")
+            assert terminal.session.status == "COMPLETED" and terminal.simulation_time_s == 120
+            assert report.status != "IN_PROGRESS" and len(report.criteria) == 10
+            assert report.through_event_sequence == terminal.event_sequence
+            assert store.accept("trainee", pause).status == "EXPIRED"
+            with pytest.raises(TrainingStoreError, match="records are retained"):
+                await service.delete(sid, "observer")
+            assert store.assessment(sid, "trainee") == report
+        with TrainingStore(tmp_path / "assessment.sqlite") as recovered:
+            assert recovered.assessment(sid, "trainee") == report
+    asyncio.run(run())
 
 
 # Random in every run (IDs) or read from the wall clock: the rest of a committed row is the simulation's

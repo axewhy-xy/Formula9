@@ -44,6 +44,8 @@ class Settings(BaseModel):
     training_database_path: Path
     # Opt-in: at each start, delete terminal training sessions older than this many newest ones
     training_retention_keep_latest: int | None = Field(default=None, ge=0)
+    assessment_supervisors: list[str] = Field(default_factory=list)
+    assessment_inactivity_timeout_s: int = Field(default=900, ge=1)
     # LTA DataMall bus stops/services/routes, written by src.transit.import_lta
     transit_database_path: Path
     # Accounts are stored in MongoDB; without a URI the /auth endpoints answer 503
@@ -98,6 +100,8 @@ def get_settings() -> Settings:
         map_database_path=map_database_path,
         training_database_path=training_database_path,
         training_retention_keep_latest=getenv("TRAINING_RETENTION_KEEP_LATEST") or None,
+        assessment_supervisors=[name.strip() for name in getenv("ASSESSMENT_SUPERVISORS", "").split(",") if name.strip()],
+        assessment_inactivity_timeout_s=getenv("ASSESSMENT_INACTIVITY_TIMEOUT_S", "900"),
         transit_database_path=transit_database_path,
         mongodb_uri=getenv("MONGODB_URI") or None,
         mongodb_database=getenv("MONGODB_DATABASE", "formula9"),

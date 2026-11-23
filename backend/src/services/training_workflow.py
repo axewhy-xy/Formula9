@@ -18,6 +18,7 @@ import logging
 from uuid import uuid4
 
 from contracts.v2.models import Event
+
 from src.persistence.training_store import TrainingStoreError
 from src.services.battery_decision import submit_battery_decision
 from src.services.charge_booking import BOOKING_COMMANDS, submit_booking_command
@@ -97,6 +98,7 @@ class ActorCommit:
         self.actor.note_decisions(events)
         result = self.actor.generate_snapshot(in_place=not copy_domain)
         result.snapshot_id = self.baseline.snapshot_id
+        self.actor.observe_publication(result, events)
         events = [*self.actor.pending_events, *events]
         ordered = tuple(event.model_copy(update={"event_sequence": self.baseline.event_sequence+index+1,
             "tick": result.tick}) for index, event in enumerate(events))
@@ -122,6 +124,7 @@ class ActorCommit:
         return result
 
     def commit_snapshot(self, proposed, domain_events=(), **kwargs):
+        domain_events = self.actor.before_publication(proposed, domain_events)
         proposed, domain_events = self._prepare(proposed, domain_events, copy_domain=False)
         kwargs.setdefault("expected_snapshot_id", self.baseline.snapshot_id)
         result = self.store.commit_snapshot(proposed, domain_events,
