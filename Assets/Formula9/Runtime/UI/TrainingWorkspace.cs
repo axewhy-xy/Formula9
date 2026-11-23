@@ -36,6 +36,7 @@ namespace Formula9.UI
         private readonly ChargingPage charging;
         private readonly ReportsPage reports;
         private readonly IncidentReportsTab incidentReports;
+        private readonly EmergencyDispatchPanel emergency; //added panel for emergency dispatch
         private readonly Button sessionToggle;
         private readonly VisualElement sessionCard;
         private bool? sessionToolsOpen;
@@ -167,6 +168,7 @@ namespace Formula9.UI
 
             reports = new ReportsPage(root);
             incidentReports = new IncidentReportsTab(root, api, session, world, run);
+            emergency = new EmergencyDispatchPanel(root, session, run, notify, () => Current);
             session.SnapshotAccepted += (_, __) => { acceptedAt = Time.realtimeSinceStartup; Render(); };
             session.EventsAccepted += _ => RenderReports();
             session.AvailabilityChanged += _ => { if (!session.Available) { InvalidateRoute(); ClearIncidentPreview(); } Render(); };
@@ -209,6 +211,7 @@ namespace Formula9.UI
                 boundary = currentBoundary; dependencies = null; context = null; requestGeneration++; approvedDraft = null; heldIncident = heldVehicle = null; heldWhileWatching = false;
                 if (ledgerSession != s?.SessionId) { ledger.Clear(); ledgerSession = s?.SessionId; }
                 charging.Reset();
+                emergency?.Reset();
                 routeReason.value = incidentReason.value = "";
                 draft = new List<RouteWaypoint>(); draftHistory.Clear(); draftHistory.Add(new List<RouteWaypoint>()); historyIndex = 0;
                 preview = null; draftView = null; outcome = null; outcomeSequence = -1; suggesting = false;
@@ -223,6 +226,7 @@ namespace Formula9.UI
             }
             FitSessionControls();
             incidentReports.Render(s);
+            emergency?.Render(s);
             if (s == null) { RenderReports(); UpdateActions(); return; }
             // An applied approval moves its route to a new revision, which finishes the draft. A queued
             // or rejected one never does, so its draft stays for another try.
@@ -306,6 +310,10 @@ namespace Formula9.UI
             fleetCameras.text = world.CamerasShown ? "Hide cameras" : "Cameras";
             fleetCameras.EnableInClassList("segment-selected", world.CamerasShown);
             charging.UpdateActions();
+            //UpdateActions() can be triggered while the constructor is still running, 
+            //before line 171 has created emergency. The ?. stops that from causing a 
+            //NullReferenceException
+            emergency?.UpdateActions();
             var candidate = s?.Candidates.FirstOrDefault(c => c.CandidateId == candidates.value && c.IncidentId == incidents.value);
             var decision = Current && !incidentBusy && s?.Session.Status == "RUNNING" && candidate?.Validation == "PASS" && candidate.ExpiresAtTick >= s.Tick &&
                 s.Incidents.Any(i => i.IncidentId == incidents.value && i.State == "OPTIONS_READY") && !string.IsNullOrWhiteSpace(incidentReason.value);

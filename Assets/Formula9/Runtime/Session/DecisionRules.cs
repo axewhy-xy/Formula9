@@ -132,6 +132,36 @@ namespace Formula9.Session
             return command;
         }
 
+        // The shuttles that cannot carry passengers: out of service, flat, or held by a breakdown that is not over.
+        public static List<FleetVehicle> NonOperational(FullSnapshot snapshot)
+        {
+            if (snapshot?.Vehicles == null) return new List<FleetVehicle>();
+            var broken = new HashSet<string>((snapshot.Incidents ?? new List<Incident>())
+                .Where(i => i.EventType == "BREAKDOWN" && i.State != "RESOLVED" && i.VehicleId != null).Select(i => i.VehicleId));
+            return snapshot.Vehicles.Where(v => v.ServiceState == "OUT_OF_SERVICE" || v.BatteryKwh <= 0 || broken.Contains(v.VehicleId)).ToList();
+        }
+
+        // The backend's "request assistance" option for a shuttle, or null when it offers none that can be approved now.
+        public static Candidate AssistanceOption(FullSnapshot snapshot, string vehicleId)
+        {
+            if (snapshot == null || snapshot.Session.Status != "RUNNING" || string.IsNullOrEmpty(vehicleId)) return null;
+            foreach (var incident in (snapshot.Incidents ?? new List<Incident>()).Where(i => i.State == "OPTIONS_READY").OrderByDescending(i => i.DetectedTick))
+            {
+                var option = (snapshot.Candidates ?? new List<Candidate>()).FirstOrDefault(c =>
+                    c.IncidentId == incident.IncidentId && c.Action == "ESCALATE" && c.Validation == "PASS" &&
+                    c.ExpiresAtTick >= snapshot.Tick && (c.VehicleId ?? incident.VehicleId) == vehicleId);
+                if (option != null) return option;
+            }
+            return null;
+        }
+
+        // Emergency dispatch is the backend's own assistance option, approved like any incident decision.
+        public static DispatcherCommand EmergencyDispatchCommand(FullSnapshot snapshot, string vehicleId, string reason)
+        {
+            var option = AssistanceOption(snapshot, vehicleId) ?? throw new ArgumentException("The backend offers no assistance option for this shuttle right now.");
+            return IncidentCommand(snapshot, option.IncidentId, option.CandidateId, reason);
+        }
+
         private static DispatcherCommand Command(FullSnapshot snapshot, string kind, string targetType, string id, long revision, string reason, JObject payload)
         {
             if (string.IsNullOrWhiteSpace(reason)) throw new ArgumentException("Enter a reason for this decision.");

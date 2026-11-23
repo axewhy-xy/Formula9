@@ -4,6 +4,14 @@
         <ui:Label text="Incident Monitor" class="page-title" />
         <!-- The tables' columns are set in TrainingWorkspace.cs; their rows come from the backend. -->
         <ui:VisualElement name="incident-table-host" />
+        <!-- Emergency dispatch: shown while a shuttle cannot run. Its options come from the backend. -->
+        <ui:VisualElement name="emergency-dispatch" style="display: none;">
+            <ui:Label text="Emergency dispatch" class="workspace-text" />
+            <ui:DropdownField name="emergency-vehicle" label="Shuttle not operational" />
+            <ui:Label name="emergency-status" class="workspace-text" />
+            <ui:TextField name="emergency-reason" label="Reason" max-length="2048" />
+            <ui:Button name="emergency-dispatch-button" text="Emergency dispatch" class="danger" />
+        </ui:VisualElement>
         <!-- Deciding on an incident: shown once there is one. -->
         <ui:VisualElement name="incident-decisions" style="display: none;">
             <ui:DropdownField name="incidents" label="Incident" />
