@@ -3,7 +3,7 @@ Build Formula9.exe with the backend bundled beside it.
 
 Author: Lau Xiang Yang
 Date Created: 06/11/2026
-Last Modified: 10/11/2026
+Last Modified: 24/11/2026
 
 Description:
     A plain Unity build only contains the client. This script builds the Windows player in batch
@@ -26,6 +26,8 @@ Description:
 from __future__ import annotations
 
 import argparse
+import ctypes
+from ctypes import wintypes
 import os
 from pathlib import Path
 import shutil
@@ -104,29 +106,88 @@ def safe_to_replace(folder: Path) -> bool:
 
 """
 # -----------------------------------------------------------------------------------
+# Function: busy_file
+# -----------------------------------------------------------------------------------
+Description:
+    This function finds a file under folder that Windows would refuse to delete right now: a program
+    or library a running process has loaded, or a file it holds open, such as a log. It asks for
+    write and delete access to each file without using either, which Windows refuses for such files.
+
+Args:
+    folder (Path): The folder to check.
+
+Returns:
+    Path | None: The first such file, or None if every file can be deleted.
+"""
+def busy_file(folder: Path) -> Path | None:
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                                     wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    access = 0x40000000 | 0x00010000  # GENERIC_WRITE | DELETE
+    share = 0x1 | 0x2 | 0x4  # FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
+    open_existing = 3
+    invalid = wintypes.HANDLE(-1).value
+    file_not_found = 2
+    for path in folder.rglob("*"):
+        if not path.is_file():
+            continue
+        handle = kernel32.CreateFileW(str(path), access, share, None, open_existing, 0, None)
+        if handle == invalid:
+            if ctypes.get_last_error() != file_not_found:
+                return path
+        else:
+            kernel32.CloseHandle(handle)
+    return None
+
+
+"""
+# -----------------------------------------------------------------------------------
 # Function: remove_folder
 # -----------------------------------------------------------------------------------
 Description:
     This function deletes an earlier build folder, or its Backend folder. It first moves the folder
-    aside, which Windows refuses while a program inside it is running, so a build that is still
-    open is left whole instead of half deleted.
+    aside, which Windows refuses while a process has its working directory inside it, so nothing
+    new can start from it. A program from the folder can still be running from elsewhere, so it
+    then checks every file and puts the folder back untouched if any is in use. That way, a build
+    that is still open is left whole instead of half deleted.
 
 Args:
     folder (Path): The folder to delete.
 
 Raises:
-    SystemExit: If something in the folder is running.
+    SystemExit: If something in the folder is running. Only if a running program opened a file
+        after the check is the folder partly deleted; it is then moved back to its name when possible.
 """
 def remove_folder(folder: Path) -> None:
     if not folder.exists():
         return
+    close = "Close every Formula9 window started from it (its backend stops a few seconds later), then build again."
     aside = folder.with_name(f"{folder.name}.deleting-{os.getpid()}")
     try:
         os.rename(folder, aside)
     except PermissionError:
-        raise SystemExit(f"{folder} is in use. Close every Formula9 window started from it (its backend stops a "
-                         "few seconds later), then build again.") from None
-    shutil.rmtree(aside)
+        raise SystemExit(f"{folder} is in use. {close}") from None
+
+    def put_back() -> Path:
+        try:
+            os.rename(aside, folder)
+            return folder
+        except OSError:
+            return aside
+
+    busy = busy_file(aside)
+    if busy is not None:
+        where = put_back()
+        raise SystemExit(f"{where} is in use: {busy.relative_to(aside)} is open in a running program. {close}")
+    try:
+        shutil.rmtree(aside)
+    except OSError as error:
+        where = put_back()
+        opened = os.path.relpath(error.filename, aside) if error.filename else "a file"
+        raise SystemExit(f"{where} is in use and was only partly deleted: {opened} was opened while it was "
+                         f"being deleted. {close}") from None
 
 
 """
