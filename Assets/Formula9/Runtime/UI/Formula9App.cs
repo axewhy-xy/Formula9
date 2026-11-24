@@ -181,13 +181,15 @@ namespace Formula9.UI
             session.SnapshotAccepted += (snapshot, _) => battery.OnSnapshot(snapshot);
             session.ConnectionChanged += connected =>
             {
-                // Reconnecting plays no cue of its own: the session recovered alert already says the
-                // backend is back. A battery that turned red meanwhile waits a poll so it doesn't overlap it.
+                // The reconnect cue plays on the same snapshot; a battery that turned red meanwhile waits a
+                // poll. A session the backend recovered after a crash says so with its session recovered
+                // alert instead, so it gets no reconnect cue on top.
                 if (connected) battery.HoldNextCue();
-                else if (!alerts.Muted) player.Play(AlertPlayer.DisconnectCue);
+                if (alerts.Muted || (connected && session.ReconnectRecovered)) return;
+                player.Play(connected ? AlertPlayer.ReconnectCue : AlertPlayer.DisconnectCue);
             };
 
-            // Interface sounds: only the start, resume and confirm buttons make a sound.
+            // Interface sounds: only starting, resuming and sending a decision make a sound.
             var root = GetComponent<UIDocument>().rootVisualElement;
             var uiPlayer = new GameObject("Interface sounds").AddComponent<UiSoundPlayer>();
             uiPlayer.transform.SetParent(transform, false);
@@ -197,7 +199,9 @@ namespace Formula9.UI
             // "no" for something that worked, and a queued command can keep this silent for a few seconds.
             uiSounds = new UiSounds(uiPlayer.Play, () => busy || cleanupBusy || session?.HasPendingCommand == true || workspace?.Busy == true);
             foreach (var name in UiSounds.StartButtons) root.Q<Button>(name).clicked += uiSounds.StartPressed;
-            foreach (var name in UiSounds.ConfirmButtons) root.Q<Button>(name).clicked += uiSounds.ConfirmPressed;
+            // The confirmation chimes when a decision is actually sent, not on the click: a click the
+            // checks stop (options withdrawn or refreshed, an invalid reason, a busy session) sends nothing.
+            workspace.DecisionSent += uiSounds.ConfirmPressed;
             uiSounds.Listen(root);
             listenedRoot = root;
             world.RouteNodeSelected += _ => uiSounds.PointPicked();
@@ -215,13 +219,20 @@ namespace Formula9.UI
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function stops the session controller and polling, then stops catching presses
-        //     for the greyed-out button sound. It uses the root it listened on rather than asking the
+        //     for the greyed-out button sound and unhooks the start click, so enabling the app again
+        //     doesn't hook it twice. It uses the root it listened on rather than asking the
         //     UIDocument again, which may already be switched off with no root.
         private void OnDisable()
         {
             session?.Shutdown();
             StopAllCoroutines();
             uiSounds?.Unlisten(listenedRoot);
+            if (uiSounds != null && listenedRoot != null)
+                foreach (var name in UiSounds.StartButtons)
+                {
+                    var button = listenedRoot.Q<Button>(name);
+                    if (button != null) button.clicked -= uiSounds.StartPressed;
+                }
             listenedRoot = null;
         }
 

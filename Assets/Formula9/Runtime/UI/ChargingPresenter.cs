@@ -89,7 +89,7 @@ namespace Formula9.UI
             return new ChargingQueueRow
             {
                 VehicleId = v.VehicleId, Rank = rank, Urgency = urgency, UrgencyClass = css,
-                BatteryPercent = v.BatteryCapacityKwh > 0 ? Math.Max(0, Math.Min(100, 100 * v.BatteryKwh / v.BatteryCapacityKwh)) : 0,
+                BatteryPercent = BatteryWatch.Percent(v),
                 Battery = $"{v.BatteryKwh:0.#} kWh", Loops = f?.LoopsRemaining?.ToString() ?? "—", State = StateName(v.ServiceState),
                 Eta = f?.NextDepotEtaS == null ? "—" : Duration(f.NextDepotEtaS.Value),
                 Booking = booking == null ? "—" : $"{booking.ChargerId} · {SimClock(booking.StartTick)}",

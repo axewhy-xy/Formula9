@@ -9,8 +9,8 @@
  *     Part of the native semantic audio work (NAT-M2-07). TrainingAlerts decides which events
  *     alert; this component only turns a cue name into a sound. The incident, battery and
  *     disconnect clips are from amee's sound consultation with Vuk; the quieter incident alert
- *     follows the audio professor's review; the other alerts are still the Qt client's
- *     Assets/Audio/alert_*.wav. Reconnecting plays only session_recovered, not a cue of its own.
+ *     follows the audio professor's review, as does the reconnect cue, UI Confirmation; the other
+ *     alerts are still the Qt client's Assets/Audio/alert_*.wav.
  */
 
 using System.Collections.Generic;
@@ -45,6 +45,7 @@ namespace Formula9.Audio
         {
             [BatteryWatch.Cue] = "ui_battery_low",
             [DisconnectCue] = "ui_dull_01",  // amee: dial 1 is disconnect
+            [ReconnectCue] = "ui_confirmation", // the audio professor: UI Confirmation_2
         };
 
         // Cue name -> volume for cues quieter than full volume. The audio professor found the
@@ -54,9 +55,9 @@ namespace Formula9.Audio
             ["incident_alert"] = 0.5f,
         };
 
-        // Played when the backend stops answering a joined session. Reconnecting has no cue of its own:
-        // the backend's SESSION_RECOVERED event plays session_recovered then.
-        public const string DisconnectCue = "disconnect";
+        // Played when the backend stops answering a joined session, and when it answers again. A
+        // reconnect to a session the backend recovered after a crash plays session_recovered instead.
+        public const string DisconnectCue = "disconnect", ReconnectCue = "reconnect";
 
         private readonly Dictionary<string, AudioClip> clips = new Dictionary<string, AudioClip>();
         private AudioSource source;

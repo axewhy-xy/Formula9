@@ -48,13 +48,13 @@ namespace Formula9.Tests
         // Function: EverySoundingButtonIsInTheRealLayout
         // -----------------------------------------------------------------------------------
         // Description:
-        //     Each start and confirm button the app hooks a sound onto exists in the simulator
-        //     layout, so a renamed button fails here instead of going silent.
+        //     Each start button the app hooks a sound onto exists in the simulator layout, so a
+        //     renamed button fails here instead of going silent.
         [Test]
         public void EverySoundingButtonIsInTheRealLayout()
         {
             var root = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/Formula9/UI/Formula9App.uxml").CloneTree();
-            foreach (var name in UiSounds.StartButtons.Concat(UiSounds.ConfirmButtons))
+            foreach (var name in UiSounds.StartButtons)
                 Assert.IsNotNull(root.Q<Button>(name), name);
         }
 
@@ -62,8 +62,7 @@ namespace Formula9.Tests
         // Function: StartConfirmAndMapPointsHaveTheirOwnSounds
         // -----------------------------------------------------------------------------------
         // Description:
-        //     Starting or resuming, confirming and picking a map point play their own sounds, and
-        //     no button both starts and confirms.
+        //     Starting or resuming, confirming and picking a map point play their own sounds.
         [Test]
         public void StartConfirmAndMapPointsHaveTheirOwnSounds()
         {
@@ -71,13 +70,10 @@ namespace Formula9.Tests
             sounds.ConfirmPressed();
             sounds.PointPicked();
             CollectionAssert.AreEqual(new[] { UiSound.StartSession, UiSound.Confirm, UiSound.MapPoint }, played);
-            CollectionAssert.IsEmpty(UiSounds.StartButtons.Intersect(UiSounds.ConfirmButtons));
             CollectionAssert.Contains(UiSounds.StartButtons, "resume", "resume shares the start session sound");
             Assert.Greater(UiSounds.VolumeOf(UiSound.Confirm), UiSounds.Volume, "the soft confirmation chime plays louder");
             Assert.AreEqual(UiSounds.Volume, UiSounds.VolumeOf(UiSound.StartSession));
             Assert.IsTrue(UiSounds.Volumes.Values.All(v => v > 0 && v <= 1), "volumes stay within 0 to 1");
-            CollectionAssert.IsSubsetOf(new[] { "route-approve", "route-confirm-send", "charge-apply" }, UiSounds.ConfirmButtons,
-                "re-route, the other route choices and the battery decision all confirm");
         }
 
         // -----------------------------------------------------------------------------------

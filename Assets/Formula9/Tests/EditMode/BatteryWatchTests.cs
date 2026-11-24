@@ -97,16 +97,35 @@ namespace Formula9.Tests
         // Function: RedMatchesTheGaugeColourAtTheBoundary
         // -----------------------------------------------------------------------------------
         // Description:
-        //     A shuttle counts as red exactly when the Charging page colours its gauge red, which
-        //     is the same rule Fleet Overview colours with.
+        //     Red starts just below 20%. The sound and the Charging page's gauge class are each
+        //     checked against that fixed boundary, not against each other, so a change to either
+        //     one fails here. Both pages draw BatteryWatch.Percent, which the sound reads too.
         [Test]
         public void RedMatchesTheGaugeColourAtTheBoundary()
         {
-            foreach (var percent in new[] { 0, 19.5, 19.9999, 20, 20.0001, 21 })
+            var expected = new Dictionary<double, bool> { [0] = true, [19.5] = true, [19.9999] = true, [20] = false, [20.0001] = false, [21] = false };
+            foreach (var entry in expected)
             {
-                var vehicle = Snapshot("s", percent).Vehicles[0];
-                Assert.AreEqual(Formula9.UI.ChargingPresenter.BatteryClass(percent) == "charge-battery-low", BatteryWatch.IsRed(vehicle), $"{percent}%");
+                var vehicle = Snapshot("s", entry.Key).Vehicles[0];
+                Assert.AreEqual(entry.Value, BatteryWatch.IsRed(vehicle), $"{entry.Key}% sounds");
+                Assert.AreEqual(entry.Key, BatteryWatch.Percent(vehicle), 1e-9, $"{entry.Key}% gauge percent");
+                Assert.AreEqual(entry.Value, Formula9.UI.ChargingPresenter.BatteryClass(entry.Key) == "charge-battery-low", $"{entry.Key}% Charging page gauge");
             }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: AShuttleWithNoCapacityIsRedLikeItsGauge
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A shuttle with no battery capacity shows a red 0% bar, so it counts as red and
+        //     sounds like any other shuttle whose gauge turns red.
+        [Test]
+        public void AShuttleWithNoCapacityIsRedLikeItsGauge()
+        {
+            var empty = new FleetVehicle { BatteryCapacityKwh = 0, BatteryKwh = 0 };
+            Assert.AreEqual(0, BatteryWatch.Percent(empty));
+            Assert.IsTrue(BatteryWatch.IsRed(empty));
+            Assert.AreEqual("charge-battery-low", Formula9.UI.ChargingPresenter.BatteryClass(BatteryWatch.Percent(empty)));
         }
 
         // -----------------------------------------------------------------------------------
@@ -202,7 +221,6 @@ namespace Formula9.Tests
         {
             watch.OnSnapshot(null);
             watch.OnSnapshot(new FullSnapshot { SessionId = "s" });
-            Assert.IsFalse(BatteryWatch.IsRed(new FleetVehicle { BatteryCapacityKwh = 0, BatteryKwh = 0 }));
             Assert.IsEmpty(played);
         }
 
@@ -210,12 +228,11 @@ namespace Formula9.Tests
         // Function: EveryClientCueHasARealClip
         // -----------------------------------------------------------------------------------
         // Description:
-        //     Battery and disconnect each map to their own clip that loads. Reconnecting has no cue:
-        //     session_recovered already plays then, and two sounds at once were one too many.
+        //     Battery, disconnect and reconnect each map to their own clip that loads.
         [Test]
         public void EveryClientCueHasARealClip()
         {
-            CollectionAssert.AreEquivalent(new[] { BatteryWatch.Cue, AlertPlayer.DisconnectCue }, AlertPlayer.ClientSoundFiles.Keys);
+            CollectionAssert.AreEquivalent(new[] { BatteryWatch.Cue, AlertPlayer.DisconnectCue, AlertPlayer.ReconnectCue }, AlertPlayer.ClientSoundFiles.Keys);
             Assert.AreEqual(AlertPlayer.ClientSoundFiles.Count, AlertPlayer.ClientSoundFiles.Values.Distinct().Count(), "one distinct sound per cue");
             foreach (var file in AlertPlayer.ClientSoundFiles.Values)
             {

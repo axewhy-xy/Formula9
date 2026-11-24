@@ -71,27 +71,41 @@ namespace Formula9.Audio
         public static bool IsRed(double percent) => percent < RedPercent;
 
         // -----------------------------------------------------------------------------------
+        // Function: Percent
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function gives the percent both battery gauges show: the charge over the
+        //     capacity, kept within 0 to 100. A shuttle with no battery capacity reads 0%.
+        //
+        // Args:
+        //     vehicle (FleetVehicle): The shuttle.
+        //
+        // Returns:
+        //     double: Its battery, 0 to 100.
+        public static double Percent(FleetVehicle vehicle) =>
+            vehicle.BatteryCapacityKwh > 0 ? Math.Max(0, Math.Min(100, 100 * vehicle.BatteryKwh / vehicle.BatteryCapacityKwh)) : 0;
+
+        // -----------------------------------------------------------------------------------
         // Function: IsRed (vehicle)
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function tells whether a shuttle's battery gauge shows red. A shuttle with no
-        //     battery capacity has no gauge to turn red.
+        //     This function tells whether a shuttle's battery gauge shows red, from the same
+        //     percent the gauges draw, so a shuttle with no battery capacity is red too.
         //
         // Args:
         //     vehicle (FleetVehicle): The shuttle.
         //
         // Returns:
         //     bool: True when its gauge is red.
-        public static bool IsRed(FleetVehicle vehicle) =>
-            vehicle.BatteryCapacityKwh > 0 && IsRed(100 * vehicle.BatteryKwh / vehicle.BatteryCapacityKwh);
+        public static bool IsRed(FleetVehicle vehicle) => IsRed(Percent(vehicle));
 
         // -----------------------------------------------------------------------------------
         // Function: HoldNextCue
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function makes a drop seen in the next snapshot sound one snapshot later. The
-        //     session recovered alert plays when an outage ends, so a battery that ran low during
-        //     it would otherwise sound on top of it.
+        //     reconnect cue plays on the snapshot that ends an outage, so a battery that ran low
+        //     during it would otherwise sound on top of it.
         public void HoldNextCue() => holding = true;
 
         // -----------------------------------------------------------------------------------

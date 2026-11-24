@@ -553,6 +553,59 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
+        // Function: AReconnectToARecoveredSessionSaysSo
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A return after an ordinary drop is a plain reconnect. A return to a session the
+        //     backend recovered after a crash, whose SESSION_RECOVERED event announces it, says so
+        //     while the return is reported, and only then.
+        [Test]
+        public async Task AReconnectToARecoveredSessionSaysSo()
+        {
+            var returns = new List<bool>();
+            controller.ConnectionChanged += connected => { if (connected) returns.Add(controller.ReconnectRecovered); };
+            await controller.JoinAsync(SessionId);
+            backend.SnapshotReply = new HttpResponse { Failure = HttpFailure.Incomplete };
+            await controller.RefreshAsync();
+            backend.SnapshotReply = null;
+            await controller.RefreshAsync();
+            CollectionAssert.AreEqual(new[] { false }, returns, "a Wi-Fi blip or timeout is a plain reconnect");
+
+            backend.SnapshotReply = new HttpResponse { Failure = HttpFailure.Incomplete };
+            await controller.RefreshAsync();
+            backend.SnapshotReply = null;
+            backend.Snapshot["session_epoch"] = 2;
+            backend.Snapshot["session"]["session_epoch"] = 2;
+            backend.Snapshot["event_sequence"] = 9;
+            backend.OnEvents = request => FakeBackend.After(request) == 7
+                ? Json(backend.Replay(7, 2))
+                : Json(backend.Replay(FakeBackend.After(request)));
+            await controller.RefreshAsync();
+            CollectionAssert.AreEqual(new[] { false, true }, returns, "a crash recovery says so");
+            Assert.IsFalse(controller.ReconnectRecovered, "only while the return is reported");
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: TakenIsCalledOnlyForACommandThatGoesOut
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The taken callback, which the confirmation sound hangs on, runs once a command has
+        //     passed every check and before its reply, and not for a command that is refused or
+        //     rejected.
+        [Test]
+        public async Task TakenIsCalledOnlyForACommandThatGoesOut()
+        {
+            var taken = new List<int>();
+            var command = SessionController.ControlCommand(SessionId, 1, 3, "PAUSE");
+            Assert.IsFalse(await controller.SubmitAsync(command, () => taken.Add(0)), "no session joined");
+            await controller.JoinAsync(SessionId);
+            Assert.ThrowsAsync<ArgumentException>(() => controller.SubmitAsync(SessionController.ControlCommand("session-002", 1, 3, "PAUSE"), () => taken.Add(0)));
+            Assert.IsEmpty(taken);
+            Assert.IsTrue(await controller.SubmitAsync(command, () => taken.Add(backend.To("/commands", "POST").Count())));
+            CollectionAssert.AreEqual(new[] { 0 }, taken, "once, before the command was posted");
+        }
+
+        // -----------------------------------------------------------------------------------
         // Function: StartIsSentWithTheSessionRevisionAndConfirmed
         // -----------------------------------------------------------------------------------
         // Description:

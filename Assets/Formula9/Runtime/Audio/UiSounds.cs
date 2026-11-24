@@ -8,8 +8,9 @@
  * Description:
  *     Applies the consultation's rules to the Unity controls: buttons make no hover sound and most
  *     presses stay silent. Start scenario, Start and watch in 3D and Resume simulation play the start
- *     session click; Approve route (a re-route), Route Planning's Confirm (keep, hold or assist) and the
- *     Charging page's Apply play the confirmation sound; picking a point for a route
+ *     session click; a decision sent from Approve route (a re-route), Route Planning's Confirm (keep,
+ *     hold or assist) or the Charging page's Apply plays the confirmation sound, once it has passed
+ *     every check, so a click that sends nothing stays silent; picking a point for a route
  *     plays the map point sound. Clicking a button that is greyed out plays the command rejected
  *     sound, so the app says no out loud, unless the app is busy sending something: a button greyed
  *     out only while a command, login or preview is on its way has not refused anything. Interface sounds are separate from training alerts, so
@@ -38,9 +39,8 @@ namespace Formula9.Audio
     //     are tested without audio.
     //
     //     Attributes: Volume (0.35, as in the web app); Volumes, the sounds played louder;
-    //     StartButtons, the buttons that start or
-    //     resume the session; ConfirmButtons, the buttons that confirm a decision; Files, sound to
-    //     clip in Resources/Formula9/Audio.
+    //     StartButtons, the buttons that start or resume the session; Files, sound to clip in
+    //     Resources/Formula9/Audio.
     public sealed class UiSounds
     {
         public const float Volume = 0.35f;
@@ -65,9 +65,9 @@ namespace Formula9.Audio
         public static float VolumeOf(UiSound sound) => Volumes.TryGetValue(sound, out var volume) ? volume : Volume;
 
         // The audio professor's review: starting and resuming the session share one click, and every
-        // other confirmation plays the confirmation sound. Every other press stays silent.
+        // other confirmation plays the confirmation sound (ConfirmPressed, raised when a decision is
+        // sent rather than by a button). Every other press stays silent.
         public static readonly IReadOnlyList<string> StartButtons = new[] { "start", "route-start", "resume" };
-        public static readonly IReadOnlyList<string> ConfirmButtons = new[] { "route-approve", "route-confirm-send", "charge-apply" };
 
         // Sound -> clip in Resources/Formula9/Audio.
         public static readonly IReadOnlyDictionary<UiSound, string> Files = new Dictionary<UiSound, string>
@@ -133,7 +133,7 @@ namespace Formula9.Audio
         // Function: ConfirmPressed
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function plays the confirmation sound for a button that confirms a decision.
+        //     This function plays the confirmation sound for a decision that was sent.
         public void ConfirmPressed() => play?.Invoke(UiSound.Confirm);
 
         // -----------------------------------------------------------------------------------

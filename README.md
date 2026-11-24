@@ -359,9 +359,10 @@ sound; each event ID plays at most once, even when a reconnect replays it; histo
 and muting still marks events as seen, so unmuting causes no burst. The sounds in
 `Resources/Formula9/Audio` are the Qt client's `alert_*.wav`, except the incident alert
 (`ui_accident.wav`, played at half volume), battery critical (`ui_battery_low.wav`, the only battery sound, played once when a shuttle's
-gauge turns red below 20%) and disconnect
-(`ui_dull_01.wav`). Reconnecting plays no sound of its own; when the backend recovers the
-session, its `SESSION_RECOVERED` event plays the session recovered alert. **Mute alerts** is kept across
+gauge turns red below 20%; a shuttle with no battery capacity reads a red 0%), disconnect
+(`ui_dull_01.wav`) and reconnect (`ui_confirmation.wav`, after any outage that ends). When the
+backend comes back with a session it recovered after a crash, its `SESSION_RECOVERED` event plays
+the session recovered alert instead of the reconnect sound, so the two never play together. **Mute alerts** is kept across
 restarts in `PlayerPrefs` (`training.muteAlerts`); tests use in-memory preferences.
 
 ## Interface sounds
@@ -372,7 +373,7 @@ make no hover sound, and every press not listed below stays silent:
 | Sound | Clip | Plays when |
 |---|---|---|
 | Start session | `ui_start_session.wav` (UI Button Click-Dull) | **Start scenario**, **Start and watch in 3D** or **Resume simulation** is clicked |
-| Confirmation | `ui_confirmation.wav` (UI Confirmation_2) | **Approve route** (a re-route), Route Planning's **Confirm** (keep route, hold or request assistance) or the Charging page's **Apply decision** (a battery decision) is clicked |
+| Confirmation | `ui_confirmation.wav` (UI Confirmation_2) | A decision from **Approve route** (a re-route), Route Planning's **Confirm** (keep route, hold or request assistance) or the Charging page's **Apply decision** (a battery decision) is sent. A click its checks stop (options withdrawn or refreshed, an invalid reason, a busy session) sends nothing and stays silent |
 | Map point | `ui_map_point.wav` (UI Hover New 1) | a road is picked for a route on the map |
 | Refused | `alert_command_rejected.wav` | a greyed-out button is pressed while nothing is being sent |
 
