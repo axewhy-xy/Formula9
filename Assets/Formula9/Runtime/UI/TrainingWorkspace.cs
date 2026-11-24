@@ -374,9 +374,7 @@ namespace Formula9.UI
             fleetCameras.text = world.CamerasShown ? "Hide cameras" : "Cameras";
             fleetCameras.EnableInClassList("segment-selected", world.CamerasShown);
             charging.UpdateActions();
-            //UpdateActions() can be triggered while the constructor is still running, 
-            //before line 171 has created emergency. The ?. stops that from causing a 
-            //NullReferenceException
+            // UpdateActions can run before the constructor has created the panel, so emergency may still be null
             emergency?.UpdateActions();
             // The decision card: usable while the session runs, is connected and is up to date
             var free = Current && confirmCommand == null;

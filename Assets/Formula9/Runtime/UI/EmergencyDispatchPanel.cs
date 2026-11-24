@@ -1,6 +1,9 @@
 /*
  * The Emergency dispatch block on the Incident Monitor page.
  *
+ * Author: Ang Yu Xuan
+ * Date Created: 19/11/2026
+ * Last Modified: 24/11/2026
  * Description:
  *     Lists the shuttles that cannot run and lets the operator ask for assistance for one. The
  *     request is the backend's own "request assistance" incident option, approved with a reason
@@ -22,7 +25,7 @@ namespace Formula9.UI
     // Class: EmergencyDispatchPanel
     // -----------------------------------------------------------------------------------
     // Description:
-    //     Owns the controls named emergency in IncidentMonitor.uxml. TrainingWorkspace creates it
+    //     Owns the controls named emergency in RoutePlanning.uxml. TrainingWorkspace creates it
     //     once and calls Render for every snapshot and UpdateActions on its refresh timer. It holds
     //     no session data of its own: what it shows is read from the latest snapshot each time.
     public sealed class EmergencyDispatchPanel

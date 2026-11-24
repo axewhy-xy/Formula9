@@ -43,7 +43,7 @@ namespace Formula9.World
     {
         public const string NoWorld = "3D unavailable · this session has no spatial capability.";
         public const string MapHint = "2D map · press 3D View for the buildings in 3D.";
-        private const string CityArea = "toa-payoh";
+        internal const string CityArea = "toa-payoh";
         private const float CityMaxDistance = 3000, CityFarClip = 8000, CityPanMargin = 150;
         private static readonly Color CitySky = new Color(0.72f, 0.84f, 0.92f), WorldBackground = new Color(0.10f, 0.10f, 0.12f);
         private const float MinDistance = 5, MaxDistance = 300, MinPitch = 0.12f, MaxPitch = 1.45f;

@@ -180,37 +180,9 @@ namespace Formula9.UI
             var battery = new BatteryWatch(player.Play, () => alerts.Muted);
             session.SnapshotAccepted += (snapshot, _) => battery.OnSnapshot(snapshot);
 
-            // Shuttle battery monitor: warns when a shuttle's charge nears what it needs to reach a depot.
-            // It needs the road network, so it is built once, after the first snapshot
-            ShuttleBatteryMonitor batteryMonitor = null;
-            var batteryMonitorStarted = false;
-            var nextBatteryLog = 0f;
-            async Task StartBatteryMonitor(CityClient roadClient)
-            {
-                try
-                {
-                    var roads = await roadClient.GetRoadsAsync("toa-payoh");   // the area the 3D city draws
-                    var monitor = new ShuttleBatteryMonitor(new DepotRoadGraph(roads));
-                    // This is purely for testing ONLY, so I comment it out 
-                    // uncomment this line to make every trip look costly and force a warning
-                    //monitor.KwhPerMeter = 0.003;
-                    monitor.ReturnRequired += a => ShowMessage($"{a.VehicleId}: return to the depot now. {a.DistanceToDepotM:0} m away, {a.BatteryKwh:0.0} kWh left, needs {a.ThresholdKwh:0.0}.");
-                    monitor.Critical += a => ShowMessage($"{a.VehicleId}: cannot reach a depot on its charge.");
-                    batteryMonitor = monitor;
-                }
-                catch (Exception error) { Debug.LogWarning("Battery monitor is off, no road network: " + error.Message); }
-            }
-            session.SnapshotAccepted += (snapshot, _) =>
-            {
-                if (!batteryMonitorStarted) { batteryMonitorStarted = true; Run(StartBatteryMonitor(new CityClient(transport))); }
-                batteryMonitor?.OnSnapshot(snapshot);
-                if (batteryMonitor == null || Time.realtimeSinceStartup < nextBatteryLog) return;
-                nextBatteryLog = Time.realtimeSinceStartup + 2f;
-                // Purely for debugging purpose for testing emergency dispatch
-                // foreach (var a in batteryMonitor.Latest.Values)
-                //     Debug.Log($"[BatteryMonitor] {a.VehicleId}: {a.DistanceToDepotM:0} m to depot | battery {a.BatteryKwh:0.00} kWh | threshold {a.ThresholdKwh:0.00} kWh | {a.Risk} | offNetwork={a.OffNetwork}");
-            };
-
+            // Warns when a shuttle's charge nears what it needs to reach a depot (it stays alive through the session's events)
+            new ShuttleBatteryService(session, api, new CityClient(transport), _ => WorldView.CityArea, ShowMessage);
+            
             session.ConnectionChanged += connected =>
             {
                 // The reconnect cue plays on the same snapshot; a battery that ran low meanwhile waits a poll.

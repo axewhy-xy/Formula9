@@ -1,6 +1,10 @@
 /*
  * Shortest driving distance from anywhere on the road network to the nearest depot.
  *
+ * Author: Ang Yu Xuan
+ * Date Created: 18/11/2026
+ * Last Modified: 24/11/2026
+ *
  * Description:
  *     Built from the same CityRoad list the traffic renderer uses, so it follows the same one-way
  *     rules. One Dijkstra run on the REVERSED graph, started at the depots, gives every junction its
@@ -24,8 +28,7 @@ namespace Formula9.World
     //     Coordinates are the city's local metres: x east, y north (the backend's x_m, y_m).
     public sealed class DepotRoadGraph
     {
-        //the values here are estimated defaults, can be tuned if needs to.
-
+        // The values here are estimated defaults, can be tuned if needs to.
         // Farther than this from every road, a shuttle is not on the network (a depot yard, say).
         public const float SnapRadiusM = 40f;
         // Inside this of a depot the straight line is the trip.
@@ -34,6 +37,10 @@ namespace Formula9.World
         private const float WrongWayPenaltyM = 60f;
         // Roads this much farther from the shuttle than the nearest one are not candidates.
         private const float SnapTieM = 2f;
+        // A road counts as the same road as a closed edge when it lies within this of its path ...
+        private const float ClosureMatchM = 12f;
+        // ... and runs the same way: the cosine of the angle between them, either way along, is at least this (about 37 degrees)
+        private const float ClosureParallel = 0.8f;
         // Up to this many junctions within this distance of a depot count as its entrances; the
         // nearest junction always does, however far.
         private const int DepotEntrances = 3;
@@ -53,6 +60,7 @@ namespace Formula9.World
             public Vector2[] Points;
             public float[] Along;
             public float Length;
+            public Vector2 Mid;      // the point halfway along it
         }
 
         private struct Candidate { public Edge Edge; public float Lateral, Remaining, Score; }
@@ -62,6 +70,8 @@ namespace Formula9.World
         private readonly Dictionary<long, Vector2> nodes = new Dictionary<long, Vector2>();
         private readonly List<Vector2> depots = new List<Vector2>();
         private readonly HashSet<string> closed = new HashSet<string>();
+        private readonly HashSet<string> roadNames = new HashSet<string>();   // every edge key and road ID
+        private readonly HashSet<Edge> closedAlongPaths = new HashSet<Edge>();
         private readonly List<Candidate> scratch = new List<Candidate>();
         private Dictionary<long, float> toDepot = new Dictionary<long, float>();
 
@@ -89,12 +99,20 @@ namespace Formula9.World
             if (length < 0.1f) return;
             // Same key the traffic renderer uses, so a closure naming "road|direction" matches.
             var edge = new Edge { Key = $"{road.Id}|{direction}", RoadId = road.Id, From = from, To = to, Points = points, Along = along, Length = length };
+            edge.Mid = PointAtFraction(points, 0.5f);
             edges.Add(edge);
+            roadNames.Add(edge.Key); roadNames.Add(edge.RoadId);
             nodes[from] = points[0];
             nodes[to] = points[points.Length - 1];
             if (!incoming.TryGetValue(to, out var list)) incoming[to] = list = new List<Edge>();
             list.Add(edge);
         }
+
+        // True once a depot position is known; without one there is no distance to give
+        public bool HasDepots => depots.Count > 0;
+
+        // An edge key, to show what this graph's roads are called when closures do not match any of them
+        public string SampleRoadKey => edges.Count > 0 ? edges[0].Key : null;
 
         // -----------------------------------------------------------------------------------
         // Function: SetDepots
@@ -109,24 +127,97 @@ namespace Formula9.World
         }
 
         // -----------------------------------------------------------------------------------
+        // Function: NamesRoad
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Whether an ID is the ID of a road here ("road-9") or of one direction of it ("road-9|1").
+        public bool NamesRoad(string id) => roadNames.Contains(id);
+
+        // -----------------------------------------------------------------------------------
         // Function: SetClosed
         // -----------------------------------------------------------------------------------
         // Description:
-        // roadId|direction
-        // road-9	Both directions of that road
-        // road-9|1	Only the forward direction
-        // road-9|-1	Only the reverse direction
-        //     Replaces the closed roads and redoes the search. An ID matches a whole road ("road-9")
-        //     or one direction of it ("road-9|1"). A shuttle already on a closed road may still drive
-        //     off it; only entering one is blocked.
-        public void SetClosed(IEnumerable<string> ids)
+        //     Closes roads by their IDs only. See SetClosures.
+        public int SetClosed(IEnumerable<string> ids) => SetClosures(ids, null);
+
+        // -----------------------------------------------------------------------------------
+        // Function: SetClosures
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Replaces the closed roads and redoes the search. A road is closed when its ID is given
+        //     (a whole road "road-9", or one direction of it "road-9|1"), or when it lies along one of
+        //     the given paths. The paths are for closures the backend names by its own edge IDs, which
+        //     are not city road IDs: its edges come with their geometry, in the same coordinates, and
+        //     the roads that lie along it (the same place, the same way, either direction) are closed.
+        //     A shuttle already on a closed road may still drive off it; only entering one is blocked.
+        //
+        // Args:
+        //     ids (IEnumerable<string>): Road IDs to close.
+        //     paths (IEnumerable<Vector2[]>): Polylines, in local metres, of closed edges.
+        //
+        // Returns:
+        //     (int): How many edges of the graph are closed now. 0 when something was given means
+        //     none of it names or lies along a road here, so the closures change nothing.
+        public int SetClosures(IEnumerable<string> ids, IEnumerable<Vector2[]> paths)
         {
             closed.Clear();
+            closedAlongPaths.Clear();
             foreach (var id in ids ?? Enumerable.Empty<string>()) closed.Add(id);
+            foreach (var path in paths ?? Enumerable.Empty<Vector2[]>())
+            {
+                if (path == null || path.Length < 2) continue;
+                var middle = PointAtFraction(path, 0.5f);
+                foreach (var edge in edges)
+                    if (RunsAlong(edge.Mid, edge.Points, path) || RunsAlong(middle, path, edge.Points))
+                        closedAlongPaths.Add(edge);
+            }
             Recompute();
+            return edges.Count(IsClosed);
         }
 
-        private bool IsClosed(Edge e) => closed.Count > 0 && (closed.Contains(e.Key) || closed.Contains(e.RoadId));
+        private bool IsClosed(Edge e) => (closed.Count > 0 && (closed.Contains(e.Key) || closed.Contains(e.RoadId))) || closedAlongPaths.Contains(e);
+
+        // A point of one line that is near the other line and runs the same way as it there (either direction)
+        private static bool RunsAlong(Vector2 point, Vector2[] own, Vector2[] other)
+        {
+            if (Nearest(point, other, out var otherDirection) > ClosureMatchM) return false;
+            Nearest(point, own, out var ownDirection);
+            return Mathf.Abs(Vector2.Dot(ownDirection, otherDirection)) >= ClosureParallel;
+        }
+
+        // Distance from a point to a line, and the direction of the line where it is nearest
+        private static float Nearest(Vector2 p, Vector2[] line, out Vector2 direction)
+        {
+            var best = float.MaxValue;
+            direction = Vector2.right;
+            for (var i = 0; i < line.Length - 1; i++)
+            {
+                var ab = line[i + 1] - line[i];
+                var lengthSquared = ab.sqrMagnitude;
+                if (lengthSquared < 1e-6f) continue;
+                var t = Mathf.Clamp01(Vector2.Dot(p - line[i], ab) / lengthSquared);
+                var distance = Vector2.Distance(p, line[i] + ab * t);
+                if (distance >= best) continue;
+                best = distance;
+                direction = ab.normalized;
+            }
+            return best;
+        }
+
+        // The point a fraction of the way along a line
+        private static Vector2 PointAtFraction(Vector2[] line, float fraction)
+        {
+            var total = 0f;
+            for (var i = 1; i < line.Length; i++) total += Vector2.Distance(line[i - 1], line[i]);
+            var target = total * fraction;
+            for (var i = 1; i < line.Length; i++)
+            {
+                var piece = Vector2.Distance(line[i - 1], line[i]);
+                if (piece > 0f && target <= piece) return Vector2.Lerp(line[i - 1], line[i], target / piece);
+                target -= piece;
+            }
+            return line[line.Length - 1];
+        }
 
         private void Recompute()
         {
