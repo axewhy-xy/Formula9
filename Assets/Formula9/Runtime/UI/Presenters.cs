@@ -16,6 +16,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using Formula9.Audio;
 using Formula9.Backend;
 using Formula9.Contracts;
 using Formula9.Session;
@@ -385,7 +386,7 @@ namespace Formula9.UI
                     Route = v.RouteId == null ? "—" : $"{v.RouteId} / {v.RouteRevision}",
                     RouteLine = v.RouteId == null ? "No route assigned" : $"Route {v.RouteId} · rev {v.RouteRevision}",
                     Battery = $"{Number(v.BatteryKwh)} / {Number(v.BatteryCapacityKwh)} kWh",
-                    BatteryPercent = v.BatteryCapacityKwh > 0 ? Math.Max(0, Math.Min(100, 100 * v.BatteryKwh / v.BatteryCapacityKwh)) : 0,
+                    BatteryPercent = BatteryWatch.Percent(v),
                     Provenance = v.Provenance.Kind,
                     NextStop = NextStopLine(v, route),
                     Eta = EtaLine(snapshot.EnergyForecasts?.FirstOrDefault(f => f.VehicleId == v.VehicleId)),

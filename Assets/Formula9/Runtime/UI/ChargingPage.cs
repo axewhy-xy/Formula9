@@ -39,6 +39,8 @@ namespace Formula9.UI
 
         // True while a booking or cancel is being sent, when Apply and Cancel are greyed out only to wait
         public bool Busy => busy;
+        // A booking passed every check and is on its way; a cancel or a refused Apply does not raise it
+        public event Action DecisionSent;
 
         public ChargingPage(VisualElement root, TrainingApi api, SessionController session, Action<Task> run, Action<string> notify, Func<bool> current)
         {
@@ -516,7 +518,7 @@ namespace Formula9.UI
                 var command = Scheduling
                     ? DecisionRules.ScheduleChargeCommand(s, vehicleId, draftChargerId, draftStart, replacing, reason.value)
                     : DecisionRules.ChargeCommand(s, SelectedOption(s).OptionId, reason.value);
-                if (await session.SubmitAsync(command))
+                if (await session.SubmitAsync(command, () => DecisionSent?.Invoke()))
                 {
                     await session.RefreshAsync();
                     reason.value = ""; ClearChoice();

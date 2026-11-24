@@ -45,30 +45,35 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: EveryMajorButtonIsInTheRealLayout
+        // Function: EverySoundingButtonIsInTheRealLayout
         // -----------------------------------------------------------------------------------
         // Description:
-        //     Each major button the app hooks the click onto exists in the simulator layout, so
-        //     a renamed button fails here instead of going silent.
+        //     Each start button the app hooks a sound onto exists in the simulator layout, so a
+        //     renamed button fails here instead of going silent.
         [Test]
-        public void EveryMajorButtonIsInTheRealLayout()
+        public void EverySoundingButtonIsInTheRealLayout()
         {
             var root = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/Formula9/UI/Formula9App.uxml").CloneTree();
-            foreach (var name in UiSounds.MajorButtons)
+            foreach (var name in UiSounds.StartButtons)
                 Assert.IsNotNull(root.Q<Button>(name), name);
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: MajorButtonsAndMapPointsHaveTheirOwnSounds
+        // Function: StartConfirmAndMapPointsHaveTheirOwnSounds
         // -----------------------------------------------------------------------------------
         // Description:
-        //     A major button and picking a map point play their own sounds.
+        //     Starting or resuming, confirming and picking a map point play their own sounds.
         [Test]
-        public void MajorButtonsAndMapPointsHaveTheirOwnSounds()
+        public void StartConfirmAndMapPointsHaveTheirOwnSounds()
         {
-            sounds.MajorPressed();
+            sounds.StartPressed();
+            sounds.ConfirmPressed();
             sounds.PointPicked();
-            CollectionAssert.AreEqual(new[] { UiSound.MajorButton, UiSound.MapPoint }, played);
+            CollectionAssert.AreEqual(new[] { UiSound.StartSession, UiSound.Confirm, UiSound.MapPoint }, played);
+            CollectionAssert.Contains(UiSounds.StartButtons, "resume", "resume shares the start session sound");
+            Assert.Greater(UiSounds.VolumeOf(UiSound.Confirm), UiSounds.Volume, "the soft confirmation chime plays louder");
+            Assert.AreEqual(UiSounds.Volume, UiSounds.VolumeOf(UiSound.StartSession));
+            Assert.IsTrue(UiSounds.Volumes.Values.All(v => v > 0 && v <= 1), "volumes stay within 0 to 1");
         }
 
         // -----------------------------------------------------------------------------------
@@ -198,15 +203,17 @@ namespace Formula9.Tests
         // Function: EverySoundIsARealClip
         // -----------------------------------------------------------------------------------
         // Description:
-        //     Every sound loads as a real clip.
+        //     Every sound loads as a real clip, with its audio data ready: a clip still unloaded
+        //     plays nothing the first time, which left each sound's first press silent.
         [Test]
         public void EverySoundIsARealClip()
         {
-            foreach (var file in UiSounds.Files.Values.Distinct())
+            foreach (var file in UiSounds.Files.Values.Concat(AlertPlayer.SoundFiles.Values).Concat(AlertPlayer.ClientSoundFiles.Values).Distinct())
             {
-                var clip = Resources.Load<AudioClip>($"Formula9/Audio/{file}");
+                var clip = AlertPlayer.LoadClip(file);
                 Assert.IsNotNull(clip, file);
                 Assert.Greater(clip.length, 0.02f, file);
+                Assert.AreEqual(AudioDataLoadState.Loaded, clip.loadState, file + " is ready before its first play");
             }
         }
     }
