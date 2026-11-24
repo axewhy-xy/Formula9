@@ -294,18 +294,19 @@ namespace Formula9.UI
         // Function: Title
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function names the joined session's scenario: spatial sessions are the 3D
-        //     exercise.
+        //     This function names the kind of session joined, in plain words: practice, the
+        //     scored assessment or the 3D road exercise. With none joined it is the page's name.
         //
         // Args:
-        //     snapshot (FullSnapshot): The accepted snapshot.
+        //     snapshot (FullSnapshot): The accepted snapshot, or null.
         //
         // Returns:
         //     string: The title.
         public static string Title(FullSnapshot snapshot) =>
-            IsAssessment(snapshot) ? "Toa Payoh · scored exercise" :
-            snapshot?.Spatial != null ? "3D fleet exercise · road, ramp and obstruction" :
-            "Singapore, real streets · incidents, detours, charging";
+            snapshot == null ? "Fleet training" :
+            IsAssessment(snapshot) ? "Assessment · scored, timed exercise" :
+            snapshot.Spatial != null ? "3D road exercise" :
+            "Practice session";
 
         // -----------------------------------------------------------------------------------
         // Function: Controls
@@ -816,27 +817,27 @@ namespace Formula9.UI
         // Function: Outcome
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function says what happened to a command, in the Qt client's wording, with
-        //     plainer messages for a kept-in-service shuttle, a reserved charger, and a Start
-        //     refused because a route crosses a closed road.
+        //     This function says what happened to a command, in plain words for the operator.
+        //     Routine decisions say nothing: the session badge and the Route Planning panel
+        //     already show them, and command IDs and ticks are for the console, not the screen.
         //
         // Args:
         //     outcome (CommandOutcome): The outcome.
         //
         // Returns:
-        //     string: The message.
+        //     string: The message, or null when there is nothing to tell the operator.
         public static string Outcome(CommandOutcome outcome)
         {
             switch (outcome.Status)
             {
                 case "QUEUED":
-                    return $"Decision {outcome.CommandId} for {outcome.TargetId} is QUEUED and durably accepted; awaiting authoritative outcome.";
+                    return null;
                 case "APPLIED":
                     if (outcome.CommandType == "SCHEDULE_CHARGE") return $"Charging slot booked on {outcome.TargetId}";
                     if (outcome.CommandType == "CANCEL_CHARGE_BOOKING") return $"Charging booking on {outcome.TargetId} cancelled";
                     if (outcome.TargetType == "VEHICLE") return $"Shuttle {outcome.TargetId} kept in service";
                     if (outcome.TargetType == "CHARGER") return $"Charger {outcome.TargetId} reserved";
-                    return $"Decision {outcome.CommandId} APPLIED for {outcome.TargetId} at tick {outcome.AppliedTick?.ToString() ?? "unknown"}.";
+                    return null;
                 case "REJECTED":
                     if (outcome.FailureCode == "ASSESSMENT_NOT_READY")
                         return "The assessment's charging task is unavailable. Create a fresh assessment, then try again.";
@@ -846,13 +847,13 @@ namespace Formula9.UI
                         return outcome.FailureCode == "STALE_REVISION" ? $"{outcome.TargetId} changed just now. Check the slot again."
                             : outcome.FailureCode == "CHARGER_CONFLICT" ? $"That slot on {outcome.TargetId} is already taken."
                             : $"The charging change was refused: {outcome.FailureCode ?? "no code"}.";
-                    return $"Decision {outcome.CommandId} REJECTED for {outcome.TargetId}: {outcome.FailureCode ?? "no code"}.";
+                    return $"The decision for {outcome.TargetId} was refused. Refresh and try again.";
                 case "NEEDS_RECONFIRMATION":
-                    return $"Decision {outcome.CommandId} for {outcome.TargetId} needs reconfirmation after recovery; review and submit again.";
+                    return $"The decision for {outcome.TargetId} needs reconfirmation after the session recovered. Review it and send it again.";
                 case "EXPIRED":
-                    return $"Decision {outcome.CommandId} for {outcome.TargetId} expired; refresh and choose a current option.";
+                    return $"The decision for {outcome.TargetId} expired. Refresh and choose a current option.";
                 default:
-                    return $"Decision {outcome.CommandId} returned status {outcome.Status} for {outcome.TargetId}.";
+                    return null;
             }
         }
 

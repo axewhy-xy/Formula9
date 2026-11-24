@@ -136,7 +136,8 @@ namespace Formula9.UI
             routePendingTitle = root.Q<Label>("route-pending-title");
             routePendingItems = root.Q("route-pending-items");
             routeBadge = root.Q<Label>("nav-route-badge");
-            Bind(root, "refresh", RequestContext);
+            // The setup panel's Refresh also reloads the route editor's context
+            Bind(root, "refresh-sessions", RequestContext);
             routeCameras = Bind(root, "route-cameras", ToggleCameras);
             routeStages = root.Q("route-stages");
             foreach (var stage in RoutePresenter.Stages) { var chip = new Label(stage); chip.AddToClassList("route-stage"); routeStages.Add(chip); }
@@ -369,6 +370,8 @@ namespace Formula9.UI
             fleetCameras.SetEnabled(world.CamerasShown || (world.HasCity && s?.Vehicles.Any(v => v.VehicleId == world.SelectedId) == true));
             fleetCameras.text = world.CamerasShown ? "Hide cameras" : "Cameras";
             fleetCameras.EnableInClassList("segment-selected", world.CamerasShown);
+            // Open cameras are closed from their own panel, so the Fleet List only offers to open them
+            fleetCameras.style.display = world.CamerasShown ? DisplayStyle.None : DisplayStyle.Flex;
             charging.UpdateActions();
             // The decision card: usable while the session runs, is connected and is up to date
             var free = Current && confirmCommand == null;
@@ -1017,7 +1020,6 @@ namespace Formula9.UI
             FillMetrics(routeOutcomeRows, RoutePresenter.OutcomeRows(outcome));
             routeOutcomeNotes.text = outcome == null ? "" : string.Join("\n", outcome.Summary);
             world.SetServedStops(outcome == null ? (IReadOnlyCollection<string>)Array.Empty<string>() : outcome.Stops.Where(stop => stop.ServedThisLoop).Select(stop => stop.StopId).ToList());
-            world.SetExecutionStatus(RoutePresenter.ExecutionLine(s, outcome));
         }
 
         private void RenderReports() => reports.Render(session.Store.SelectedSessionId, session.Store.Events, ledger);

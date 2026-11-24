@@ -5,7 +5,7 @@
  * Contributors: Rishika (page layout, fleet cards, map/3D switch),
  *     Lau Xiang Yang (training workspace, session list and cleanup, exit)
  * Date Created: 30/10/2026
- * Last Modified: 23/11/2026
+ * Last Modified: 24/11/2026
  *
  * Description:
  *     Part of the Unity client's UI. Wires the UI Toolkit screens to the login and session layers,
@@ -67,6 +67,7 @@ namespace Formula9.UI
         private Label fleetTitle;
         private Toggle remember;
         private Button viewMap, viewWorld;
+        private Toggle muteToggle;
         private const string RememberedUserKey = "login.rememberedUser";
         private TextField username, password, confirm, sessionId;
         private Label signUpHint, loginError, title, user, capacity, status, message, sessionBadge, worldNotice;
@@ -117,6 +118,8 @@ namespace Formula9.UI
             session.AvailabilityChanged += _ => Render(renderWorkspace: false);
             session.CommandFinished += outcome =>
             {
+                // The full outcome goes to the console; the screen only says what the operator needs
+                Debug.Log($"Command {outcome.CommandId} {outcome.Status} for {outcome.TargetId} at tick {outcome.AppliedTick?.ToString() ?? "unknown"}: {outcome.FailureCode ?? "no failure code"}");
                 ShowMessage(TrainingPresenter.Outcome(outcome));
                 if (outcome.Status == "APPLIED") Run(session.RefreshAsync());
                 // The closed road has to be routed around first, which happens on that page
@@ -141,6 +144,9 @@ namespace Formula9.UI
             world.transform.SetParent(transform, false);
             world.Attach(GetComponent<UIDocument>().rootVisualElement.Q("world"), new SceneLoader(transport),
                 MapTiles.FromEnvironment(transport), new TransitClient(transport), new CityClient(transport));
+            // The 2D Map / 3D View switch lives inside the map; Attach added the map's layers after
+            // it, so bring it back in front of them
+            GetComponent<UIDocument>().rootVisualElement.Q("view-bar")?.BringToFront();
             world.ReadinessChanged += (ready, diagnostic) => Render();
             world.EntitySelected += _ => { if (session.Store.Snapshot != null) RenderFleet(session.Store.Snapshot); };
             workspace = new TrainingWorkspace(GetComponent<UIDocument>().rootVisualElement, api, session, world, Run, text => ShowMessage(text));
@@ -156,7 +162,8 @@ namespace Formula9.UI
             // Incident alerts become notifications, one per shuttle and incident, each with a Decide
             // button. They pass the same gate as the sounds, so muting and replays behave alike. An
             // incident event the notifications don't take still says its headline on the message line.
-            var notifications = new NotificationQueue();
+            // A card says which shuttle its incident is slowing; only the 3D city knows the slowed roads
+            var notifications = new NotificationQueue { SlowedBy = id => world.IncidentSlowing(id) };
             var stack = new NotificationStack(rootElement.Q("notifications"), notifications,
                 (vehicle, incident) => workspace.DecideFor(vehicle, incident), () => workspace.ShowRoutePlanning());
             stack.Anchor(rootElement.Q("world"));
@@ -169,7 +176,7 @@ namespace Formula9.UI
                 if (headline != null) ShowMessage(headline);
             };
             var mute = new MuteSetting(new PlayerPreferences(), alerts);
-            var muteToggle = GetComponent<UIDocument>().rootVisualElement.Q<Toggle>("mute");
+            muteToggle = GetComponent<UIDocument>().rootVisualElement.Q<Toggle>("mute");
             muteToggle.SetValueWithoutNotify(mute.Muted);
             muteToggle.RegisterValueChangedCallback(change => mute.Muted = change.newValue);
             session.EventsAccepted += events => alerts.OnEvents(events, true);
@@ -437,7 +444,7 @@ namespace Formula9.UI
             fleetSearch = root.Q<TextField>("fleet-search");
             fleetSearch.textEdition.placeholder = "Search shuttle…";
             fleetSearch.RegisterValueChangedCallback(_ => { if (session.Store.Snapshot != null) RenderFleet(session.Store.Snapshot); });
-            sessionId.textEdition.placeholder = "Session ID";
+            sessionId.textEdition.placeholder = "…or paste a session ID";
             viewMap = root.Q<Button>("view-map");
             viewWorld = root.Q<Button>("view-world");
             viewMap.clicked += () => { world.ShowMap(true); Render(); };
@@ -479,8 +486,12 @@ namespace Formula9.UI
             createPractice.clicked += () => Run(Create(SessionController.IntegratedScenario));
             assessmentMode.clicked += () => Run(Create(SessionController.ScoredScenario));
             root.Q<Button>("join").clicked += () => Run(Join(sessionId.value.Trim()));
-            root.Q<Button>("refresh").clicked += () => Run(session.RefreshAsync());
-            refreshSessions.clicked += () => Run(RefreshSessionList());
+            // One Refresh for the setup panel: the list, and the joined session if there is one
+            refreshSessions.clicked += () =>
+            {
+                Run(session.RefreshAsync());
+                Run(RefreshSessionList());
+            };
             start.clicked += () => Run(session.SendControlAsync("START"));
             pause.clicked += () => Run(session.SendControlAsync("PAUSE"));
             resume.clicked += () => Run(session.SendControlAsync("RESUME"));
@@ -493,10 +504,12 @@ namespace Formula9.UI
             clock.text = DateTime.Now.ToString("d MMM yyyy · HH:mm", CultureInfo.InvariantCulture);
             Render();
 
-            // Toggle the sidebar between full width and icons only
+            // Toggle the sidebar between full width and icons only. It starts as icons only, so the
+            // map gets the width; each icon's tooltip names its page.
             var toggleBtn = root.Q<Button>("nav-toggle-btn");
             var navPanel = root.Q("nav-panel");
-            bool isCollapsed = false;
+            bool isCollapsed = true;
+            navPanel?.EnableInClassList("collapsed", isCollapsed);
             toggleBtn.clicked += () =>
             {
                 isCollapsed = !isCollapsed;
@@ -882,7 +895,7 @@ namespace Formula9.UI
             }
             finally
             {
-                refreshSessions.text = "Refresh list";
+                refreshSessions.text = "Refresh";
                 RenderCleanup();
             }
         }
@@ -921,6 +934,8 @@ namespace Formula9.UI
             pause.style.display = controls.PauseVisible ? DisplayStyle.Flex : DisplayStyle.None;
             resume.style.display = controls.ResumeVisible ? DisplayStyle.Flex : DisplayStyle.None;
             sessionPlayback.style.display = controls.PlaybackVisible ? DisplayStyle.Flex : DisplayStyle.None;
+            // Alerts only sound in a joined session, so the mute is offered only then
+            if (muteToggle != null) muteToggle.style.display = snapshot != null ? DisplayStyle.Flex : DisplayStyle.None;
             if (world != null)
             {
                 viewMap.EnableInClassList("segment-selected", world.ShowingMap);
@@ -929,6 +944,7 @@ namespace Formula9.UI
                 // Only loading and failures are shown; the routine 3D summary stays in the tooltip
                 var notice = world.Notice ? world.Diagnostic : "";
                 if (worldNotice.text != notice) worldNotice.text = notice;
+                worldNotice.style.display = string.IsNullOrEmpty(notice) ? DisplayStyle.None : DisplayStyle.Flex;
             }
             start.SetEnabled(controls.Start);
             start.tooltip = controls.StartHint ?? "";
@@ -1178,7 +1194,7 @@ namespace Formula9.UI
         //     text (string): The message, or empty to hide it.
         private void ShowMessage(string text)
         {
-            message.text = text;
+            message.text = text ?? "";
             message.style.display = string.IsNullOrEmpty(text) ? DisplayStyle.None : DisplayStyle.Flex;
         }
 

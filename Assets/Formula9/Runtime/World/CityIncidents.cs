@@ -49,6 +49,12 @@ namespace Formula9.World
         public string Status { get; private set; }
         public int SceneCount => scenes.Count;
 
+        // The shuttle a live incident is slowing on the roads it slows, or null; for the incident
+        // notification, since only the scene knows those roads
+        public FleetVehicle SlowedBy(string incidentId) =>
+            snapshot != null && incidentId != null && scenes.TryGetValue(incidentId, out var scene)
+                ? snapshot.Vehicles.FirstOrDefault(v => IncidentSimulation.IsSlowing(scene.Plan, v, snapshot)) : null;
+
         public CityIncidents(Transform parent, Material basis, Material lineMaterial)
         {
             root = new GameObject("Incidents").transform;

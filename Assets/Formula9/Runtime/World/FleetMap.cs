@@ -31,6 +31,8 @@ namespace Formula9.World
 
         private static readonly Color BasemapBackground = new Color(0.925f, 0.945f, 0.941f);
         private static readonly Color PlannedRoute = new Color(0.153f, 0.682f, 0.376f);
+        // The outline drawn under every route on the street map
+        private static readonly Color RouteCasing = new Color(0.06f, 0.18f, 0.22f, 0.85f);
         private static readonly Color RoadClosed = new Color(0.839f, 0.188f, 0.192f);
         private static readonly Color StopColor = new Color(0.09f, 0.412f, 0.667f);
         // Gold: no shuttle in the palette uses it. Its names need a darker shade to read on white.
@@ -45,8 +47,9 @@ namespace Formula9.World
         private static readonly Color ChargingTrip = new Color(0.925f, 0.102f, 0.6f);
         private static readonly Color[] ShuttlePalette =
         {
-            // No green: planned routes are green, so a green shuttle would vanish on one.
-            new Color(0.184f, 0.502f, 0.929f), new Color(0.91f, 0.365f, 0.627f), new Color(0.949f, 0.6f, 0.29f), new Color(0.608f, 0.318f, 0.878f),
+            // No green and no orange: planned routes are green and approved detours orange, so a shuttle
+            // in either would vanish on its own route's outline. The third is a wine red for that reason.
+            new Color(0.184f, 0.502f, 0.929f), new Color(0.91f, 0.365f, 0.627f), new Color(0.6f, 0.106f, 0.31f), new Color(0.608f, 0.318f, 0.878f),
             new Color(0, 0.639f, 0.639f), new Color(0.51f, 0.392f, 0.235f), new Color(0.353f, 0.431f, 0.549f),
         };
         // The same colour for a shuttle on the map and on its fleet card.
@@ -154,11 +157,17 @@ namespace Formula9.World
             // A wheel or touchpad scroll over the legend scrolls the legend only: stopped here, after
             // the rows have used it, it never reaches the map's zoom below
             legend.RegisterCallback<WheelEvent>(e => e.StopPropagation());
-            var legendToggle = new Button { text = "Legend  -", tooltip = "Show or hide the legend" };
+            // The title and a chevron that points down while the list is folded (open it) and up
+            // while it is shown (fold it), as a dropdown does
+            var legendToggle = new Button { tooltip = "Show or hide the legend" };
+            legendToggle.Add(new Label("Legend") { pickingMode = PickingMode.Ignore });
+            var legendChevron = new Label("‹") { pickingMode = PickingMode.Ignore };
+            legendChevron.AddToClassList("map-legend-chevron");
+            legendToggle.Add(legendChevron);
             showLegend = show =>
             {
                 legendRows.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
-                legendToggle.text = show ? "Legend  -" : "Legend  +";
+                legend.EnableInClassList("map-legend-folded", !show);
             };
             legendToggle.clicked += () => showLegend(legendRows.resolvedStyle.display == DisplayStyle.None);
             legendToggle.AddToClassList("map-legend-title");
@@ -618,21 +627,38 @@ namespace Formula9.World
                 var closures = new HashSet<string>(snapshot.Disruptions.Where(d => d.ActiveFromTick <= snapshot.Tick && (d.ActiveUntilTick == null || snapshot.Tick < d.ActiveUntilTick)).SelectMany(d => d.AffectedEdgeIds));
                 // A route is an approved detour when it was revised, or a shuttle on it is detouring
                 var detouring = new HashSet<string>(snapshot.Vehicles.Where(v => v.ServiceState == "DETOURING").Select(v => v.RouteId));
+                // Each route is outlined in the colour of the shuttle driving it, the same colour as its bus
+                // icon (ordered as DrawVehicles orders them); a route several share takes the first one's
+                var ordered = snapshot.Vehicles.OrderBy(v => v.VehicleId, StringComparer.Ordinal).ToList();
+                var outlines = new Dictionary<string, Color>();
+                for (var i = 0; i < ordered.Count; i++)
+                    if (ordered[i].RouteId != null && !outlines.ContainsKey(ordered[i].RouteId))
+                        outlines[ordered[i].RouteId] = offline ? Frozen : ShuttleColor(i);
+                // Every road piece of every route, sorted into open and closed. They are drawn in layers below,
+                // every outline before any middle, so no piece's outline covers the end of the piece before it
+                // (which left a notch at each join).
+                var open = new List<(Vector2[] Path, Color Outline, Color Middle)>();
+                var closed = new List<Vector2[]>();
                 // While editing, only the route being edited: the rest of the fleet would hide the roads
                 foreach (var route in snapshot.Routes.Where(r => draft == null || r.RouteId == draft.Context.RouteId))
                 {
                     var routeColor = draft != null ? CommittedInEdit : !realMap ? new Color(0.4f, 0.6f, 0.7f) : route.Revision > 1 || detouring.Contains(route.RouteId) ? ApprovedDetour : PlannedRoute;
+                    // A route no shuttle drives keeps the dark outline
+                    var outline = outlines.TryGetValue(route.RouteId, out var shuttleColor) ? shuttleColor : RouteCasing;
                     for (var i = 0; i < route.EdgePathsM.Count; i++)
                     {
                         var path = route.EdgePathsM[i].Select(p => Project(p.XM, p.YM)).ToArray();
-                        if (i < route.DirectedEdgeIds.Count && closures.Contains(route.DirectedEdgeIds[i]))
-                        {
-                            Line(painter, path, new Color(RoadClosed.r, RoadClosed.g, RoadClosed.b, 0.40f), 28);
-                            Line(painter, path, RoadClosed, 10);
-                        }
-                        else Line(painter, path, routeColor, 6);
+                        if (i < route.DirectedEdgeIds.Count && closures.Contains(route.DirectedEdgeIds[i])) closed.Add(path);
+                        else open.Add((path, outline, routeColor));
                     }
                 }
+                // The shuttle's colour as a 3 px edge each side, lifting the route off the street map's own
+                // coloured roads and saying whose route it is; then the route's colour down the middle
+                if (realMap) foreach (var piece in open) Line(painter, piece.Path, piece.Outline, 12);
+                foreach (var piece in open) Line(painter, piece.Path, piece.Middle, 6);
+                // Closed sections over the routes, their glow first for the same reason
+                foreach (var path in closed) Line(painter, path, new Color(RoadClosed.r, RoadClosed.g, RoadClosed.b, 0.40f), 28);
+                foreach (var path in closed) Line(painter, path, RoadClosed, 10);
                 // Where a shuttle is driving for a charge: its path is not a route, so it would otherwise be invisible
                 foreach (var booking in snapshot.ChargeBookings.Where(b => b.Status == "ACTIVE" && b.TripPathM.Count > 1))
                 {
@@ -716,6 +742,8 @@ namespace Formula9.World
         private static void Line(Painter2D painter, Vector2[] points, Color color, float width)
         {
             if (points.Length < 2) return;
+            // Round joins and ends, so a route made of many road pieces reads as one line
+            painter.lineJoin = LineJoin.Round; painter.lineCap = LineCap.Round;
             painter.strokeColor = color; painter.lineWidth = width; painter.BeginPath(); painter.MoveTo(points[0]);
             foreach (var point in points.Skip(1)) painter.LineTo(point);
             painter.Stroke();

@@ -99,6 +99,32 @@ namespace Formula9.Tests
             StringAssert.StartsWith("Shuttle 04 reaches it now.", queue.Items[0].Body);
         }
 
+        // The card's last line says what the 3D view's status box used to: the event's impact, how long
+        // until the incident clears (counted from the snapshot's ticks), and the shuttle it is slowing,
+        // which only the 3D city knows. With none of them known there is no line.
+        [Test]
+        public void TheDetailLineSaysTheImpactWhenItClearsAndWhoItSlows()
+        {
+            var s = Snapshot();
+            s.Tick = 200; s.SimulationTimeS = 10; // 0.05 s a tick
+            Incident(s, Collision).Location = null; // no closure on its road to end sooner
+            Incident(s, Collision).ClearsAtTick = 700; // 500 ticks, 25 s
+            var queue = new NotificationQueue { SlowedBy = id => id == Collision ? new FleetVehicle { VehicleId = "shuttle-02", SpeedMps = 3.1 } : null };
+            queue.OnSnapshot(s);
+            var detected = Detected(reach: ("shuttle-04", 40.0));
+            detected.Data["operational_impact"] = "Lane blocked";
+            queue.OnEvent(detected);
+            Assert.AreEqual("Lane blocked · clears in 25 s · Shuttle 02 slowed to 3.1 m/s", queue.Items[0].Detail);
+
+            var plain = Snapshot();
+            Incident(plain, Collision).Location = null;
+            Incident(plain, Collision).ClearsAtTick = null;
+            var quiet = new NotificationQueue();
+            quiet.OnSnapshot(plain);
+            quiet.OnEvent(Detected(reach: ("shuttle-04", 40.0)));
+            Assert.IsNull(quiet.Items[0].Detail);
+        }
+
         [Test]
         public void BeforeAnySnapshotTheTextComesFromTheEvent()
         {
