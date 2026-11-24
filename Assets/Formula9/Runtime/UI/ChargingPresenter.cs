@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Formula9.Audio;
 using Formula9.Contracts;
 
 namespace Formula9.UI
@@ -263,7 +264,7 @@ namespace Formula9.UI
         public static int Stage(string vehicleId, string choice, bool checkedOk) => vehicleId == null ? 0 : choice == null ? 1 : checkedOk ? 3 : 2;
 
         // Battery colours, the same thresholds as the Fleet Overview gauge.
-        public static string BatteryClass(double percent) => percent < 20 ? "charge-battery-low" : percent < 50 ? "charge-battery-mid" : "charge-battery-good";
+        public static string BatteryClass(double percent) => BatteryWatch.IsRed(percent) ? "charge-battery-low" : percent < 50 ? "charge-battery-mid" : "charge-battery-good";
 
         public static string StatusClass(string status)
         {

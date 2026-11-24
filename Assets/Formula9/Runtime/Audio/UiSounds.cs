@@ -1,14 +1,15 @@
 /*
- * Interface sounds from amee's sound consultation with Vuk.
+ * Interface sounds from amee's sound consultation with Vuk and the audio professor's review.
  *
  * Author: Choo Jian Wei
  * Date Created: 30/10/2026
- * Last Modified: 23/11/2026
+ * Last Modified: 24/11/2026
  *
  * Description:
  *     Applies the consultation's rules to the Unity controls: buttons make no hover sound and most
- *     presses stay silent. Only the major buttons (Start scenario, Start and watch in 3D, Approve
- *     route and the Charging page's Apply) play an electric click, and picking a point for a route
+ *     presses stay silent. Start scenario, Start and watch in 3D and Resume simulation play the start
+ *     session click; Approve route (a re-route), Route Planning's Confirm (keep, hold or assist) and the
+ *     Charging page's Apply play the confirmation sound; picking a point for a route
  *     plays the map point sound. Clicking a button that is greyed out plays the command rejected
  *     sound, so the app says no out loud, unless the app is busy sending something: a button greyed
  *     out only while a command, login or preview is on its way has not refused anything. Interface sounds are separate from training alerts, so
@@ -27,7 +28,7 @@ namespace Formula9.Audio
     // -----------------------------------------------------------------------------------
     // Description:
     //     This enum lists the interface sounds. UiSounds.Files maps each to its clip.
-    public enum UiSound { MajorButton, MapPoint, Refused }
+    public enum UiSound { StartSession, Confirm, MapPoint, Refused }
 
     // -----------------------------------------------------------------------------------
     // Class: UiSounds
@@ -36,19 +37,43 @@ namespace Formula9.Audio
     //     This class decides when an interface sound plays. The player is injected, so the rules
     //     are tested without audio.
     //
-    //     Attributes: Volume (0.35, as in the web app); MajorButtons, the names of the buttons
-    //     that click; Files, sound to clip in Resources/Formula9/Audio.
+    //     Attributes: Volume (0.35, as in the web app); Volumes, the sounds played louder;
+    //     StartButtons, the buttons that start or
+    //     resume the session; ConfirmButtons, the buttons that confirm a decision; Files, sound to
+    //     clip in Resources/Formula9/Audio.
     public sealed class UiSounds
     {
         public const float Volume = 0.35f;
 
-        // The buttons the consultation counts as major; every other press stays silent.
-        public static readonly IReadOnlyList<string> MajorButtons = new[] { "start", "route-start", "route-approve", "charge-apply" };
+        // Sounds louder than Volume. The confirmation chime is soft and was hard to hear at 0.35.
+        public static readonly IReadOnlyDictionary<UiSound, float> Volumes = new Dictionary<UiSound, float>
+        {
+            [UiSound.Confirm] = 1f,
+        };
+
+        // -----------------------------------------------------------------------------------
+        // Function: VolumeOf
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function gives the volume a sound plays at: its own from Volumes, else Volume.
+        //
+        // Args:
+        //     sound (UiSound): The sound.
+        //
+        // Returns:
+        //     float: Its volume, 0 to 1.
+        public static float VolumeOf(UiSound sound) => Volumes.TryGetValue(sound, out var volume) ? volume : Volume;
+
+        // The audio professor's review: starting and resuming the session share one click, and every
+        // other confirmation plays the confirmation sound. Every other press stays silent.
+        public static readonly IReadOnlyList<string> StartButtons = new[] { "start", "route-start", "resume" };
+        public static readonly IReadOnlyList<string> ConfirmButtons = new[] { "route-approve", "route-confirm-send", "charge-apply" };
 
         // Sound -> clip in Resources/Formula9/Audio.
         public static readonly IReadOnlyDictionary<UiSound, string> Files = new Dictionary<UiSound, string>
         {
-            [UiSound.MajorButton] = "ui_major_button",  // App SFX: UI Button Click Positive_1.wav
+            [UiSound.StartSession] = "ui_start_session", // UI Button Click-Dull.wav
+            [UiSound.Confirm] = "ui_confirmation",      // UI Confirmation_1.wav
             [UiSound.MapPoint] = "ui_map_point",        // UI Hover New 1.wav
             [UiSound.Refused] = "alert_command_rejected", // the training alert's clip, reused for a greyed-out button
         };
@@ -98,11 +123,18 @@ namespace Formula9.Audio
         public void Unlisten(VisualElement root) => root?.UnregisterCallback(onPointerDown, TrickleDown.TrickleDown);
 
         // -----------------------------------------------------------------------------------
-        // Function: MajorPressed
+        // Function: StartPressed
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function plays the electric click for a major button.
-        public void MajorPressed() => play?.Invoke(UiSound.MajorButton);
+        //     This function plays the start session click for a start or resume button.
+        public void StartPressed() => play?.Invoke(UiSound.StartSession);
+
+        // -----------------------------------------------------------------------------------
+        // Function: ConfirmPressed
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function plays the confirmation sound for a button that confirms a decision.
+        public void ConfirmPressed() => play?.Invoke(UiSound.Confirm);
 
         // -----------------------------------------------------------------------------------
         // Function: PointPicked
@@ -165,28 +197,32 @@ namespace Formula9.Audio
         // Function: Awake
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function adds a 2D audio source that does not play on its own.
+        //     This function adds a 2D audio source that does not play on its own, and loads every
+        //     interface clip up front: a clip whose audio is not loaded yet plays nothing the first
+        //     time, so each sound's first press would otherwise be silent.
         private void Awake()
         {
             source = gameObject.AddComponent<AudioSource>();
             source.playOnAwake = false;
             source.spatialBlend = 0;
+            foreach (var file in UiSounds.Files.Values)
+                if (!clips.ContainsKey(file)) clips[file] = AlertPlayer.LoadClip(file);
         }
 
         // -----------------------------------------------------------------------------------
         // Function: Play
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function plays one interface sound at the set volume. Each clip is loaded the
-        //     first time it plays and then kept; a missing clip stays silent.
+        //     This function plays one interface sound at its volume (VolumeOf). The clips were loaded in
+        //     Awake; a missing clip stays silent.
         //
         // Args:
         //     sound (UiSound): The sound to play.
         public void Play(UiSound sound)
         {
             var file = UiSounds.Files[sound];
-            if (!clips.TryGetValue(file, out var clip)) clips[file] = clip = Resources.Load<AudioClip>($"Formula9/Audio/{file}");
-            if (clip != null) source.PlayOneShot(clip, UiSounds.Volume);
+            if (!clips.TryGetValue(file, out var clip)) clips[file] = clip = AlertPlayer.LoadClip(file);
+            if (clip != null) source.PlayOneShot(clip, UiSounds.VolumeOf(sound));
         }
     }
 }

@@ -176,12 +176,13 @@ namespace Formula9.UI
             session.SnapshotAccepted += (snapshot, _) => battery.OnSnapshot(snapshot);
             session.ConnectionChanged += connected =>
             {
-                // The reconnect cue plays on the same snapshot; a battery that ran low meanwhile waits a poll.
+                // Reconnecting plays no cue of its own: the session recovered alert already says the
+                // backend is back. A battery that turned red meanwhile waits a poll so it doesn't overlap it.
                 if (connected) battery.HoldNextCue();
-                if (!alerts.Muted) player.Play(connected ? AlertPlayer.ReconnectCue : AlertPlayer.DisconnectCue);
+                else if (!alerts.Muted) player.Play(AlertPlayer.DisconnectCue);
             };
 
-            // Interface sounds from amee's consultation with Vuk: only the major buttons click.
+            // Interface sounds: only the start, resume and confirm buttons make a sound.
             var root = GetComponent<UIDocument>().rootVisualElement;
             var uiPlayer = new GameObject("Interface sounds").AddComponent<UiSoundPlayer>();
             uiPlayer.transform.SetParent(transform, false);
@@ -190,7 +191,8 @@ namespace Formula9.UI
             // on its way, even a button greyed out for a real reason stays silent. No sound is safer than a
             // "no" for something that worked, and a queued command can keep this silent for a few seconds.
             uiSounds = new UiSounds(uiPlayer.Play, () => busy || cleanupBusy || session?.HasPendingCommand == true || workspace?.Busy == true);
-            foreach (var name in UiSounds.MajorButtons) root.Q<Button>(name).clicked += uiSounds.MajorPressed;
+            foreach (var name in UiSounds.StartButtons) root.Q<Button>(name).clicked += uiSounds.StartPressed;
+            foreach (var name in UiSounds.ConfirmButtons) root.Q<Button>(name).clicked += uiSounds.ConfirmPressed;
             uiSounds.Listen(root);
             listenedRoot = root;
             world.RouteNodeSelected += _ => uiSounds.PointPicked();
@@ -1006,7 +1008,7 @@ namespace Formula9.UI
                 var fill = new VisualElement();
                 fill.AddToClassList("battery-fill");
                 fill.style.width = Length.Percent((float)row.BatteryPercent);
-                fill.style.backgroundColor = row.BatteryPercent < 20 ? new Color(0.839f, 0.188f, 0.192f)
+                fill.style.backgroundColor = BatteryWatch.IsRed(row.BatteryPercent) ? new Color(0.839f, 0.188f, 0.192f)
                     : row.BatteryPercent < 50 ? new Color(0.949f, 0.6f, 0.29f) : new Color(0.153f, 0.682f, 0.376f);
                 gauge.Add(fill);
                 battCol.Add(gauge);
