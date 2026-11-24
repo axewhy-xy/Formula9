@@ -34,6 +34,7 @@ namespace Formula9.UI
         private readonly ChargingPage charging;
         private readonly ReportsPage reports;
         private readonly IncidentReportsTab incidentReports;
+        private readonly AssessmentReportsTab assessmentReports;
         private readonly Button sessionToggle;
         private readonly VisualElement sessionCard;
         private bool? sessionToolsOpen;
@@ -156,7 +157,8 @@ namespace Formula9.UI
             routeOutcomeRows = root.Q("route-outcome-rows");
             fleetTable = Table(root.Q("route-fleet-host"), "", "Shuttle ID", "State", "Route / revision", "Battery", "Provenance");
             Tabs(root, ("route-tab-editor", "route-editor-panel"), ("route-tab-fleet", "route-fleet-panel"));
-            Tabs(root, ("reports-tab-log", "reports-log-panel"), ("reports-tab-commands", "reports-commands-panel"), ("reports-tab-incidents", "reports-incidents-panel"));
+            Tabs(root, ("reports-tab-log", "reports-log-panel"), ("reports-tab-commands", "reports-commands-panel"),
+                ("reports-tab-incidents", "reports-incidents-panel"), ("reports-tab-assessment", "reports-assessment-panel"));
             operationalViews = new List<VisualElement> { root.Q("view-bar"), root.Q("world") };
             routeUndo = Bind(root, "route-undo", () => RestoreDraft(-1));
             routeRedo = Bind(root, "route-redo", () => RestoreDraft(1));
@@ -191,6 +193,8 @@ namespace Formula9.UI
 
             reports = new ReportsPage(root);
             incidentReports = new IncidentReportsTab(root, api, session, world, run);
+            assessmentReports = new AssessmentReportsTab(root, api, run);
+            root.Q<Button>("reports-tab-assessment").clicked += Render;
             session.SnapshotAccepted += (_, __) => { acceptedAt = Time.realtimeSinceStartup; Render(); };
             session.EventsAccepted += _ => RenderReports();
             session.AvailabilityChanged += _ => { if (!session.Available) InvalidateRoute(); Render(); };
@@ -294,6 +298,7 @@ namespace Formula9.UI
             }
             FitSessionControls();
             incidentReports.Render(s);
+            assessmentReports.Render(s, session.SignedInUsername, shownPage == ReportsPageIndex);
             if (s == null) { RenderBadge(0); RenderReports(); UpdateActions(); return; }
             // An applied approval moves its route to a new revision, which finishes the draft. A queued
             // or rejected one never does, so its draft stays for another try.

@@ -85,6 +85,7 @@ namespace Formula9.Session
     public sealed class SessionController
     {
         public const string IntegratedScenario = "scenario-m2-integrated-r1";
+        public const string ScoredScenario = "scenario-toa-payoh-scored-r1";
         public static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
         // The backend's traffic moves every tenth of a second. The 3D city asks for it again as soon as
         // each reply comes, and the backend holds a request this long for the next frame, so each frame
@@ -170,6 +171,9 @@ namespace Formula9.Session
         public bool Available { get; private set; }
         public bool HasPendingCommand => pending != null;
         public bool CreationPending => creationKey != null;
+        internal string PendingCreationScenario => creationScenario;
+        // Assessment results belong to the account even when the joined session stays selected after logout.
+        internal string SignedInUsername => auth.IsLoggedIn ? auth.Username : null;
         // Scenario for the next creation; an unresolved creation keeps the one it started with.
         public string Scenario { get; set; } = IntegratedScenario;
         // Whether PumpStream keeps a stream of the joined session open. Off by default, so a caller
@@ -677,7 +681,7 @@ namespace Formula9.Session
         public async Task<(int Live, int Archived)> ArchiveAllAsync()
         {
             var listed = await api.ListSessionsAsync(ArchiveListPage, lifetime.Token);
-            var live = listed.Sessions.Where(s => s.OccupiesCapacity).Select(s => s.SessionId).ToList();
+            var live = listed.Sessions.Where(s => s.OccupiesCapacity && s.CanArchive != false).Select(s => s.SessionId).ToList();
             foreach (var id in live)
             {
                 try

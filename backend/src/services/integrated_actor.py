@@ -3,7 +3,7 @@ Authoritative planar fleet and domain state for the BE-M2-06 integrated slice.
 
 Author: Nur Syazliyarni Binte Zazali
 Date Created: 28/10/2026
-Last Modified: 28/10/2026
+Last Modified: 23/11/2026
 
 Description:
     Reuses BE-M2-02 separation/motion and BE-M2-04/05 validation, incident and
@@ -1008,6 +1008,10 @@ class IntegratedSessionActor(SessionActor):
     def depot_distances(self):
         return {self.domain.vehicles[shuttle.ID].vehicle_id: self.depot_choice(shuttle)[1] for shuttle in self.shuttles}
 
+    def charging_offer_loop_limits(self) -> dict[str, int]:
+        """Scenario-specific warning thresholds, separate from the battery reserve."""
+        return {}
+
     def battery_decisions(self, model, snapshot, *, in_place=False):
         choices = {self.domain.vehicles[shuttle.ID].vehicle_id: self.depot_choice(shuttle) for shuttle in self.shuttles}
         # From each loop's end, the way in to the furthest depot it must keep in reach (see _safety_returns)
@@ -1022,7 +1026,7 @@ class IntegratedSessionActor(SessionActor):
                 for shuttle, vehicle in zip(self.shuttles, snapshot.vehicles)
                 for charger_id in self.definition.bay_positions},
             depot_choices={vehicle_id: depot["depot_id"] for vehicle_id, (depot, _) in choices.items()},
-            return_distances_m=returns, in_place=in_place)
+            return_distances_m=returns, offer_loop_limits=self.charging_offer_loop_limits(), in_place=in_place)
 
     def generate_snapshot(self, *, in_place: bool = False) -> FullSnapshot:
         """The public snapshot of where the session is now: a copy of the domain, or with in_place the
@@ -1548,9 +1552,10 @@ class IntegratedSessionActor(SessionActor):
         targets = [target for shuttle in self.shuttles
                    if (target := self._incident_target(shuttle, blocked)) is not None]
         # Settled incidents leave random_incidents, so an empty list is not "first".
-        opening = self.incident_catalog.opening if self.random_incident is None else None
+        opening = self._incident_opening() if self.random_incident is None else None
         if opening is not None:
-            targets = [target for target in targets if target["editable"] and not target["busy"]]
+            targets = [target for target in targets if target["editable"] and not target["busy"]
+                       and target["vehicle"].vehicle_id == opening.get("vehicle_id", target["vehicle"].vehicle_id)]
         if not targets:
             logger.debug("[INCIDENT DEBUG] incident delayed: no shuttle on its route")
             return
@@ -1566,7 +1571,9 @@ class IntegratedSessionActor(SessionActor):
                 return
             target = self.rng.choice(targets)
             vehicle = target["vehicle"]
-            eligible = [edge for edge, _ in target["ahead"]]
+            eligible = [edge for edge, distance in target["ahead"] if distance >= opening.get("minimum_distance_m", 0)]
+            if not eligible:
+                return
             edge = eligible[0]
             routes = self.definition.routes.for_route(self.domain, vehicle.route_id)
             for candidate in eligible:
@@ -1641,7 +1648,8 @@ class IntegratedSessionActor(SessionActor):
         # Only a closure on the remaining route of a shuttle that can be taken round it asks for a decision.
         requires_guidance = (is_closure and edge in target["remaining"] and target["editable"]
                              and not target["busy"])
-        event = WorldEvent(event_id=f"random-{template.kind.lower()}-{self.current_tick}",
+        event_id = (opening or {}).get("event_id", f"random-{template.kind.lower()}-{self.current_tick}")
+        event = WorldEvent(event_id=event_id,
                            event_type=KIND_EVENTS[template.kind], edge_id=edge, node_id=None,
                            start_tick=self.current_tick, duration_s=duration_s, warning_s=template.warning_s,
                            detection_delay_s=template.detection_delay_s, recovery_s=template.recovery_s)
@@ -1656,6 +1664,10 @@ class IntegratedSessionActor(SessionActor):
                      "guidance=%s next_due=%s", opening is not None, selection["incident_id"], vehicle.vehicle_id,
                      edge, selection["warning_m"], selection["impact_edge_ids"], requires_guidance,
                      self.incident_due_tick)
+
+    def _incident_opening(self):
+        """Provide the opening incident policy for this session."""
+        return self.incident_catalog.opening
 
     def _incident_record(self, event: WorldEvent, *, incident_id, disruption_id, target, requires_guidance, origin):
         """The checkpointed record of one placed world event: what the IncidentService stages, what slows the
@@ -1934,6 +1946,7 @@ class IntegratedSessionActor(SessionActor):
         charging = {s.ID for s in self.shuttles if self.modes[s.ID] == "CHARGING"}
         proposed = {s.ID: self._prepare_motion(s) for s in self.shuttles}
         proposed, blocked = self._resolve_motion(proposed)
+        self.observe_motion(proposed)
         moved = {}
         for shuttle in self.shuttles:
             mode = self.modes[shuttle.ID]
@@ -1978,8 +1991,12 @@ class IntegratedSessionActor(SessionActor):
             elif shuttle.ID in charging and self._charge_finished(shuttle.ID, level):
                 # Retain the reservation until the finished shuttle has driven
                 # clear of the bay; a public free port must be physically usable.
+                vehicle_id = self.domain.vehicles[shuttle.ID].vehicle_id
+                booking = next((item for item in live_bookings(self.domain)
+                                if item.vehicle_id == vehicle_id and item.status == "ACTIVE"), None)
                 self._begin_parking(shuttle, port.charger_id)
                 self._event(shuttle, "CHARGING_FINISHED", charger_id=port.charger_id,
+                    booking_id=booking.booking_id if booking else None,
                     charged_s=self.charge_elapsed[shuttle.ID], energy_added_kwh=level-self.charge_started_kwh[shuttle.ID], battery_kwh=level)
             elif mode in {"IN_SERVICE", "DETOURING"} and shuttle.route_ID.startswith("depot-path-"):
                 if shuttle.progress >= self._routes[shuttle.route_ID]["total_length"]-EPSILON:

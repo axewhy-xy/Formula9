@@ -169,7 +169,9 @@ def charge_options(model: EnergyModel, snapshot: FullSnapshot, charge_s: float =
                    parking_distances_m: dict[tuple[str, str], float] | None = None,
                    depot_choices: dict[str, str] | None = None,
                    return_distances_m: dict[str, float] | None = None,
-                   charge_time_scale: float | None = None) -> list[ChargeOption]:
+                   charge_time_scale: float | None = None,
+                   offer_loop_limits: dict[str, int] | None = None,
+                   forecasts: list[EnergyForecast] | None = None) -> list[ChargeOption]:
     if parking_distances_m is not None:
         if depot_distances_m is None or depot_speed_mps is None or depot_speed_mps <= 0:
             raise ValueError("Parking estimates require depot distances and a positive depot speed")
@@ -187,15 +189,20 @@ def charge_options(model: EnergyModel, snapshot: FullSnapshot, charge_s: float =
         decision_started[o.vehicle_id] = min(started, decision_started.get(o.vehicle_id, started))
     options = []
     depot_chargers = {d.depot_id: set(d.charger_ids) for d in snapshot.depots}
-    for forecast in energy_forecasts(model, snapshot, depot_distances_m=depot_distances_m, depot_speed_mps=depot_speed_mps,
-                                     depot_choices=depot_choices):
-        if forecast.loops_remaining is None or forecast.loops_remaining > LOW_LOOPS:
+    # The snapshot builder already calculated these from the same model and inputs.
+    if forecasts is None:
+        forecasts = energy_forecasts(model, snapshot, depot_distances_m=depot_distances_m,
+                                    depot_speed_mps=depot_speed_mps, depot_choices=depot_choices)
+    for forecast in forecasts:
+        # Scored exercises can publish an earlier offer for the designated shuttle.
+        limit = (offer_loop_limits or {}).get(forecast.vehicle_id, LOW_LOOPS)
+        if forecast.loops_remaining is None or forecast.loops_remaining > limit:
             continue
         vehicle = vehicles[forecast.vehicle_id]
         if (vehicle.vehicle_id in on_charger or
                 not transition_allowed("vehicle", vehicle.service_state, "RETURNING_TO_DEPOT")):
             continue
-        if forecast.loops_remaining >= snapshot.charge_decision_deferrals.get(vehicle.vehicle_id, LOW_LOOPS + 1):
+        if forecast.loops_remaining >= snapshot.charge_decision_deferrals.get(vehicle.vehicle_id, limit + 1):
             continue  # the operator chose CONTINUE; ask again once another loop is used
         prefix = f"charge-option-{vehicle.vehicle_id}"
         offered_at_tick = decision_started.get(vehicle.vehicle_id, snapshot.tick)
@@ -395,20 +402,21 @@ def with_battery_decisions(model: EnergyModel, snapshot: FullSnapshot, charge_s:
                            depot_choices: dict[str, str] | None = None,
                            return_distances_m: dict[str, float] | None = None,
                            charge_time_scale: float | None = None,
+                           offer_loop_limits: dict[str, int] | None = None,
                            in_place: bool = False) -> FullSnapshot:
     forecasts = energy_forecasts(model, snapshot, depot_distances_m=depot_distances_m, depot_speed_mps=depot_speed_mps,
                                  depot_choices=depot_choices)
     options = charge_options(model, snapshot, charge_s, depot_distances_m=depot_distances_m,
                              depot_speed_mps=depot_speed_mps, parking_distances_m=parking_distances_m,
                              depot_choices=depot_choices, return_distances_m=return_distances_m,
-                             charge_time_scale=charge_time_scale)
+                             charge_time_scale=charge_time_scale, offer_loop_limits=offer_loop_limits, forecasts=forecasts)
     revisions = {**snapshot.charge_option_revisions, **{o.option_id: o.revision for o in options}}
     loops = {f.vehicle_id: f.loops_remaining for f in forecasts}
     on_charger = {vehicle_id for c in snapshot.chargers for vehicle_id in c.occupied_vehicle_ids}
     deferrals = {
         vehicle_id: deferred for vehicle_id, deferred in snapshot.charge_decision_deferrals.items()
         if vehicle_id not in on_charger and loops.get(vehicle_id) is not None
-        and deferred <= loops[vehicle_id] <= LOW_LOOPS}
+        and deferred <= loops[vehicle_id] <= (offer_loop_limits or {}).get(vehicle_id, LOW_LOOPS)}
     # Everything above reads the snapshot as it came, so filling it in place gives the same result
     result = snapshot if in_place else snapshot.model_copy(deep=True)
     result.energy_forecasts, result.charge_options = forecasts, options

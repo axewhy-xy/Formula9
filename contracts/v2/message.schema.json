@@ -1913,6 +1913,20 @@
     "ScenarioRevision": {
       "additionalProperties": true,
       "properties": {
+        "assessment_duration_s": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Simulation seconds available in a scored attempt, pinned at creation.",
+          "title": "Assessment Duration S"
+        },
         "energy_model_revision": {
           "maxLength": 128,
           "minLength": 1,
@@ -2269,7 +2283,8 @@
             "INVALID_REFERENCE",
             "INVALID_TRANSITION",
             "UNSUPPORTED_VERSION",
-            "INVALID_PAYLOAD"
+            "INVALID_PAYLOAD",
+            "ASSESSMENT_NOT_READY"
           ],
           "title": "Code",
           "type": "string"

@@ -19,6 +19,9 @@ class SessionListEntry(BaseModel):
     scenario_revision_id: Id
     status: Literal["DRAFT", "READY", "RUNNING", "PAUSED", "RECOVERING", "COMPLETED", "ARCHIVED", "FAILED"]
     occupies_capacity: bool
+    is_assessment: bool = False
+    can_delete: bool | None = None
+    can_archive: bool | None = None
 
 
 class SessionListResponse(BaseModel):
@@ -26,4 +29,5 @@ class SessionListResponse(BaseModel):
     live_count: Annotated[int, Field(ge=0)]
     total: Annotated[int, Field(ge=0)]
     capacity: Annotated[int, Field(ge=1)]
+    terminal_practice_count: Annotated[int, Field(ge=0)] | None = None
 

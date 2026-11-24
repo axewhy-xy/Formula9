@@ -2,6 +2,35 @@
   "$defs": {
     "SessionListEntry": {
       "properties": {
+        "can_archive": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Can Archive"
+        },
+        "can_delete": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Can Delete"
+        },
+        "is_assessment": {
+          "default": false,
+          "title": "Is Assessment",
+          "type": "boolean"
+        },
         "occupies_capacity": {
           "title": "Occupies Capacity",
           "type": "boolean"
@@ -63,6 +92,19 @@
       },
       "title": "Sessions",
       "type": "array"
+    },
+    "terminal_practice_count": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Terminal Practice Count"
     },
     "total": {
       "minimum": 0,
