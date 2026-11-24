@@ -1,7 +1,7 @@
 /*
  * Runs the shuttle battery monitor for the app and tells the operator what it finds.
  *
- * Author: YOUR NAME
+ * Author: Ang Yu Xuan
  * Date Created: 23/11/2026
  * Last Modified: 24/11/2026
  *
@@ -105,7 +105,6 @@ namespace Formula9.World
             {
                 var roads = await cityClient.GetRoadsAsync(area);
                 var created = new ShuttleBatteryMonitor(new DepotRoadGraph(roads));
-                created.KwhPerMeter = 0.02;
                 created.ReturnRequired += a => notify($"{a.VehicleId}: return to the depot now. " + (a.DistanceKnown
                     ? $"{a.DistanceToDepotM:0} m away, {a.BatteryKwh:0.0} kWh left, needs {a.ThresholdKwh:0.0}."
                     : $"{a.BatteryKwh:0.0} kWh left, at its {a.ReserveKwh:0.0} kWh reserve."));

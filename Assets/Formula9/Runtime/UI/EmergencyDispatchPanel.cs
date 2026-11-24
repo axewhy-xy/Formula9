@@ -98,8 +98,6 @@ namespace Formula9.UI
         {
             if (host == null) return;
             var down = DecisionRules.NonOperational(s).Select(v => v.VehicleId).ToList();
-            //Purely for debugging purpose ONLY to check for Emergency Dispatch button
-            //if (down.Count == 0 && s != null && s.Vehicles.Count > 0) down.Add(s.Vehicles[0].VehicleId);
             host.style.display = down.Count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
             // Keeps the operator's chosen shuttle while it is still in the list
             TrainingWorkspace.Choices(vehicle, down);
