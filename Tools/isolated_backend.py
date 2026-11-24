@@ -4,7 +4,7 @@ Run this repository's backend for end-to-end tests, isolated from team data.
 Author: Choo Jian Wei
 Contributors: Lau Xiang Yang (default to this repository)
 Date Created: 30/10/2026
-Last Modified: 15/11/2026
+Last Modified: 24/11/2026
 
 Description:
     Accounts live in memory (never the shared MongoDB) and training sessions in a temporary
@@ -40,23 +40,23 @@ SEEDED_INCIDENTS = [
 
 """
 # -----------------------------------------------------------------------------------
-# Function: main
+# Function: isolate
 # -----------------------------------------------------------------------------------
 Description:
-    This function points the backend at a temporary training database, blanks the MongoDB URI (a
-    blank value wins over backend/.env), installs an in-memory account store, and serves the app on
-    127.0.0.1.
+    This function points the backend of a checkout at a temporary training database, blanks the
+    MongoDB URI (a blank value wins over backend/.env), and installs an in-memory account store.
+    Tools/showcase_backend.py shares it.
+
+Parameters:
+    repo: The repository whose backend to run.
+
+Returns:
+    The in-memory AuthService, so a caller can add accounts to it.
 
 Raises:
     SystemExit: If a MongoDB URI is still configured.
 """
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--formula9", type=Path, default=Path(__file__).resolve().parents[1])
-    parser.add_argument("--port", type=int, default=8010)
-    parser.add_argument("--seed-incidents", action="store_true", help="Schedule SEEDED_INCIDENTS in every session")
-    args = parser.parse_args()
-    repo = args.formula9.resolve()
+def isolate(repo: Path):
     sys.path[:0] = [str(repo / "backend"), str(repo)]
     os.environ["TRAINING_DATABASE_PATH"] = str(Path(tempfile.mkdtemp(prefix="formula9-isolated-")) / "sessions.sqlite")
     os.environ["MONGODB_URI"] = ""  # a blank value wins over backend/.env, which load_dotenv does not override
@@ -70,7 +70,26 @@ def main() -> None:
     from src.auth import service as auth_service
     from src.auth.service import AuthService
     from src.auth.store import MemoryAccountStore
-    auth_service.set_auth_service(AuthService(MemoryAccountStore()))
+    accounts = AuthService(MemoryAccountStore())
+    auth_service.set_auth_service(accounts)
+    return accounts
+
+
+"""
+# -----------------------------------------------------------------------------------
+# Function: main
+# -----------------------------------------------------------------------------------
+Description:
+    This function isolates the backend (isolate), optionally seeds the incidents, and serves the app
+    on 127.0.0.1.
+"""
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--formula9", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--port", type=int, default=8010)
+    parser.add_argument("--seed-incidents", action="store_true", help="Schedule SEEDED_INCIDENTS in every session")
+    args = parser.parse_args()
+    isolate(args.formula9.resolve())
 
     if args.seed_incidents:
         # Every session shares the cached workflow definition's catalogue, so its timeline is theirs

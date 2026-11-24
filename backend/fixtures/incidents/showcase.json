@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "notes": "The showcase session's world events (Tools/showcase_backend.py, docs/showcase.md), in scenario seconds after Start. Each is on a road shuttles of the integrated exercise drive, ahead of them: a pedestrian in front of shuttle-03 and shuttle-05, a road closure that asks shuttle-04 (and shuttle-02) for a decision, a signal fault at the next lights of shuttle-02 and shuttle-04, a breakdown on the return roads every shuttle-01 detour rejoins (so the 3D follow camera reaches it whatever detour is drawn; it lasts long enough for that), and a collision ahead of shuttle-03 and shuttle-05 once shuttle-03's battery has run low. Rows have the shape of predefined_scenarios.json's timeline. random_generation replaces those keys of predefined_scenarios.json's policy, so random events also come sooner.",
+  "random_generation": {
+    "min_interval_s": 45,
+    "max_interval_s": 90
+  },
+  "timeline": [
+    {
+      "event_id": "showcase-pedestrian",
+      "event_type": "PEDESTRIAN_ON_ROAD",
+      "location": {
+        "edge_id": "road-658171026:0:forward"
+      },
+      "at_s": 8,
+      "duration_s": 30
+    },
+    {
+      "event_id": "showcase-closure",
+      "event_type": "ROAD_CLOSURE",
+      "location": {
+        "edge_id": "road-864872994:0:forward"
+      },
+      "at_s": 20,
+      "duration_s": 300
+    },
+    {
+      "event_id": "showcase-lights",
+      "event_type": "SIGNAL_FAULT",
+      "location": {
+        "node_id": "junction-023"
+      },
+      "at_s": 25,
+      "duration_s": 120
+    },
+    {
+      "event_id": "showcase-breakdown",
+      "event_type": "BREAKDOWN",
+      "location": {
+        "edge_id": "return:10:forward"
+      },
+      "at_s": 50,
+      "duration_s": 300
+    },
+    {
+      "event_id": "showcase-collision",
+      "event_type": "COLLISION",
+      "location": {
+        "edge_id": "road-656790729:0:forward"
+      },
+      "at_s": 90,
+      "duration_s": 180
+    }
+  ]
+}

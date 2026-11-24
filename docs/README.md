@@ -11,6 +11,7 @@ These describe the system as it is built today.
 | Document | Covers |
 | --- | --- |
 | [Technical architecture](architecture.md) | Runtime topology, backend modules and session engine, contracts, the Unity client's layers and views, update rates, data sources, testing and known limitations |
+| [Showcase session](showcase.md) | `showcase.bat`: a session that shows every feature within minutes, its event schedule and a walkthrough |
 | [Session creation and recovery](session_creation.md) | Session lifecycle, the v2 HTTP contract, deletion and disk cleanup, runtime and crash recovery, instrumentation |
 | [Training contract v2](../contracts/v2/README.md) | Wire rules, entities, battery and booking additions, state transition tables |
 | [Backend](../backend/README.md) | Running the server and the headless actors |
