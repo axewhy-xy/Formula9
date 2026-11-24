@@ -73,7 +73,7 @@ namespace Formula9.Audio
         public static readonly IReadOnlyDictionary<UiSound, string> Files = new Dictionary<UiSound, string>
         {
             [UiSound.StartSession] = "ui_start_session", // UI Button Click-Dull.wav
-            [UiSound.Confirm] = "ui_confirmation",      // UI Confirmation_1.wav
+            [UiSound.Confirm] = "ui_confirmation",      // UI Confirmation_2.wav
             [UiSound.MapPoint] = "ui_map_point",        // UI Hover New 1.wav
             [UiSound.Refused] = "alert_command_rejected", // the training alert's clip, reused for a greyed-out button
         };

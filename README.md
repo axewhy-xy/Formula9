@@ -368,7 +368,7 @@ make no hover sound, and every press not listed below stays silent:
 | Sound | Clip | Plays when |
 |---|---|---|
 | Start session | `ui_start_session.wav` (UI Button Click-Dull) | **Start scenario**, **Start and watch in 3D** or **Resume simulation** is clicked |
-| Confirmation | `ui_confirmation.wav` (UI Confirmation_1) | **Approve route** (a re-route), Route Planning's **Confirm** (keep route, hold or request assistance) or the Charging page's **Apply decision** (a battery decision) is clicked |
+| Confirmation | `ui_confirmation.wav` (UI Confirmation_2) | **Approve route** (a re-route), Route Planning's **Confirm** (keep route, hold or request assistance) or the Charging page's **Apply decision** (a battery decision) is clicked |
 | Map point | `ui_map_point.wav` (UI Hover New 1) | a road is picked for a route on the map |
 | Refused | `alert_command_rejected.wav` | a greyed-out button is pressed while nothing is being sent |
 
