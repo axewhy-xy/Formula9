@@ -66,6 +66,10 @@ namespace Formula9.World
         private float yaw, pitch = 0.6f, distance = 90;
         private int dragButton = -1;
         private FleetMap map;
+        // The 3D view's Draft in 3D / road surface / Retry 3D row, in its bottom-left corner
+        private VisualElement worldActions;
+        // The column of camera thumbnails over the camera view's left edge
+        private VisualElement cameraRail;
         private bool preferMap;
         private CityClient cityClient;
         private CityView city;
@@ -142,14 +146,14 @@ namespace Formula9.World
             hud.AddToClassList("world-hud");
             hud.style.display = DisplayStyle.None;
             surface.Add(hud);
-            var actions = new VisualElement(); actions.AddToClassList("world-actions");
-            actions.style.position = UnityEngine.UIElements.Position.Absolute; actions.style.left = 8; actions.style.bottom = 8;
-            drafting = new Toggle("Draft in 3D"); actions.Add(drafting);
-            surfaces = new DropdownField("Road surface / lane / deck"); actions.Add(surfaces);
+            worldActions = new VisualElement(); worldActions.AddToClassList("world-actions");
+            worldActions.style.position = UnityEngine.UIElements.Position.Absolute; worldActions.style.left = 8; worldActions.style.bottom = 8;
+            drafting = new Toggle("Draft in 3D"); worldActions.Add(drafting);
+            surfaces = new DropdownField("Road surface / lane / deck"); worldActions.Add(surfaces);
             surfaces.RegisterValueChangedCallback(_ => DrawDraft());
             drafting.RegisterValueChangedCallback(_ => DrawDraft());
-            actions.Add(new Button(Retry) { text = "Retry 3D" });
-            surface.Add(actions);
+            worldActions.Add(new Button(Retry) { text = "Retry 3D" });
+            surface.Add(worldActions);
             var cameraObject = new GameObject("World Camera");
             cameraObject.transform.SetParent(transform, false);
             viewCamera = cameraObject.AddComponent<Camera>();
@@ -164,7 +168,21 @@ namespace Formula9.World
             mainCameraLabel.AddToClassList("camera-label");
             mainCameraView.Add(mainCameraLabel);
             cameraPanel.Add(mainCameraView);
-            var strip = new VisualElement();
+            // The thumbnails sit in a rail over the large view's left edge, which the operator can fold
+            // away. Left, because incident notifications stack in the top-right corner.
+            var rail = new VisualElement { pickingMode = PickingMode.Ignore };
+            rail.AddToClassList("camera-rail");
+            cameraRail = rail;
+            var railToggle = new Button { text = "‹ Cameras", tooltip = "Show or hide the camera thumbnails" };
+            railToggle.AddToClassList("camera-rail-toggle");
+            railToggle.clicked += () =>
+            {
+                rail.ToggleInClassList("camera-rail-collapsed");
+                railToggle.text = rail.ClassListContains("camera-rail-collapsed") ? "Cameras ›" : "‹ Cameras";
+            };
+            rail.Add(railToggle);
+            // It scrolls, so on a short view (or above the Fleet List) every thumbnail stays reachable
+            var strip = new ScrollView(ScrollViewMode.Vertical);
             strip.AddToClassList("camera-strip");
             for (var i = 0; i < shuttleCameras.Cameras.Count; i++)
             {
@@ -179,7 +197,8 @@ namespace Formula9.World
                 strip.Add(tile);
                 cameraTiles.Add(tile);
             }
-            cameraPanel.Add(strip);
+            rail.Add(strip);
+            cameraPanel.Add(rail);
             cameraPanel.style.display = DisplayStyle.None;    // hidden until the button is pressed
             surface.Add(cameraPanel);
             SelectCamera(0);
@@ -961,6 +980,28 @@ namespace Formula9.World
             RefreshHint();
             CamerasToggled?.Invoke(show);
         }
+
+        // -----------------------------------------------------------------------------------
+        // Function: SetBottomInset
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function lifts the controls along the view's bottom edge (the 2D map's buttons,
+        //     scale bar and credits, and the 3D view's Draft in 3D row) by this many points, and
+        //     ends the camera thumbnails' column above them, so a panel laid over the bottom of the
+        //     view, such as the Fleet List, hides none of them. 0 puts them back.
+        //
+        // Args:
+        //     points (float): How far the panel reaches up into the view.
+        public void SetBottomInset(float points)
+        {
+            points = Mathf.Max(0, points);
+            map?.SetBottomInset(points);
+            if (worldActions != null) worldActions.style.translate = new StyleTranslate(new Translate(0, -points));
+            if (cameraRail != null) cameraRail.style.bottom = RailBottomGap + points;
+        }
+
+        // The gap below the camera thumbnails' column, as in .camera-rail
+        private const float RailBottomGap = 10;
 
         // -----------------------------------------------------------------------------------
         // Function: SelectCamera

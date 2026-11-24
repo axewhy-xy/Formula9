@@ -16,6 +16,7 @@ marker names them.
 
 from __future__ import annotations
 
+from src.services.incident_scenarios.world_events import ONE_ROAD_EVENTS
 from src.traffic import route_signals
 from src.traffic.city_traffic import line_at, line_length
 
@@ -179,13 +180,13 @@ def scene(kind: str, road: list[tuple[float, float]]) -> list[tuple[float, float
 def live_hazards(records: list[dict], snapshot, edges: dict[str, dict], tick: int) -> list:
     """Every live world event's scene at a tick, both ways, from the session's incident records and its
     latest snapshot: what the background traffic keeps off. A breakdown has no scene, only its pinned
-    vehicle, and a signal fault only its red lights; no event has a drawn queue, since the traffic forms
+    vehicle, a pedestrian on the road only its walker, and a signal fault only its red lights; no event has a drawn queue, since the traffic forms
     its own behind the scene."""
     found = []
     for record in records:
         start, until = event_window(record, snapshot.disruptions, getattr(snapshot, "incidents", ()))
         kind = record.get("kind")
-        if not start <= tick < until or kind not in (BLOCK, ACCIDENT) or event_type(record) == "BREAKDOWN":
+        if not start <= tick < until or kind not in (BLOCK, ACCIDENT) or event_type(record) in ONE_ROAD_EVENTS:
             continue
         marker = record.get("map_marker") or {}
         edge = edges.get(marker.get("edge_id") or "")

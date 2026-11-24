@@ -47,6 +47,9 @@ TestResults*.xml
 
 # Python environments, generated caches, optional datasets and live session data.
 .venv/
+# The native traffic engine, built per machine by Tools/build_native.py
+backend/src/traffic/_traffic_native*.pyd
+backend/src/traffic/_traffic_native*.so
 __pycache__/
 *.py[cod]
 .pytest_cache/

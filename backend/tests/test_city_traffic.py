@@ -27,9 +27,12 @@ from src.services.integrated_actor import SHUTTLE_FRONT_M, IntegratedSessionActo
 from src.services import training_sessions
 from src.services.training_sessions import TrainingSessionService, checkpoint, next_deadline
 from src.persistence.training_store import TrainingStore
-from src.traffic import city_traffic, incident_hazards, route_signals, signal_cycle
+from src.traffic import city_traffic, incident_hazards, route_signals, signal_cycle, walk_network
 from src.traffic.city_traffic import FRAME_RECORD, CityTraffic, ShuttleRoute, overlap, unpack_frame
 from src.traffic.road_network import RoadNetwork
+
+# Every test here runs on both traffic engines, which must drive identically (conftest.traffic_engine)
+pytestmark = pytest.mark.usefixtures("traffic_engine")
 
 MODELS = {"car": {"length_m": 4.5, "width_m": 1.8, "height_m": 1.5}}
 DT = 0.05
@@ -268,7 +271,11 @@ def stop_line_crossed_on_red(actor, before, junctions, known):
 
 
 @pytest.mark.traffic
-def test_shuttles_queue_behind_the_traffic_and_never_run_a_red_or_touch_a_vehicle():
+def test_shuttles_queue_behind_the_traffic_and_never_run_a_red_or_touch_a_vehicle(monkeypatch):
+    # The queue at a light, without the walkers: with them this session's shuttles are held as often at
+    # the crossings before it (test_city_pedestrians), and the queue this looks for does not form in its
+    # five minutes
+    monkeypatch.setenv(walk_network.PEDESTRIANS_VARIABLE, "0")
     actor = IntegratedSessionActor(0, session_id="traffic-test")
     actor.is_paused = False
     actor.modes = {s.ID: "IN_SERVICE" for s in actor.shuttles}

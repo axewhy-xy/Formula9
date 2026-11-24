@@ -1,0 +1,2144 @@
+{
+  "$defs": {
+    "Candidate": {
+      "additionalProperties": true,
+      "properties": {
+        "action": {
+          "enum": [
+            "KEEP_ROUTE",
+            "ESCALATE",
+            "ROAD_DETOUR",
+            "HOLD_AT_STOP",
+            "WAIT",
+            "RETURN_TO_DEPOT",
+            "CHARGE"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "assumptions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assumptions",
+          "type": "array"
+        },
+        "candidate_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Candidate Id",
+          "type": "string"
+        },
+        "dependency_revisions": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "title": "Dependency Revisions",
+          "type": "object"
+        },
+        "expires_at_tick": {
+          "minimum": 0,
+          "title": "Expires At Tick",
+          "type": "integer"
+        },
+        "incident_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Incident Id",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "validation": {
+          "enum": [
+            "PASS",
+            "WARN",
+            "FAIL",
+            "UNKNOWN"
+          ],
+          "title": "Validation",
+          "type": "string"
+        },
+        "vehicle_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vehicle Id"
+        }
+      },
+      "required": [
+        "candidate_id",
+        "incident_id",
+        "revision",
+        "action",
+        "validation",
+        "expires_at_tick",
+        "dependency_revisions",
+        "assumptions"
+      ],
+      "title": "Candidate",
+      "type": "object"
+    },
+    "ChargeBooking": {
+      "additionalProperties": true,
+      "description": "One shuttle's hold on a charger port over a window of simulation ticks.\n\nSCHEDULED holds a future slot. ACTIVE means the port is taken, from dispatch through charging\nuntil the shuttle has cleared the bay. COMPLETED, CANCELLED and MISSED are final. The window\nis an estimate: an overrunning ACTIVE booking has its end_tick extended by the backend.",
+      "properties": {
+        "booking_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Booking Id",
+          "type": "string"
+        },
+        "charger_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Charger Id",
+          "type": "string"
+        },
+        "end_tick": {
+          "minimum": 0,
+          "title": "End Tick",
+          "type": "integer"
+        },
+        "is_estimate": {
+          "const": true,
+          "default": true,
+          "title": "Is Estimate",
+          "type": "boolean"
+        },
+        "origin": {
+          "enum": [
+            "OPERATOR",
+            "CHARGE_NOW",
+            "SAFETY_RETURN"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "phase": {
+          "anyOf": [
+            {
+              "enum": [
+                "DROPPING_PASSENGERS",
+                "DRIVING_TO_CHARGER",
+                "CHARGING",
+                "LEAVING_BAY",
+                "RETURNING_TO_ROUTE"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Phase"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "set_down_stop_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Set Down Stop Id"
+        },
+        "start_tick": {
+          "minimum": 0,
+          "title": "Start Tick",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "SCHEDULED",
+            "ACTIVE",
+            "COMPLETED",
+            "CANCELLED",
+            "MISSED"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "status_reason": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status Reason"
+        },
+        "trip_path_m": {
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "title": "Trip Path M",
+          "type": "array"
+        },
+        "vehicle_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Vehicle Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "booking_id",
+        "revision",
+        "vehicle_id",
+        "charger_id",
+        "status",
+        "origin",
+        "start_tick",
+        "end_tick"
+      ],
+      "title": "ChargeBooking",
+      "type": "object"
+    },
+    "ChargeOption": {
+      "additionalProperties": true,
+      "properties": {
+        "action": {
+          "enum": [
+            "CHARGE_NOW",
+            "CONTINUE",
+            "RETURN_TO_DEPOT"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "assumptions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assumptions",
+          "type": "array"
+        },
+        "battery_after_kwh": {
+          "minimum": 0,
+          "title": "Battery After Kwh",
+          "type": "number"
+        },
+        "charger_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Charger Id"
+        },
+        "dependency_revisions": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "title": "Dependency Revisions",
+          "type": "object"
+        },
+        "expires_at_tick": {
+          "minimum": 0,
+          "title": "Expires At Tick",
+          "type": "integer"
+        },
+        "is_estimate": {
+          "const": true,
+          "default": true,
+          "title": "Is Estimate",
+          "type": "boolean"
+        },
+        "loops_after": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Loops After"
+        },
+        "min_in_service_vehicles": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min In Service Vehicles"
+        },
+        "offered_at_tick": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Offered At Tick"
+        },
+        "option_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Option Id",
+          "type": "string"
+        },
+        "out_of_service_s": {
+          "minimum": 0,
+          "title": "Out Of Service S",
+          "type": "number"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "validation": {
+          "enum": [
+            "PASS",
+            "WARN",
+            "FAIL",
+            "UNKNOWN"
+          ],
+          "title": "Validation",
+          "type": "string"
+        },
+        "vehicle_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Vehicle Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "option_id",
+        "vehicle_id",
+        "revision",
+        "action",
+        "validation",
+        "expires_at_tick",
+        "dependency_revisions",
+        "out_of_service_s",
+        "battery_after_kwh",
+        "loops_after",
+        "assumptions"
+      ],
+      "title": "ChargeOption",
+      "type": "object"
+    },
+    "Charger": {
+      "additionalProperties": true,
+      "properties": {
+        "aggregate_revision": {
+          "minimum": 0,
+          "title": "Aggregate Revision",
+          "type": "integer"
+        },
+        "charger_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Charger Id",
+          "type": "string"
+        },
+        "occupied_vehicle_ids": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          "title": "Occupied Vehicle Ids",
+          "type": "array"
+        },
+        "port_count": {
+          "minimum": 1,
+          "title": "Port Count",
+          "type": "integer"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Position"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "power_kw": {
+          "exclusiveMinimum": 0,
+          "title": "Power Kw",
+          "type": "number"
+        }
+      },
+      "required": [
+        "charger_id",
+        "aggregate_revision",
+        "port_count",
+        "power_kw",
+        "occupied_vehicle_ids"
+      ],
+      "title": "Charger",
+      "type": "object"
+    },
+    "Depot": {
+      "additionalProperties": true,
+      "properties": {
+        "charger_ids": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          "title": "Charger Ids",
+          "type": "array"
+        },
+        "depot_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Depot Id",
+          "type": "string"
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        }
+      },
+      "required": [
+        "depot_id",
+        "position",
+        "charger_ids"
+      ],
+      "title": "Depot",
+      "type": "object"
+    },
+    "Disruption": {
+      "additionalProperties": true,
+      "properties": {
+        "active_from_tick": {
+          "minimum": 0,
+          "title": "Active From Tick",
+          "type": "integer"
+        },
+        "active_until_tick": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Active Until Tick"
+        },
+        "affected_edge_ids": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          "title": "Affected Edge Ids",
+          "type": "array"
+        },
+        "aggregate_revision": {
+          "minimum": 0,
+          "title": "Aggregate Revision",
+          "type": "integer"
+        },
+        "disruption_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Disruption Id",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "reason": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "disruption_id",
+        "aggregate_revision",
+        "affected_edge_ids",
+        "active_from_tick",
+        "reason",
+        "provenance"
+      ],
+      "title": "Disruption",
+      "type": "object"
+    },
+    "EnergyForecast": {
+      "additionalProperties": true,
+      "properties": {
+        "energy_model_revision": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Energy Model Revision",
+          "type": "string"
+        },
+        "is_estimate": {
+          "const": true,
+          "default": true,
+          "title": "Is Estimate",
+          "type": "boolean"
+        },
+        "loops_remaining": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Loops Remaining"
+        },
+        "next_depot_eta_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Depot Eta S"
+        },
+        "next_depot_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Depot Id"
+        },
+        "reaches_depot_above_reserve": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reaches Depot Above Reserve"
+        },
+        "reserve_kwh": {
+          "minimum": 0,
+          "title": "Reserve Kwh",
+          "type": "number"
+        },
+        "reserve_margin_kwh": {
+          "title": "Reserve Margin Kwh",
+          "type": "number"
+        },
+        "vehicle_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Vehicle Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "vehicle_id",
+        "energy_model_revision",
+        "reserve_kwh",
+        "reserve_margin_kwh",
+        "loops_remaining"
+      ],
+      "title": "EnergyForecast",
+      "type": "object"
+    },
+    "FleetVehicle": {
+      "additionalProperties": true,
+      "properties": {
+        "aggregate_revision": {
+          "minimum": 0,
+          "title": "Aggregate Revision",
+          "type": "integer"
+        },
+        "battery_capacity_kwh": {
+          "exclusiveMinimum": 0,
+          "title": "Battery Capacity Kwh",
+          "type": "number"
+        },
+        "battery_kwh": {
+          "minimum": 0,
+          "title": "Battery Kwh",
+          "type": "number"
+        },
+        "heading_deg": {
+          "title": "Heading Deg",
+          "type": "number"
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "route_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Route Id"
+        },
+        "route_revision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Route Revision"
+        },
+        "service_state": {
+          "enum": [
+            "STANDBY",
+            "IN_SERVICE",
+            "DWELLING",
+            "BLOCKED",
+            "AWAITING_GUIDANCE",
+            "DETOURING",
+            "RETURNING_TO_DEPOT",
+            "QUEUED_FOR_CHARGE",
+            "CHARGING",
+            "OUT_OF_SERVICE"
+          ],
+          "title": "Service State",
+          "type": "string"
+        },
+        "spatial": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpatialVehicle"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "speed_mps": {
+          "minimum": 0,
+          "title": "Speed Mps",
+          "type": "number"
+        },
+        "vehicle_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Vehicle Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "vehicle_id",
+        "aggregate_revision",
+        "service_state",
+        "route_id",
+        "route_revision",
+        "position",
+        "heading_deg",
+        "speed_mps",
+        "battery_kwh",
+        "battery_capacity_kwh",
+        "provenance"
+      ],
+      "title": "FleetVehicle",
+      "type": "object"
+    },
+    "FullSnapshot": {
+      "additionalProperties": true,
+      "properties": {
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/Candidate"
+          },
+          "title": "Candidates",
+          "type": "array"
+        },
+        "charge_bookings": {
+          "items": {
+            "$ref": "#/$defs/ChargeBooking"
+          },
+          "title": "Charge Bookings",
+          "type": "array"
+        },
+        "charge_decision_deferrals": {
+          "patternProperties": {
+            "^[A-Za-z0-9][A-Za-z0-9_.:-]*$": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "propertyNames": {
+            "maxLength": 128,
+            "minLength": 1
+          },
+          "title": "Charge Decision Deferrals",
+          "type": "object"
+        },
+        "charge_option_revisions": {
+          "patternProperties": {
+            "^[A-Za-z0-9][A-Za-z0-9_.:-]*$": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "propertyNames": {
+            "maxLength": 128,
+            "minLength": 1
+          },
+          "title": "Charge Option Revisions",
+          "type": "object"
+        },
+        "charge_options": {
+          "items": {
+            "$ref": "#/$defs/ChargeOption"
+          },
+          "title": "Charge Options",
+          "type": "array"
+        },
+        "chargers": {
+          "items": {
+            "$ref": "#/$defs/Charger"
+          },
+          "title": "Chargers",
+          "type": "array"
+        },
+        "contract_version": {
+          "pattern": "^2\\.[0-9]+$",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "depots": {
+          "items": {
+            "$ref": "#/$defs/Depot"
+          },
+          "title": "Depots",
+          "type": "array"
+        },
+        "disruptions": {
+          "items": {
+            "$ref": "#/$defs/Disruption"
+          },
+          "title": "Disruptions",
+          "type": "array"
+        },
+        "energy_forecasts": {
+          "items": {
+            "$ref": "#/$defs/EnergyForecast"
+          },
+          "title": "Energy Forecasts",
+          "type": "array"
+        },
+        "event_sequence": {
+          "minimum": 0,
+          "title": "Event Sequence",
+          "type": "integer"
+        },
+        "incidents": {
+          "items": {
+            "$ref": "#/$defs/Incident"
+          },
+          "title": "Incidents",
+          "type": "array"
+        },
+        "message_type": {
+          "const": "FULL_SNAPSHOT",
+          "title": "Message Type",
+          "type": "string"
+        },
+        "routes": {
+          "items": {
+            "$ref": "#/$defs/RouteRevision"
+          },
+          "title": "Routes",
+          "type": "array"
+        },
+        "scenario": {
+          "$ref": "#/$defs/ScenarioRevision"
+        },
+        "scene_revision": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Scene Revision",
+          "type": "string"
+        },
+        "session": {
+          "$ref": "#/$defs/TrainingSession"
+        },
+        "session_epoch": {
+          "minimum": 0,
+          "title": "Session Epoch",
+          "type": "integer"
+        },
+        "session_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Session Id",
+          "type": "string"
+        },
+        "simulation_time_s": {
+          "minimum": 0,
+          "title": "Simulation Time S",
+          "type": "number"
+        },
+        "snapshot_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Snapshot Id",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "spatial": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpatialReference"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tick": {
+          "minimum": 0,
+          "title": "Tick",
+          "type": "integer"
+        },
+        "transform_revision": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Transform Revision",
+          "type": "string"
+        },
+        "vehicles": {
+          "items": {
+            "$ref": "#/$defs/FleetVehicle"
+          },
+          "title": "Vehicles",
+          "type": "array"
+        }
+      },
+      "required": [
+        "contract_version",
+        "session_id",
+        "session_epoch",
+        "scene_revision",
+        "transform_revision",
+        "tick",
+        "simulation_time_s",
+        "event_sequence",
+        "source",
+        "message_type",
+        "snapshot_id",
+        "scenario",
+        "session",
+        "vehicles",
+        "routes",
+        "disruptions",
+        "incidents",
+        "candidates",
+        "chargers"
+      ],
+      "title": "FullSnapshot",
+      "type": "object"
+    },
+    "Incident": {
+      "additionalProperties": true,
+      "properties": {
+        "aggregate_revision": {
+          "minimum": 0,
+          "title": "Aggregate Revision",
+          "type": "integer"
+        },
+        "candidate_ids": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          "title": "Candidate Ids",
+          "type": "array"
+        },
+        "clears_at_tick": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Clears At Tick"
+        },
+        "detected_tick": {
+          "minimum": 0,
+          "title": "Detected Tick",
+          "type": "integer"
+        },
+        "event_type": {
+          "anyOf": [
+            {
+              "enum": [
+                "BREAKDOWN",
+                "COLLISION",
+                "SIGNAL_FAULT",
+                "ROAD_CLOSURE",
+                "PEDESTRIAN_ON_ROAD"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Type"
+        },
+        "exposed_vehicle_ids": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          "title": "Exposed Vehicle Ids",
+          "type": "array"
+        },
+        "exposures": {
+          "items": {
+            "$ref": "#/$defs/IncidentExposure"
+          },
+          "title": "Exposures",
+          "type": "array"
+        },
+        "incident_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Incident Id",
+          "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IncidentLocation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "responses": {
+          "items": {
+            "$ref": "#/$defs/IncidentResponse"
+          },
+          "title": "Responses",
+          "type": "array"
+        },
+        "state": {
+          "enum": [
+            "DETECTED",
+            "AWAITING_REVIEW",
+            "OPTIONS_READY",
+            "ACTION_COMMITTED",
+            "EXECUTING",
+            "WAITING",
+            "ESCALATED",
+            "RESOLVED",
+            "UNRESOLVED"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "vehicle_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vehicle Id"
+        }
+      },
+      "required": [
+        "incident_id",
+        "aggregate_revision",
+        "state",
+        "detected_tick",
+        "candidate_ids",
+        "provenance"
+      ],
+      "title": "Incident",
+      "type": "object"
+    },
+    "IncidentExposure": {
+      "additionalProperties": true,
+      "description": "A shuttle that will reach an incident while it lasts, how far away and about when.\n\nIts remaining route crosses the incident's footprint (the scene and the queue behind it). Refreshed\nas shuttles move.",
+      "properties": {
+        "distance_m": {
+          "minimum": 0,
+          "title": "Distance M",
+          "type": "number"
+        },
+        "eta_s": {
+          "minimum": 0,
+          "title": "Eta S",
+          "type": "number"
+        },
+        "is_estimate": {
+          "const": true,
+          "default": true,
+          "title": "Is Estimate",
+          "type": "boolean"
+        },
+        "keep_route_delay_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keep Route Delay S"
+        },
+        "vehicle_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Vehicle Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "vehicle_id",
+        "distance_m",
+        "eta_s"
+      ],
+      "title": "IncidentExposure",
+      "type": "object"
+    },
+    "IncidentLocation": {
+      "additionalProperties": true,
+      "description": "Where a world event is: one operating-network road (edge_id) or one junction (node_id).",
+      "properties": {
+        "edge_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Edge Id"
+        },
+        "node_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Node Id"
+        },
+        "road_name": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Road Name"
+        }
+      },
+      "title": "IncidentLocation",
+      "type": "object"
+    },
+    "IncidentResponse": {
+      "additionalProperties": true,
+      "description": "What the operator decided for one exposed shuttle, or that it reached the incident undecided.\n\nNO_DECISION is recorded when a shuttle drives into the incident's footprint, or is still held at it\nwhen it clears, without a decision; it is scored as an unresolved incident is.",
+      "properties": {
+        "action": {
+          "enum": [
+            "KEEP_ROUTE",
+            "ROAD_DETOUR",
+            "ESCALATE",
+            "HOLD_AT_STOP",
+            "WAIT",
+            "NO_DECISION"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "before_arrival": {
+          "title": "Before Arrival",
+          "type": "boolean"
+        },
+        "completed_tick": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed Tick"
+        },
+        "decided_tick": {
+          "minimum": 0,
+          "title": "Decided Tick",
+          "type": "integer"
+        },
+        "hold_stop_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hold Stop Id"
+        },
+        "vehicle_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Vehicle Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "vehicle_id",
+        "action",
+        "decided_tick",
+        "before_arrival"
+      ],
+      "title": "IncidentResponse",
+      "type": "object"
+    },
+    "Position": {
+      "additionalProperties": true,
+      "properties": {
+        "x_m": {
+          "title": "X M",
+          "type": "number"
+        },
+        "y_m": {
+          "title": "Y M",
+          "type": "number"
+        },
+        "z_m": {
+          "title": "Z M",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x_m",
+        "y_m",
+        "z_m"
+      ],
+      "title": "Position",
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": true,
+      "properties": {
+        "authored": {
+          "default": false,
+          "title": "Authored",
+          "type": "boolean"
+        },
+        "branch_tick": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Branch Tick"
+        },
+        "kind": {
+          "enum": [
+            "TRAINING_SIMULATION",
+            "HISTORICAL_SIMULATION",
+            "RECORDED_SENSOR"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "recording_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recording Id"
+        },
+        "sequence_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sequence Id"
+        },
+        "source_frame": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Frame"
+        },
+        "source_timestamp": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Timestamp"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    },
+    "RouteRevision": {
+      "additionalProperties": true,
+      "properties": {
+        "directed_edge_ids": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          "title": "Directed Edge Ids",
+          "type": "array"
+        },
+        "distance_m": {
+          "minimum": 0,
+          "title": "Distance M",
+          "type": "number"
+        },
+        "edge_paths_m": {
+          "default": [],
+          "items": {
+            "items": {
+              "$ref": "#/$defs/Position"
+            },
+            "maxItems": 1024,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 1024,
+          "title": "Edge Paths M",
+          "type": "array"
+        },
+        "estimated_duration_s": {
+          "minimum": 0,
+          "title": "Estimated Duration S",
+          "type": "number"
+        },
+        "required_stop_ids": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          "title": "Required Stop Ids",
+          "type": "array"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "route_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Route Id",
+          "type": "string"
+        },
+        "scene_revision": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Scene Revision",
+          "type": "string"
+        },
+        "stops_m": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RouteStop"
+          },
+          "maxItems": 64,
+          "title": "Stops M",
+          "type": "array"
+        }
+      },
+      "required": [
+        "route_id",
+        "revision",
+        "scene_revision",
+        "directed_edge_ids",
+        "required_stop_ids",
+        "distance_m",
+        "estimated_duration_s"
+      ],
+      "title": "RouteRevision",
+      "type": "object"
+    },
+    "RouteStop": {
+      "additionalProperties": true,
+      "properties": {
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "stop_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Stop Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stop_id",
+        "position"
+      ],
+      "title": "RouteStop",
+      "type": "object"
+    },
+    "ScenarioRevision": {
+      "additionalProperties": true,
+      "properties": {
+        "assessment_duration_s": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Simulation seconds available in a scored attempt, pinned at creation.",
+          "title": "Assessment Duration S"
+        },
+        "energy_model_revision": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Energy Model Revision",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "revision_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Revision Id",
+          "type": "string"
+        },
+        "rubric_revision": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Rubric Revision",
+          "type": "string"
+        },
+        "rules_revision": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Rules Revision",
+          "type": "string"
+        },
+        "scenario_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "scene_revision": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Scene Revision",
+          "type": "string"
+        },
+        "seed": {
+          "title": "Seed",
+          "type": "integer"
+        },
+        "spatial": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpatialReference"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "transform_revision": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Transform Revision",
+          "type": "string"
+        },
+        "vehicle_model_revision": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Vehicle Model Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "revision_id",
+        "scene_revision",
+        "transform_revision",
+        "rules_revision",
+        "vehicle_model_revision",
+        "energy_model_revision",
+        "rubric_revision",
+        "seed",
+        "provenance"
+      ],
+      "title": "ScenarioRevision",
+      "type": "object"
+    },
+    "SpatialReference": {
+      "additionalProperties": true,
+      "properties": {
+        "manifest_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Manifest Sha256",
+          "type": "string"
+        },
+        "required_capabilities": {
+          "items": {
+            "const": "world_3d",
+            "type": "string"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "title": "Required Capabilities",
+          "type": "array"
+        },
+        "scene_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "scene_revision": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Scene Revision",
+          "type": "string"
+        },
+        "spatial_revision": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Spatial Revision",
+          "type": "string"
+        },
+        "spatial_schema_version": {
+          "const": "1.0",
+          "title": "Spatial Schema Version",
+          "type": "string"
+        },
+        "transform_revision": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Transform Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "spatial_schema_version",
+        "scene_id",
+        "scene_revision",
+        "spatial_revision",
+        "transform_revision",
+        "manifest_sha256",
+        "required_capabilities"
+      ],
+      "title": "SpatialReference",
+      "type": "object"
+    },
+    "SpatialVehicle": {
+      "additionalProperties": true,
+      "description": "Origin is the collision body's centre; never a render mesh pivot.",
+      "properties": {
+        "asset_to_body": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 16,
+          "minItems": 16,
+          "title": "Asset To Body",
+          "type": "array"
+        },
+        "collision_proxy_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Collision Proxy Id",
+          "type": "string"
+        },
+        "collision_proxy_revision": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Collision Proxy Revision",
+          "type": "string"
+        },
+        "deck_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Deck Id",
+          "type": "string"
+        },
+        "dimensions_m": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "Dimensions M",
+          "type": "array"
+        },
+        "lane_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Lane Id",
+          "type": "string"
+        },
+        "movement": {
+          "enum": [
+            "CONTINUOUS",
+            "HELD",
+            "DISCONTINUITY"
+          ],
+          "title": "Movement",
+          "type": "string"
+        },
+        "orientation_xyzw": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Orientation Xyzw",
+          "type": "array"
+        },
+        "position_m": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "Position M",
+          "type": "array"
+        },
+        "render_asset_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Render Asset Id",
+          "type": "string"
+        },
+        "render_asset_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Render Asset Sha256",
+          "type": "string"
+        },
+        "route_progress_m": {
+          "minimum": 0,
+          "title": "Route Progress M",
+          "type": "number"
+        },
+        "support_offset_m": {
+          "minimum": 0,
+          "title": "Support Offset M",
+          "type": "number"
+        },
+        "support_surface_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Support Surface Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "position_m",
+        "orientation_xyzw",
+        "dimensions_m",
+        "collision_proxy_id",
+        "collision_proxy_revision",
+        "support_surface_id",
+        "lane_id",
+        "deck_id",
+        "support_offset_m",
+        "route_progress_m",
+        "movement",
+        "render_asset_id",
+        "render_asset_sha256",
+        "asset_to_body"
+      ],
+      "title": "SpatialVehicle",
+      "type": "object"
+    },
+    "StreamError": {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/StreamErrorBody"
+        },
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "error",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "session_id",
+        "error"
+      ],
+      "title": "StreamError",
+      "type": "object"
+    },
+    "StreamErrorBody": {
+      "additionalProperties": true,
+      "properties": {
+        "code": {
+          "enum": [
+            "INVALID_REFERENCE",
+            "ROLE_DENIED",
+            "SESSION_RECOVERING",
+            "INVALID_PAYLOAD",
+            "STALE_REVISION",
+            "QUEUE_FULL",
+            "INTERNAL_ERROR"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 512,
+          "title": "Message",
+          "type": "string"
+        },
+        "retryable": {
+          "title": "Retryable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "title": "StreamErrorBody",
+      "type": "object"
+    },
+    "StreamHeartbeat": {
+      "additionalProperties": true,
+      "properties": {
+        "session_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Session Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "heartbeat",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "session_id"
+      ],
+      "title": "StreamHeartbeat",
+      "type": "object"
+    },
+    "StreamSignalFault": {
+      "additionalProperties": true,
+      "properties": {
+        "junction_id": {
+          "title": "Junction Id",
+          "type": "string"
+        },
+        "mode": {
+          "title": "Mode",
+          "type": "string"
+        },
+        "until_s": {
+          "title": "Until S",
+          "type": "number"
+        }
+      },
+      "required": [
+        "junction_id",
+        "mode",
+        "until_s"
+      ],
+      "title": "StreamSignalFault",
+      "type": "object"
+    },
+    "StreamSnapshot": {
+      "additionalProperties": true,
+      "properties": {
+        "session_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Session Id",
+          "type": "string"
+        },
+        "snapshot": {
+          "$ref": "#/$defs/FullSnapshot"
+        },
+        "type": {
+          "const": "snapshot",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "session_id",
+        "snapshot"
+      ],
+      "title": "StreamSnapshot",
+      "type": "object"
+    },
+    "StreamTraffic": {
+      "additionalProperties": true,
+      "properties": {
+        "frames": {
+          "items": {
+            "$ref": "#/$defs/StreamTrafficFrame"
+          },
+          "maxItems": 10,
+          "minItems": 1,
+          "title": "Frames",
+          "type": "array"
+        },
+        "session_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Session Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "traffic",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "session_id",
+        "frames"
+      ],
+      "title": "StreamTraffic",
+      "type": "object"
+    },
+    "StreamTrafficFrame": {
+      "additionalProperties": true,
+      "description": "One traffic step. vehicles is base64 of vehicle_count records of 14 bytes, little-endian: uint16\nindex in /api/traffic/{area}'s vehicles, int32 x cm, int32 y cm, int16 heading in tenths of a degree\nanticlockwise from east, uint16 speed cm/s. pedestrians (2.x, optional) is base64 of pedestrian_count\nrecords of 14 bytes, little-endian: uint16 index in /api/road-features/{area}/walkways's seeds, int32 x\ncm, int32 y cm, int16 heading in tenths of a degree anticlockwise from east, uint8 speed in units of\n2 cm/s, uint8 flags (bit 0 waiting at a kerb, bit 1 on a crossing's road part, bit 2 on a kerb ramp,\nbit 3 standing a while); a frame from a backend that walks none has neither. Presentation only; the\nsnapshot is the authority.",
+      "properties": {
+        "pedestrian_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Pedestrian Count",
+          "type": "integer"
+        },
+        "pedestrians": {
+          "default": "",
+          "title": "Pedestrians",
+          "type": "string"
+        },
+        "shuttles": {
+          "items": {
+            "$ref": "#/$defs/StreamTrafficShuttle"
+          },
+          "title": "Shuttles",
+          "type": "array"
+        },
+        "signal_faults": {
+          "items": {
+            "$ref": "#/$defs/StreamSignalFault"
+          },
+          "title": "Signal Faults",
+          "type": "array"
+        },
+        "simulation_time_s": {
+          "title": "Simulation Time S",
+          "type": "number"
+        },
+        "tick": {
+          "minimum": 0,
+          "title": "Tick",
+          "type": "integer"
+        },
+        "vehicle_count": {
+          "minimum": 0,
+          "title": "Vehicle Count",
+          "type": "integer"
+        },
+        "vehicles": {
+          "title": "Vehicles",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tick",
+        "simulation_time_s",
+        "vehicle_count",
+        "vehicles",
+        "shuttles"
+      ],
+      "title": "StreamTrafficFrame",
+      "type": "object"
+    },
+    "StreamTrafficShuttle": {
+      "additionalProperties": true,
+      "description": "A shuttle's body in a traffic step. held_by (2.x, optional) says what the background traffic holds it\nup for when it does: a vehicle (\"traffic\") or the walkers on or waiting at a crossing on its way\n(\"pedestrians\"); a shuttle nothing in the traffic holds up has none.",
+      "properties": {
+        "heading_deg": {
+          "title": "Heading Deg",
+          "type": "number"
+        },
+        "held_by": {
+          "anyOf": [
+            {
+              "enum": [
+                "traffic",
+                "pedestrians"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Held By"
+        },
+        "speed_mps": {
+          "title": "Speed Mps",
+          "type": "number"
+        },
+        "vehicle_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Vehicle Id",
+          "type": "string"
+        },
+        "x_m": {
+          "title": "X M",
+          "type": "number"
+        },
+        "y_m": {
+          "title": "Y M",
+          "type": "number"
+        }
+      },
+      "required": [
+        "vehicle_id",
+        "x_m",
+        "y_m",
+        "heading_deg",
+        "speed_mps"
+      ],
+      "title": "StreamTrafficShuttle",
+      "type": "object"
+    },
+    "TrainingSession": {
+      "additionalProperties": true,
+      "properties": {
+        "aggregate_revision": {
+          "minimum": 0,
+          "title": "Aggregate Revision",
+          "type": "integer"
+        },
+        "authority_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Authority Id",
+          "type": "string"
+        },
+        "scenario_revision_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Scenario Revision Id",
+          "type": "string"
+        },
+        "session_epoch": {
+          "minimum": 0,
+          "title": "Session Epoch",
+          "type": "integer"
+        },
+        "session_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Session Id",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "DRAFT",
+            "READY",
+            "RUNNING",
+            "PAUSED",
+            "RECOVERING",
+            "COMPLETED",
+            "ARCHIVED",
+            "FAILED"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "scenario_revision_id",
+        "status",
+        "session_epoch",
+        "aggregate_revision",
+        "authority_id"
+      ],
+      "title": "TrainingSession",
+      "type": "object"
+    }
+  },
+  "$id": "https://formula9.local/contracts/v2/stream_message.schema.json",
+  "discriminator": {
+    "mapping": {
+      "error": "#/$defs/StreamError",
+      "heartbeat": "#/$defs/StreamHeartbeat",
+      "snapshot": "#/$defs/StreamSnapshot",
+      "traffic": "#/$defs/StreamTraffic"
+    },
+    "propertyName": "type"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/StreamSnapshot"
+    },
+    {
+      "$ref": "#/$defs/StreamTraffic"
+    },
+    {
+      "$ref": "#/$defs/StreamHeartbeat"
+    },
+    {
+      "$ref": "#/$defs/StreamError"
+    }
+  ],
+  "title": "Formula 9 training session stream message v2"
+}

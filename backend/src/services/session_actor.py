@@ -42,6 +42,28 @@ class SessionActor:
     MAX_PENDING_COMMANDS = 256
     MAX_RETAINED_OUTCOMES = 1024
 
+    def checkpoint_extension(self) -> dict:
+        """Scenario-owned state that must travel with a committed actor checkpoint."""
+        return {}
+
+    def admission_options(self) -> dict:
+        """Additional durable scenario data supplied when the session is first admitted."""
+        return {}
+
+    def publication_due(self) -> bool:
+        """Allow a scenario to request a publication at an additional lifecycle boundary."""
+        return self.should_emit_snapshot()
+
+    def before_publication(self, snapshot, events):
+        """Prepare scenario lifecycle events before the domain publication is assembled."""
+        return events
+
+    def observe_publication(self, snapshot, events) -> None:
+        """Observe decisions and opportunities that are actually about to be published."""
+
+    def observe_motion(self, proposed) -> None:
+        """Observe validated motion after the actor has resolved stops and collisions."""
+
     def __init__(self, seed: int, route: list[dict], fixed_DT: float = 0.05,
                  shuttle_cnt: int = 5, *, session_id: str = "fleet-session"):
         if fixed_DT != self.STEP_S:

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "time_unit": "simulation_seconds",
-  "notes": "Synthetic templates only. Instance IDs, affected route edges, and trigger ticks are assigned by the running session. Each incident is placed about warning_s at cruise speed ahead of a shuttle chosen with the session RNG. tutorial_opening, when enabled, scripts a road block on an editable route's next road after_min_s to after_max_s into the session. timeline lists world events the scenario schedules beside the random ones: {event_id, event_type (BREAKDOWN, COLLISION or ROAD_CLOSURE), location {edge_id}, at_s, duration_s}, or a SIGNAL_FAULT at a signalled junction, location {node_id} (a junction id of fixtures/traffic/toa-payoh-signals.json), and optionally warning_s, detection_delay_s and recovery_s, which otherwise come from the template of the event's kind.",
+  "notes": "Synthetic templates only. Instance IDs, affected route edges, and trigger ticks are assigned by the running session. Each incident is placed about warning_s at cruise speed ahead of a shuttle chosen with the session RNG. tutorial_opening, when enabled, scripts a road block on an editable route's next road after_min_s to after_max_s into the session. timeline lists world events the scenario schedules beside the random ones: {event_id, event_type (BREAKDOWN, COLLISION, ROAD_CLOSURE or PEDESTRIAN_ON_ROAD: a pedestrian crossing the edge's road where there is no crossing), location {edge_id}, at_s, duration_s}, or a SIGNAL_FAULT at a signalled junction, location {node_id} (a junction id of fixtures/traffic/toa-payoh-signals.json), and optionally warning_s, detection_delay_s and recovery_s, which otherwise come from the template of the event's kind.",
   "timeline": [],
   "scenarios": [
     {

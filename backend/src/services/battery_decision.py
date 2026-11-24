@@ -122,7 +122,7 @@ def apply_charger_reservation(store: TrainingStore, command: DispatcherCommand, 
     shuttle = next(v for v in proposed.vehicles if v.vehicle_id == vehicle.vehicle_id)
     shuttle.service_state = "RETURNING_TO_DEPOT"
     shuttle.aggregate_revision += 1
-    record_hold(proposed, vehicle.vehicle_id, charger.charger_id, proposed.tick, option.out_of_service_s, "CHARGE_NOW")
+    booking = record_hold(proposed, vehicle.vehicle_id, charger.charger_id, proposed.tick, option.out_of_service_s, "CHARGE_NOW")
     model = ENERGY_MODELS.get(proposed.scenario.energy_model_revision)
     if model is not None:
         # Reissue the remaining offers: the reserved shuttle leaves service,
@@ -138,7 +138,8 @@ def apply_charger_reservation(store: TrainingStore, command: DispatcherCommand, 
                   entity_type="CHARGER", entity_id=charger.charger_id,
                   entity_revision=charger.aggregate_revision, event_type="CHARGER_RESERVED",
                   source=proposed.source,
-                  data=_decision_record(store, snapshot, model, command, vehicle, option))
+                  data={**_decision_record(store, snapshot, model, command, vehicle, option),
+                        "booking_id": booking.booking_id})
     return store.apply(command.command_id, proposed, (event,))
 
 """

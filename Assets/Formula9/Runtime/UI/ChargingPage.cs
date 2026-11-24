@@ -37,6 +37,9 @@ namespace Formula9.UI
         private const long PreviewSettleMs = 150, RecheckTicks = 200;
         private const float RowHeight = 40;
 
+        // True while a booking or cancel is being sent, when Apply and Cancel are greyed out only to wait
+        public bool Busy => busy;
+
         public ChargingPage(VisualElement root, TrainingApi api, SessionController session, Action<Task> run, Action<string> notify, Func<bool> current)
         {
             this.root = root; this.api = api; this.session = session; this.run = run; this.notify = notify; this.current = current;

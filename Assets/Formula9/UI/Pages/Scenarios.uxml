@@ -2,6 +2,6 @@
     <Style src="project://database/Assets/Formula9/UI/Formula9App.uss" />
     <ui:ScrollView class="workspace-page">
         <ui:Label text="Scenarios" class="page-title" />
-        <ui:Label text="Choose a scenario above when creating a training session. Configuring scenarios is coming in a later milestone." class="workspace-text" />
+        <ui:Label text="Use Assessment mode for the timed scored exercise or Create training session to practise." class="workspace-text" />
     </ui:ScrollView>
 </ui:UXML>

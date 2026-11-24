@@ -5,7 +5,7 @@
  * Contributors: Rishika (page layout, fleet cards, map/3D switch),
  *     Lau Xiang Yang (training workspace, session list and cleanup, exit)
  * Date Created: 30/10/2026
- * Last Modified: 15/11/2026
+ * Last Modified: 23/11/2026
  *
  * Description:
  *     Part of the Unity client's UI. Wires the UI Toolkit screens to the login and session layers,
@@ -52,24 +52,31 @@ namespace Formula9.UI
         private int sessionListLimit = SessionListPage;
         private long liveSessions = -1;
         private bool cleanupBusy;
+        private UiSounds uiSounds;
+        // The root the greyed-out button sound listens on; the UIDocument may have dropped it by OnDisable
+        private VisualElement listenedRoot;
         private Button moreSessions, archiveAll, deleteSession, purgeSessions, reclaimDisk, dialogCancel, dialogConfirm;
         private VisualElement dialogOverlay;
         private Label dialogText;
         private Func<Task> dialogAction;
 
-        private VisualElement loginScreen, trainingScreen, fleet, confirmRow, fleetPanel, sessionPlayback;
+        private VisualElement loginScreen, trainingScreen, fleet, confirmRow, sessionPlayback;
+        private VisualElement sessionCard;
         private TextField fleetSearch;
-        private VisualElement fleetEmpty;
+        private VisualElement fleetEmpty, fleetHeader, fleetNoMatch;
         private Label fleetTitle;
         private Toggle remember;
         private Button viewMap, viewWorld;
         private const string RememberedUserKey = "login.rememberedUser";
         private TextField username, password, confirm, sessionId;
         private Label signUpHint, loginError, title, user, capacity, status, message, sessionBadge, worldNotice;
+        private Label assessmentBadge, assessmentTimer;
         private string sessionBadgeClass;
         private readonly SessionStatusPresenter sessionStatusPresenter = new SessionStatusPresenter();
         private Button forgot, submit, modeSwitch, start, pause, resume, archive, refreshSessions;
-        private DropdownField scenario, sessions;
+        private DropdownField sessions;
+        private Button createPractice, assessmentMode, quitAssessment;
+        private bool creatingSession;
 
         private string incidentHistorySessionId;
         private WorldView world;
@@ -87,8 +94,10 @@ namespace Formula9.UI
             var transport = new UnityHttpTransport();
             auth = new AuthSession();
             authClient = new AuthClient(transport, auth);
-            api = new TrainingApi(transport, auth);
-            session = new SessionController(api, auth);
+            // Parse polled replies off the main thread; nothing here ever blocks on those tasks
+            api = new TrainingApi(transport, auth) { ParseInBackground = true };
+            // The joined session's snapshots and traffic come over its stream while it delivers
+            session = new SessionController(api, auth) { UseStream = true };
             auth.Ended += OnLoginEnded;
             session.SnapshotAccepted += (snapshot, reset) =>
             {
@@ -100,11 +109,12 @@ namespace Formula9.UI
                     incidentHistorySessionId = snapshot.SessionId;
                     Run(LoadIncidentMapHistory(snapshot.SessionId, snapshot.EventSequence));
                 }
-                Render();
+                // The workspace handles snapshot and availability events to update action freshness.
+                Render(renderWorkspace: false);
                 Run(RefreshSessionListIfChanged());
             };
             session.TrafficFramesAccepted += frames => world.ShowTraffic(frames);
-            session.AvailabilityChanged += available => Render();
+            session.AvailabilityChanged += _ => Render(renderWorkspace: false);
             session.CommandFinished += outcome =>
             {
                 ShowMessage(TrainingPresenter.Outcome(outcome));
@@ -135,14 +145,6 @@ namespace Formula9.UI
             world.EntitySelected += _ => { if (session.Store.Snapshot != null) RenderFleet(session.Store.Snapshot); };
             workspace = new TrainingWorkspace(GetComponent<UIDocument>().rootVisualElement, api, session, world, Run, text => ShowMessage(text));
             var rootElement = GetComponent<UIDocument>().rootVisualElement;
-            workspace.SectionChanged += section =>
-            {
-                foreach (var name in new[] { "operations", "scenarios", "reports" })
-                    rootElement.Q<Button>("section-" + name).EnableInClassList("section-item-selected", name == section);
-            };
-            foreach (var name in new[] { "operations", "scenarios", "reports" })
-                rootElement.Q<Button>("section-" + name).clicked += () => workspace.ShowSection(name);
-            workspace.ShowSection("operations");
             // A marker on the map opens Route Planning for the first shuttle still to be decided for there
             world.IncidentSelected += id => workspace.DecideForIncident(id);
             workspace.IncidentSelected += () => { if (session.Store.Snapshot != null) RenderFleet(session.Store.Snapshot); };
@@ -188,8 +190,14 @@ namespace Formula9.UI
             var root = GetComponent<UIDocument>().rootVisualElement;
             var uiPlayer = new GameObject("Interface sounds").AddComponent<UiSoundPlayer>();
             uiPlayer.transform.SetParent(transform, false);
-            var uiSounds = new UiSounds(uiPlayer.Play);
+            // A button greyed out only while something is being sent has not refused anything, so it stays
+            // silent. The check is app-wide on purpose: while any command, login, cleanup or route preview is
+            // on its way, even a button greyed out for a real reason stays silent. No sound is safer than a
+            // "no" for something that worked, and a queued command can keep this silent for a few seconds.
+            uiSounds = new UiSounds(uiPlayer.Play, () => busy || cleanupBusy || session?.HasPendingCommand == true || workspace?.Busy == true);
             foreach (var name in UiSounds.MajorButtons) root.Q<Button>(name).clicked += uiSounds.MajorPressed;
+            uiSounds.Listen(root);
+            listenedRoot = root;
             world.RouteNodeSelected += _ => uiSounds.PointPicked();
             world.RoadClicked += (_, __) => uiSounds.PointPicked();
             world.ViewChanged += Render;
@@ -197,17 +205,22 @@ namespace Formula9.UI
             ShowLogin(null);
             StartCoroutine(Poll());
             StartCoroutine(PollTraffic());
+            StartCoroutine(PumpStream());
         }
 
         // -----------------------------------------------------------------------------------
         // Function: OnDisable
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function stops the session controller and polling.
+        //     This function stops the session controller and polling, then stops catching presses
+        //     for the greyed-out button sound. It uses the root it listened on rather than asking the
+        //     UIDocument again, which may already be switched off with no root.
         private void OnDisable()
         {
             session?.Shutdown();
             StopAllCoroutines();
+            uiSounds?.Unlisten(listenedRoot);
+            listenedRoot = null;
         }
 
         // -----------------------------------------------------------------------------------
@@ -261,7 +274,8 @@ namespace Formula9.UI
             var idle = new WaitForSecondsRealtime(0.05f);
             while (true)
             {
-                if (!auth.IsLoggedIn || world == null || !world.WantsTraffic)
+                // While the session's stream delivers, the traffic comes over it instead
+                if (!auth.IsLoggedIn || world == null || !world.WantsTraffic || session.Streaming)
                 {
                     yield return retry;
                     continue;
@@ -275,6 +289,26 @@ namespace Formula9.UI
                 }
                 else if (request.IsCanceled || request.Result < 0) yield return retry;
                 else if (request.Result == 0) yield return idle;
+            }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: PumpStream
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function keeps the joined session's stream every frame
+        //     (SessionController.PumpStream): the backend pushes the session's newer snapshots and,
+        //     while the 3D city is shown, its traffic frames, so neither waits for a poll. The
+        //     stream's messages are parsed off the main thread; here they are only handed on.
+        //
+        // Returns:
+        //     IEnumerator: The coroutine.
+        private IEnumerator PumpStream()
+        {
+            while (true)
+            {
+                session.PumpStream(world != null && world.WantsTraffic);
+                yield return null;
             }
         }
 
@@ -360,36 +394,46 @@ namespace Formula9.UI
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function connects the training shell's controls: session create, join and list,
-        //     the session controls, the cleanup dialog, the fleet panel and the clock in the top
-        //     bar.
+        //     the session controls, the cleanup dialog, the fleet panel and the clock in the
+        //     sidebar.
         //
         // Args:
         //     root (VisualElement): The document's root.
         private void BindTraining(VisualElement root)
         {
             trainingScreen = root.Q("training-host");
+            sessionCard = root.Q("content-card");
             title = root.Q<Label>("title");
             user = root.Q<Label>("user");
             capacity = root.Q<Label>("capacity");
             status = root.Q<Label>("status");
             sessionBadge = root.Q<Label>("session-badge");
+            assessmentBadge = root.Q<Label>("assessment-mode-badge");
+            assessmentTimer = root.Q<Label>("assessment-timer");
             message = root.Q<Label>("message");
             ShowMessage("");
             worldNotice = root.Q<Label>("world-notice");
             fleet = root.Q("fleet");
             sessionId = root.Q<TextField>("session-id");
-            scenario = root.Q<DropdownField>("scenario");
             sessions = root.Q<DropdownField>("sessions");
+            createPractice = root.Q<Button>("create");
+            assessmentMode = root.Q<Button>("assessment-mode");
+            quitAssessment = root.Q<Button>("quit-assessment");
             start = root.Q<Button>("start");
             pause = root.Q<Button>("pause");
             resume = root.Q<Button>("resume");
             archive = root.Q<Button>("archive");
             sessionPlayback = root.Q("session-playback");
             refreshSessions = root.Q<Button>("refresh-sessions");
-            fleetPanel = root.Q("fleet-panel");
             fleetTitle = root.Q<Label>("fleet-title");
             fleetEmpty = root.Q("fleet-empty");
+            fleetHeader = root.Q("fleet-table-header");
+            fleetNoMatch = root.Q("fleet-no-match");
             fleet.style.display = DisplayStyle.None;
+            // The list's scrollbar narrows the rows, so the column headings give up the same width
+            // on their right and stay over their columns
+            if (fleet is ScrollView fleetScroll)
+                fleetScroll.verticalScroller.RegisterCallback<GeometryChangedEvent>(_ => AlignFleetHeader(fleetScroll));
             fleetSearch = root.Q<TextField>("fleet-search");
             fleetSearch.textEdition.placeholder = "Search shuttle…";
             fleetSearch.RegisterValueChangedCallback(_ => { if (session.Store.Snapshot != null) RenderFleet(session.Store.Snapshot); });
@@ -404,14 +448,7 @@ namespace Formula9.UI
                 if (world.ShowingMap) ShowMessage(world.Diagnostic);
                 Render();
             };
-            root.Q<Button>("toggle-fleet").clicked += () =>
-                fleetPanel.style.display = fleetPanel.resolvedStyle.display == DisplayStyle.None ? DisplayStyle.Flex : DisplayStyle.None;
 
-            scenario.choices = TrainingPresenter.Scenarios.Select(s => s.Label).ToList();
-            scenario.index = 0;
-            scenario.tooltip = string.Join(" ", TrainingPresenter.Scenarios.Select(s => $"{s.Label}: {s.Description}"));
-            session.Scenario = TrainingPresenter.Scenarios[0].Id;
-            scenario.RegisterValueChangedCallback(_ => { session.Scenario = TrainingPresenter.Scenarios[scenario.index].Id; Render(); });
             sessions.RegisterValueChangedCallback(_ =>
             {
                 RenderCleanup();
@@ -439,7 +476,8 @@ namespace Formula9.UI
                 Run(authClient.LogOutAsync());
             };
             root.Q<Button>("exit-app").clicked += ConfirmExit;
-            root.Q<Button>("create").clicked += () => Run(Create());
+            createPractice.clicked += () => Run(Create(SessionController.IntegratedScenario));
+            assessmentMode.clicked += () => Run(Create(SessionController.ScoredScenario));
             root.Q<Button>("join").clicked += () => Run(Join(sessionId.value.Trim()));
             root.Q<Button>("refresh").clicked += () => Run(session.RefreshAsync());
             refreshSessions.clicked += () => Run(RefreshSessionList());
@@ -447,20 +485,24 @@ namespace Formula9.UI
             pause.clicked += () => Run(session.SendControlAsync("PAUSE"));
             resume.clicked += () => Run(session.SendControlAsync("RESUME"));
             archive.clicked += ConfirmArchive;
+            quitAssessment.clicked += ConfirmArchive;
 
-            // The clock in the top bar, to the minute
+            // The clock under the user's name in the sidebar, to the minute
             var clock = root.Q<Label>("clock");
-            clock.schedule.Execute(() => clock.text = DateTime.Now.ToString("d MMM yyyy    HH:mm", CultureInfo.InvariantCulture)).Every(10000);
-            clock.text = DateTime.Now.ToString("d MMM yyyy    HH:mm", CultureInfo.InvariantCulture);
+            clock.schedule.Execute(() => clock.text = DateTime.Now.ToString("d MMM yyyy · HH:mm", CultureInfo.InvariantCulture)).Every(10000);
+            clock.text = DateTime.Now.ToString("d MMM yyyy · HH:mm", CultureInfo.InvariantCulture);
             Render();
+
+            // Toggle the sidebar between full width and icons only
             var toggleBtn = root.Q<Button>("nav-toggle-btn");
             var navPanel = root.Q("nav-panel");
             bool isCollapsed = false;
-            toggleBtn.clicked+=() =>
+            toggleBtn.clicked += () =>
             {
                 isCollapsed = !isCollapsed;
                 navPanel?.EnableInClassList("collapsed", isCollapsed);
             };
+            // The Fleet List's collapse toggle is TrainingWorkspace's, with the rest of its layout
         }
 
         // -----------------------------------------------------------------------------------
@@ -586,12 +628,24 @@ namespace Formula9.UI
         //     This function creates a training session, showing progress meanwhile. The progress
         //     note goes once the attempt finishes; a failure has already replaced it with its own
         //     message, which stays.
-        private async Task Create()
+        private async Task Create(string scenario)
         {
-            const string creating = "Creating a training session…";
+            if (creatingSession || (session.CreationPending && session.PendingCreationScenario != scenario)) return;
+            session.Scenario = scenario;
+            var creating = scenario == SessionController.ScoredScenario ? "Creating an assessment…" : "Creating a training session…";
+            creatingSession = true;
+            RenderAssessment(session.Store.Snapshot);
             ShowMessage(creating);
-            await session.CreateAsync();
-            if (message.text == creating) ShowMessage("");
+            try
+            {
+                await session.CreateAsync();
+                if (message.text == creating) ShowMessage("");
+            }
+            finally
+            {
+                creatingSession = false;
+                RenderAssessment(session.Store.Snapshot);
+            }
         }
 
         // -----------------------------------------------------------------------------------
@@ -637,7 +691,7 @@ namespace Formula9.UI
         //     admin action, and the dialog says so. SessionController.ArchiveAllAsync does the
         //     work and reports how many were really archived.
         private void ConfirmArchiveAll() => Confirm(
-            "Archive every live session on this backend, including other trainees' running ones? Each attempt ends for everyone in it and its slot is freed. Their history stays available.",
+            "Archive all visible live sessions you can manage? Archived sessions release their slots and keep their history and assessment results.",
             "Archive all", () => Cleanup("Archiving live sessions…", async () =>
             {
                 var (live, archived) = await session.ArchiveAllAsync();
@@ -668,22 +722,21 @@ namespace Formula9.UI
         // Function: ConfirmPurgeSessions
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function reads the session counts, then asks before deleting the finished
-        //     sessions older than the KeptByPurge newest, saying exactly how many go; with none
-        //     to delete it says so instead of asking. Live sessions are never deleted.
+        //     This function checks whether a purge could apply and confirms the retention
+        //     policy. The backend counts eligible practice sessions at the time of the purge.
         //
         // Returns:
         //     Task: The count and the question.
         private async Task ConfirmPurgeSessions()
         {
             var list = await api.ListSessionsAsync(1);
-            var deleted = TrainingPresenter.PurgeCount(list, KeptByPurge);
-            if (deleted == 0)
+            if (TrainingPresenter.PurgeCount(list, KeptByPurge) == 0)
             {
                 ShowMessage(TrainingPresenter.PurgeQuestion(list, KeptByPurge));
                 return;
             }
-            Confirm(TrainingPresenter.PurgeQuestion(list, KeptByPurge), $"Delete {deleted}", () => Cleanup(
+            Confirm(TrainingPresenter.PurgeQuestion(list, KeptByPurge),
+                "Delete old practice sessions", () => Cleanup(
                 "Deleting old sessions…",
                 async () => TrainingPresenter.Purged(await api.PurgeSessionsAsync(KeptByPurge))));
         }
@@ -692,12 +745,21 @@ namespace Formula9.UI
         // Function: ConfirmArchive
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function asks before archiving the joined session. Archive sits next to Start,
-        //     Pause and Resume, so a slip must not end the attempt. If the session can no longer
-        //     be archived by the time the trainee confirms, nothing is sent.
-        private void ConfirmArchive() => Confirm(
-            "Archive this session? The attempt ends and its runtime slot is released. Its history remains available.",
-            "Archive session", () => archive.enabledSelf ? session.SendControlAsync("ARCHIVE") : Task.CompletedTask);
+        //     Confirm archiving or quitting an assessment. Send nothing if the selected session
+        //     changes or ends while the dialog is open.
+        private void ConfirmArchive()
+        {
+            var snapshot = session.Store.Snapshot;
+            if (snapshot == null) return;
+            var sessionId = snapshot.SessionId;
+            var assessed = TrainingPresenter.IsAssessmentActive(snapshot);
+            Confirm(assessed
+                    ? "Quit assessment mode? This archives the attempt and returns the screen to normal mode. Reports will show Assessment disrupted, with earned points and any confirmed safety failure retained."
+                    : "Archive this session? The attempt ends and its runtime slot is released. Its history remains available.",
+                assessed ? "Quit assessment mode" : "Archive session",
+                () => session.SessionId == sessionId && archive.enabledSelf
+                    ? session.SendControlAsync("ARCHIVE") : Task.CompletedTask);
+        }
 
         // -----------------------------------------------------------------------------------
         // Function: Confirm
@@ -848,7 +910,9 @@ namespace Formula9.UI
         // Description:
         //     This function shows the current state: view switch and 3D notice, session
         //     controls, the workspace, the status line and the fleet panel.
-        private void Render()
+        private void Render() => Render(renderWorkspace: true);
+
+        private void Render(bool renderWorkspace)
         {
             var snapshot = session.Store.Snapshot;
             var worldReady = world != null && world.Ready;
@@ -871,27 +935,50 @@ namespace Formula9.UI
             pause.SetEnabled(controls.Pause);
             resume.SetEnabled(controls.Resume);
             archive.SetEnabled(controls.Archive);
-            workspace?.Render();
+            RenderAssessment(snapshot);
+            if (renderWorkspace) workspace?.Render();
             world?.SetOffline(snapshot != null && !session.Available);
             RenderSessionStatus(snapshot);
+            title.text = TrainingPresenter.Title(snapshot);
             if (snapshot == null)
             {
-                title.text = TrainingPresenter.ScenarioTitle(session.Scenario);
                 fleetTitle.text = "Fleet List (0)";
                 fleet.Clear();
                 fleet.style.display = DisplayStyle.None;
+                fleetHeader.style.display = DisplayStyle.None;
+                fleetNoMatch.style.display = DisplayStyle.None;
                 fleetEmpty.style.display = DisplayStyle.Flex;
                 return;
             }
-            title.text = TrainingPresenter.Title(snapshot);
             sessionId.SetValueWithoutNotify(snapshot.SessionId);
             RenderFleet(snapshot);
+        }
+
+        /// <summary>Keep the mode indicator and countdown visible across the training pages.</summary>
+        private void RenderAssessment(FullSnapshot snapshot)
+        {
+            var active = TrainingPresenter.IsAssessmentActive(snapshot);
+            var pending = session.PendingCreationScenario;
+            createPractice.SetEnabled(!creatingSession && (pending == null || pending == SessionController.IntegratedScenario));
+            assessmentMode.SetEnabled(!creatingSession && (pending == null || pending == SessionController.ScoredScenario));
+            assessmentMode.style.display = active ? DisplayStyle.None : DisplayStyle.Flex;
+            quitAssessment.style.display = active ? DisplayStyle.Flex : DisplayStyle.None;
+            quitAssessment.SetEnabled(archive.enabledSelf);
+            archive.style.display = active ? DisplayStyle.None : DisplayStyle.Flex;
+            assessmentBadge.style.display = active ? DisplayStyle.Flex : DisplayStyle.None;
+            sessionCard.EnableInClassList("assessment-active", active);
+            start.text = active ? "Start assessment" : "Start scenario";
+
+            var clock = TrainingPresenter.AssessmentClock(snapshot, session.Available);
+            if (assessmentTimer.text != clock.Text) assessmentTimer.text = clock.Text;
+            assessmentTimer.style.display = clock.Text == null ? DisplayStyle.None : DisplayStyle.Flex;
+            assessmentTimer.EnableInClassList("assessment-timer-urgent", clock.Urgent);
         }
 
         // Keep the operator's state readable: badge, tooltip and one-line summary.
         private void RenderSessionStatus(FullSnapshot snapshot)
         {
-            var view = sessionStatusPresenter.Present(snapshot, session.Available);
+            var view = sessionStatusPresenter.Present(snapshot, session.Available, session.Pace.Factor);
             if (sessionBadge.text != view.BadgeText) sessionBadge.text = view.BadgeText;
             if (sessionBadgeClass != view.BadgeClass)
             {
@@ -902,6 +989,7 @@ namespace Formula9.UI
             if (sessionBadge.tooltip != view.Tooltip) sessionBadge.tooltip = view.Tooltip;
             if (status.text != view.Summary) status.text = view.Summary;
             status.EnableInClassList("session-summary-offline", view.Offline);
+            status.EnableInClassList("session-summary-behind", view.Behind);
         }
 
         // -----------------------------------------------------------------------------------
@@ -916,13 +1004,16 @@ namespace Formula9.UI
         //     snapshot (FullSnapshot): The accepted snapshot.
         private void RenderFleet(FullSnapshot snapshot)
         {
-            world.SetIncidentEvents(session.Store.Events);
+            if (snapshot == null) return;
+            if (world != null) world.SetIncidentEvents(session.Store.Events);
             fleet.Clear();
             var rows = TrainingPresenter.Fleet(snapshot, workspace?.SelectedIncident);
             fleetEmpty.style.display = rows.Count == 0 ? DisplayStyle.Flex : DisplayStyle.None;
             fleet.style.display = rows.Count == 0 ? DisplayStyle.None : DisplayStyle.Flex;
             fleetTitle.text = $"Fleet List ({rows.Count})";
             var search = fleetSearch.value.Trim();
+            var shown = 0;
+
             foreach (var row in rows)
             {
                 if (search.Length > 0 && row.ShuttleId.IndexOf(search, StringComparison.OrdinalIgnoreCase) < 0) continue;
@@ -933,46 +1024,103 @@ namespace Formula9.UI
                 card.EnableInClassList("fleet-card-incident", row.Incident != null);
                 card.RegisterCallback<ClickEvent>(_ => workspace?.PickVehicle(id));
 
+                // 1. Bus Icon
                 var icon = new VisualElement { pickingMode = PickingMode.Ignore };
                 icon.AddToClassList("bus-icon");
                 var color = world != null && world.Offline ? FleetMap.FrozenColor : FleetMap.ShuttleColor(row.Index);
-                icon.generateVisualContent += mesh => Glyph.DrawBus(mesh.painter2D, new Vector2(18, 18), 36, color);
+                icon.generateVisualContent += mesh => Glyph.DrawBus(mesh.painter2D, new Vector2(14, 14), 28, color);
                 card.Add(icon);
 
-                var text = new VisualElement();
-                text.AddToClassList("fleet-card-text");
-                var top = new VisualElement();
-                top.AddToClassList("fleet-card-top");
-                top.Add(CardLabel(id, "fleet-card-id"));
+                // 2. Info Columns container
+                var contentRow = new VisualElement { style = { flexDirection = FlexDirection.Row, flexGrow = 1, alignItems = Align.Center, minWidth = 0 } };
+
+                // Widths live in USS (.fleet-col-*), shared with the header row.
+                // Shuttle ID
+                var idCol = Column("fleet-col-id");
+                idCol.Add(CardLabel(id, "fleet-card-id"));
+                contentRow.Add(idCol);
+
+                // Status
+                var statusCol = Column("fleet-col-status");
+                var dot = new VisualElement { style = { backgroundColor = StatusColor(row.State) } };
+                dot.AddToClassList("status-dot");
+                statusCol.Add(dot);
+                statusCol.Add(new Label(row.Status) { style = { fontSize = 12 } });
+                contentRow.Add(statusCol);
+
+                // Battery gauge
+                var battCol = Column("fleet-col-battery");
+                battCol.tooltip = row.Battery;
                 var gauge = new VisualElement();
                 gauge.AddToClassList("battery-gauge");
                 var fill = new VisualElement();
                 fill.AddToClassList("battery-fill");
                 fill.style.width = Length.Percent((float)row.BatteryPercent);
-                // Amber below 50 %, red below 20 %
                 fill.style.backgroundColor = row.BatteryPercent < 20 ? new Color(0.839f, 0.188f, 0.192f)
                     : row.BatteryPercent < 50 ? new Color(0.949f, 0.6f, 0.29f) : new Color(0.153f, 0.682f, 0.376f);
                 gauge.Add(fill);
-                top.Add(gauge);
-                top.Add(new Label($"{row.BatteryPercent:0}%") { tooltip = row.Battery });
-                text.Add(top);
+                battCol.Add(gauge);
+                battCol.Add(new Label($"{row.BatteryPercent:0}%") { style = { fontSize = 11 } });
+                contentRow.Add(battCol);
 
-                var status = new VisualElement();
-                status.AddToClassList("fleet-card-status");
-                var dot = new VisualElement();
-                dot.AddToClassList("status-dot");
-                dot.style.backgroundColor = StatusColor(row.State);
-                status.Add(dot);
-                status.Add(new Label(row.Status));
-                text.Add(status);
+                // Route and next stop
+                var routeCol = Column("fleet-col-route");
+                routeCol.Add(CardLabel(row.RouteLine, "fleet-card-line"));
+                routeCol.Add(CardLabel(row.NextStop, "fleet-card-line"));
+                contentRow.Add(routeCol);
 
-                if (row.Incident != null) text.Add(CardLabel(row.Incident, "fleet-incident"));
-                text.Add(CardLabel(row.RouteLine, "fleet-card-line"));
-                text.Add(CardLabel(row.NextStop, "fleet-card-line"));
-                text.Add(CardLabel(row.Eta, "fleet-card-line"));
-                card.Add(text);
+                // ETA
+                var etaCol = Column("fleet-col-eta");
+                etaCol.Add(CardLabel(row.Eta, "fleet-card-line"));
+                contentRow.Add(etaCol);
+
+                // Incident
+                var incidentCol = Column("fleet-col-incident");
+                if (row.Incident != null) incidentCol.Add(CardLabel(row.Incident, "fleet-incident"));
+                contentRow.Add(incidentCol);
+
+                card.Add(contentRow);
                 fleet.Add(card);
+                shown++;
             }
+            // The column header shows only over cards; a search that matches none says so instead
+            fleetHeader.style.display = shown > 0 ? DisplayStyle.Flex : DisplayStyle.None;
+            fleetNoMatch.style.display = rows.Count > 0 && shown == 0 ? DisplayStyle.Flex : DisplayStyle.None;
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: AlignFleetHeader
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function keeps the Fleet List's column headings over their columns: while the
+        //     list shows its scrollbar, the heading row is as much narrower as the rows are.
+        //
+        // Args:
+        //     list (ScrollView): The Fleet List.
+        private void AlignFleetHeader(ScrollView list)
+        {
+            var scroller = list.verticalScroller;
+            var width = scroller.resolvedStyle.display == DisplayStyle.None ? 0 : scroller.layout.width;
+            fleetHeader.style.marginRight = float.IsNaN(width) ? 0 : width;
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: Column
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function makes one column of a fleet row. Its width comes from the USS class.
+        //
+        // Args:
+        //     className (string): The column's USS class, such as fleet-col-id.
+        //
+        // Returns:
+        //     VisualElement: The column.
+        private static VisualElement Column(string className)
+        {
+            var col = new VisualElement();
+            col.AddToClassList("fleet-col");
+            col.AddToClassList(className);
+            return col;
         }
 
         // -----------------------------------------------------------------------------------

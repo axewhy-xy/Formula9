@@ -6,8 +6,10 @@
     python Tools/run_backend.py --start-everything
     python Tools/run_backend.py [--reload] [--host 127.0.0.1] [--port 8000]
 
-Setup installs the existing dependency lock into backend/.venv. It does not
-install system software or download the optional KITTI/ML datasets and models.
+Setup installs the existing dependency lock into backend/.venv, then builds the
+native traffic engine if CMake and a C++ compiler are installed (Tools/build_native.py;
+without it the backend drives the same traffic in Python). It does not install system
+software or download the optional KITTI/ML datasets and models.
 """
 
 from __future__ import annotations
@@ -56,8 +58,19 @@ def set_up(environment: dict[str, str]) -> int:
     result = subprocess.call([str(environment_python()), "-m", "ensurepip", "--upgrade"], cwd=ROOT, env=environment)
     if result:
         return result
-    return subprocess.call([str(environment_python()), "-m", "pip", "install", "-r",
-                            str(ROOT / "backend/requirements.lock.txt")], cwd=ROOT, env=environment)
+    result = subprocess.call([str(environment_python()), "-m", "pip", "install", "-r",
+                              str(ROOT / "backend/requirements.lock.txt")], cwd=ROOT, env=environment)
+    if result:
+        return result
+    build_native(environment)
+    return 0
+
+
+def build_native(environment: dict[str, str]) -> bool:
+    """Builds the native traffic engine (Tools/build_native.py) where CMake and a C++ compiler are
+    installed. Optional: without it the backend drives the same traffic in Python, more slowly."""
+    print("Building the native traffic engine (optional)...", flush=True)
+    return subprocess.call([str(environment_python()), str(ROOT / "Tools" / "build_native.py")], cwd=ROOT, env=environment) == 0
 
 
 def saved_value(name: str, path: Path) -> str:
@@ -230,6 +243,9 @@ def main() -> int:
     command = [interpreter, "-m", "uvicorn", "src.app:app", "--host", args.host, "--port", str(args.port)]
     if args.reload:
         command += ["--reload", "--reload-dir", str(ROOT / "backend/src"), "--reload-dir", str(ROOT / "contracts")]
+        # Every reload would start the session worker processes again, each loading the road network:
+        # while editing, sessions run in the server's own process unless asked otherwise
+        environment.setdefault("F9_SESSION_WORKERS", "0")
     print(f"Repository: {ROOT}\nPython: {interpreter}\nBackend: {ROOT / 'backend'}", flush=True)
     return subprocess.call(command, cwd=ROOT, env=environment)
 

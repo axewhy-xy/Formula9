@@ -83,6 +83,31 @@ flags, the committed route edges, route/session/scene revisions, and backend
 estimate assumptions. It supplies mouse picking and numeric waypoint entry;
 only a fresh route preview and the approval endpoint can authorize a detour.
 
+## Live session stream (2.x, additive)
+
+`stream.py` and `stream_message.schema.json` define
+`WS /api/v2/sessions/{session_id}/stream?traffic=&after_tick=&snapshot_interval_ms=`, which pushes
+what a client would otherwise poll. Every message is one JSON text frame with a `type`:
+
+- `snapshot`: `{"type", "session_id", "snapshot"}`, the newest committed `FULL_SNAPSHOT` exactly as
+  `GET /snapshot` returns it. The first message of every stream, then each newer one, at most one per
+  `snapshot_interval_ms` (100-5000, default 250). Snapshots coalesce and never go backwards; the
+  stream never carries events. A client reads events from `GET /events` when a snapshot's
+  `event_sequence` is past its cursor, so the replay rules above are unchanged.
+- `traffic`: `{"type", "session_id", "frames"}`, the frames after the last sent, as
+  `GET /traffic` returns them, while the client wants traffic and the session has some.
+- `heartbeat`: `{"type", "session_id"}` after 5 s with nothing else.
+- `error`: `{"type", "session_id", "error": {"code", "message", "retryable"}}`. `INVALID_PAYLOAD`
+  refuses a client message and the stream goes on; any other code ends it, and the server closes
+  with 4404 (`INVALID_REFERENCE`), 4403 (`ROLE_DENIED`) or 1013 (`SESSION_RECOVERING`). 1001 means
+  the backend is stopping.
+
+The client sends `{"type": "traffic", "enabled": bool, "after_tick": int}` (`after_tick` optional)
+to turn traffic frames on or off. The login is the bearer token on the upgrade request. A client
+treats the stream as an accelerator only: on any close it polls over HTTP, which reports the
+session's state as before, and reconnects later. Message types it does not know are skipped.
+`fixtures/stream_messages.json` has one of each.
+
 ## Shared alert cues
 
 `alert_cues.json` is the hand-maintained source for the web and native alert
@@ -135,7 +160,7 @@ mute handling, and silent history playback remain the gates' responsibility.
 
 An incident stands for a world event at a place on the road network, not an
 effect attached to one shuttle. `Incident.event_type` (`BREAKDOWN`,
-`COLLISION`, `SIGNAL_FAULT`, `ROAD_CLOSURE`) and `location` (exactly one of
+`COLLISION`, `SIGNAL_FAULT`, `ROAD_CLOSURE`, `PEDESTRIAN_ON_ROAD`) and `location` (exactly one of
 `edge_id` or `node_id`, with an optional `road_name`) say what and where it is.
 `exposed_vehicle_ids` lists, nearest first, the shuttles whose remaining route
 crosses its footprint (the scene and the queue behind it) before it clears, and

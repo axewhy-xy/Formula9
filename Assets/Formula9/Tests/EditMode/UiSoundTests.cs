@@ -3,11 +3,13 @@
  *
  * Author: Choo Jian Wei
  * Date Created: 30/10/2026
- * Last Modified: 03/11/2026
+ * Last Modified: 23/11/2026
  *
  * Description:
  *     Checks the sound consultation as applied to the Unity controls: the major buttons exist in
- *     the real layout, the major button and map point sounds play, and every sound is a real clip.
+ *     the real layout, the major button and map point sounds play, a greyed-out button plays the
+ *     refused sound unless the app is busy, a real press reaches it through the root, and every
+ *     sound is a real clip.
  */
 
 using System.Collections.Generic;
@@ -67,6 +69,129 @@ namespace Formula9.Tests
             sounds.MajorPressed();
             sounds.PointPicked();
             CollectionAssert.AreEqual(new[] { UiSound.MajorButton, UiSound.MapPoint }, played);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: PressingAGreyedOutButtonPlaysTheRefusedSound
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A press on a disabled button, or on its label, plays the refused sound, and so does a
+        //     press on a button greyed out by its disabled panel; a press on an enabled button, or on
+        //     no button, stays silent.
+        [Test]
+        public void PressingAGreyedOutButtonPlaysTheRefusedSound()
+        {
+            var panel = new VisualElement();
+            var off = new Button { text = "Apply" };
+            var label = new Label("inside");
+            off.Add(label);
+            off.SetEnabled(false);
+            var on = new Button();
+            panel.Add(off); panel.Add(on);
+
+            sounds.Pressed(off);
+            sounds.Pressed(label);
+            CollectionAssert.AreEqual(new[] { UiSound.Refused, UiSound.Refused }, played);
+
+            played.Clear();
+            sounds.Pressed(on);
+            sounds.Pressed(panel);
+            sounds.Pressed(null);
+            CollectionAssert.IsEmpty(played);
+
+            panel.SetEnabled(false);
+            sounds.Pressed(on);
+            CollectionAssert.AreEqual(new[] { UiSound.Refused }, played, "a button greyed out by its panel counts too");
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: AGreyedOutButtonStaysSilentWhileTheAppIsBusy
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A button greyed out while a command, login or preview is being sent is waiting, not
+        //     refusing, so a second click on it (Apply double-clicked) stays silent until the app is
+        //     done.
+        [Test]
+        public void AGreyedOutButtonStaysSilentWhileTheAppIsBusy()
+        {
+            var busy = true;
+            var waiting = new UiSounds(played.Add, () => busy);
+            var apply = new Button();
+            apply.SetEnabled(false);
+
+            waiting.Pressed(apply);
+            CollectionAssert.IsEmpty(played);
+
+            busy = false;
+            waiting.Pressed(apply);
+            CollectionAssert.AreEqual(new[] { UiSound.Refused }, played);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: ARealPressOnAGreyedOutButtonReachesTheRoot
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Through a real panel, a left press on a greyed-out button (or its label) is caught
+        //     by the root's listener and plays the refused sound; a right or middle click does not,
+        //     and after Unlisten nothing plays.
+        [Test]
+        public void ARealPressOnAGreyedOutButtonReachesTheRoot()
+        {
+            var host = new GameObject("UiSoundTests panel");
+            var settings = ScriptableObject.CreateInstance<PanelSettings>();
+            try
+            {
+                host.SetActive(false);
+                var document = host.AddComponent<UIDocument>();
+                document.panelSettings = settings;
+                host.SetActive(true);
+                var root = document.rootVisualElement;
+                Assert.IsNotNull(root?.panel, "the document has a panel");
+
+                var off = new Button { text = "Apply" };
+                var label = new Label("inside");
+                off.Add(label);
+                off.SetEnabled(false);
+                root.Add(off);
+                sounds.Listen(root);
+
+                Press(off, 0);
+                Press(label, 0);
+                CollectionAssert.AreEqual(new[] { UiSound.Refused, UiSound.Refused }, played);
+
+                played.Clear();
+                Press(off, 1);
+                Press(off, 2);
+                CollectionAssert.IsEmpty(played, "a right or middle click is not a press");
+
+                sounds.Unlisten(root);
+                Press(off, 0);
+                CollectionAssert.IsEmpty(played, "Unlisten stops the sound");
+                Assert.DoesNotThrow(() => sounds.Unlisten(null), "a root already gone is ignored");
+            }
+            finally
+            {
+                Object.DestroyImmediate(host);
+                Object.DestroyImmediate(settings);
+            }
+        }
+
+        // Sends a pointer press and its release with the given mouse button straight to an element,
+        // so the pointer is not left marked as pressed for later tests.
+        private static void Press(VisualElement target, int button)
+        {
+            var down = new Event { type = EventType.MouseDown, button = button, mousePosition = Vector2.zero };
+            using (var press = PointerDownEvent.GetPooled(down))
+            {
+                press.target = target;
+                target.SendEvent(press);
+            }
+            var up = new Event { type = EventType.MouseUp, button = button, mousePosition = Vector2.zero };
+            using (var release = PointerUpEvent.GetPooled(up))
+            {
+                release.target = target;
+                target.SendEvent(release);
+            }
         }
 
         // -----------------------------------------------------------------------------------

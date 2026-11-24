@@ -23,7 +23,11 @@ namespace HealthbarGames
             mNextMalfunctionTime = mStartTime + initialDelay + malfunctionDelay;
             mWasInitialDelay = false;
 
+#if UNITY_2023_1_OR_NEWER
+            mTrafficManagers = FindObjectsByType<TrafficLightManager>(FindObjectsSortMode.None);
+#else
             mTrafficManagers = FindObjectsOfType<TrafficLightManager>();
+#endif
             mMalfunctionTimers = new float[mTrafficManagers.Length];
 
             for (int i = 0; i < mTrafficManagers.Length; i++)
