@@ -3,12 +3,13 @@
  *
  * Author: Choo Jian Wei
  * Date Created: 30/10/2026
- * Last Modified: 03/11/2026
+ * Last Modified: 24/11/2026
  *
  * Description:
  *     Part of the native semantic audio work (NAT-M2-07). TrainingAlerts decides which events
- *     alert; this component only turns a cue name into a sound. The incident, battery low,
- *     disconnect and reconnect clips are from amee's sound consultation with Vuk; the other
+ *     alert; this component only turns a cue name into a sound. The incident, battery and
+ *     disconnect clips are from amee's sound consultation with Vuk; the quieter incident alert
+ *     follows the audio professor's review, as does the reconnect cue, UI Confirmation; the other
  *     alerts are still the Qt client's Assets/Audio/alert_*.wav.
  */
 
@@ -27,7 +28,7 @@ namespace Formula9.Audio
     //
     //     Attributes: SoundFiles maps each cue name to its clip (file name without .wav);
     //     ClientSoundFiles does the same for cues the client raises itself, such as battery low,
-    //     which no backend event carries.
+    //     which no backend event carries; Volumes lowers the cues that play below full volume.
     public sealed class AlertPlayer : MonoBehaviour
     {
         // Cue name -> clip in Resources/Formula9/Audio (file name without .wav).
@@ -44,10 +45,18 @@ namespace Formula9.Audio
         {
             [BatteryWatch.Cue] = "ui_battery_low",
             [DisconnectCue] = "ui_dull_01",  // amee: dial 1 is disconnect
-            [ReconnectCue] = "ui_dull_08",   // amee: dial 8 is reconnect
+            [ReconnectCue] = "ui_confirmation", // the audio professor: UI Confirmation_2
         };
 
-        // Played when the backend stops answering a joined session, and when it answers again.
+        // Cue name -> volume for cues quieter than full volume. The audio professor found the
+        // incident alert too loud next to the others.
+        public static readonly IReadOnlyDictionary<string, float> Volumes = new Dictionary<string, float>
+        {
+            ["incident_alert"] = 0.5f,
+        };
+
+        // Played when the backend stops answering a joined session, and when it answers again. A
+        // reconnect to a session the backend recovered after a crash plays session_recovered instead.
         public const string DisconnectCue = "disconnect", ReconnectCue = "reconnect";
 
         private readonly Dictionary<string, AudioClip> clips = new Dictionary<string, AudioClip>();
@@ -58,12 +67,37 @@ namespace Formula9.Audio
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function creates the 2D audio source the alerts play through. Alerts are
-        //     interface sounds, not part of the 3D world, so the source has no spatial blend.
+        //     interface sounds, not part of the 3D world, so the source has no spatial blend. It
+        //     also loads every alert clip up front: a clip whose audio is not loaded yet plays
+        //     nothing the first time, so each alert's first cue would otherwise be silent.
         private void Awake()
         {
             source = gameObject.AddComponent<AudioSource>();
             source.playOnAwake = false;
             source.spatialBlend = 0; // alerts are interface sounds, not part of the 3D world
+            foreach (var cues in new[] { SoundFiles, ClientSoundFiles })
+                foreach (var cue in cues)
+                    clips[cue.Key] = LoadClip(cue.Value);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: LoadClip
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function loads a clip from Resources/Formula9/Audio with its audio data ready.
+        //     The clips are imported without Preload Audio Data, and the first PlayOneShot of a
+        //     clip still unloaded is silent, so the data is loaded here, before it is needed.
+        //
+        // Args:
+        //     file (string): The file name without .wav.
+        //
+        // Returns:
+        //     AudioClip: The loaded clip, or null when there is no such clip.
+        internal static AudioClip LoadClip(string file)
+        {
+            var clip = Resources.Load<AudioClip>($"Formula9/Audio/{file}");
+            if (clip != null && clip.loadState != AudioDataLoadState.Loaded) clip.LoadAudioData();
+            return clip;
         }
 
         // -----------------------------------------------------------------------------------
@@ -79,8 +113,8 @@ namespace Formula9.Audio
         {
             if (!SoundFiles.TryGetValue(cue, out var file) && !ClientSoundFiles.TryGetValue(cue, out file)) return;
             if (!clips.TryGetValue(cue, out var clip))
-                clips[cue] = clip = Resources.Load<AudioClip>($"Formula9/Audio/{file}");
-            if (clip != null) source.PlayOneShot(clip);
+                clips[cue] = clip = LoadClip(file);
+            if (clip != null) source.PlayOneShot(clip, Volumes.TryGetValue(cue, out var volume) ? volume : 1f);
         }
     }
 }

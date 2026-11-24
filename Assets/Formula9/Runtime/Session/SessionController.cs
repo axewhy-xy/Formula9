@@ -196,6 +196,9 @@ namespace Formula9.Session
         // AvailabilityChanged it ignores joining, leaving and resyncing, which are not the
         // backend dropping.
         public event Action<bool> ConnectionChanged;
+        // True during ConnectionChanged(true) when the backend came back with a recovered session,
+        // whose SESSION_RECOVERED event is about to be fetched and announces the reconnect itself.
+        public bool ReconnectRecovered { get; private set; }
         public event Action<CommandOutcome> CommandFinished;
         // Includes submissions with an unknown outcome and complete HTTP refusals, so the
         // report does not silently omit commands that never produced a journaled receipt.
@@ -722,6 +725,8 @@ namespace Formula9.Session
         //
         // Args:
         //     command (DispatcherCommand): The command for the joined session.
+        //     taken (Action): Called once the command has passed every check and is on its way,
+        //         before any reply; not called when it is refused or rejected as malformed.
         //
         // Returns:
         //     Task<bool>: False when refused because the session is not ready or a command is open.
@@ -729,13 +734,14 @@ namespace Formula9.Session
         // Throws:
         //     ArgumentException: If the command is for another session.
         //     ContractException: If the command breaks the contract.
-        public async Task<bool> SubmitAsync(DispatcherCommand command)
+        public async Task<bool> SubmitAsync(DispatcherCommand command, Action taken = null)
         {
             if (Session == null || !Available || resyncPending || joiningSessionId != null || pending != null) return await Refuse();
             if (command.SessionId != SessionId) throw new ArgumentException("Command is for another session", nameof(command));
             ContractParser.Serialize(command); // reject a malformed command before it becomes pending
             pending = new PendingCommand { Command = command };
             RecordPending("PENDING_CONFIRMATION");
+            taken?.Invoke();
             await RunPendingAsync(0);
             return true;
         }
@@ -753,13 +759,15 @@ namespace Formula9.Session
         //     preview (RouteEditPreview): A fresh, approvable preview of the current route
         //         revision.
         //     reason (string): Why the route is changed.
+        //     taken (Action): Called once the approval has passed every check and is on its way,
+        //         before any reply; not called when it is refused or throws.
         //
         // Returns:
         //     Task<bool>: False when refused because the session is not ready or a command is open.
         //
         // Throws:
         //     ArgumentException: If the preview is stale or not approvable, or the reason is empty.
-        public async Task<bool> ApproveRouteAsync(RouteEditPreview preview, string reason)
+        public async Task<bool> ApproveRouteAsync(RouteEditPreview preview, string reason, Action taken = null)
         {
             if (Session == null || !Available || resyncPending || joiningSessionId != null || pending != null) return await Refuse();
             var snapshot = Store.Snapshot;
@@ -784,6 +792,7 @@ namespace Formula9.Session
                 },
             };
             RecordPending("PENDING_CONFIRMATION");
+            taken?.Invoke();
             await RunPendingAsync(0);
             return true;
         }
@@ -892,7 +901,13 @@ namespace Formula9.Session
             Session = snapshot.Session;
             if (epochChanged && pending != null && pending.Command.SessionId == sessionId) pending.StatusOnly = true;
             SetAvailable(true);
-            if (connectionLost) { connectionLost = false; ConnectionChanged?.Invoke(true); }
+            if (connectionLost)
+            {
+                connectionLost = false;
+                ReconnectRecovered = recovered;
+                try { ConnectionChanged?.Invoke(true); }
+                finally { ReconnectRecovered = false; }
+            }
             Pace.Observe(snapshot, now().Ticks / (double)TimeSpan.TicksPerSecond);
             SnapshotAccepted?.Invoke(snapshot, resetEvents);
             if (recovered) _ = RequestRecoveryEventsAsync(sessionId, recoveredAfter, snapshot.EventSequence);
