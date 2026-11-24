@@ -3,10 +3,10 @@
  *
  * Author: Choo Jian Wei
  * Date Created: 03/11/2026
- * Last Modified: 03/11/2026
+ * Last Modified: 24/11/2026
  *
  * Description:
- *     Checks when the battery low sound plays: once when a shuttle drops below the threshold,
+ *     Checks when the battery critical sound plays: once when a shuttle's gauge turns red,
  *     again only after it charges back, never for what was already low on joining, and never while
  *     Mute alerts is on. Also checks the clip it plays is real.
  */
@@ -67,7 +67,7 @@ namespace Formula9.Tests
         // Function: DroppingBelowTheThresholdSoundsOnce
         // -----------------------------------------------------------------------------------
         // Description:
-        //     A shuttle crossing below LowPercent sounds once, and staying low stays silent.
+        //     A shuttle whose gauge turns red sounds once, and staying red stays silent.
         [Test]
         public void DroppingBelowTheThresholdSoundsOnce()
         {
@@ -78,35 +78,54 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: ItSoundsWhenTheGaugeFirstReadsTheThreshold
+        // Function: ItSoundsOnlyWhenTheGaugeTurnsRed
         // -----------------------------------------------------------------------------------
         // Description:
-        //     The gauge rounds to whole percents, so 20.4% already reads 20% and sounds, while
-        //     20.6% still reads 21% and stays silent.
+        //     The sound is the critical warning, so a battery at exactly RedPercent, whose gauge is
+        //     not red yet, stays silent; just below it, the gauge turns red and it sounds.
         [Test]
-        public void ItSoundsWhenTheGaugeFirstReadsTheThreshold()
+        public void ItSoundsOnlyWhenTheGaugeTurnsRed()
         {
             watch.OnSnapshot(Snapshot("s", 21));
-            watch.OnSnapshot(Snapshot("s", 20.6));
-            Assert.IsEmpty(played, "20.6% still reads 21%");
-            watch.OnSnapshot(Snapshot("s", 20.4));
-            CollectionAssert.AreEqual(new[] { BatteryWatch.Cue }, played, "20.4% reads 20%");
+            watch.OnSnapshot(Snapshot("s", 20));
+            Assert.IsEmpty(played, "20% is not red yet");
+            watch.OnSnapshot(Snapshot("s", 19.99));
+            CollectionAssert.AreEqual(new[] { BatteryWatch.Cue }, played, "19.99% is red");
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: LowMatchesTheGaugeTextAtTheBoundary
+        // Function: RedMatchesTheGaugeColourAtTheBoundary
         // -----------------------------------------------------------------------------------
         // Description:
-        //     Both gauges print the battery with "0", so IsLow is true exactly when that text
-        //     reads LowPercent or less, including at the half.
+        //     Red starts just below 20%. The sound and the Charging page's gauge class are each
+        //     checked against that fixed boundary, not against each other, so a change to either
+        //     one fails here. Both pages draw BatteryWatch.Percent, which the sound reads too.
         [Test]
-        public void LowMatchesTheGaugeTextAtTheBoundary()
+        public void RedMatchesTheGaugeColourAtTheBoundary()
         {
-            foreach (var percent in new[] { 19.5, 20.4999, 20.5, 20.5001, 21 })
+            var expected = new Dictionary<double, bool> { [0] = true, [19.5] = true, [19.9999] = true, [20] = false, [20.0001] = false, [21] = false };
+            foreach (var entry in expected)
             {
-                var vehicle = Snapshot("s", percent).Vehicles[0];
-                Assert.AreEqual(int.Parse($"{percent:0}") <= BatteryWatch.LowPercent, BatteryWatch.IsLow(vehicle), $"{percent}%");
+                var vehicle = Snapshot("s", entry.Key).Vehicles[0];
+                Assert.AreEqual(entry.Value, BatteryWatch.IsRed(vehicle), $"{entry.Key}% sounds");
+                Assert.AreEqual(entry.Key, BatteryWatch.Percent(vehicle), 1e-9, $"{entry.Key}% gauge percent");
+                Assert.AreEqual(entry.Value, Formula9.UI.ChargingPresenter.BatteryClass(entry.Key) == "charge-battery-low", $"{entry.Key}% Charging page gauge");
             }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: AShuttleWithNoCapacityIsRedLikeItsGauge
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A shuttle with no battery capacity shows a red 0% bar, so it counts as red and
+        //     sounds like any other shuttle whose gauge turns red.
+        [Test]
+        public void AShuttleWithNoCapacityIsRedLikeItsGauge()
+        {
+            var empty = new FleetVehicle { BatteryCapacityKwh = 0, BatteryKwh = 0 };
+            Assert.AreEqual(0, BatteryWatch.Percent(empty));
+            Assert.IsTrue(BatteryWatch.IsRed(empty));
+            Assert.AreEqual("charge-battery-low", Formula9.UI.ChargingPresenter.BatteryClass(BatteryWatch.Percent(empty)));
         }
 
         // -----------------------------------------------------------------------------------
@@ -114,7 +133,7 @@ namespace Formula9.Tests
         // -----------------------------------------------------------------------------------
         // Description:
         //     A drop in the snapshot that ends an outage sounds one snapshot later instead of on
-        //     top of the reconnect cue; a hold with no drop changes nothing after it.
+        //     top of the session recovered alert; a hold with no drop changes nothing after it.
         [Test]
         public void AfterAReconnectADropWaitsOneSnapshot()
         {
@@ -202,7 +221,6 @@ namespace Formula9.Tests
         {
             watch.OnSnapshot(null);
             watch.OnSnapshot(new FullSnapshot { SessionId = "s" });
-            Assert.IsFalse(BatteryWatch.IsLow(new FleetVehicle { BatteryCapacityKwh = 0, BatteryKwh = 0 }));
             Assert.IsEmpty(played);
         }
 
@@ -210,7 +228,7 @@ namespace Formula9.Tests
         // Function: EveryClientCueHasARealClip
         // -----------------------------------------------------------------------------------
         // Description:
-        //     Battery low, disconnect and reconnect each map to their own clip that loads.
+        //     Battery, disconnect and reconnect each map to their own clip that loads.
         [Test]
         public void EveryClientCueHasARealClip()
         {
