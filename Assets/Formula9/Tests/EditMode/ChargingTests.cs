@@ -44,6 +44,21 @@ namespace Formula9.Tests
             StringAssert.Contains("stranded", ChargingPresenter.Exceptions(s).Single(e => e.VehicleId == "shuttle-02").Text);
         }
 
+        // The screenshots that found this: 20% with 4 loops read Low beside a red gauge.
+        [TestCase(7.9, 4, "High")]     // 19.75%, shown as 20%: red gauge
+        [TestCase(7.0, 58, "High")]    // 17.5%: red gauge, plenty of loops forecast
+        [TestCase(8.4, 5, "Medium")]   // 21%: amber gauge
+        [TestCase(28.0, 3, "Medium")]  // 70%: few loops still counts
+        [TestCase(28.0, 1, "High")]    // 70%: last loop still counts
+        [TestCase(28.0, 44, "Low")]
+        public void UrgencyFollowsTheBatteryAsWellAsTheLoops(double kwh, int loops, string label)
+        {
+            var s = Low();
+            s.Vehicles.First(v => v.VehicleId == "shuttle-03").BatteryKwh = kwh;
+            s.EnergyForecasts.First(f => f.VehicleId == "shuttle-03").LoopsRemaining = loops;
+            Assert.AreEqual(label, ChargingPresenter.Queue(s).Single(r => r.VehicleId == "shuttle-03").Urgency);
+        }
+
         [TestCase("RETURNING_TO_DEPOT", "Depot trip")]
         [TestCase("QUEUED_FOR_CHARGE", "At charger")]
         [TestCase("CHARGING", "Charging")]
