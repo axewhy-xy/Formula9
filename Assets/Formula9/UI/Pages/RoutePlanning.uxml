@@ -13,6 +13,15 @@
                 <ui:Label name="route-pending-title" class="route-pending-title" />
                 <ui:VisualElement name="route-pending-items" class="route-pending-items" />
             </ui:VisualElement>
+
+            <!-- Emergency dispatch: shown while a shuttle cannot run -->
+            <ui:VisualElement name="emergency-dispatch" class="route-card" style="display: none;">
+                <ui:Label text="Emergency dispatch" class="route-card-title" />
+                <ui:DropdownField name="emergency-vehicle" label="Shuttle not operational" />
+                <ui:Label name="emergency-status" class="route-card-text" />
+                <ui:TextField name="emergency-reason" max-length="512" multiline="true" placeholder-text="Why does it need assistance?" />
+                <ui:Button name="emergency-dispatch-button" text="Emergency dispatch" class="wide-button danger" />
+            </ui:VisualElement>
             <ui:DropdownField name="shuttles" label="Shuttle" />
 
             <ui:VisualElement class="route-card route-card-problem">
