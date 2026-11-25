@@ -19,7 +19,7 @@
             </ui:Button>
             <ui:VisualElement name="nav-items" class="nav-items">
                 <ui:Button name="nav-fleet" class="nav-item" tooltip="Fleet Overview"><f9:Glyph kind="Bus" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Fleet Overview" picking-mode="Ignore" /></ui:Button>
-                <ui:Button name="nav-route" class="nav-item" tooltip="Route Planning"><f9:Glyph kind="Pin" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Route Planning" picking-mode="Ignore" /><ui:Label name="nav-route-badge" class="nav-badge" picking-mode="Ignore" style="display: none;" /></ui:Button>
+                <ui:Button name="nav-route" class="nav-item" tooltip="Route Planning"><f9:Glyph kind="Pin" tint="#E6F2F2" class="nav-item-icon" /><ui:Label name="nav-route-name" text="Route Planning" picking-mode="Ignore" /><ui:TextElement name="nav-route-badge" class="nav-badge" picking-mode="Ignore" style="display: none;" /></ui:Button>
                 <ui:Button name="nav-charging" class="nav-item" tooltip="Charging"><f9:Glyph kind="Plug" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Charging" picking-mode="Ignore" /></ui:Button>
                 <ui:Button name="nav-scenarios" class="nav-item" tooltip="Scenarios"><f9:Glyph kind="Info" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Scenarios" picking-mode="Ignore" /></ui:Button>
                 <ui:Button name="nav-reports" class="nav-item" tooltip="Reports"><f9:Glyph kind="Document" tint="#E6F2F2" class="nav-item-icon" /><ui:Label text="Reports" picking-mode="Ignore" /></ui:Button>
@@ -47,12 +47,19 @@
                         <ui:Label name="assessment-mode-badge" text="Assessment mode" class="assessment-mode-badge" style="display: none;" />
                         <ui:Label name="session-badge" text="No session" class="session-badge" />
                         <ui:Label name="assessment-timer" class="assessment-timer" style="display: none;" />
+                        <!-- Next to the title: open the setup panel below, or start an assessment straight away -->
+                        <ui:VisualElement class="session-start">
+                            <ui:Button name="session-toggle" text="Create/join training session" class="session-button session-primary" tooltip="Show or hide session creation, joining and deletion." />
+                            <ui:Button name="assessment-mode" text="Assessment mode" class="session-button assessment-mode-button" tooltip="Create and join a timed scored exercise." />
+                        </ui:VisualElement>
                     </ui:VisualElement>
                     <ui:VisualElement class="session-utilities">
                         <ui:Button name="quit-assessment" text="Quit assessment mode" class="session-button session-caution" tooltip="Archive this attempt and record the assessment as disrupted." style="display: none;" />
-                        <ui:Button name="session-toggle" text="Session options" class="session-button session-quiet" tooltip="Show or hide session creation, joining and deletion." style="display: none;" />
                         <!-- Only while a session is joined: before that nothing can sound -->
-                        <ui:Toggle name="mute" label="Mute alert sounds" class="mute" tooltip="Silence the sounds for incidents, low batteries and lost connections. The incident notifications over the map still appear." style="display: none;" />
+                        <!-- A bell while alert sounds are on, a bell with a slash while muted; a click switches. Formula9App sets the icon and tooltip. -->
+                        <ui:Button name="mute" class="mute mute-button" style="display: none;">
+                            <f9:Glyph kind="Bell" tint="#4A5D61" size="20" />
+                        </ui:Button>
                     </ui:VisualElement>
                     <ui:VisualElement name="session-playback" class="session-playback" style="display: none;">
                         <ui:Button name="archive" text="Archive session" class="session-button session-caution" tooltip="End this attempt and release its runtime slot. History remains available." />
@@ -67,40 +74,44 @@
                     <ui:Label name="status" class="status session-summary" />
                 </ui:VisualElement>
 
-                <!-- Session setup as one panel: start a new session on the left, join one on the right -->
+                <!-- Session setup as one panel, opened from Create/join training session: start a new session on the left, join one on the right -->
                 <ui:VisualElement class="session-tools session-setup">
                     <ui:VisualElement class="session-setup-group session-setup-new">
                         <ui:Label text="Start a new session" class="session-setup-heading" />
                         <ui:VisualElement class="session-setup-line">
-                            <ui:Button name="create" text="Create training session" class="session-button session-primary" tooltip="Practise freely: no timer and no score." />
-                            <ui:Button name="assessment-mode" text="Assessment mode" class="session-button assessment-mode-button" tooltip="Create and join a timed scored exercise." />
+                            <!-- For show until the backend stores session names: what is typed is not sent yet -->
+                            <ui:TextField name="session-name" class="session-name" max-length="64" placeholder-text="Name your session…" tooltip="Session names are not saved yet; the session is listed by its ID." />
+                            <ui:Button name="create" text="Create" class="session-button session-primary" tooltip="Practise freely: no timer and no score." />
                         </ui:VisualElement>
                     </ui:VisualElement>
                     <ui:VisualElement class="session-setup-group session-setup-join">
                         <ui:VisualElement class="session-setup-line">
                             <ui:Label text="Join an existing session" class="session-setup-heading" />
+                            <!-- Icons, not full buttons, so this heading line is no taller than Start a new session's.
+                                 Refresh, then the admin actions that were under Session maintenance. -->
+                            <ui:Button name="refresh-sessions" class="session-icon-button" tooltip="Reload the session list and the joined session.">
+                                <f9:Glyph kind="Refresh" tint="#2B8699" size="16" />
+                            </ui:Button>
+                            <ui:Button name="archive-all" class="session-icon-button" tooltip="Archive everyone's live sessions. Admin action: ends every live session on this backend, other trainees' too, and frees its slot. Their history stays available.">
+                                <f9:Glyph kind="Archive" tint="#B03333" size="16" />
+                            </ui:Button>
+                            <ui:Button name="purge-sessions" class="session-icon-button" tooltip="Delete old sessions: permanently remove finished practice sessions older than the 20 newest. The dialog says how many first. Live sessions and assessments are kept.">
+                                <f9:Glyph kind="Clock" tint="#B03333" size="16" />
+                            </ui:Button>
+                            <ui:Button name="reclaim-disk" class="session-icon-button" tooltip="Reclaim disk space: return space freed by deletions to the disk. Archive all live sessions first.">
+                                <f9:Glyph kind="Disk" tint="#4A5D61" size="16" />
+                            </ui:Button>
                             <ui:Label name="capacity" text="Session list not loaded" class="muted session-capacity" />
-                            <ui:Button name="refresh-sessions" text="Refresh" class="session-button session-quiet" tooltip="Reload the session list and the joined session." />
                         </ui:VisualElement>
+                        <!-- One box: the session list, each with a trash icon to delete it, or the ID field in its place while Join by ID is in use -->
                         <ui:VisualElement class="session-setup-line">
-                            <ui:DropdownField name="sessions" class="sessions" />
+                            <f9ui:SessionPicker name="sessions" class="sessions" />
+                            <ui:TextField name="session-id" class="session-id" max-length="128" style="display: none;" />
+                            <ui:Button name="join" text="Join by ID" class="session-button session-primary" tooltip="Paste a session ID, then press Enter or Join by ID again." />
                             <ui:Button name="more-sessions" text="Show more" class="session-button session-quiet" tooltip="List older sessions too." style="display: none;" />
-                        </ui:VisualElement>
-                        <ui:VisualElement class="session-setup-line">
-                            <ui:TextField name="session-id" class="session-id" max-length="128" />
-                            <ui:Button name="join" text="Join by ID" class="session-button session-secondary" />
                         </ui:VisualElement>
                     </ui:VisualElement>
                 </ui:VisualElement>
-
-                <ui:Foldout text="Session maintenance" value="false" class="session-tools session-maintenance">
-                    <ui:VisualElement class="row">
-                        <ui:Button name="archive-all" text="Archive everyone's live sessions…" class="session-button session-caution" tooltip="Admin action: ends every live session on this backend, other trainees' too, and frees its slot. Their history stays available." />
-                        <ui:Button name="delete-session" text="Delete permanently…" class="session-button session-caution" tooltip="Remove the selected archived, completed or failed session and all of its history, for everyone." />
-                        <ui:Button name="purge-sessions" text="Delete old sessions…" class="session-button session-caution" tooltip="Permanently remove finished sessions older than the 20 newest. The dialog says how many first. Live sessions are kept." />
-                        <ui:Button name="reclaim-disk" text="Reclaim disk space" class="session-button session-quiet" tooltip="Return space freed by deletions to the disk. Archive all live sessions first." />
-                    </ui:VisualElement>
-                </ui:Foldout>
 
                 <ui:Label name="message" class="message" />
 
@@ -111,6 +122,8 @@
                         <ui:VisualElement name="view-bar" class="view-bar">
                             <ui:Button name="view-map" text="2D Map" class="segment" />
                             <ui:Button name="view-world" text="3D View" class="segment" />
+                            <!-- The selected shuttle's cameras; greyed out until a shuttle is selected in a session with a 3D city -->
+                            <ui:Button name="view-cameras" text="Cameras" class="segment" tooltip="Watch the selected shuttle through its blind-spot cameras: front, rear and sides." />
                             <ui:Label name="world-notice" class="world-notice" style="display: none;" />
                         </ui:VisualElement>
                     </ui:VisualElement>

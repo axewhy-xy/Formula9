@@ -4,7 +4,7 @@
  * Author: Choo Jian Wei
  * Contributors: Rishika (fleet cards, next stop and ETA), Lau Xiang Yang (session list and cleanup, exit)
  * Date Created: 30/10/2026
- * Last Modified: 23/11/2026
+ * Last Modified: 26/11/2026
  *
  * Description:
  *     Part of the Unity client's UI. Pure functions that turn login results, snapshots, session
@@ -185,6 +185,10 @@ namespace Formula9.UI
     public sealed class FleetRow
     {
         public string ShuttleId, State, Status, Route, RouteLine, Battery, Provenance, NextStop, Eta;
+        // What Eta is the time to (the next depot), for its tooltip.
+        public string EtaTarget;
+        // The last stop of the shuttle's route before the loop starts again, by name.
+        public string FinalStop;
         // A line for the shuttle's open incident; null when it has none.
         public string Incident;
         public double BatteryPercent;
@@ -251,9 +255,10 @@ namespace Formula9.UI
 
         public static SessionSetupView SessionSetup(FullSnapshot snapshot, bool charging, bool? toolsOpen)
         {
+            // The setup panel stays closed until Create/join training session opens it, joined or not
             var joined = snapshot != null;
-            var showTools = !joined || (toolsOpen ?? IsTerminalSession(snapshot.Session?.Status));
-            return new SessionSetupView(showTools, joined, charging && !showTools);
+            var showTools = toolsOpen ?? false;
+            return new SessionSetupView(showTools, true, charging && joined && !showTools);
         }
 
         private static (string Text, string Class) SessionBadge(string state) => state switch
@@ -389,7 +394,9 @@ namespace Formula9.UI
                     BatteryPercent = v.BatteryCapacityKwh > 0 ? Math.Max(0, Math.Min(100, 100 * v.BatteryKwh / v.BatteryCapacityKwh)) : 0,
                     Provenance = v.Provenance.Kind,
                     NextStop = NextStopLine(v, route),
+                    FinalStop = FinalStopLine(v, route),
                     Eta = EtaLine(snapshot.EnergyForecasts?.FirstOrDefault(f => f.VehicleId == v.VehicleId)),
+                    EtaTarget = EtaTargetLine(snapshot.EnergyForecasts?.FirstOrDefault(f => f.VehicleId == v.VehicleId)),
                     Incident = IncidentLine(snapshot, v.VehicleId, selectedIncident),
                     Index = index,
                 };
@@ -430,21 +437,22 @@ namespace Formula9.UI
         // Function: NextStopLine
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function writes a shuttle's next-stop line.
+        //     This function writes a shuttle's next stop for the Fleet List's Next stop column:
+        //     the stop's name alone, as the column heading already says what it is.
         //
         // Args:
         //     vehicle (FleetVehicle): The shuttle.
         //     route (RouteRevision): Its route, or null.
         //
         // Returns:
-        //     string: The line.
+        //     string: The stop's name, or a dash, "Unknown" or "No stops" when there is none to name.
         private static string NextStopLine(FleetVehicle vehicle, RouteRevision route)
         {
-            if (vehicle.RouteId == null) return "Next stop —";
-            if (route == null) return "Next stop unknown";
-            if (route.StopsM.Count == 0) return "No stops on this route";
+            if (vehicle.RouteId == null) return "—";
+            if (route == null) return "Unknown";
+            if (route.StopsM.Count == 0) return "No stops";
             var next = NextStop(route, vehicle.Position.XM, vehicle.Position.YM);
-            return next == null ? "Next stop unknown" : $"Next stop {next}";
+            return next == null ? "Unknown" : Formula9.World.RouteDraftView.StopName(next);
         }
 
         // -----------------------------------------------------------------------------------
@@ -474,6 +482,47 @@ namespace Formula9.UI
             foreach (var stop in ordered)
                 if (stop.At + reachedM >= shuttleAt) return stop.StopId;
             return ordered[0].StopId;
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: FinalStop
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function finds the route's final stop: the last one along its path, after which
+        //     the loop starts again at the first.
+        //
+        // Args:
+        //     route (RouteRevision): The route.
+        //
+        // Returns:
+        //     string: The stop ID, or null when the route has no path or stops.
+        public static string FinalStop(RouteRevision route)
+        {
+            var path = route.EdgePathsM.SelectMany(p => p).ToList();
+            if (path.Count < 2 || route.StopsM.Count == 0) return null;
+            return route.StopsM.OrderBy(s => DistanceAlong(path, s.Position.XM, s.Position.YM)).Last().StopId;
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: FinalStopLine
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function writes a shuttle's final stop for the Fleet List's Final stop column,
+        //     as its name alone, like the Next stop column.
+        //
+        // Args:
+        //     vehicle (FleetVehicle): The shuttle.
+        //     route (RouteRevision): Its route, or null.
+        //
+        // Returns:
+        //     string: The stop's name, or a dash, "Unknown" or "No stops" when there is none to name.
+        private static string FinalStopLine(FleetVehicle vehicle, RouteRevision route)
+        {
+            if (vehicle.RouteId == null) return "—";
+            if (route == null) return "Unknown";
+            if (route.StopsM.Count == 0) return "No stops";
+            var final = FinalStop(route);
+            return final == null ? "Unknown" : Formula9.World.RouteDraftView.StopName(final);
         }
 
         // -----------------------------------------------------------------------------------
@@ -509,20 +558,26 @@ namespace Formula9.UI
         // Function: EtaLine
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function writes the ETA to the shuttle's next depot, in seconds under a minute
-        //     and minutes after.
+        //     This function writes the ETA to the shuttle's next depot for the Fleet List's ETA
+        //     column: the duration alone, in seconds under a minute and minutes after. Which depot
+        //     is in EtaTarget, shown when the ETA is hovered.
         //
         // Args:
         //     forecast (EnergyForecast): The shuttle's energy forecast, or null.
         //
         // Returns:
-        //     string: The line.
+        //     string: The duration, or a dash when there is none.
         private static string EtaLine(EnergyForecast forecast)
         {
-            if (forecast?.NextDepotEtaS == null) return "ETA —";
+            if (forecast?.NextDepotEtaS == null) return "—";
             var seconds = forecast.NextDepotEtaS.Value;
-            return $"Depot {forecast.NextDepotId} ETA {(seconds < 60 ? $"{Math.Round(seconds)} s" : $"{Math.Round(seconds / 60)} min")}";
+            return seconds < 60 ? $"{Math.Round(seconds)} s" : $"{Math.Round(seconds / 60)} min";
         }
+
+        // What the ETA is to, for its tooltip: the duration alone does not say it is the depot's
+        private static string EtaTargetLine(EnergyForecast forecast) =>
+            forecast?.NextDepotEtaS == null ? "No depot ETA yet" :
+            forecast.NextDepotId == null ? "Time to reach the next depot" : $"Time to reach depot {forecast.NextDepotId}";
 
         // -----------------------------------------------------------------------------------
         // Function: IncidentLine

@@ -5,7 +5,7 @@
  * Contributors: Rishika (page layout, fleet cards, map/3D switch),
  *     Lau Xiang Yang (training workspace, session list and cleanup, exit)
  * Date Created: 30/10/2026
- * Last Modified: 24/11/2026
+ * Last Modified: 26/11/2026
  *
  * Description:
  *     Part of the Unity client's UI. Wires the UI Toolkit screens to the login and session layers,
@@ -55,7 +55,7 @@ namespace Formula9.UI
         private UiSounds uiSounds;
         // The root the greyed-out button sound listens on; the UIDocument may have dropped it by OnDisable
         private VisualElement listenedRoot;
-        private Button moreSessions, archiveAll, deleteSession, purgeSessions, reclaimDisk, dialogCancel, dialogConfirm;
+        private Button moreSessions, archiveAll, purgeSessions, reclaimDisk, dialogCancel, dialogConfirm;
         private VisualElement dialogOverlay;
         private Label dialogText;
         private Func<Task> dialogAction;
@@ -67,7 +67,7 @@ namespace Formula9.UI
         private Label fleetTitle;
         private Toggle remember;
         private Button viewMap, viewWorld;
-        private Toggle muteToggle;
+        private Button muteToggle;
         private const string RememberedUserKey = "login.rememberedUser";
         private TextField username, password, confirm, sessionId;
         private Label signUpHint, loginError, title, user, capacity, status, message, sessionBadge, worldNotice;
@@ -75,8 +75,8 @@ namespace Formula9.UI
         private string sessionBadgeClass;
         private readonly SessionStatusPresenter sessionStatusPresenter = new SessionStatusPresenter();
         private Button forgot, submit, modeSwitch, start, pause, resume, archive, refreshSessions;
-        private DropdownField sessions;
-        private Button createPractice, assessmentMode, quitAssessment;
+        private SessionPicker sessions;
+        private Button createPractice, assessmentMode, quitAssessment, joinById;
         private bool creatingSession;
 
         private string incidentHistorySessionId;
@@ -176,9 +176,19 @@ namespace Formula9.UI
                 if (headline != null) ShowMessage(headline);
             };
             var mute = new MuteSetting(new PlayerPreferences(), alerts);
-            muteToggle = GetComponent<UIDocument>().rootVisualElement.Q<Toggle>("mute");
-            muteToggle.SetValueWithoutNotify(mute.Muted);
-            muteToggle.RegisterValueChangedCallback(change => mute.Muted = change.newValue);
+            // A bell while alert sounds are on, a bell with a slash while muted; a click switches
+            muteToggle = GetComponent<UIDocument>().rootVisualElement.Q<Button>("mute");
+            var muteIcon = muteToggle.Q<Glyph>();
+            void ShowMute()
+            {
+                muteIcon.Kind = mute.Muted ? GlyphKind.BellOff : GlyphKind.Bell;
+                muteToggle.tooltip = mute.Muted
+                    ? "Alert sounds are muted. Click to turn them back on."
+                    : "Alert sounds are on. Click to mute the sounds for incidents, low batteries and lost connections; the incident notifications over the map still appear.";
+            }
+            ShowMute();
+            muteToggle.clicked += () => { mute.Muted = !mute.Muted; ShowMute(); };
+            HoverTip.Attach(muteToggle);
             session.EventsAccepted += events => alerts.OnEvents(events, true);
             session.EventsAccepted += _ => { if (session.Store.Snapshot != null) world.SetIncidentEvents(session.Store.Events); };
             session.RecoveryEventsReceived += _ => { if (session.Store.Snapshot != null) world.SetIncidentEvents(session.Store.Events); };
@@ -422,7 +432,7 @@ namespace Formula9.UI
             worldNotice = root.Q<Label>("world-notice");
             fleet = root.Q("fleet");
             sessionId = root.Q<TextField>("session-id");
-            sessions = root.Q<DropdownField>("sessions");
+            sessions = root.Q<SessionPicker>("sessions");
             createPractice = root.Q<Button>("create");
             assessmentMode = root.Q<Button>("assessment-mode");
             quitAssessment = root.Q<Button>("quit-assessment");
@@ -444,23 +454,29 @@ namespace Formula9.UI
             fleetSearch = root.Q<TextField>("fleet-search");
             fleetSearch.textEdition.placeholder = "Search shuttle…";
             fleetSearch.RegisterValueChangedCallback(_ => { if (session.Store.Snapshot != null) RenderFleet(session.Store.Snapshot); });
-            sessionId.textEdition.placeholder = "…or paste a session ID";
+            sessionId.textEdition.placeholder = "Paste a session ID";
             viewMap = root.Q<Button>("view-map");
             viewWorld = root.Q<Button>("view-world");
             viewMap.clicked += () => { world.ShowMap(true); Render(); };
             viewWorld.clicked += () =>
             {
+                var fromMap = world.ShowingMap;
                 world.ShowMap(false);
                 // Still on the map: this session has no 3D view, so say why instead of doing nothing
                 if (world.ShowingMap) ShowMessage(world.Diagnostic);
+                // Already in 3D, or watching cameras: back to the whole city, as Overview and the
+                // cameras' Close did before 3D View took their place
+                else if (!fromMap) world.Overview();
                 Render();
             };
 
-            sessions.RegisterValueChangedCallback(_ =>
+            sessions.Picked += _ =>
             {
                 RenderCleanup();
                 if (SelectedEntry != null) Run(Join(SelectedEntry.SessionId));
-            });
+            };
+            // Each session's trash icon in the list deletes that session, picked or not
+            sessions.DeleteRequested += index => { if (index >= 0 && index < listedSessions.Count) ConfirmDeleteSession(listedSessions[index]); };
             moreSessions = root.Q<Button>("more-sessions");
             moreSessions.clicked += () =>
             {
@@ -468,11 +484,11 @@ namespace Formula9.UI
                 Run(RefreshSessionList());
             };
             archiveAll = root.Q<Button>("archive-all");
-            deleteSession = root.Q<Button>("delete-session");
             purgeSessions = root.Q<Button>("purge-sessions");
             reclaimDisk = root.Q<Button>("reclaim-disk");
             archiveAll.clicked += ConfirmArchiveAll;
-            deleteSession.clicked += ConfirmDeleteSession;
+            // The session icons say what they do only in their tooltips, which the running app shows through HoverTip
+            foreach (var icon in new[] { refreshSessions, archiveAll, purgeSessions, reclaimDisk }) HoverTip.Attach(icon);
             purgeSessions.clicked += () => Run(ConfirmPurgeSessions());
             reclaimDisk.clicked += () => Run(Cleanup("Reclaiming disk space…", async () => TrainingPresenter.Reclaimed(await api.CompactSessionsAsync())));
             RenderCleanup();
@@ -485,7 +501,22 @@ namespace Formula9.UI
             root.Q<Button>("exit-app").clicked += ConfirmExit;
             createPractice.clicked += () => Run(Create(SessionController.IntegratedScenario));
             assessmentMode.clicked += () => Run(Create(SessionController.ScoredScenario));
-            root.Q<Button>("join").clicked += () => Run(Join(sessionId.value.Trim()));
+            // Join by ID swaps the session list for the ID field; pressed again, or Enter in the field,
+            // joins. Leaving the field any other way brings the list back.
+            joinById = root.Q<Button>("join");
+            joinById.clicked += () =>
+            {
+                if (sessionId.style.display.value == DisplayStyle.None) { ShowSessionIdField(true); return; }
+                JoinTypedId();
+            };
+            sessionId.RegisterCallback<KeyDownEvent>(e =>
+            {
+                if (e.keyCode != KeyCode.Return && e.keyCode != KeyCode.KeypadEnter) return;
+                e.StopPropagation();
+                JoinTypedId();
+            }, TrickleDown.TrickleDown);
+            // Focus moving to Join by ID is a press of it, which joins: keep the field until then
+            sessionId.RegisterCallback<FocusOutEvent>(e => { if (e.relatedTarget != joinById) ShowSessionIdField(false); });
             // One Refresh for the setup panel: the list, and the joined session if there is one
             refreshSessions.clicked += () =>
             {
@@ -678,19 +709,52 @@ namespace Formula9.UI
             return session.JoinAsync(id);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: ShowSessionIdField
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function shows the session ID field in place of the session list, empty and
+        //     focused for a paste, or puts the list back.
+        //
+        // Args:
+        //     show (bool): True for the ID field, false for the list.
+        private void ShowSessionIdField(bool show)
+        {
+            sessions.style.display = show ? DisplayStyle.None : DisplayStyle.Flex;
+            sessionId.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
+            // Pressed in while the ID field is showing, as Create/join training session is while its panel is open
+            joinById.EnableInClassList("session-toggle-open", show);
+            if (!show) return;
+            sessionId.SetValueWithoutNotify("");
+            sessionId.Focus();
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: JoinTypedId
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function joins the session whose ID was pasted, then puts the list back. An
+        //     empty field just puts the list back.
+        private void JoinTypedId()
+        {
+            var id = sessionId.value.Trim();
+            ShowSessionIdField(false);
+            if (id.Length > 0) Run(Join(id));
+        }
+
         private SessionListEntry SelectedEntry =>
-            sessions.index >= 0 && sessions.index < listedSessions.Count ? listedSessions[sessions.index] : null;
+            sessions.Index >= 0 && sessions.Index < listedSessions.Count ? listedSessions[sessions.Index] : null;
 
         // -----------------------------------------------------------------------------------
         // Function: RenderCleanup
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function enables the cleanup buttons that apply: delete for a finished session,
-        //     purge, and reclaim disk space only when no session is live.
+        //     This function enables the cleanup buttons that apply: archive all while a session is
+        //     live, purge, and reclaim disk space only when no session is live. Each session's
+        //     trash icon is enabled when its list opens (see RefreshSessionList).
         private void RenderCleanup()
         {
             archiveAll.SetEnabled(!cleanupBusy && liveSessions > 0);
-            deleteSession.SetEnabled(!cleanupBusy && TrainingPresenter.CanDelete(SelectedEntry));
             purgeSessions.SetEnabled(!cleanupBusy);
             reclaimDisk.SetEnabled(!cleanupBusy && liveSessions == 0);
         }
@@ -715,12 +779,15 @@ namespace Formula9.UI
         // Function: ConfirmDeleteSession
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function asks before permanently deleting the selected session, and leaves it if
-        //     it is the joined one.
-        private void ConfirmDeleteSession()
+        //     This function asks before permanently deleting a session, and leaves it if it is the
+        //     joined one.
+        //
+        // Args:
+        //     entry (SessionListEntry): The session whose trash icon was clicked in the list.
+        private void ConfirmDeleteSession(SessionListEntry entry)
         {
-            var id = SelectedEntry?.SessionId;
-            if (id == null) return;
+            var id = entry?.SessionId;
+            if (id == null || cleanupBusy || !TrainingPresenter.CanDelete(entry)) return;
             Confirm($"Permanently delete session {id}? Its history is removed for everyone. This cannot be undone.", "Delete permanently", () => Cleanup(
                 $"Deleting session {id}…",
                 async () =>
@@ -875,17 +942,19 @@ namespace Formula9.UI
         //     selected, and updates the capacity line.
         private async Task RefreshSessionList()
         {
-            refreshSessions.text = "Loading…";
+            refreshSessions.AddToClassList("session-refresh-loading");
             try
             {
                 var list = await api.ListSessionsAsync(sessionListLimit);
                 listedSessions = list.Sessions;
                 liveSessions = list.LiveCount;
                 moreSessions.style.display = list.Sessions.Count < list.Total && sessionListLimit < MaxSessionListLimit ? DisplayStyle.Flex : DisplayStyle.None;
-                sessions.SetValueWithoutNotify(listedSessions.Count == 0 ? "No training sessions found" : "Select a session to join");
-                sessions.choices = listedSessions.Select(TrainingPresenter.SessionLabel).ToList();
-                var selected = listedSessions.FindIndex(s => s.SessionId == session.SessionId);
-                if (selected >= 0) sessions.SetValueWithoutNotify(sessions.choices[selected]);
+                // The list read when the picker opens, so a trash icon reflects the list and cleanup of that moment
+                var shownList = listedSessions;
+                sessions.SetChoices(shownList.Select(TrainingPresenter.SessionLabel),
+                    i => !cleanupBusy && i < shownList.Count && TrainingPresenter.CanDelete(shownList[i]));
+                sessions.Select(shownList.FindIndex(s => s.SessionId == session.SessionId),
+                    shownList.Count == 0 ? "No training sessions found" : "Select a session to join");
                 capacity.text = TrainingPresenter.Capacity(list);
             }
             catch (Exception error) when (!(error is NotLoggedInException))
@@ -895,7 +964,7 @@ namespace Formula9.UI
             }
             finally
             {
-                refreshSessions.text = "Refresh";
+                refreshSessions.RemoveFromClassList("session-refresh-loading");
                 RenderCleanup();
             }
         }
@@ -939,7 +1008,8 @@ namespace Formula9.UI
             if (world != null)
             {
                 viewMap.EnableInClassList("segment-selected", world.ShowingMap);
-                viewWorld.EnableInClassList("segment-selected", !world.ShowingMap);
+                // While the cameras show, the Cameras segment is the one lit, not 3D View
+                viewWorld.EnableInClassList("segment-selected", !world.ShowingMap && !world.CamerasShown);
                 viewWorld.tooltip = world.Diagnostic;
                 // Only loading and failures are shown; the routine 3D summary stays in the tooltip
                 var notice = world.Notice ? world.Diagnostic : "";
@@ -1075,19 +1145,27 @@ namespace Formula9.UI
                 fill.style.backgroundColor = row.BatteryPercent < 20 ? new Color(0.839f, 0.188f, 0.192f)
                     : row.BatteryPercent < 50 ? new Color(0.949f, 0.6f, 0.29f) : new Color(0.153f, 0.682f, 0.376f);
                 gauge.Add(fill);
-                battCol.Add(gauge);
+                // The percentage first, so it starts under the "Battery" heading; the gauge follows it
                 battCol.Add(new Label($"{row.BatteryPercent:0}%") { style = { fontSize = 11 } });
+                battCol.Add(gauge);
                 contentRow.Add(battCol);
 
-                // Route and next stop
+                // Next stop: just where the shuttle is heading; its route is on the map
                 var routeCol = Column("fleet-col-route");
-                routeCol.Add(CardLabel(row.RouteLine, "fleet-card-line"));
                 routeCol.Add(CardLabel(row.NextStop, "fleet-card-line"));
                 contentRow.Add(routeCol);
 
+                // Final stop: the last stop of the shuttle's route loop
+                var finalCol = Column("fleet-col-final");
+                finalCol.Add(CardLabel(row.FinalStop, "fleet-card-line"));
+                contentRow.Add(finalCol);
+
                 // ETA
                 var etaCol = Column("fleet-col-eta");
-                etaCol.Add(CardLabel(row.Eta, "fleet-card-line"));
+                // The duration alone; hovering it says it is the time to the next depot
+                var eta = CardLabel(row.Eta, "fleet-card-line");
+                eta.tooltip = row.EtaTarget;
+                etaCol.Add(eta);
                 contentRow.Add(etaCol);
 
                 // Incident

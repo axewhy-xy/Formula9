@@ -346,6 +346,9 @@
 
 .title { flex-grow: 1; -unity-font-style: bold; }
 .mute { margin: 0 0 0 4px; }
+/* The alert sounds bell: an icon button the height of the header's buttons */
+.app Button.mute-button { width: 34px; height: 34px; padding: 0; align-items: center; justify-content: center; background-color: rgba(0, 0, 0, 0); border-width: 0; border-radius: 8px; }
+.app Button.mute-button:hover { background-color: rgb(238, 244, 244); }
 
 .row {
     flex-direction: row;
@@ -355,7 +358,7 @@
     margin-bottom: 8px;
 }
 
-.session-id { flex-grow: 1; flex-basis: 200px; min-width: 200px; margin-right: 8px; }
+.session-id, .session-name { flex-grow: 1; flex-basis: 200px; min-width: 200px; margin-right: 8px; }
 .sessions { flex-grow: 1; flex-basis: 300px; margin-right: 8px; }
 .muted { color: rgb(74, 93, 97); white-space: normal; }
 
@@ -395,6 +398,8 @@
 .session-utilities, .session-playback { flex-direction: row; align-items: center; flex-shrink: 0; margin: 4px 0; }
 .session-utilities { padding-right: 16px; }
 .session-playback { margin-left: auto; padding-left: 16px; border-left-width: 1px; border-left-color: rgb(211, 222, 222); }
+/* Create/join training session and Assessment mode, next to the title and its badges */
+.session-start { flex-direction: row; flex-wrap: wrap; align-items: center; flex-shrink: 0; margin: 4px 0 4px 12px; }
 /* Session setup: one bordered panel, "Start a new session" beside "Join an existing session". */
 .session-setup {
     flex-direction: row;
@@ -408,14 +413,38 @@
     background-color: rgb(247, 250, 250);
 }
 .session-setup-group { flex-grow: 1; flex-basis: 320px; min-width: 0; margin-bottom: 6px; }
-.session-setup-new { flex-grow: 0; margin-right: 16px; padding-right: 16px; border-right-width: 1px; border-right-color: rgb(220, 230, 230); }
-.session-setup-heading { -unity-font-style: bold; font-size: 13px; color: rgb(15, 76, 92); margin: 0 12px 6px 0; padding: 0; }
+.session-setup-new { margin-right: 16px; padding-right: 16px; border-right-width: 1px; border-right-color: rgb(220, 230, 230); }
+/* A fixed height, so both columns' headings, and the boxes under them, line up */
+.session-setup-heading { height: 22px; -unity-text-align: middle-left; -unity-font-style: bold; font-size: 13px; color: rgb(15, 76, 92); margin: 0 12px 6px 0; padding: 0; }
 .session-setup-line { flex-direction: row; flex-wrap: wrap; align-items: center; margin-bottom: 6px; }
-.session-setup-line .session-setup-heading { margin-bottom: 0; }
-.session-capacity { flex-grow: 1; font-size: 12px; margin: 0 8px 0 0; }
+/* Join an existing session's heading keeps its refresh icon close */
+.session-setup-line .session-setup-heading { margin-bottom: 0; margin-right: 4px; }
+/* One line, cut short rather than wrapped, so the heading line keeps its height */
+.session-capacity { flex-shrink: 1; min-width: 0; font-size: 12px; margin: 0 4px 0 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Small round icon buttons: refresh and the admin actions on the join heading, and each session's trash icon */
+.app Button.session-icon-button { width: 22px; height: 22px; padding: 0; margin: 0 2px 0 0; align-items: center; justify-content: center; background-color: rgba(0, 0, 0, 0); border-width: 0; border-radius: 11px; }
+.app Button.session-icon-button:hover { background-color: rgb(229, 243, 242); }
+.app Button.session-icon-button:disabled { background-color: rgba(0, 0, 0, 0); opacity: 0.3; }
+/* A gap after the last icon, before the session count */
+#reclaim-disk { margin-right: 10px; }
+/* Dimmed while the list loads */
+.app Button.session-refresh-loading { opacity: 0.4; }
 .session-setup .sessions { margin: 0 8px 0 0; }
-.session-maintenance { flex-shrink: 0; margin-bottom: 8px; color: rgb(74, 93, 97); }
-.session-maintenance .row { margin-top: 8px; }
+
+/* A tooltip in the running app (HoverTip): a small dark label under the hovered element */
+.hover-tip { position: absolute; max-width: 320px; padding: 6px 10px; margin: 0; border-radius: 6px; font-size: 12px; white-space: normal; color: rgb(255, 255, 255); background-color: rgb(30, 42, 46); }
+
+/* The session picker: a field like a dropdown's, and its list of sessions with a trash icon each */
+.app Button.session-picker-field { flex-direction: row; align-items: center; justify-content: space-between; height: 34px; margin: 0; padding: 0 10px; background-color: rgb(255, 255, 255); border-width: 1px; border-color: rgb(211, 222, 222); border-radius: 8px; }
+.app Button.session-picker-field:hover { background-color: rgb(247, 250, 250); }
+.session-picker-text { flex-shrink: 1; min-width: 0; margin: 0; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; -unity-text-align: middle-left; }
+.session-picker-arrow { flex-shrink: 0; margin: 0 0 0 6px; padding: 0; color: rgb(74, 93, 97); }
+.session-picker-overlay { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
+.session-picker-list { position: absolute; padding: 4px 0; background-color: rgb(255, 255, 255); border-width: 1px; border-color: rgb(211, 222, 222); border-radius: 8px; }
+.session-picker-row { flex-direction: row; align-items: center; padding-right: 8px; }
+.app Button.session-picker-option { flex-grow: 1; flex-shrink: 1; min-width: 0; height: 30px; margin: 0 4px 0 0; padding: 0 10px; background-color: rgba(0, 0, 0, 0); border-width: 0; border-radius: 0; -unity-text-align: middle-left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app Button.session-picker-option:hover { background-color: rgb(238, 244, 244); }
+.app Button.session-picker-selected { -unity-font-style: bold; }
 
 .app Button.session-button { border-width: 1px; }
 .app Button.session-primary { color: rgb(255, 255, 255); background-color: rgb(43, 134, 153); border-color: rgb(43, 134, 153); -unity-font-style: bold; }
@@ -424,6 +453,9 @@
 .app Button.assessment-mode-button:hover { background-color: rgb(59, 37, 121); border-color: rgb(59, 37, 121); }
 .app Button.session-secondary { color: rgb(34, 112, 128); background-color: rgb(255, 255, 255); border-color: rgb(43, 134, 153); -unity-font-style: bold; }
 .app Button.session-secondary:hover { background-color: rgb(229, 243, 242); }
+/* Create/join training session and Join by ID are teal with white text, flipping to white with teal
+   text while switched on: its panel open, or the ID field showing. After session-primary, so it wins. */
+.app Button.session-toggle-open, .app Button.session-toggle-open:hover { color: rgb(43, 134, 153); background-color: rgb(255, 255, 255); border-color: rgb(43, 134, 153); }
 .app Button.session-pause { color: rgb(88, 57, 10); background-color: rgb(250, 205, 111); border-color: rgb(210, 160, 60); -unity-font-style: bold; }
 .app Button.session-pause:hover { background-color: rgb(242, 190, 85); }
 .app Button.session-quiet { color: rgb(74, 93, 97); background-color: rgb(255, 255, 255); border-color: rgb(211, 222, 222); }
@@ -449,7 +481,7 @@
 .session-compact .session-header { padding-bottom: 0; margin-bottom: 8px; border-bottom-width: 0; }
 .session-compact .session-heading, .session-compact .session-utilities, .session-compact .session-playback,
 .session-compact .session-title, .session-compact .session-badge,
-.session-compact .assessment-mode-badge, .session-compact .assessment-timer { margin-top: 0; margin-bottom: 0; }
+.session-compact .assessment-mode-badge, .session-compact .assessment-timer, .session-compact .session-start { margin-top: 0; margin-bottom: 0; }
 .session-compact .session-status-bar { display: none; }
 
 /* The 2D Map / 3D View switch floats over the top centre of the map on a translucent pill, so the
@@ -555,7 +587,17 @@
     color: rgb(255, 255, 255);
     -unity-font-style: bold;
     font-size: 12px;
+    /* No label spacing of its own, so a heading starts at its column's edge (after the column's
+       padding below, which comes later and wins), exactly where the rows' text starts */
+    margin-left: 0;
+    margin-right: 0;
+    padding-left: 0;
+    padding-right: 0;
 }
+/* The rows' text likewise starts at its column's edge, so it lines up under its heading */
+.fleet-col Label { margin-left: 0; margin-right: 0; padding-left: 0; padding-right: 0; }
+/* The status dot hangs just left of the column, so the status text (not the dot) is under "Status" */
+.fleet-col-status .status-dot { margin-left: -13px; }
 
 /* The icon column of a card is 28px wide plus 12px margin. */
 .fleet-th-icon { width: 40px; flex-shrink: 0; }
@@ -566,8 +608,10 @@
 .fleet-col-id { width: 95px; flex-shrink: 0; }
 .fleet-col-status { width: 120px; flex-shrink: 0; flex-direction: row; align-items: center; }
 .fleet-col-battery { width: 90px; flex-shrink: 0; flex-direction: row; align-items: center; }
-.fleet-col-route, .fleet-col-eta { flex-grow: 1; flex-basis: 0; min-width: 100px; padding-left: 8px; padding-right: 8px; }
-.fleet-col-incident { flex-grow: 0; flex-shrink: 1; flex-basis: 180px; min-width: 60px; padding-left: 8px; }
+.fleet-col-route, .fleet-col-final { flex-grow: 1; flex-basis: 0; min-width: 100px; padding-left: 8px; padding-right: 8px; }
+/* The ETA is a short duration ("4 min"), so a narrow fixed column; the incident text takes the room */
+.fleet-col-eta { width: 80px; flex-shrink: 0; padding-left: 8px; padding-right: 8px; }
+.fleet-col-incident { flex-grow: 1.5; flex-shrink: 1; flex-basis: 0; min-width: 180px; padding-left: 8px; }
 
 /* The Fleet page is collapsed: the panel shrinks to its header row so the map gets the room back.
    The list is hidden rather than clipped, so the panel sizes to the header by itself. */
@@ -754,7 +798,8 @@
     width: 24px;
     height: 12px;
     padding: 1px;
-    margin-right: 4px;
+    /* After the percentage, which comes first in the column */
+    margin-left: 6px;
     border-width: 1px;
     border-radius: 2px;
     border-color: rgb(28, 34, 40);
@@ -980,23 +1025,24 @@
     background-color: rgb(253, 236, 236);
 }
 
-/* How many shuttles need a decision, on the Route Planning nav item; it stays when the panel collapses. */
+/* How many shuttles need a decision, on the Route Planning nav item; it stays when the panel collapses.
+   A TextElement, not a Label, so the sidebar's name rules (.nav-item Label) never hide or fade it.
+   TrainingWorkspace places it: at the top right of the name's last letter (over the empty space
+   above the "g") but never past the item's edge, or in the icon's corner while collapsed. */
 .nav-item .nav-badge {
     position: absolute;
-    right: 8px;
-    top: 12px;
-    min-width: 20px;
-    height: 20px;
+    top: 4px;
+    min-width: 16px;
+    height: 16px;
     margin: 0;
-    padding: 0 6px;
-    border-radius: 10px;
-    font-size: 11px;
+    padding: 0 4px;
+    border-radius: 8px;
+    font-size: 10px;
     -unity-font-style: bold;
     -unity-text-align: middle-center;
     color: rgb(255, 255, 255);
     background-color: rgb(214, 48, 49);
 }
-.nav-panel.collapsed .nav-item .nav-badge { display: flex; opacity: 1; right: 2px; top: 2px; min-width: 16px; height: 16px; padding: 0 4px; font-size: 10px; }
 
 .route-card {
     flex-shrink: 0;
@@ -1124,7 +1170,6 @@
 .app Button.camera-rail-toggle:hover { background-color: rgba(43, 134, 153, 0.95); }
 /* The rail's header: fold the thumbnails, or close the cameras and go back to the 3D view */
 .camera-rail-bar { flex-direction: row; align-items: center; }
-.app Button.camera-rail-toggle.camera-close { margin-left: 6px; }
 .camera-strip {
     flex-direction: column;
     flex-shrink: 1; /* shrinks to the rail's height and scrolls */

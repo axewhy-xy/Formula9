@@ -4,7 +4,7 @@
  * Author: Choo Jian Wei
  * Contributors: Rishika (fleet card tests), Lau Xiang Yang (session cleanup tests)
  * Date Created: 30/10/2026
- * Last Modified: 23/11/2026
+ * Last Modified: 26/11/2026
  *
  * Description:
  *     Checks what the screens show, using the shared snapshot fixture: login and command messages
@@ -207,14 +207,15 @@ namespace Formula9.Tests
         [TestCase("ARCHIVED")]
         [TestCase("COMPLETED")]
         [TestCase("FAILED")]
-        public void FinishedSessionsDefaultToVisibleSetup(string state)
+        public void FinishedSessionsKeepSetupClosedUntilOpened(string state)
         {
             foreach (var charging in new[] { true, false })
             {
                 var setup = TrainingPresenter.SessionSetup(WithStatus(state), charging, null);
-                Assert.IsTrue(setup.ToolsVisible);
+                Assert.IsFalse(setup.ToolsVisible);
                 Assert.IsTrue(setup.ToggleVisible);
-                Assert.IsFalse(setup.Compact);
+                Assert.AreEqual(charging, setup.Compact);
+                Assert.IsTrue(TrainingPresenter.SessionSetup(WithStatus(state), charging, true).ToolsVisible);
             }
         }
 
@@ -229,10 +230,12 @@ namespace Formula9.Tests
             Assert.IsTrue(open.ToolsVisible);
             Assert.IsFalse(open.Compact);
             Assert.IsFalse(TrainingPresenter.SessionSetup(s, false, null).Compact);
-            var empty = TrainingPresenter.SessionSetup(null, true, false);
-            Assert.IsTrue(empty.ToolsVisible);
-            Assert.IsFalse(empty.ToggleVisible);
-            Assert.IsFalse(empty.Compact);
+            // With no session, setup is still closed until Create/join training session opens it
+            var empty = TrainingPresenter.SessionSetup(null, true, null);
+            Assert.IsFalse(empty.ToolsVisible);
+            Assert.IsTrue(empty.ToggleVisible);
+            Assert.IsFalse(empty.Compact, "nothing to fold before a session is joined");
+            Assert.IsTrue(TrainingPresenter.SessionSetup(null, true, true).ToolsVisible);
         }
 
         [Test]

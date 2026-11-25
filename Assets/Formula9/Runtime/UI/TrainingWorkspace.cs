@@ -25,10 +25,14 @@ namespace Formula9.UI
         private readonly DropdownField shuttles;
         private readonly Dictionary<string, string> shuttleByChoice = new Dictionary<string, string>();
         private readonly VisualElement routePending, routePendingItems;
-        private readonly Label routePendingTitle, routeBadge;
+        private readonly Label routePendingTitle, routeName;
+        // A TextElement, not a Label: the sidebar's rules for its names (.nav-item Label) hide and fade
+        // every Label in a nav item as it collapses and opens, and must never reach the badge
+        private readonly TextElement routeBadge;
+        private readonly VisualElement navPanel;
         private readonly TextField routeReason;
         private readonly Label routeProblem, routeOptionsExpiry, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes;
-        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowProblem, routeCameras, fleetCameras, approve, routeStart, routeWatch;
+        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowProblem, routeCameras, viewCameras, approve, routeStart, routeWatch;
         private readonly VisualElement routeStages, routeWaypoints, routeIssues, routeMetrics, routeDecide, routeFeedback, routeApply, routeOutcomePanel, routeOutcomeRows, fleetTable;
         private readonly List<VisualElement> operationalViews;
         private readonly ChargingPage charging;
@@ -38,7 +42,6 @@ namespace Formula9.UI
         private readonly Button sessionToggle;
         private readonly VisualElement sessionCard;
         private bool? sessionToolsOpen;
-        private string sessionToolsState;
         private readonly List<List<RouteWaypoint>> draftHistory = new List<List<RouteWaypoint>> { new List<RouteWaypoint>() };
         private List<RouteWaypoint> draft = new List<RouteWaypoint>();
         private int historyIndex;
@@ -118,8 +121,8 @@ namespace Formula9.UI
                 if (button != null) button.clicked+= () => {ShowPage(index); Render();};
             }
             Bind(root, "follow-selected", () => world.FollowSelected());
-            fleetCameras = Bind(root, "fleet-cameras", ToggleSelectedCameras);
-            Bind(root, "camera-overview", () => world.Overview());
+            // The Cameras segment beside 2D Map and 3D View; 3D View does what Overview did
+            viewCameras = Bind(root, "view-cameras", ToggleSelectedCameras);
             fleetPage = root.Q("fleet-page");
             fleetPanel = root.Q("fleet-panel");
             fleetHeaderBar = fleetPage?.Q(className: "fleet-panel-header");
@@ -135,7 +138,18 @@ namespace Formula9.UI
             routePending = root.Q("route-pending");
             routePendingTitle = root.Q<Label>("route-pending-title");
             routePendingItems = root.Q("route-pending-items");
-            routeBadge = root.Q<Label>("nav-route-badge");
+            routeBadge = root.Q<TextElement>("nav-route-badge");
+            // The badge follows the nav item as the sidebar opens and closes: placed on every size change
+            // of the sidebar and the item, and checked again with the buttons every 250 ms in case a
+            // change sends no event (a hidden name sends none)
+            routeName = root.Q<Label>("nav-route-name");
+            navPanel = root.Q("nav-panel");
+            if (routeBadge != null && routeName != null && navPanel != null)
+            {
+                navPanel.RegisterCallback<GeometryChangedEvent>(_ => PlaceRouteBadge());
+                routeBadge.parent.RegisterCallback<GeometryChangedEvent>(_ => PlaceRouteBadge());
+                routeName.RegisterCallback<GeometryChangedEvent>(_ => PlaceRouteBadge());
+            }
             // The setup panel's Refresh also reloads the route editor's context
             Bind(root, "refresh-sessions", RequestContext);
             routeCameras = Bind(root, "route-cameras", ToggleCameras);
@@ -220,7 +234,7 @@ namespace Formula9.UI
             world.RouteNodeSelected += AppendNode;
             world.RoadClicked += AddRoad;
             world.WaypointClicked += RemoveWaypoint;
-            root.schedule.Execute(UpdateActions).Every(250);
+            root.schedule.Execute(() => { UpdateActions(); PlaceRouteBadge(); }).Every(250);
             ShowPage(FleetPage);
         }
 
@@ -278,7 +292,10 @@ namespace Formula9.UI
             var currentBoundary = s == null ? null : $"{s.SessionId}/{s.SessionEpoch}";
             if (boundary != currentBoundary)
             {
-                sessionToolsOpen = null;
+                // Joining closes the setup panel, except a finished session joined from it: it was picked
+                // to look at or delete, and the session list's trash icons are in that panel
+                var keepTools = sessionToolsOpen == true && TrainingPresenter.IsTerminalSession(s?.Session?.Status);
+                sessionToolsOpen = keepTools ? true : (bool?)null;
                 boundary = currentBoundary; dependencies = null; context = null; requestGeneration++; approvedDraft = null;
                 selectedVehicle = route = selectedDetour = pendingSeen = pendingStrip = null;
                 choice = null; choiceCandidate = confirmCommand = optionsNote = null; rerouting = awaitingError = false;
@@ -290,12 +307,6 @@ namespace Formula9.UI
                 draft = new List<RouteWaypoint>(); draftHistory.Clear(); draftHistory.Add(new List<RouteWaypoint>()); historyIndex = 0;
                 preview = null; draftView = null; outcome = null; outcomeSequence = -1; suggesting = false;
                 world.SetRouteDraft(null, null, null);
-            }
-            var setupState = s?.Session?.Status;
-            if (sessionToolsState != setupState)
-            {
-                if (TrainingPresenter.IsTerminalSession(setupState)) sessionToolsOpen = null;
-                sessionToolsState = setupState;
             }
             FitSessionControls();
             incidentReports.Render(s);
@@ -367,11 +378,10 @@ namespace Formula9.UI
             routeCameras.SetEnabled(world.CamerasShown || (world.HasCity && RouteVehicle() != null));
             routeCameras.text = world.CamerasShown ? "Hide cameras" : "Cameras";
             routeCameras.EnableInClassList("segment-selected", world.CamerasShown);
-            fleetCameras.SetEnabled(world.CamerasShown || (world.HasCity && s?.Vehicles.Any(v => v.VehicleId == world.SelectedId) == true));
-            fleetCameras.text = world.CamerasShown ? "Hide cameras" : "Cameras";
-            fleetCameras.EnableInClassList("segment-selected", world.CamerasShown);
-            // Open cameras are closed from their own panel, so the Fleet List only offers to open them
-            fleetCameras.style.display = world.CamerasShown ? DisplayStyle.None : DisplayStyle.Flex;
+            // Always on the map's bar; greyed out until a shuttle in the 3D city is selected, lit while its
+            // cameras show. Pressed again (or 3D View) closes them.
+            viewCameras.SetEnabled(world.CamerasShown || (world.HasCity && s?.Vehicles.Any(v => v.VehicleId == world.SelectedId) == true));
+            viewCameras.EnableInClassList("segment-selected", world.CamerasShown);
             charging.UpdateActions();
             // The decision card: usable while the session runs, is connected and is up to date
             var free = Current && confirmCommand == null;
@@ -510,14 +520,40 @@ namespace Formula9.UI
             }
         }
 
+        // Expanded, the badge sits at the top right of the name's last letter; while the sidebar is still
+        // opening, the name runs past the item's edge and is clipped, so the badge stops at that edge
+        // instead of being clipped with it. Collapsed, the stylesheet puts it in the icon's corner.
+        private void PlaceRouteBadge()
+        {
+            if (routeBadge == null || routeName == null || navPanel == null) return;
+            var button = routeBadge.parent;
+            var width = float.IsNaN(routeBadge.layout.width) ? 16 : Mathf.Max(16, routeBadge.layout.width);
+            var atEdge = button.layout.width - width - 6;
+            if (float.IsNaN(atEdge)) return;
+            float left, top;
+            // The sidebar's own class says whether it is collapsed: the name's style or layout can lag behind it.
+            // Collapsed, the icon's top-right corner; both states are placed here, so no stylesheet rule can move it.
+            if (navPanel.ClassListContains("collapsed")) { left = atEdge + 4; top = 2; }
+            else
+            {
+                // Before the name is laid out it has no width yet; the edge keeps the badge in view meanwhile
+                var named = routeName.resolvedStyle.display != DisplayStyle.None && routeName.layout.width > 0 && !float.IsNaN(routeName.layout.xMax);
+                left = named ? Mathf.Min(routeName.layout.xMax - 4, atEdge) : atEdge;
+                top = named ? routeName.layout.yMin - 8 : 4;
+            }
+            left = Mathf.Max(0, left); top = Mathf.Max(0, top);
+            if (routeBadge.style.left.keyword != StyleKeyword.Undefined || Math.Abs(routeBadge.style.left.value.value - left) > 0.5f) routeBadge.style.left = left;
+            if (routeBadge.style.top.keyword != StyleKeyword.Undefined || Math.Abs(routeBadge.style.top.value.value - top) > 0.5f) routeBadge.style.top = top;
+        }
+
         // How many shuttles need a decision, on the Route Planning nav item; nothing when none do.
         private void RenderBadge(int shuttles)
         {
             if (routeBadge == null) return;
             var text = shuttles.ToString();
             if (routeBadge.text != text) routeBadge.text = text;
-            // Shown, the stylesheet decides: it keeps the badge when the nav panel collapses
-            routeBadge.style.display = shuttles > 0 ? new StyleEnum<DisplayStyle>(StyleKeyword.Null) : new StyleEnum<DisplayStyle>(DisplayStyle.None);
+            // Shown or hidden here only, collapsed or not; the sidebar's styles never decide it
+            routeBadge.style.display = shuttles > 0 ? DisplayStyle.Flex : DisplayStyle.None;
             var hint = shuttles == 0 ? "Route Planning" : shuttles == 1 ? "Route Planning: 1 shuttle needs a decision" : $"Route Planning: {shuttles} shuttles need a decision";
             var button = routeBadge.parent;
             if (button != null && button.tooltip != hint) button.tooltip = hint;
@@ -674,7 +710,7 @@ namespace Formula9.UI
             UpdateActions();
         }
 
-        // The Cameras button on Fleet Overview: the selected shuttle's cameras, or back to 3D.
+        // The Cameras segment on the map's bar: the selected shuttle's cameras, or back to 3D.
         private void ToggleSelectedCameras()
         {
             if (world.CamerasShown) CloseCameras();
@@ -1030,14 +1066,15 @@ namespace Formula9.UI
             FitSessionControls();
         }
 
-        // Finished attempts reopen setup; Charging keeps its one-screen layout while tools are closed.
+        // Setup opens only from Create/join training session, and closes again on joining or leaving
+        // a session; Charging keeps its one-screen layout while tools are closed.
         private void FitSessionControls()
         {
             var setup = TrainingPresenter.SessionSetup(session.Store.Snapshot, shownPage == ChargingPageIndex, sessionToolsOpen);
             sessionToggle.style.display = setup.ToggleVisible ? DisplayStyle.Flex : DisplayStyle.None;
             sessionCard.EnableInClassList("session-tools-hidden", !setup.ToolsVisible);
             sessionCard.EnableInClassList("session-compact", setup.Compact);
-            sessionToggle.text = setup.ToolsVisible ? "Hide session options" : "Session options";
+            sessionToggle.EnableInClassList("session-toggle-open", setup.ToolsVisible);
         }
 
         private void ShowPage(int index)

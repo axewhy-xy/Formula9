@@ -30,25 +30,23 @@ namespace Formula9.World
         private const int ParentTileLevels = 4;
 
         private static readonly Color BasemapBackground = new Color(0.925f, 0.945f, 0.941f);
-        private static readonly Color PlannedRoute = new Color(0.153f, 0.682f, 0.376f);
         // The outline drawn under every route on the street map
         private static readonly Color RouteCasing = new Color(0.06f, 0.18f, 0.22f, 0.85f);
         private static readonly Color RoadClosed = new Color(0.839f, 0.188f, 0.192f);
         private static readonly Color StopColor = new Color(0.09f, 0.412f, 0.667f);
-        // Gold: no shuttle in the palette uses it. Its names need a darker shade to read on white.
-        private static readonly Color BusStopColor = new Color(0.96f, 0.76f, 0.05f);
-        private static readonly Color BusStopText = new Color(0.45f, 0.33f, 0);
+        // Bus stop names in a darker shade of the bus stop icon's blue, to read on white
+        private static readonly Color BusStopText = new Color(0.067f, 0.302f, 0.635f);
+        private const float BusStopIconSize = 14;
         private static readonly Color DotOutline = new Color(0.118f, 0.157f, 0.176f);
         private static readonly Color Frozen = new Color(0.627f, 0.627f, 0.627f);
         public static Color FrozenColor => Frozen;
         private static readonly Color ApprovedDetour = new Color(0.949f, 0.6f, 0.29f);
-        private static readonly Color OtherRoads = new Color(0.588f, 0.745f, 0.902f);
         private static readonly Color DepotColor = new Color(0.122f, 0.306f, 0.349f);
         private static readonly Color ChargingTrip = new Color(0.925f, 0.102f, 0.6f);
         private static readonly Color[] ShuttlePalette =
         {
-            // No green and no orange: planned routes are green and approved detours orange, so a shuttle
-            // in either would vanish on its own route's outline. The third is a wine red for that reason.
+            // No orange: approved detours are orange, so a shuttle in it would vanish on its own detour's
+            // outline. The third is a wine red for that reason.
             new Color(0.184f, 0.502f, 0.929f), new Color(0.91f, 0.365f, 0.627f), new Color(0.6f, 0.106f, 0.31f), new Color(0.608f, 0.318f, 0.878f),
             new Color(0, 0.639f, 0.639f), new Color(0.51f, 0.392f, 0.235f), new Color(0.353f, 0.431f, 0.549f),
         };
@@ -75,7 +73,7 @@ namespace Formula9.World
         private string selectedId;
         private bool offline;
         private readonly VisualElement legend = new VisualElement { pickingMode = PickingMode.Ignore };
-        private readonly VisualElement busStopLegend, proposedLegend, notClearedLegend;
+        private readonly VisualElement busStopLegend, proposedLegend, notClearedLegend, frozenLegend, depotLegend;
         private readonly Action<bool> showLegend;
         private readonly Label scale = new Label { pickingMode = PickingMode.Ignore };
         // The compass, fit and zoom buttons in the bottom-right corner
@@ -173,20 +171,22 @@ namespace Formula9.World
             legendToggle.AddToClassList("map-legend-title");
             legend.Add(legendToggle);
             legend.Add(legendRows);
-            LegendRow(legendRows, "Planned route", PlannedRoute, "swatch-line");
+            // A route and the shuttle that drives it share a colour, so their rows sit together
+            LegendRow(legendRows, "Planned route (its shuttle's colour)", ShuttlePalette[0], "swatch-line");
+            LegendRow(legendRows, "Shuttle (its colour)", LegendIcon(18, (painter, at) => Glyph.DrawBus(painter, at, 16, ShuttlePalette[0])));
             LegendRow(legendRows, "Approved detour", ApprovedDetour, "swatch-line");
             LegendRow(legendRows, "Trip to or from a charger", ChargingTrip, "swatch-line");
             LegendRow(legendRows, "Charger", Glyph.ChargerColor, "swatch-square");
             LegendRow(legendRows, "Road closed", RoadClosed, "swatch-band");
             proposedLegend = LegendRow(legendRows, "Proposed route", Proposed, "swatch-line");
             notClearedLegend = LegendRow(legendRows, "Not cleared for the shuttle", RoadNotCleared, "swatch-thin");
-            LegendRow(legendRows, "Other roads", OtherRoads, "swatch-thin");
-            LegendRow(legendRows, "Shuttle", ShuttlePalette[0], "swatch-square");
             LegendRow(legendRows, "Incident", RoadClosed, "swatch-dot");
-            LegendRow(legendRows, "No recent update", Frozen, "swatch-square");
+            // Only while the map shows them: grey shuttles while the backend is offline, depots when the session has one
+            frozenLegend = LegendRow(legendRows, "No recent update", Frozen, "swatch-square");
             LegendRow(legendRows, "Shuttle's stop (its colour)", StopColor, "swatch-ring");
-            LegendRow(legendRows, "Depot", DepotColor, "swatch-dot");
-            busStopLegend = LegendRow(legendRows, "Other bus stop", BusStopColor, "swatch-dot");
+            depotLegend = LegendRow(legendRows, "Depot", DepotColor, "swatch-dot");
+            // The same bus stop icon the map draws, not a colour swatch
+            busStopLegend = LegendRow(legendRows, "Bus stop", LegendIcon(BusStopIconSize + 2, (painter, at) => Glyph.DrawBusStop(painter, at, BusStopIconSize)));
             controls = new VisualElement { pickingMode = PickingMode.Ignore }; controls.AddToClassList("map-controls");
             var compass = new VisualElement { pickingMode = PickingMode.Ignore, tooltip = "The map is always north-up" }; compass.AddToClassList("map-compass");
             compass.Add(new Glyph(GlyphKind.Compass, RoadClosed, 14)); compass.Add(new Label("N") { pickingMode = PickingMode.Ignore }); controls.Add(compass);
@@ -347,6 +347,23 @@ namespace Formula9.World
             var swatch = new VisualElement { pickingMode = PickingMode.Ignore }; swatch.AddToClassList(swatchClass);
             if (swatchClass == "swatch-ring") swatch.style.borderTopColor = swatch.style.borderBottomColor = swatch.style.borderLeftColor = swatch.style.borderRightColor = color;
             else swatch.style.backgroundColor = color;
+            return LegendRow(legend, text, swatch);
+        }
+
+        // A legend key drawn in code, centred in a square of the given size, as the map draws the same thing.
+        private static VisualElement LegendIcon(float size, Action<Painter2D, Vector2> draw)
+        {
+            var icon = new VisualElement { pickingMode = PickingMode.Ignore };
+            icon.style.width = icon.style.height = size;
+            icon.generateVisualContent += mesh => draw(mesh.painter2D, icon.contentRect.center);
+            return icon;
+        }
+
+        // A legend row whose key is any element, such as an icon drawn in code.
+        private static VisualElement LegendRow(VisualElement legend, string text, VisualElement swatch)
+        {
+            var row = new VisualElement { pickingMode = PickingMode.Ignore }; row.AddToClassList("map-legend-row");
+            var key = new VisualElement { pickingMode = PickingMode.Ignore }; key.AddToClassList("map-legend-key");
             key.Add(swatch); row.Add(key);
             row.Add(new Label(text) { pickingMode = PickingMode.Ignore });
             legend.Add(row);
@@ -380,6 +397,8 @@ namespace Formula9.World
             legend.style.display = islandWhenEmpty ? DisplayStyle.Flex : DisplayStyle.None;
             busStopLegend.style.display = BusStopsShown && busStops.Count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
             proposedLegend.style.display = notClearedLegend.style.display = draft != null ? DisplayStyle.Flex : DisplayStyle.None;
+            frozenLegend.style.display = offline ? DisplayStyle.Flex : DisplayStyle.None;
+            depotLegend.style.display = snapshot != null && snapshot.Depots.Count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
             var metres = NiceLength(110 * MetresPerPoint);
             scale.text = metres >= 1000 ? $"{metres / 1000:0.#} km" : $"{metres:0.#} m";
             scale.style.width = (float)(metres / MetresPerPoint);
@@ -444,8 +463,15 @@ namespace Formula9.World
                 foreach (var vehicle in snapshot.Vehicles.OrderBy(v => v.VehicleId == SelectedId ? 0 : 1).ThenBy(v => v.VehicleId, StringComparer.Ordinal))
                 {
                     var at = ShownAt(vehicle);
-                    var label = PlaceLabel(vehicle.VehicleId + (snapshot.Incidents.Any(i => i.Involves(vehicle.VehicleId) && i.State != "RESOLVED") ? " !" : ""), at, LabelStyle.Below, DotOutline);
-                    if (label != null) vehicleLabels[vehicle.VehicleId] = (label, at);
+                    var label = PlaceLabel(vehicle.VehicleId, at, LabelStyle.Below, DotOutline);
+                    if (label == null) continue;
+                    vehicleLabels[vehicle.VehicleId] = (label, at);
+                    // A shuttle caught in an open incident has its name box turned red, in place of a "!"
+                    if (snapshot.Incidents.Any(i => i.Involves(vehicle.VehicleId) && i.State != "RESOLVED"))
+                    {
+                        label.style.backgroundColor = RoadClosed;
+                        label.style.color = Color.white;
+                    }
                 }
                 foreach (var depot in snapshot.Depots) PlaceLabel(DepotName(depot.DepotId), Project(depot.Position.XM, depot.Position.YM), LabelStyle.Below, DepotColor);
                 foreach (var charger in snapshot.Chargers.Where(c => c.Position != null)) PlaceLabel(charger.ChargerId, Project(charger.Position.XM, charger.Position.YM), LabelStyle.Below, DepotColor);
@@ -642,9 +668,13 @@ namespace Formula9.World
                 // While editing, only the route being edited: the rest of the fleet would hide the roads
                 foreach (var route in snapshot.Routes.Where(r => draft == null || r.RouteId == draft.Context.RouteId))
                 {
-                    var routeColor = draft != null ? CommittedInEdit : !realMap ? new Color(0.4f, 0.6f, 0.7f) : route.Revision > 1 || detouring.Contains(route.RouteId) ? ApprovedDetour : PlannedRoute;
                     // A route no shuttle drives keeps the dark outline
-                    var outline = outlines.TryGetValue(route.RouteId, out var shuttleColor) ? shuttleColor : RouteCasing;
+                    var driven = outlines.TryGetValue(route.RouteId, out var shuttleColor);
+                    var outline = driven ? shuttleColor : RouteCasing;
+                    var detour = route.Revision > 1 || detouring.Contains(route.RouteId);
+                    var routeColor = draft != null ? CommittedInEdit : !realMap ? new Color(0.4f, 0.6f, 0.7f) : detour ? ApprovedDetour : outline;
+                    // A planned route is drawn all in its shuttle's colour, with no edge
+                    if (draft == null && realMap && !detour) outline = Color.clear;
                     for (var i = 0; i < route.EdgePathsM.Count; i++)
                     {
                         var path = route.EdgePathsM[i].Select(p => Project(p.XM, p.YM)).ToArray();
@@ -652,9 +682,9 @@ namespace Formula9.World
                         else open.Add((path, outline, routeColor));
                     }
                 }
-                // The shuttle's colour as a 3 px edge each side, lifting the route off the street map's own
-                // coloured roads and saying whose route it is; then the route's colour down the middle
-                if (realMap) foreach (var piece in open) Line(painter, piece.Path, piece.Outline, 12);
+                // Round a detour, the shuttle's colour as a 3 px edge each side, saying whose it is (a planned
+                // route has none, being in that colour already); then the route's colour down the middle
+                if (realMap) foreach (var piece in open.Where(p => p.Outline.a > 0)) Line(painter, piece.Path, piece.Outline, 12);
                 foreach (var piece in open) Line(painter, piece.Path, piece.Middle, 6);
                 // Closed sections over the routes, their glow first for the same reason
                 foreach (var path in closed) Line(painter, path, new Color(RoadClosed.r, RoadClosed.g, RoadClosed.b, 0.40f), 28);
@@ -735,7 +765,7 @@ namespace Formula9.World
             for (var i = 0; i < busStopPositions.Count; i++)
             {
                 var at = Project(busStopPositions[i].X, busStopPositions[i].Y);
-                if (contentRect.Contains(at) && !ServedByARoute(busStops[i].Code)) Dot(painter, at, BusStopColor, 5);
+                if (contentRect.Contains(at) && !ServedByARoute(busStops[i].Code)) Glyph.DrawBusStop(painter, at, BusStopIconSize);
             }
         }
 

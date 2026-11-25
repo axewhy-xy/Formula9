@@ -177,14 +177,10 @@ namespace Formula9.World
                 // Folded thumbnails are not seen, so only the large camera keeps drawing
                 shuttleCameras.Thumbnails = !folded;
             };
-            // Closing sits with the cameras it closes, beside the thumbnails' toggle
-            var closeCameras = new Button(CloseCameras) { text = "Close ✕", tooltip = "Close the cameras and go back to the 3D view" };
-            closeCameras.AddToClassList("camera-rail-toggle");
-            closeCameras.AddToClassList("camera-close");
+            // No Close here: 3D View, or the Cameras segment pressed again, on the map's bar closes them
             var railBar = new VisualElement();
             railBar.AddToClassList("camera-rail-bar");
             railBar.Add(railToggle);
-            railBar.Add(closeCameras);
             rail.Add(railBar);
             // It scrolls, so on a short view (or above the Fleet List) every thumbnail stays reachable
             var strip = new ScrollView(ScrollViewMode.Vertical);
