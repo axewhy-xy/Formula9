@@ -182,7 +182,6 @@ namespace Formula9.UI
 
             // Warns when a shuttle's charge nears what it needs to reach a depot (it stays alive through the session's events)
             new ShuttleBatteryService(session, api, new CityClient(transport), _ => WorldView.CityArea, ShowMessage);
-            
             session.ConnectionChanged += connected =>
             {
                 // The reconnect cue plays on the same snapshot; a battery that turned red meanwhile waits a

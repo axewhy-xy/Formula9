@@ -32,7 +32,7 @@ namespace Formula9.World
     // -----------------------------------------------------------------------------------
     public sealed class ShuttleBatteryService
     {
-        // How long to wait before asking for the roads again after a failure
+        // How long to wait before asking again after a failed request (the roads, or the closed edges' geometry)
         private const float RetrySeconds = 30f;
 
         private readonly SessionController session;
@@ -44,6 +44,7 @@ namespace Formula9.World
         private string loadedArea;
         private bool loading;
         private float nextAttempt;
+        private float retryClosuresAt;   // when to ask again for closed edges whose lookup failed; 0 for never
 
         // Null until the roads have loaded
         public ShuttleBatteryMonitor Monitor => monitor;
@@ -70,13 +71,21 @@ namespace Formula9.World
             var area = areaFor(snapshot);
             if (!loading && area != null && area != loadedArea && Time.realtimeSinceStartup >= nextAttempt) _ = Start(area);
             monitor?.OnSnapshot(snapshot);
+            // A closure lookup that failed is tried again after a pause
+            if (retryClosuresAt > 0 && Time.realtimeSinceStartup >= retryClosuresAt)
+            {
+                retryClosuresAt = 0;
+                monitor?.RetryClosures();
+            }
         }
 
         // The geometry of closed backend edges: the route editor lists each route's edges with their paths.
-        // Edges no route lists stay unanswered, and the monitor then says its closures match nothing.
+        // Edges no route lists get an empty answer, which the monitor takes as final and reports. A lookup
+        // that fails (a network error, say) is a different thing: those edges are asked for again later.
         private async Task LoadEdgePaths(ShuttleBatteryMonitor target, IReadOnlyCollection<string> ids)
         {
             var found = new Dictionary<string, Vector2[]>();
+            var failed = false;
             try
             {
                 var snapshot = session.Store.Snapshot;
@@ -90,12 +99,24 @@ namespace Formula9.World
                             if (wanted.Contains(edge.EdgeId) && edge.Path != null && edge.Path.Count >= 2 && !found.ContainsKey(edge.EdgeId))
                                 found[edge.EdgeId] = edge.Path.Select(p => new Vector2((float)p.X, (float)p.Y)).ToArray();
                     }
-                    // Not every route has roads to edit in every scenario
-                    catch (BackendErrorException) { }
+                    // Not every route has roads to edit in every scenario: that is an answer, not a failure
+                    catch (BackendErrorException error) when (error.Error.Code == "INVALID_REFERENCE") { }
+                    catch (Exception error)
+                    {
+                        failed = true;
+                        Debug.LogWarning("[BatteryMonitor] Could not load the geometry of closed roads: " + error.Message);
+                    }
                 }
             }
-            catch (Exception error) { Debug.LogWarning("[BatteryMonitor] Could not load the geometry of closed roads: " + error.Message); }
-            target.SetEdgePaths(found);
+            catch (Exception error)
+            {
+                failed = true;
+                Debug.LogWarning("[BatteryMonitor] Could not load the geometry of closed roads: " + error.Message);
+            }
+            // What was not found because a request failed, as opposed to not being listed
+            var unanswered = failed ? ids.Where(id => !found.ContainsKey(id)).ToList() : null;
+            target.SetEdgePaths(found, unanswered);
+            if (unanswered != null && unanswered.Count > 0) retryClosuresAt = Time.realtimeSinceStartup + RetrySeconds;
         }
 
         private async Task Start(string area)

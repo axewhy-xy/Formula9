@@ -108,6 +108,15 @@ namespace Formula9.Tests
             Assert.AreEqual(20.6f, result.DistanceM, 0.5f);
         }
 
+        // The scan skips roads whose box, widened by the snap radius (40 m), cannot hold the shuttle: the edge of that radius must not move
+        [Test]
+        public void SnapRadius_IsTheSameWithTheBoxCheck()
+        {
+            var graph = Graph();
+            Assert.IsFalse(graph.DistanceToDepot(new Vector2(500, 39)).OffNetwork, "39 m from R1 is on the road");
+            Assert.IsTrue(graph.DistanceToDepot(new Vector2(500, 41)).OffNetwork, "41 m from R1 is off the network");
+        }
+
         [Test]
         public void FarFromEveryRoad_IsOffNetwork()
         {
@@ -260,8 +269,8 @@ namespace Formula9.Tests
             var critical = 0;
             monitor.Critical += _ => critical++;
             monitor.OnSnapshot(Snapshot("IN_SERVICE", 0.4, x: 900));    // trip 0.45: Critical
-            monitor.OnSnapshot(Snapshot("IN_SERVICE", 0.4, x: 100));    // near the depot: still Critical for the episode
-            Assert.AreEqual(BatteryRisk.Critical, monitor.Latest["shuttle-01"].Risk);
+            monitor.OnSnapshot(Snapshot("IN_SERVICE", 0.4, x: 100));    // near the depot: the estimate improves ...
+            Assert.AreEqual(BatteryRisk.Critical, monitor.Latest["shuttle-01"].Risk, "... but the state never improves below the worst reached");
             monitor.OnSnapshot(Snapshot("IN_SERVICE", 0.35, x: 900));   // Critical again
             Assert.AreEqual(1, critical);
         }
@@ -314,6 +323,7 @@ namespace Formula9.Tests
             var monitor = new ShuttleBatteryMonitor(Graph());
             var messages = new List<string>();
             monitor.Diagnostic += messages.Add;
+            monitor.EdgePathsNeeded += _ => { };   // someone is listening, so the monitor waits for the answer
             var snapshot = Snapshot("IN_SERVICE", 20);
             snapshot.Disruptions = new List<Disruption> { Closure("edge-2") };
             monitor.OnSnapshot(snapshot);
@@ -325,6 +335,42 @@ namespace Formula9.Tests
             StringAssert.Contains("edge-2", messages[0]);
             monitor.OnSnapshot(snapshot);
             Assert.AreEqual(1, messages.Count);
+        }
+
+        [Test]
+        public void ClosuresNobodyCanLookUp_AreStillReported()
+        {
+            var monitor = new ShuttleBatteryMonitor(Graph());   // nothing is listening for EdgePathsNeeded
+            var messages = new List<string>();
+            monitor.Diagnostic += messages.Add;
+            var snapshot = Snapshot("IN_SERVICE", 20);
+            snapshot.Disruptions = new List<Disruption> { Closure("return:11:forward") };
+            monitor.OnSnapshot(snapshot);
+            Assert.AreEqual(1, messages.Count);
+            StringAssert.Contains("return:11:forward", messages[0]);
+        }
+
+        [Test]
+        public void AFailedLookup_IsAskedAgainOnRetry_ButAnEmptyAnswerIsFinal()
+        {
+            var monitor = new ShuttleBatteryMonitor(Graph());
+            var asked = new List<string>(); var messages = new List<string>();
+            monitor.EdgePathsNeeded += ids => asked.AddRange(ids);
+            monitor.Diagnostic += messages.Add;
+            var snapshot = Snapshot("IN_SERVICE", 20);
+            snapshot.Disruptions = new List<Disruption> { Closure("edge-2") };
+            monitor.OnSnapshot(snapshot);
+            Assert.AreEqual(1, asked.Count);
+
+            monitor.SetEdgePaths(new Dictionary<string, Vector2[]>(), new[] { "edge-2" });   // the request failed
+            Assert.IsEmpty(messages, "a failure says nothing about the roads");
+            Assert.AreEqual(1, asked.Count, "not asked again at once");
+            monitor.RetryClosures();
+            Assert.AreEqual(2, asked.Count, "asked again on the retry");
+
+            monitor.SetEdgePaths(new Dictionary<string, Vector2[]>());   // answered, with nothing: final
+            monitor.RetryClosures();
+            Assert.AreEqual(2, asked.Count);
         }
 
         [Test]

@@ -179,7 +179,7 @@ namespace Formula9.Session
         // The backend's "request assistance" option for a shuttle, or null when it offers none that can be approved now.
         public static Candidate AssistanceOption(FullSnapshot snapshot, string vehicleId)
         {
-            if (snapshot == null || snapshot.Session.Status != "RUNNING" || string.IsNullOrEmpty(vehicleId)) return null;
+            if (snapshot?.Session?.Status != "RUNNING" || string.IsNullOrEmpty(vehicleId)) return null;
             foreach (var incident in (snapshot.Incidents ?? new List<Incident>()).Where(i => i.State == "OPTIONS_READY").OrderByDescending(i => i.DetectedTick))
             {
                 var option = (snapshot.Candidates ?? new List<Candidate>()).FirstOrDefault(c =>

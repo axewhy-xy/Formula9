@@ -76,7 +76,7 @@ namespace Formula9.World
     // -----------------------------------------------------------------------------------
     public sealed class ShuttleBatteryMonitor
     {
-        // 0.5 kWh per km. A placeholder from the energy blueprint
+        // 0.5 kWh per km. A placeholder from the energy blueprint: check it against the backend's model.
         public const double DefaultKwhPerMeter = 0.0005;
         public const double DefaultReserveFraction = 0.15;
 
@@ -96,7 +96,7 @@ namespace Formula9.World
         // Something the operator cannot see but should know, for example closures that change nothing
         public event Action<string> Diagnostic;
         // Closures name backend edges this monitor has no geometry for. Whoever can fetch it answers
-        // with SetEdgePaths (an empty answer is fine: it says there is none).
+        // with SetEdgePaths (an empty answer is fine: it says there is none; a failure says so, see there).
         public event Action<IReadOnlyCollection<string>> EdgePathsNeeded;
 
         private static readonly HashSet<string> Parked = new HashSet<string> { "CHARGING", "QUEUED_FOR_CHARGE", "STANDBY", "OUT_OF_SERVICE" };
@@ -165,9 +165,6 @@ namespace Formula9.World
             if (closures == closureKey) return;
             closureKey = closures;
 
-            Debug.Log($"[BatteryMonitor] disruptions: {snapshot.Disruptions?.Count ?? 0} total, {active.Count} active; closed edge ids: {string.Join(", ", active.SelectMany(d => d.AffectedEdgeIds ?? new List<string>()))}");
-
-
             activeIds = active.SelectMany(d => d.AffectedEdgeIds ?? new List<string>()).Distinct().ToList();
             ApplyClosures();
         }
@@ -182,14 +179,31 @@ namespace Formula9.World
         //
         // Args:
         //     paths (IReadOnlyDictionary<string, Vector2[]>): Edge ID to its polyline, in local metres.
-        public void SetEdgePaths(IReadOnlyDictionary<string, Vector2[]> paths)
+        //     failed (IReadOnlyCollection<string>): Edge IDs whose lookup failed (a network error, say) as
+        //     opposed to being answered with no geometry. An answer with none is final; a failed one is
+        //     asked for again by RetryClosures.
+        public void SetEdgePaths(IReadOnlyDictionary<string, Vector2[]> paths, IReadOnlyCollection<string> failed = null)
         {
             foreach (var pair in paths) edgePaths[pair.Key] = pair.Value;
-            ApplyClosures();
+            var lookupFailed = failed != null && failed.Count > 0;
+            ApplyClosures(lookupFailed);
+            // Forgotten only now, so that the failure is not asked about again at once
+            if (lookupFailed) asked.ExceptWith(failed);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: RetryClosures
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Asks again, through EdgePathsNeeded, for the geometry of closed edges whose lookup failed.
+        //     Does nothing when every closure has been answered.
+        public void RetryClosures()
+        {
+            if (activeIds.Any(id => !graph.NamesRoad(id) && !edgePaths.ContainsKey(id) && !asked.Contains(id))) ApplyClosures(false);
         }
 
         // Closes what the closures in force name: a road by ID where the ID is one, else the roads along the edge's path
-        private void ApplyClosures()
+        private void ApplyClosures(bool lookupFailed = false)
         {
             var along = new List<Vector2[]>();
             var missing = new List<string>();
@@ -197,17 +211,15 @@ namespace Formula9.World
             {
                 if (graph.NamesRoad(id)) continue;
                 if (edgePaths.TryGetValue(id, out var path)) along.Add(path);
-                else if (asked.Add(id)) missing.Add(id);
+                else if (asked.Add(id)) missing.Add(id);   // marked while the lookup is under way, so it is asked for once
             }
             var matched = graph.SetClosures(activeIds, along);
-
-            Debug.Log($"[BatteryMonitor] closures named: {activeIds.Count}, graph edges closed: {matched}");
-
-
-            // Ask for the geometry first; the closures are applied again when it arrives
-            if (missing.Count > 0) { EdgePathsNeeded?.Invoke(missing); return; }
+            // Ask for the geometry first; the closures are applied again when it arrives. With nobody to
+            // ask, fall through and say so: the closures would otherwise be ignored without a word.
+            if (missing.Count > 0 && EdgePathsNeeded != null) { EdgePathsNeeded.Invoke(missing); return; }
             // Neither an ID of the graph nor a path along one of its roads: the closures change nothing
-            if (activeIds.Count > 0 && matched == 0)
+            // (a lookup that failed says nothing about the roads: the service reports it, and it is asked again)
+            if (activeIds.Count > 0 && matched == 0 && !lookupFailed)
                 Diagnostic?.Invoke($"Road closures name {activeIds.Count} edge(s), for example '{activeIds[0]}', but none could be matched to a road of the graph, " +
                                    $"by ID (its roads look like '{graph.SampleRoadKey}') or by position. Closures are not changing the shortest path home.");
         }
