@@ -9,7 +9,7 @@
  *     On every accepted snapshot each shuttle's shortest road distance to the nearest depot is
  *     found, turned into the energy that trip needs, and a threshold is built from it:
  *
- *         threshold = distance * kWh-per-metre * safety factor + reserve
+ *     threshold = distance * kWh-per-metre * safety factor + reserve
  *
  *     The threshold moves with the shuttle: it rises as the shuttle drives away from the depot and
  *     falls as it comes back. A shuttle at or below it is flagged ReturnNow; one that could not
@@ -17,28 +17,33 @@
  *
  *     Each warning is raised once per low-battery episode. An episode starts when a shuttle first
  *     reaches ReturnNow and ends only when its battery has risen again (it has charged) or it parks
- *     at a depot. Until then the shuttle stays at least ReturnNow, however the estimate moves, and a
- *     warning already raised is not raised again. A worse one (ReturnNow to Critical) is.
+ *     at a depot. Until then the shuttle never improves below the worst state it has reached, however
+ *     the estimate moves, and a warning already raised is not raised again. A worse one (ReturnNow to
+ *     Critical) is.
  *
  *     When the distance cannot be found (no depot known, or no road path to one) the shuttle is
  *     Unknown, never Critical: the monitor then only checks the battery against the reserve and
  *     the backend's own forecast.
  *
+ *     Shuttles that are on a charger, stranded (OUT_OF_SERVICE, they cannot drive) or already at a
+ *     depot are not watched: there is nothing to tell the operator about them.
+ *
  *     This is a plain class wired like BatteryWatch (see ShuttleBatteryService). The backend owns
  *     the real energy model and its own safety return; this is the client-side view that tells the
  *     operator early.
-
- *     Situation	                                        Result
- *     Distance known, battery healthy	                    Ok
- *     Distance known, can't reach the depot on its charge	Critical
- *     Distance unknown, battery above the reserve	        Unknown, with no warning
- *     Distance unknown, battery at or below the reserve	ReturnNow, with a warning
+ *
+ *     Summary of the states:
+ *     Distance known, battery healthy ............................ Ok
+ *     Distance known, cannot reach the depot on its charge ....... Critical
+ *     Distance unknown, battery above the reserve ................ Unknown, no warning
+ *     Distance unknown, battery at or below the reserve .......... ReturnNow, with a warning
  */
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using Formula9.Contracts;
+using Formula9.Audio;
 using UnityEngine;
 
 namespace Formula9.World
@@ -60,7 +65,8 @@ namespace Formula9.World
         public bool OffNetwork;            // distance is a straight line, not a road path
         public double TripKwh;             // energy the trip needs, before margins; NaN when unknown
         public double ReserveKwh;
-        public double ThresholdKwh;        // trip * safety factor + reserve; just the reserve when the distance is unknown
+        public double ThresholdKwh;        // the shuttle's own return point: trip * safety factor + reserve (just the reserve when the distance is unknown)
+        public bool GaugeRed;              // its battery gauge shows red (BatteryWatch's rule): ReturnNow whatever the return point
         public bool AlreadyReturning;      // the backend already has it heading for the depot
 
         public bool DistanceKnown => !double.IsNaN(DistanceToDepotM);
@@ -99,7 +105,9 @@ namespace Formula9.World
         // with SetEdgePaths (an empty answer is fine: it says there is none; a failure says so, see there).
         public event Action<IReadOnlyCollection<string>> EdgePathsNeeded;
 
-        private static readonly HashSet<string> Parked = new HashSet<string> { "CHARGING", "QUEUED_FOR_CHARGE", "STANDBY", "OUT_OF_SERVICE" };
+        // Shuttles with nothing to warn about: on a charger, or stranded and unable to drive. STANDBY is not
+        // here: nothing says a standby shuttle is at a depot, so it is judged by where it is like any other.
+        private static readonly HashSet<string> NotDriving = new HashSet<string> { "CHARGING", "QUEUED_FOR_CHARGE", "OUT_OF_SERVICE" };
 
         // A low-battery episode: the lowest charge seen in it, and the worst warning already raised
         private sealed class Episode { public double LowestKwh; public BatteryRisk Raised; }
@@ -228,8 +236,8 @@ namespace Formula9.World
         {
             var id = vehicle.VehicleId;
 
-            // Parked shuttles are at a depot already; a charge ends the episode
-            if (Parked.Contains(vehicle.ServiceState))
+            // A charge ends the episode; a stranded shuttle has nothing left to warn about
+            if (NotDriving.Contains(vehicle.ServiceState))
             {
                 episodes.Remove(id);
                 latest.Remove(id);
@@ -243,14 +251,23 @@ namespace Formula9.World
             var path = new DepotRoadGraph.Result();
             if (graph.HasDepots)
                 path = graph.DistanceToDepot(new Vector2((float)vehicle.Position.XM, (float)vehicle.Position.YM), (float)(vehicle.HeadingDeg * Mathf.Deg2Rad));
+            // At a depot is where it needs to be, whatever its state says (standby, or arrived and not yet charging)
+            if (graph.HasDepots && path.AtDepot)
+            {
+                episodes.Remove(id);
+                latest.Remove(id);
+                return;
+            }
             var known = graph.HasDepots && path.Reachable;
             var distance = known ? path.DistanceM : double.NaN;
             var trip = distance * KwhPerMeter;
             var threshold = known ? ThresholdKwh(distance, KwhPerMeter, SafetyFactor, reserve) : reserve;
+            // The same rule that turns the gauge red and plays the battery_low sound
+            var gaugeRed = BatteryWatch.IsRed(vehicle);
 
             BatteryRisk computed;
             if (known && vehicle.BatteryKwh < trip) computed = BatteryRisk.Critical;
-            else if (vehicle.BatteryKwh <= threshold) computed = BatteryRisk.ReturnNow;
+            else if (vehicle.BatteryKwh <= threshold || gaugeRed) computed = BatteryRisk.ReturnNow;
             else computed = known ? BatteryRisk.Ok : BatteryRisk.Unknown;
             // The backend's flag means it cannot reach a depot AND keep its reserve: that is ReturnNow, not Critical
             if (forecast?.ReachesDepotAboveReserve == false && computed < BatteryRisk.ReturnNow) computed = BatteryRisk.ReturnNow;
@@ -278,6 +295,7 @@ namespace Formula9.World
                 DistanceToDepotM = distance, OffNetwork = known && path.OffNetwork,
                 TripKwh = trip, ReserveKwh = reserve, ThresholdKwh = threshold,
                 AlreadyReturning = vehicle.ServiceState == "RETURNING_TO_DEPOT",
+                GaugeRed = gaugeRed,
             };
             latest[id] = assessment;
 

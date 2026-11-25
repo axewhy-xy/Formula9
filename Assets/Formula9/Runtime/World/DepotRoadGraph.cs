@@ -51,6 +51,7 @@ namespace Formula9.World
             public bool Reachable;      // false when closures cut the shuttle off from every depot
             public bool OffNetwork;     // true when the distance is a straight line, not a road path
             public float DistanceM;
+            public bool AtDepot;        // true when it is within AtDepotRadiusM of a depot: the distance is the straight line
         }
 
         private sealed class Edge
@@ -272,7 +273,7 @@ namespace Formula9.World
             if (depots.Count == 0) return new Result { Reachable = false };
 
             var nearestDepot = depots.Min(d => Vector2.Distance(at, d));
-            if (nearestDepot <= AtDepotRadiusM) return new Result { Reachable = true, DistanceM = nearestDepot };
+            if (nearestDepot <= AtDepotRadiusM) return new Result { Reachable = true, AtDepot = true, DistanceM = nearestDepot };
 
             var facing = float.IsNaN(headingRad) ? (Vector2?)null : new Vector2(Mathf.Cos(headingRad), Mathf.Sin(headingRad));
             scratch.Clear();

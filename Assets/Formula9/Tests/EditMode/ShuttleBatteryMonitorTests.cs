@@ -108,9 +108,9 @@ namespace Formula9.Tests
             Assert.AreEqual(20.6f, result.DistanceM, 0.5f);
         }
 
-        // The scan skips roads whose box, widened by the snap radius (40 m), cannot hold the shuttle: the edge of that radius must not move
+        // The snap radius is 40 m: a shuttle 39 m from a road is on the network, and one 41 m away is not
         [Test]
-        public void SnapRadius_IsTheSameWithTheBoxCheck()
+        public void SnapRadius_IsFortyMetres()
         {
             var graph = Graph();
             Assert.IsFalse(graph.DistanceToDepot(new Vector2(500, 39)).OffNetwork, "39 m from R1 is on the road");
@@ -143,22 +143,6 @@ namespace Formula9.Tests
 
         private static Disruption Closure(params string[] edgeIds) =>
             new Disruption { DisruptionId = "d1", AggregateRevision = 1, ActiveFromTick = 0, ActiveUntilTick = null, AffectedEdgeIds = new List<string>(edgeIds) };
-
-        // 500 m out: trip 0.25 kWh, threshold 0.25 * 1.25 + 6 (15% of 40) = 6.3125
-        [Test]
-        public void RaisesOnce_WhenTheBatteryReachesTheThreshold()
-        {
-            var monitor = new ShuttleBatteryMonitor(Graph());
-            var raised = new List<BatteryAssessment>();
-            monitor.ReturnRequired += raised.Add;
-
-            monitor.OnSnapshot(Snapshot("IN_SERVICE", 6.5));
-            Assert.AreEqual(0, raised.Count);
-            monitor.OnSnapshot(Snapshot("IN_SERVICE", 6.3));
-            monitor.OnSnapshot(Snapshot("IN_SERVICE", 6.2));
-            Assert.AreEqual(1, raised.Count);
-            Assert.AreEqual(BatteryRisk.ReturnNow, raised[0].Risk);
-        }
 
         [Test]
         public void ThresholdMoves_WithTheDistanceToTheDepot()
@@ -383,6 +367,117 @@ namespace Formula9.Tests
             snapshot.Disruptions = new List<Disruption> { Closure("R3") };
             monitor.OnSnapshot(snapshot);
             Assert.IsEmpty(messages);
+        }
+
+        [Test]
+        public void AtADepot_IsFlagged_AndOnTheRoadIsNot()
+        {
+            Assert.IsTrue(Graph().DistanceToDepot(new Vector2(20, 5)).AtDepot);
+            Assert.IsFalse(Graph().DistanceToDepot(new Vector2(500, 0)).AtDepot);
+        }
+
+       [Test]
+       public void AStandbyShuttleAwayFromADepot_IsStillWatched()
+       {
+            var monitor = new ShuttleBatteryMonitor(Graph());
+            var raised = 0;
+            monitor.ReturnRequired += _ => raised++;
+            monitor.OnSnapshot(Snapshot("STANDBY", 6.0));   // 500 m out, at its reserve
+            Assert.AreEqual(1, raised);
+       }
+
+       [Test]
+       public void AShuttleAtADepot_IsNotWarned_WhateverItsState()
+       {
+            var monitor = new ShuttleBatteryMonitor(Graph());
+            var raised = 0; var critical = 0;
+            monitor.ReturnRequired += _ => raised++;
+            monitor.Critical += _ => critical++;
+            monitor.OnSnapshot(Snapshot("STANDBY", 1.0, x: 10));              // 10 m from the depot, nearly empty
+            monitor.OnSnapshot(Snapshot("RETURNING_TO_DEPOT", 1.0, x: 10));
+            Assert.AreEqual(0, raised + critical);
+            Assert.IsFalse(monitor.Latest.ContainsKey("shuttle-01"));
+        }
+
+        [Test]
+        public void AStrandedShuttle_IsNotWatched()
+        {
+            var monitor = new ShuttleBatteryMonitor(Graph());
+            var raised = 0; var critical = 0;
+            monitor.ReturnRequired += _ => raised++;
+            monitor.Critical += _ => critical++;
+            monitor.OnSnapshot(Snapshot("OUT_OF_SERVICE", 0.0));
+            Assert.AreEqual(0, raised + critical);
+            Assert.IsFalse(monitor.Latest.ContainsKey("shuttle-01"));
+        }
+
+        // 500 m out at 0.005 kWh/m: trip 2.5 kWh, threshold 2.5 * 1.25 + 6 = 9.125 kWh, above the gauge's red line (8 kWh of 40)
+        [Test]
+        public void RaisesOnce_WhenTheBatteryReachesTheThreshold()
+        {
+            var monitor = new ShuttleBatteryMonitor(Graph()) { KwhPerMeter = 0.005 };
+            var raised = new List<BatteryAssessment>();
+            monitor.ReturnRequired += raised.Add;
+
+            monitor.OnSnapshot(Snapshot("IN_SERVICE", 9.5));
+            Assert.AreEqual(0, raised.Count);
+            monitor.OnSnapshot(Snapshot("IN_SERVICE", 9.0));
+            monitor.OnSnapshot(Snapshot("IN_SERVICE", 8.9));
+            Assert.AreEqual(1, raised.Count);
+            Assert.AreEqual(BatteryRisk.ReturnNow, raised[0].Risk);
+            Assert.IsFalse(raised[0].GaugeRed, "its own return point came first, not the red gauge");
+        }
+
+        // --- The gauge's red line (BatteryWatch.IsRed) ---
+
+        [Test]
+        public void ARedGauge_IsAlwaysReturnNow_SoTheMessageComesWithTheRedBar()
+        {
+            var monitor = new ShuttleBatteryMonitor(Graph());
+            var raised = new List<BatteryAssessment>();
+            monitor.ReturnRequired += raised.Add;
+            monitor.OnSnapshot(Snapshot("IN_SERVICE", 8.5, x: 100));   // 21%, 100 m from the depot: nothing yet
+            Assert.AreEqual(0, raised.Count);
+            monitor.OnSnapshot(Snapshot("IN_SERVICE", 7.9, x: 100));   // 19.75%: the bar turns red; its own return point is only about 6 kWh
+            Assert.AreEqual(1, raised.Count);
+            Assert.IsTrue(raised[0].GaugeRed);
+            Assert.Less(raised[0].ThresholdKwh, raised[0].BatteryKwh, "the return point alone would not have warned yet");
+        }
+
+        [Test]
+        public void FarFromADepot_TheMessageComesBeforeTheGaugeTurnsRed()
+        {
+            var monitor = new ShuttleBatteryMonitor(Graph()) { KwhPerMeter = 0.005 };
+            var raised = new List<BatteryAssessment>();
+            monitor.ReturnRequired += raised.Add;
+            monitor.OnSnapshot(Snapshot("IN_SERVICE", 11.0, x: 900));   // 27.5%: not red; return point 900 * 0.005 * 1.25 + 6 = 11.625
+            Assert.AreEqual(1, raised.Count);
+            Assert.IsFalse(raised[0].GaugeRed);
+        }
+
+        [Test]
+        public void WithoutADistance_TheRedLineIsTheFallback()
+        {
+            var monitor = new ShuttleBatteryMonitor(Graph());
+            var raised = 0;
+            monitor.ReturnRequired += _ => raised++;
+            monitor.OnSnapshot(Snapshot("IN_SERVICE", 8.5, depot: false));   // above the reserve, gauge not red
+            Assert.AreEqual(BatteryRisk.Unknown, monitor.Latest["shuttle-01"].Risk);
+            Assert.AreEqual(0, raised);
+            monitor.OnSnapshot(Snapshot("IN_SERVICE", 7.9, depot: false));   // the gauge turns red
+            Assert.AreEqual(1, raised);
+        }
+
+        [Test]
+        public void ReturnMessage_SaysWhyItWarns()
+        {
+            var ownPoint = new BatteryAssessment { VehicleId = "shuttle-01", BatteryKwh = 9.0, CapacityKwh = 40, DistanceToDepotM = 900, ThresholdKwh = 11.6 };
+            var redFirst = new BatteryAssessment { VehicleId = "shuttle-01", BatteryKwh = 7.9, CapacityKwh = 40, DistanceToDepotM = 100, ThresholdKwh = 6.1, GaugeRed = true };
+            var unknown = new BatteryAssessment { VehicleId = "shuttle-01", BatteryKwh = 7.9, CapacityKwh = 40, DistanceToDepotM = double.NaN, ThresholdKwh = 6.0 };
+            StringAssert.Contains("needs", ShuttleBatteryService.ReturnMessage(ownPoint));
+            StringAssert.Contains("battery low", ShuttleBatteryService.ReturnMessage(redFirst));
+            StringAssert.DoesNotContain("needs", ShuttleBatteryService.ReturnMessage(redFirst), "it already has more than its return point needs");
+            StringAssert.DoesNotContain("NaN", ShuttleBatteryService.ReturnMessage(unknown));
         }
     }
 }

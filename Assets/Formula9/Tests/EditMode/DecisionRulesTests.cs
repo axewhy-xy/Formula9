@@ -233,7 +233,7 @@ namespace Formula9.Tests
         [Test]
         public void AssistanceOption_WhenSessionIsNull_ReturnsNull()
         {
-            var snapshot = Snapshot(/* your existing test arguments */);
+            var snapshot = Snapshot();
             snapshot.Session = null;
 
             var option = DecisionRules.AssistanceOption(snapshot, "vehicle-1");

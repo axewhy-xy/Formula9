@@ -79,6 +79,21 @@ namespace Formula9.World
             }
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: ReturnMessage
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The warning for a shuttle that should head for a depot, worded for why it does: its own
+        //     return point was reached, its gauge turned red first (so there is no "needs" to quote),
+        //     or the distance is not known.
+        public static string ReturnMessage(BatteryAssessment a)
+        {
+            if (!a.DistanceKnown) return $"{a.VehicleId}: return to the depot now. {a.BatteryKwh:0.0} kWh left.";
+            if (a.BatteryKwh <= a.ThresholdKwh)
+                return $"{a.VehicleId}: return to the depot now. {a.DistanceToDepotM:0} m away, {a.BatteryKwh:0.0} kWh left, needs {a.ThresholdKwh:0.0}.";
+            return $"{a.VehicleId}: battery low. Return to the depot, {a.DistanceToDepotM:0} m away.";
+        }
+
         // The geometry of closed backend edges: the route editor lists each route's edges with their paths.
         // Edges no route lists get an empty answer, which the monitor takes as final and reports. A lookup
         // that fails (a network error, say) is a different thing: those edges are asked for again later.
@@ -126,9 +141,7 @@ namespace Formula9.World
             {
                 var roads = await cityClient.GetRoadsAsync(area);
                 var created = new ShuttleBatteryMonitor(new DepotRoadGraph(roads));
-                created.ReturnRequired += a => notify($"{a.VehicleId}: return to the depot now. " + (a.DistanceKnown
-                    ? $"{a.DistanceToDepotM:0} m away, {a.BatteryKwh:0.0} kWh left, needs {a.ThresholdKwh:0.0}."
-                    : $"{a.BatteryKwh:0.0} kWh left, at its {a.ReserveKwh:0.0} kWh reserve."));
+                created.ReturnRequired += a => notify(ReturnMessage(a));
                 created.Critical += a => notify($"{a.VehicleId}: cannot reach a depot on its charge.");
                 created.Diagnostic += message => Debug.LogWarning("[BatteryMonitor] " + message);
                 created.EdgePathsNeeded += ids => _ = LoadEdgePaths(created, ids);
