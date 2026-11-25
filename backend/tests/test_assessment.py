@@ -1,0 +1,443 @@
+"""Regression coverage for Formula9's scored exercise.
+
+Author: Nur Syazliyarni Binte Zazali
+Date Created: 15/11/2026
+Last Modified: 23/11/2026
+
+Tests the scoring rules against explicit evidence and exercises the real
+command, session completion and SQLite recovery paths without a live network.
+"""
+
+from copy import deepcopy
+from dataclasses import replace
+from hashlib import sha256
+import sqlite3
+from uuid import uuid4
+
+import pytest
+
+from contracts.v2.models import DispatcherCommand, Event
+from contracts.v2.route_edit import RouteApprovalRequest, RouteEditRequest
+from contracts.v2.sessions import CreateSessionRequest
+from src.persistence.training_store import _MIGRATIONS, TrainingStore, TrainingStoreError
+from src.services.assessment import (EVALUATOR_VERSIONS, SCORED_INCIDENT, SCORED_SCENARIO, Criterion, Rubric,
+                                     finalize, load_rubric)
+from src.services.integrated_actor import SHUTTLE_FRONT_M
+from src.services.scored_actor import ScoredSessionActor
+from src.services.training_sessions import TrainingSessionService, checkpoint
+from src.services.training_workflow import approve_workflow_route, publish_workflow
+
+
+def session_control(snapshot, action):
+    """Use an ordinary revision-checked, idempotent session command."""
+    return DispatcherCommand(contract_version="2.0", command_id=action.lower(), idempotency_key=action.lower(),
+        session_id=snapshot.session_id, command_type=action, expected_epoch=snapshot.session_epoch,
+        expected_revision=snapshot.session.aggregate_revision, target_type="SESSION",
+        target_id=snapshot.session_id, payload={})
+
+
+def create_attempt(store):
+    request = CreateSessionRequest(scenario_revision_id=SCORED_SCENARIO)
+    return TrainingSessionService(store)._create_initial(request, "trainee", "create-scored",
+        sha256(request.model_dump_json().encode()).hexdigest())
+
+
+def approve_and_start(store, snapshot, actor):
+    """Approve the detour and start the assessment through the session service."""
+    service = TrainingSessionService(store)
+    route = snapshot.routes[0]
+    routes = actor.definition.routes.for_route(snapshot, route.route_id)
+    preview = routes.draft_preview(snapshot, RouteEditRequest(route_id=route.route_id,
+        expected_route_revision=route.revision, draft_revision=1))
+    assert preview.approvable
+    approval = RouteApprovalRequest(command_id="approve", idempotency_key="approve",
+        preview_id=preview.preview_id,
+        preview_revision=preview.preview_revision, target_vehicle_ids=["shuttle-01"], reason="Serve all stops")
+    result, actor = approve_workflow_route(store, actor, "trainee", approval, checkpoint)
+    assert result.status == "APPLIED"
+    result, actor = service._submit_staged(actor, "trainee", session_control(store.snapshot(snapshot.session_id), "START"), False)
+    assert result.status == "APPLIED"
+    return actor
+
+
+def test_scored_attempt_recovers_and_finalizes_once(tmp_path):
+    path = tmp_path / "training.sqlite"
+    with TrainingStore(path) as store:
+        snapshot, actor = create_attempt(store)
+        owner = "trainee"
+        sid = snapshot.session_id
+        assert store.assessment(sid, owner).status == "IN_PROGRESS"
+        assert snapshot.disruptions and snapshot.scenario.seed == 1000
+        assert snapshot.scenario.assessment_duration_s == 120
+        for action in (lambda: store.assessment(sid, "observer"),
+                       lambda: store.accept("observer", session_control(snapshot, "ARCHIVE"))):
+            with pytest.raises(TrainingStoreError, match="assigned trainee"):
+                action()
+        actor = approve_and_start(store, snapshot, actor)
+        assert actor.observations.charging_offer_tick is not None
+    with TrainingStore(path) as store:
+        snapshot, state = store.runtime(sid)
+        service = TrainingSessionService(store)
+        actor = service._restore_session(snapshot, state).actor
+        assert actor.observations.charging_offer_tick is not None
+        assert actor.assessment_plan.rubric.revision == "toa-payoh-rubric-r3"
+        _, actor = service._submit_staged(actor, owner, session_control(snapshot, "RESUME"), False)
+        paused = session_control(store.snapshot(sid), "PAUSE")
+        assert store.accept(owner, paused).status == "QUEUED"
+        # Advance to the last tick to test completion without stepping the full exercise.
+        actor.current_tick = actor.assessment_plan.ticks(actor.assessment_plan.rubric.exercise_limit_s) - 1
+        _, terminal, _ = service._step_staged(actor, None)
+        saved = store.assessment(sid, owner)
+        assert terminal.session.status == "COMPLETED"
+        assert saved.status == "INCOMPLETE"
+        assert saved.disrupted is False
+        assert saved.through_event_sequence == terminal.event_sequence
+        assert [e.event_type for e in store.replay(sid, terminal.event_sequence - 2).events] == [
+            "SESSION_COMPLETED", "COMMAND_EXPIRED"]
+        assert store.accept(owner, paused).status == "EXPIRED"
+        with pytest.raises(TrainingStoreError, match="already ended"):
+            store.accept(owner, session_control(terminal, "ARCHIVE"))
+        with pytest.raises(TrainingStoreError, match="already ended"):
+            store.accept(owner, session_control(terminal, "RESUME").model_copy(
+                update={"command_id": "resume-after-end", "idempotency_key": "resume-after-end"}))
+        assert sid not in store.runtime_ids() and sid not in store.expired_session_ids(0)
+    with TrainingStore(path) as store:
+        assert store.assessment(sid, "trainee") == saved
+
+
+@pytest.mark.parametrize("state", ["READY", "RUNNING", "PAUSED"])
+def test_archiving_a_scored_attempt_preserves_a_disrupted_report(tmp_path, state):
+    path = tmp_path / "training.sqlite"
+    with TrainingStore(path) as store:
+        snapshot, actor = create_attempt(store)
+        service = TrainingSessionService(store)
+        if state != "READY":
+            actor = approve_and_start(store, snapshot, actor)
+            snapshot = store.snapshot(snapshot.session_id)
+        if state == "PAUSED":
+            result, actor = service._submit_staged(actor, "trainee", session_control(snapshot, "PAUSE"), False)
+            assert result.status == "APPLIED"
+            snapshot = store.snapshot(snapshot.session_id)
+        control = session_control(snapshot, "ARCHIVE")
+        result, _ = service._submit_staged(actor, "trainee", control, False)
+        report = store.assessment(snapshot.session_id, "trainee")
+        assert report.status == "INCOMPLETE" and report.disrupted is True
+        assert report.explanation.startswith("Assessment disrupted")
+        assert report.points == (0 if state == "READY" else 18)
+        assert store.snapshot(snapshot.session_id).session.status == "ARCHIVED"
+        assert snapshot.session_id not in store.runtime_ids()
+        assert store.accept("trainee", control) == result
+        with pytest.raises(TrainingStoreError, match="records are retained"):
+            store.delete_session(snapshot.session_id, actor_id="observer")
+        with pytest.raises(TrainingStoreError, match="records are retained"):
+            store.delete_session(snapshot.session_id, actor_id="trainee")
+    with TrainingStore(path) as store:
+        assert store.assessment(snapshot.session_id, "trainee") == report
+
+
+def test_archived_reports_without_a_disruption_flag_are_identified_from_the_session(tmp_path):
+    with TrainingStore(tmp_path / "saved-report.sqlite") as store:
+        snapshot, actor = create_attempt(store)
+        TrainingSessionService(store)._submit_staged(actor, "trainee", session_control(snapshot, "ARCHIVE"), False)
+        report = store.assessment(snapshot.session_id, "trainee")
+        saved = report.model_dump_json(exclude={"disrupted"})
+        store._submit(lambda connection: connection.execute(
+            "UPDATE session_assessments SET result_json=? WHERE session_id=?", (saved, snapshot.session_id)).rowcount)
+        assert store.assessment(snapshot.session_id, "trainee") == report
+
+
+@pytest.mark.parametrize("assessment_v5", [False, True])
+def test_database_upgrade_from_either_branch_preserves_assessments(tmp_path, assessment_v5):
+    """Preserve the snapshot-boundary column and saved grades across both v5 schema variants."""
+    path = tmp_path / "branch-v5.sqlite"
+    plan, snapshot, events, _ = scored_evidence()
+    saved = finalize(plan, snapshot, events)
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at_utc TEXT NOT NULL)")
+        for migration in sorted(_MIGRATIONS.glob("*.sql")):
+            version = int(migration.name[:4])
+            if version < 5:
+                connection.executescript(migration.read_text())
+                connection.execute("INSERT INTO schema_migrations VALUES (?, 'before-merge')", (version,))
+        migration = "0006_session_assessments.sql" if assessment_v5 else "0005_snapshot_boundary.sql"
+        connection.executescript((_MIGRATIONS / migration).read_text())
+        connection.execute("INSERT INTO schema_migrations VALUES (5, 'before-merge')")
+        if assessment_v5:
+            raw = snapshot.model_dump_json()
+            connection.execute("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (snapshot.session_id, snapshot.session.scenario_revision_id, snapshot.session_epoch,
+                 snapshot.session.status, snapshot.tick, snapshot.event_sequence, snapshot.event_sequence,
+                 raw, sha256(raw.encode()).hexdigest()))
+            connection.execute("INSERT INTO session_assessments VALUES (?, ?, ?, ?)",
+                (snapshot.session_id, "trainee", plan.model_dump_json(), saved.model_dump_json()))
+    for _ in range(2):
+        with TrainingStore(path) as store:
+            with store._reading() as connection:
+                assert "boundary_json" in {row[1] for row in connection.execute("PRAGMA table_info(sessions)")}
+                assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 7
+                assert connection.execute("SELECT COUNT(*) FROM session_assessments").fetchone()[0] == int(assessment_v5)
+            if assessment_v5:
+                assert store.snapshot(snapshot.session_id) == snapshot
+                assert store.assessment(snapshot.session_id, "trainee") == saved
+
+
+def scored_evidence():
+    """Build a complete two-minute journal covering the current rubric's partial-credit tiers."""
+    actor = ScoredSessionActor(load_rubric(), session_id="points-test")
+    snapshot = actor.generate_snapshot()
+    plan = actor.assessment_plan
+    snapshot.tick, snapshot.session.status = plan.ticks(plan.rubric.exercise_limit_s), "COMPLETED"
+    snapshot.simulation_time_s = float(plan.rubric.exercise_limit_s)
+    route, driver = plan.rubric.route_id, plan.rubric.route_vehicle_id
+    charger = plan.rubric.charging_vehicle_id
+    events = []
+
+    def add(kind, target, tick, **data):
+        event = Event(event_id=uuid4().hex, event_sequence=len(events) + 1, event_type=kind,
+            tick=tick, entity_type="VEHICLE", entity_id=target, entity_revision=1, source=snapshot.source, data=data)
+        events.append(event)
+        snapshot.event_sequence = event.event_sequence
+        return event
+
+    add("ROUTE_APPROVED", route, 0, target_vehicle_ids=[driver], directed_edge_ids=["example-closed-road"],
+        edited={"duration_s": plan.reference_duration_s * 1.10, "energy_kwh": plan.reference_energy_kwh * 1.125})
+    add("ASSESSMENT_CHARGING_OFFERED", charger, 0, option_id="charge-now")
+    add("ASSESSMENT_CHARGING_ACTIONABLE", charger, 200)
+    add("STOP_SERVED", driver, 200, stop_id=plan.rubric.short_exercise.stop_id, route_id=route)
+    add("SERVICE_CONTINUED", charger, 400, vehicle_id=charger)
+    add("INCIDENT_DETECTED", SCORED_INCIDENT, 500, active_until_tick=2200)
+    add("OPTIONS_READY", SCORED_INCIDENT, 500, options={"escalate": {"vehicle_id": driver, "validation": "PASS"}})
+    add("INCIDENT_DECISION_RECORDED", SCORED_INCIDENT, 920, vehicle_id=driver, action="ESCALATE")
+    add("ASSESSMENT_SERVICE_RESUMED", driver, 1400, distance_m=30, observed_tick=1400)
+    add("ASSESSMENT_CHARGING_OBSERVED", charger, plan.ticks(plan.rubric.charging_observation_s),
+        minimum_kwh=7.3, minimum_in_service=3,
+        reserve_kwh=6.0, capacity_kwh=40)
+    return plan, snapshot, events, add
+
+
+def test_partial_credit_and_config_only_amendment():
+    plan, snapshot, events, _ = scored_evidence()
+    grade = finalize(plan, snapshot, events)
+    points = {item.rule_id: item.points for item in grade.criteria}
+    assert points == {"route_approval": 10, "route_stops": 12, "route_time": 4, "route_energy": 2,
+        "incident_choice": 20, "incident_time": 5, "incident_service": 5, "battery_reserve": 8,
+        "fleet_coverage": 5, "charging_follow_through": 5}
+    assert grade.points == 76 and grade.status == "PASS"
+    assert grade.disrupted is False
+    revised = plan.rubric.model_dump()
+    revised["revision"] = "updated-rubric"
+    revised["rules"]["incident_time"].update(full_s=10, zero_s=20)
+    updated = finalize(plan.model_copy(update={"rubric": Rubric.model_validate(revised)}), snapshot, events)
+    assert updated.points == 71 and updated.status == "FAIL"
+    assert finalize(plan, snapshot, events) == grade
+
+
+@pytest.mark.parametrize("safety_breach", [False, True])
+def test_disrupted_attempt_retains_points_and_confirmed_safety_failures(safety_breach):
+    plan, snapshot, events, add = scored_evidence()
+    snapshot.session.status = "ARCHIVED"
+    if safety_breach:
+        add("ASSESSMENT_CLOSED_ROAD_ENTRY", "shuttle-01", 200, edge_id="example-closed-road",
+            route_id=plan.rubric.route_id, closed_from_tick=0, incident_id=None)
+    grade = finalize(plan, snapshot, events)
+    assert grade.disrupted is True and grade.points == 76
+    assert grade.status == ("FAIL" if safety_breach else "INCOMPLETE")
+    assert bool(grade.automatic_failures) == safety_breach
+    assert "disrupted" in grade.explanation.lower()
+
+
+def test_unpublished_evaluator_is_rejected():
+    data = load_rubric().model_dump()
+    data["evaluator_version"] = "assessment-v1"
+    with pytest.raises(ValueError, match="Unknown assessment evaluator version"):
+        Rubric.model_validate(data)
+
+
+def test_new_criterion_validates_and_scores_through_its_definition(monkeypatch):
+    plan, snapshot, events, _ = scored_evidence()
+    version = EVALUATOR_VERSIONS["assessment-v2"]
+
+    def validate(_, rule):
+        if rule.minimum_tick >= rule.maximum_tick:
+            raise ValueError("Invalid approval window")
+
+    def evaluate(evidence, rule):
+        approval = evidence.approval
+        assert approval is not None
+        points = rule.maximum if rule.minimum_tick <= approval.tick <= rule.maximum_tick else 0
+        return points, "Approved inside the configured window.", [approval]
+
+    new_criterion = Criterion("Approval window", evaluate,
+                              {"minimum_tick": lambda value: type(value) is int,
+                               "maximum_tick": lambda value: type(value) is int}, validate)
+    monkeypatch.setitem(EVALUATOR_VERSIONS, "assessment-test",
+                        replace(version, criteria={**version.criteria, "approval_window": new_criterion}))
+    config = load_rubric().model_dump()
+    config.update(revision="rubric-test", evaluator_version="assessment-test")
+    config["rules"]["route_approval"]["maximum"] -= 3
+    config["rules"]["approval_window"] = {"maximum": 3, "minimum_tick": 0, "maximum_tick": 1_000}
+    revised = plan.model_copy(update={"rubric": Rubric.model_validate(config)})
+    grade = finalize(revised, snapshot, iter(events))
+    criterion = grade.criteria[-1]
+    assert (criterion.rule_id, criterion.label, criterion.points) == ("approval_window", "Approval window", 3)
+    assert criterion.event_ids == [events[0].event_id]
+
+    config["rules"]["approval_window"]["maximum_tick"] = 0
+    with pytest.raises(ValueError, match="Invalid approval window"):
+        Rubric.model_validate(config)
+
+
+@pytest.mark.parametrize(("rule", "kind", "target", "tick", "detail"), [
+    ("closed_road_entry", "ASSESSMENT_CLOSED_ROAD_ENTRY", "shuttle-01", 200,
+     {"edge_id": "example-closed-road", "route_id": "route-peer-a", "closed_from_tick": 0, "incident_id": None}),
+    ("incident_entry_without_clearance", "ASSESSMENT_CLOSED_ROAD_ENTRY", "shuttle-01", 800,
+     {"edge_id": "new-road-block", "route_id": "route-peer-a", "closed_from_tick": 500, "incident_id": SCORED_INCIDENT}),
+    ("preventable_battery_exhaustion", "BATTERY_EXHAUSTED", "shuttle-05", 1900, {}),
+])
+def test_automatic_fail_overrides_passing_points(rule, kind, target, tick, detail):
+    plan, snapshot, events, add = scored_evidence()
+    add(kind, target, tick, **detail)
+    # Keep the fixture in journal order, as the store supplies it.
+    events.sort(key=lambda event: event.tick)
+    for index, event in enumerate(events, 1):
+        event.event_sequence = index
+    grade = finalize(plan, snapshot, events)
+    assert grade.points == 76 and grade.status == "FAIL"
+    assert [failure.rule_id for failure in grade.automatic_failures] == [rule]
+
+
+def test_missed_and_unavailable_tasks_differ():
+    plan, snapshot, events, add = scored_evidence()
+    applicable = [e for e in events if e.event_type not in {"SERVICE_CONTINUED", "INCIDENT_DECISION_RECORDED"}]
+    applicable.append(add("INCIDENT_UNRESOLVED", SCORED_INCIDENT, 2200))
+    grade = finalize(plan, snapshot, applicable)
+    assert grade.status == "FAIL"
+    assert all(item.points == 0 for item in grade.criteria if item.rule_id.startswith(("incident_", "battery_", "fleet_", "charging_")))
+    unavailable = [e for e in applicable if e.event_type != "ASSESSMENT_CHARGING_OFFERED"]
+    assert finalize(plan, snapshot, unavailable).status == "INCOMPLETE"
+
+
+def test_scheduled_charging_counts_the_observed_trip_for_the_selected_booking():
+    plan, snapshot, events, add = scored_evidence()
+    events = [e for e in events if e.event_type != "SERVICE_CONTINUED"]
+    events.extend((
+        add("CHARGE_SCHEDULED", "charger-1", 400, vehicle_id="shuttle-05", booking_id="chosen-booking"),
+        add("ASSESSMENT_CHARGING_TRIP_MOVED", "shuttle-05", 1600, booking_id="other-booking", distance_m=20),
+    ))
+
+    def follow_through():
+        events.sort(key=lambda event: event.tick)
+        for index, event in enumerate(events, 1):
+            event.event_sequence = index
+        report = finalize(plan, snapshot, events)
+        return next(item for item in report.criteria if item.rule_id == "charging_follow_through")
+
+    assert follow_through().points == 0
+    events.append(add("ASSESSMENT_CHARGING_TRIP_MOVED", "shuttle-05", 1650,
+                      booking_id="chosen-booking", distance_m=20))
+    assert follow_through().points == 5
+
+
+def test_checkpoint_keeps_the_pinned_milestones_and_exercise_clock():
+    rubric = load_rubric()
+    actor = ScoredSessionActor(rubric, session_id="checkpoint-attempt")
+    actor.observations.assessment_stop_served = True
+    actor.observations.trip_m = 4.5
+    snapshot = actor.generate_snapshot()
+    state = checkpoint(actor)
+    state["assessment_observations"].update(route_loop_finished=False, target_booking_id=None)
+    restored = TrainingSessionService._restore_session(snapshot, state).actor
+    assert restored.scenario_revision == actor.scenario_revision
+    assert restored.assessment_plan.rubric.exercise_limit_s == 120
+    assert restored.observations.assessment_stop_served and restored.observations.trip_m == 4.5
+
+
+def test_cancelled_slot_keeps_previous_continue_decision():
+    plan, snapshot, events, add = scored_evidence()
+    add("CHARGE_SCHEDULED", "charger-1", 450, vehicle_id="shuttle-05", booking_id="cancelled-slot")
+    add("CHARGE_BOOKING_CANCELLED", "charger-1", 500, vehicle_id="shuttle-05", booking_id="cancelled-slot")
+    events.sort(key=lambda event: event.tick)
+    for index, event in enumerate(events, 1):
+        event.event_sequence = index
+    grade = finalize(plan, snapshot, events)
+    assert grade.points == 76 and grade.status == "PASS"
+
+
+@pytest.mark.parametrize(("published", "crossing"), [(800, 600), (920, 920)])
+def test_incident_safety_uses_crossing_time_and_committed_order(published, crossing):
+    plan, snapshot, events, add = scored_evidence()
+    add("ASSESSMENT_CLOSED_ROAD_ENTRY", "shuttle-01", published, edge_id="new-road-block",
+        route_id="route-peer-a", crossing_tick=crossing, closed_from_tick=500, incident_id=SCORED_INCIDENT)
+    events.sort(key=lambda event: event.tick)
+    for index, event in enumerate(events, 1):
+        event.event_sequence = index
+    assert finalize(plan, snapshot, events).automatic_failures == []
+
+
+def test_closure_cache_expires_without_changing_the_previous_tick():
+    actor = ScoredSessionActor(load_rubric(), session_id="closure-test")
+    shuttle = actor.shuttles[actor.graded_route]
+    closure = actor.domain.disruptions[0]
+    edge, start, _ = next((edge, start, end) for edge, start, end in actor._route_roads(shuttle.route_ID)
+                          if edge in closure.affected_edge_ids and start > SHUTTLE_FRONT_M + 1)
+    shuttle.progress = start - SHUTTLE_FRONT_M - 1
+    motion = {item.ID: item.progress for item in actor.shuttles}
+    motion[shuttle.ID] += 2
+    closure.active_until_tick = 2
+    actor.current_tick = 1
+    actor.observe_motion(motion)
+    assert [event.data["edge_id"] for event in actor.pending_events] == [edge]
+    staged = deepcopy(actor)
+    assert staged.assessment_plan is actor.assessment_plan
+    assert staged.observations is not actor.observations
+    staged.current_tick = 2
+    staged.pending_events.clear()
+    staged.observe_motion(motion)
+    assert staged.pending_events == []
+    assert len(actor.pending_events) == 1
+
+
+def test_two_minute_exercise_can_grade_all_three_tasks(tmp_path):
+    """Close a real simulated attempt at two minutes using scheduled charging and escalation."""
+    with TrainingStore(tmp_path / "scored.sqlite") as store:
+        service = TrainingSessionService(store)
+        created, actor = create_attempt(store)
+        actor = approve_and_start(store, created, actor)
+        baseline = store.snapshot(created.session_id)
+
+        def apply_action(kind, target_type, target_id, revision, payload):
+            nonlocal actor, baseline
+            command = DispatcherCommand(contract_version="2.0", command_id=kind.lower(),
+                idempotency_key=kind.lower(), session_id=baseline.session_id, command_type=kind,
+                expected_epoch=baseline.session_epoch, expected_revision=revision, target_type=target_type,
+                target_id=target_id, reason="Assessment decision", payload=payload)
+            result, actor = service._submit_staged(actor, "trainee", command, False)
+            assert result.status == "APPLIED"
+            baseline = store.snapshot(created.session_id)
+
+        offer = next(option for option in baseline.charge_options
+                     if option.vehicle_id == "shuttle-05" and option.action == "CHARGE_NOW")
+        charger = next(charger for charger in baseline.chargers if charger.charger_id == offer.charger_id)
+        apply_action("SCHEDULE_CHARGE", "CHARGER", charger.charger_id, charger.aggregate_revision,
+                     {"vehicle_id": offer.vehicle_id, "start_tick": actor.assessment_plan.ticks(10)})
+        responded = False
+        for elapsed_s in range(1, 121):
+            for _ in range(actor.assessment_plan.ticks(1)):
+                actor.tick()
+            baseline = publish_workflow(store, actor, service._snapshot(actor, baseline, "RUNNING"), checkpoint, baseline)
+            assert (baseline.session.status == "COMPLETED") == (elapsed_s == 120)
+            candidate = next((candidate for candidate in baseline.candidates if candidate.incident_id == SCORED_INCIDENT
+                              and candidate.vehicle_id == "shuttle-01" and candidate.action == "ESCALATE"
+                              and candidate.validation == "PASS"), None)
+            if candidate and not responded:
+                incident = next(incident for incident in baseline.incidents if incident.incident_id == SCORED_INCIDENT)
+                apply_action("APPROVE_INCIDENT_OPTION", "INCIDENT", incident.incident_id, incident.aggregate_revision,
+                             {"candidate_id": candidate.candidate_id, "candidate_revision": candidate.revision})
+                responded = True
+        report = store.assessment(baseline.session_id, "trainee")
+        assert responded and baseline.simulation_time_s == 120
+        assert report.status == "PASS"
+        points = {item.rule_id: item.points for item in report.criteria}
+        assert points["route_stops"] == 12
+        assert points["incident_service"] == 10
+        assert points["charging_follow_through"] == 5

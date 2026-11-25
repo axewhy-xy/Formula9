@@ -1,0 +1,44 @@
+{
+  "metadata": {
+    "author": "Nur Syazliyarni Binte Zazali",
+    "date_created": "15/11/2026",
+    "last_modified": "23/11/2026",
+    "description": "Grading rules and exercise parameters for the two-minute scored Toa Payoh exercise."
+  },
+  "revision": "toa-payoh-rubric-r3",
+  "evaluator_version": "assessment-v2",
+  "identity_version": "semantic-v1",
+  "pass_mark": 75,
+  "rules": {
+    "route_approval": {"maximum": 10},
+    "route_stops": {"maximum": 12},
+    "route_time": {"maximum": 4, "partial": 2, "full_ratio": 1.10, "partial_ratio": 1.25},
+    "route_energy": {"maximum": 4, "partial": 2, "full_ratio": 1.10, "partial_ratio": 1.25},
+    "incident_choice": {"maximum": 20, "partial": 12, "full_actions": ["ROAD_DETOUR", "ESCALATE"], "partial_actions": ["HOLD_AT_STOP", "KEEP_ROUTE"]},
+    "incident_time": {"maximum": 10, "full_s": 12, "zero_s": 30},
+    "incident_service": {"maximum": 10, "partial": 5, "full_s": 30, "partial_s": 60},
+    "battery_reserve": {"maximum": 15, "partial": 8, "buffer_fraction": 0.05},
+    "fleet_coverage": {"maximum": 10, "partial": 5, "full_count": 4, "partial_count": 3},
+    "charging_follow_through": {"maximum": 5, "continue_s": 45}
+  },
+  "automatic_fails": ["closed_road_entry", "incident_entry_without_clearance", "preventable_battery_exhaustion"],
+  "seed": 1000,
+  "route_id": "route-peer-a",
+  "route_vehicle_id": "shuttle-01",
+  "charging_vehicle_id": "shuttle-05",
+  "charging_initial_kwh": 9.2,
+  "charging_offer_loops": 8,
+  "incident_start_delay_s": 5,
+  "incident_duration_s": 40,
+  "charging_decision_s": 35,
+  "charging_observation_s": 90,
+  "charging_offer_deadline_s": 20,
+  "safety_opportunity_s": 10,
+  "exercise_limit_s": 120,
+  "short_exercise": {
+    "stop_id": "52449-toa-payoh-police-centre",
+    "approach_m": 25,
+    "incident_service_m": 30,
+    "charging_trip_m": 20
+  }
+}

@@ -69,6 +69,7 @@ from src.persistence.store_client import serve_store_call
 from src.persistence.training_store import TrainingStore, TrainingStoreError
 from src.services import session_worker
 from src.services.integrated_actor import SCENARIO_SELECTOR, IntegratedSessionActor, get_workflow_definition
+from src.services.assessment import SCORED_SCENARIO
 from src.services.session_actor import SessionActor
 from src.services.session_ipc import Channel, ChannelClosed
 from src.services.training_sessions import (LIFECYCLE, TRAFFIC_FRAMES, FrameFeed, SessionServiceBase,
@@ -732,7 +733,7 @@ class GatewaySessionService(SessionServiceBase):
             self._check_scenario(request)
             if self.closed or len(self.sessions) >= self.MAX_SESSIONS:
                 raise TrainingStoreError("QUEUE_FULL", "Training session capacity reached")
-            traffic = request.scenario_revision_id == SCENARIO_SELECTOR and IntegratedSessionActor.TRAFFIC
+            traffic = request.scenario_revision_id in {SCENARIO_SELECTOR, SCORED_SCENARIO} and IntegratedSessionActor.TRAFFIC
             handle = self._admit_worker(traffic)
             payload = {"request": request.model_dump_json(), "actor_id": actor_id, "key": key, "digest": digest}
             with self.store.trace.span("session.place", worker=handle.index, traffic=traffic) as fields:
@@ -807,6 +808,20 @@ class GatewaySessionService(SessionServiceBase):
             fields.update(**boundary(result), command_id=result.command_id, outcome=result.status,
                           failure_code=result.failure_code)
             return result
+
+    async def _expire_assessment(self, actor_id: str, command: DispatcherCommand, cutoff: str) -> bool:
+        """Have the owning worker recheck inactivity under its session lock before archiving."""
+        session = self.sessions.get(command.session_id)
+        if session is None or self._unavailable(session) or self.closed:
+            return False
+        try:
+            reply = await self._request(session.worker, "expire_assessment",
+                {"actor_id": actor_id, "command": command.model_dump_json(), "cutoff": cutoff}, REQUEST_TIMEOUT_S)
+        except ChannelClosed:
+            return False  # Recovery restores the activity timestamp; the next sweep retries.
+        if reply["removed"]:
+            self._remove(session)
+        return reply["archived"]
 
     async def _submit(self, actor_id: str, command: DispatcherCommand) -> CommandStatus:
         session = self.sessions.get(command.session_id)
@@ -901,6 +916,7 @@ class GatewaySessionService(SessionServiceBase):
 
     async def close(self) -> None:
         self.closed = True
+        await self._close_assessment_maintenance()
         if self._monitor is not None:
             self._monitor.cancel()
         # Recoveries too: one waiting to try again would otherwise hold up the drain below

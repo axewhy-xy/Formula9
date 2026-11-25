@@ -19,12 +19,16 @@ from contextvars import copy_context
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from itertools import chain
 from threading import Lock, Thread, local
 from typing import BinaryIO, Callable, Iterator, TypeVar
 from uuid import uuid4
 
 from src.core.training_telemetry import TrainingTrace, boundary, correlate
+from src.services.assessment import AssessmentPlan, finalize
+from src.services.assessment_policy import AssessmentPolicy, configured_policy
 
+from contracts.v2.assessment import SessionAssessment
 from contracts.v2.models import (
     CommandStatus,
     DispatcherCommand,
@@ -125,6 +129,14 @@ class _EncodedRuntime:
 
 
 @dataclass(frozen=True)
+class PreparedAssessment:
+    """A grade computed outside the writer, tied to the exact journal and pinned plan it read."""
+    snapshot_id: str
+    plan_json: str
+    result: dict
+
+
+@dataclass(frozen=True)
 class EncodedCommit:
     """A publication serialised before the writer takes it, as plain strings and numbers: the snapshot
     with its new snapshot ID, its domain events as (sequence, event_id, tick, JSON) and the actor
@@ -136,6 +148,7 @@ class EncodedCommit:
     events: tuple[tuple[int, str, int, str], ...]
     runtime: _EncodedRuntime | None
     expected_snapshot_id: str | None
+    assessment: PreparedAssessment | None = None
 
 
 def _encode_event(event: Event) -> tuple[int, str, int, str]:
@@ -206,13 +219,17 @@ class TrainingStore:
     and the check costs as much as encoding it.
     """
 
+    owns_writer = True
+
     def __init__(self, path: Path, *, queue_size: int = 128, trace: TrainingTrace | None = None,
-                 validate_publications: bool | None = None):
+                 validate_publications: bool | None = None, assessment_policy: AssessmentPolicy | None = None):
         if queue_size < 1:
             raise ValueError("queue_size must be positive")
         if validate_publications is None:
             validate_publications = os.environ.get("F9_VALIDATE_PUBLICATIONS", "") not in {"", "0"}
         self.validate_publications = validate_publications
+        self.assessment_policy = assessment_policy if assessment_policy is not None else configured_policy()
+        self._assessment_owners: dict[str, str] = {}
         # The latest committed snapshot JSON of each session not terminal, set by the writer once a
         # commit is durable: GET /snapshot and snapshot() read it instead of the database. Only the
         # writer changes it, so it is never older than the row it stands for.
@@ -323,6 +340,11 @@ class TrainingStore:
                 f"migrations up to v{latest}. A newer branch probably migrated it: switch back to that "
                 "branch, or set TRAINING_DATABASE_PATH to a separate file for this one.",
             )
+        # The assessment branch used v5 before main added the snapshot boundary in v5.
+        # Upgrade those databases with main's schema before applying the combined v6.
+        if current == 5 and "boundary_json" not in {row[1] for row in connection.execute("PRAGMA table_info(sessions)")}:
+            script = (_MIGRATIONS / "0005_snapshot_boundary.sql").read_text(encoding="utf-8")
+            connection.executescript("BEGIN IMMEDIATE;\n" + script + "\nCOMMIT;")
         for migration in migrations:
             version = int(migration.name[:4])
             if version <= current:
@@ -330,6 +352,9 @@ class TrainingStore:
             script = migration.read_text(encoding="utf-8")
             connection.executescript("BEGIN IMMEDIATE;\n" + script + f"\nINSERT INTO schema_migrations VALUES ({version}, '{_now()}');\nCOMMIT;")
         self._recover(connection)
+        self._assessment_owners = dict(connection.execute(
+            "SELECT a.session_id, a.trainee_id FROM session_assessments a JOIN sessions s USING(session_id)"
+            " WHERE s.status NOT IN ('COMPLETED', 'ARCHIVED', 'FAILED')"))
 
     @staticmethod
     def _write_snapshot(connection: sqlite3.Connection, snapshot: FullSnapshot, *, initial: bool = False,
@@ -377,6 +402,7 @@ class TrainingStore:
         """After a commit, on the writer: the session's snapshot JSON for reads, or none once it ends."""
         if encoded is None or encoded.status in _TERMINAL:
             self._published.pop(session_id, None)
+            self._assessment_owners.pop(session_id, None)
         else:
             self._published[session_id] = encoded.raw
         for listener in tuple(self._publish_listeners):
@@ -502,34 +528,60 @@ class TrainingStore:
         with self._reading() as connection:
             return self._session_rows(connection, limit, offset)
 
-    def session_page(self, limit: int, offset: int = 0) -> dict:
+    def session_page(self, limit: int, offset: int = 0, *, actor_id: str | None = None) -> dict:
         """Read one list page and its whole-table counts from one consistent view."""
         with self._reading() as connection:
             connection.execute("BEGIN")
-            total, live = connection.execute(f"SELECT COUNT(*), COALESCE(SUM({_OCCUPIES_CAPACITY}), 0) FROM sessions s").fetchone()
-            return {"sessions": self._session_rows(connection, limit, offset), "live_count": live, "total": total}
+            visible, parameters = self._visible_sessions(actor_id)
+            total = connection.execute("SELECT COUNT(*) FROM sessions s LEFT JOIN session_assessments a USING(session_id)"
+                                       + visible, parameters).fetchone()[0]
+            live = connection.execute(f"SELECT COALESCE(SUM({_OCCUPIES_CAPACITY}), 0) FROM sessions s").fetchone()[0]
+            practice = connection.execute(
+                "SELECT COUNT(*) FROM sessions s LEFT JOIN session_assessments a USING(session_id)"
+                " WHERE a.session_id IS NULL AND s.status IN ('COMPLETED', 'ARCHIVED', 'FAILED')").fetchone()[0]
+            rows = self._session_rows(connection, limit, offset, actor_id=actor_id)
+            return {"sessions": rows, "live_count": live, "total": total, "terminal_practice_count": practice}
 
-    @staticmethod
-    def _session_rows(connection: sqlite3.Connection, limit: int, offset: int) -> list[dict]:
+    def _visible_sessions(self, actor_id):
+        """Keep internal listings complete and filter authenticated API listings by assessment access."""
+        if actor_id is None or self.assessment_policy.is_supervisor(actor_id):
+            return "", ()
+        return " WHERE a.session_id IS NULL OR a.trainee_id=?", (actor_id,)
+
+    def _session_rows(self, connection: sqlite3.Connection, limit: int, offset: int,
+                      *, actor_id: str | None = None) -> list[dict]:
+        visible, parameters = self._visible_sessions(actor_id)
         rows = connection.execute(
-            "SELECT s.session_id, s.scenario_revision_id, s.status,"
-            f" {_OCCUPIES_CAPACITY} AS occupies_capacity FROM sessions s"
+            "SELECT s.session_id, s.scenario_revision_id, s.status, a.trainee_id,"
+            f" {_OCCUPIES_CAPACITY} AS occupies_capacity FROM sessions s LEFT JOIN session_assessments a USING(session_id)"
+            + visible +
             " ORDER BY occupies_capacity DESC, s.rowid DESC LIMIT ? OFFSET ?",
-            (limit, offset),
+            (*parameters, limit, offset),
         ).fetchall()
-        return [{**dict(row), "occupies_capacity": bool(row["occupies_capacity"])} for row in rows]
+        entries = []
+        for row in rows:
+            entry = dict(row)
+            owner = entry.pop("trainee_id")
+            entry.update(occupies_capacity=bool(row["occupies_capacity"]), is_assessment=owner is not None,
+                         can_archive=bool(row["occupies_capacity"]) and
+                         (owner is None or owner == actor_id or self.assessment_policy.is_supervisor(actor_id)),
+                         can_delete=row["status"] in _TERMINAL and
+                         (owner is None or self.assessment_policy.is_supervisor(actor_id)))
+            entries.append(entry)
+        return entries
 
     def expired_session_ids(self, keep_latest: int) -> list[str]:
-        """Terminal attempts older than the newest keep_latest, by creation order."""
+        """Find old practice attempts. Assessment records are retained."""
         with self._reading() as connection:
             rows = connection.execute(
                 "SELECT session_id FROM sessions WHERE status IN ('ARCHIVED', 'COMPLETED', 'FAILED')"
+                " AND session_id NOT IN (SELECT session_id FROM session_assessments)"
                 " ORDER BY rowid DESC LIMIT -1 OFFSET ?",
                 (keep_latest,),
             ).fetchall()
             return [row[0] for row in rows]
 
-    def delete_session(self, session_id: str) -> None:
+    def delete_session(self, session_id: str, *, actor_id: str | None = None) -> None:
         """Permanently remove a terminal attempt, including all of its history.
 
         Check the persisted lifecycle in the same writer transaction as deletion.
@@ -537,8 +589,12 @@ class TrainingStore:
         """
         def write(connection: sqlite3.Connection) -> None:
             connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute("SELECT status FROM sessions WHERE session_id=?", (session_id,)).fetchone()
+            row = connection.execute(
+                "SELECT s.status, a.trainee_id FROM sessions s LEFT JOIN session_assessments a USING(session_id)"
+                " WHERE s.session_id=?", (session_id,)).fetchone()
             if row is not None:
+                if row["trainee_id"] is not None and not self.assessment_policy.is_supervisor(actor_id):
+                    raise TrainingStoreError("ROLE_DENIED", "Assessment records are retained. Only a configured supervisor can delete them.")
                 if row["status"] not in {"ARCHIVED", "COMPLETED", "FAILED"}:
                     raise TrainingStoreError("INVALID_TRANSITION", "Archive the session before permanently deleting it")
                 for table in ("session_creations", "session_runtimes", "session_traffic", "commands", "events",
@@ -611,7 +667,10 @@ class TrainingStore:
         return self._submit(write)
 
     def create_session(self, snapshot: FullSnapshot, *, runtime_state: dict | None = None,
-                       creation: tuple[str, str, str] | None = None) -> FullSnapshot:
+                       creation: tuple[str, str, str] | None = None,
+                       assessment_plan: AssessmentPlan | None = None) -> FullSnapshot:
+        if assessment_plan is not None and creation is None:
+            raise ValueError("Scored attempts require an authenticated creator")
         snapshot = FullSnapshot.model_validate(snapshot.model_dump(mode="json"))
         runtime = _EncodedRuntime.of(runtime_state)
         def write(connection: sqlite3.Connection) -> FullSnapshot:
@@ -620,10 +679,131 @@ class TrainingStore:
             self._write_runtime(connection, snapshot.session_id, runtime)
             if creation is not None:
                 connection.execute("INSERT INTO session_creations VALUES (?, ?, ?, ?)", (*creation, snapshot.session_id))
+            if assessment_plan is not None:
+                connection.execute(
+                    "INSERT INTO session_assessments (session_id, trainee_id, plan_json, activity_at_utc) VALUES (?, ?, ?, ?)",
+                    (snapshot.session_id, creation[0], assessment_plan.model_dump_json(), _now()))
             connection.commit()
+            if assessment_plan is not None:
+                self._assessment_owners[snapshot.session_id] = creation[0]
             self._publish(snapshot.session_id, encoded)
             return snapshot
         return self._submit(write)
+
+    def _check_assessment_owner(self, trainee_id: str | None, actor_id: str | None, *, supervisor: bool = False) -> None:
+        """Use the authenticated owner for scored commands, result access and deletion."""
+        if trainee_id is not None and trainee_id != actor_id and not (supervisor and self.assessment_policy.is_supervisor(actor_id)):
+            raise TrainingStoreError("ROLE_DENIED", "Only the assigned trainee can access this assessment or change its session")
+
+    def check_read_access(self, session_id: str, actor_id: str) -> None:
+        """Authorize private assessment reads without adding database reads to live practice polls."""
+        owner = self._assessment_owners.get(session_id)
+        if owner is None and session_id not in self._published:
+            with self._reading() as connection:
+                row = connection.execute("SELECT trainee_id FROM session_assessments WHERE session_id=?", (session_id,)).fetchone()
+                owner = row[0] if row else None
+        self._check_assessment_owner(owner, actor_id, supervisor=True)
+
+    def inactive_assessments(self, before: str) -> list[dict]:
+        """Use persisted owner activity so a server restart cannot prolong abandoned attempts."""
+        live_ids = tuple(self._assessment_owners.copy())
+        if not live_ids:
+            return []
+        placeholders = ",".join("?" for _ in live_ids)
+        with self._reading() as connection:
+            return [dict(row) for row in connection.execute(
+                "SELECT a.session_id, a.trainee_id FROM session_assessments a JOIN sessions s USING(session_id)"
+                f" WHERE a.session_id IN ({placeholders}) AND s.status IN ('READY', 'PAUSED') AND a.activity_at_utc<=?",
+                (*live_ids, before))]
+
+    def assessment_is_inactive(self, session_id: str, before: str) -> bool:
+        """Recheck expiry while the runtime holds this session's command lock."""
+        with self._reading() as connection:
+            return connection.execute(
+                "SELECT 1 FROM session_assessments a JOIN sessions s USING(session_id)"
+                " WHERE a.session_id=? AND s.status IN ('READY', 'PAUSED') AND a.activity_at_utc<=?",
+                (session_id, before)).fetchone() is not None
+
+    def assessment(self, session_id: str, actor_id: str) -> SessionAssessment:
+        """Return assessment status or the saved immutable scoring breakdown."""
+        with self._reading() as connection:
+            record = connection.execute(
+                "SELECT s.scenario_revision_id, s.status, a.trainee_id, a.plan_json, a.result_json"
+                " FROM sessions s LEFT JOIN session_assessments a USING(session_id) WHERE s.session_id=?",
+                (session_id,)).fetchone()
+            if record is None:
+                raise TrainingStoreError("INVALID_REFERENCE", "Training session was not found")
+            self._check_assessment_owner(record["trainee_id"], actor_id, supervisor=True)
+            if record["result_json"] is not None:
+                result = SessionAssessment.model_validate_json(record["result_json"])
+                if result.duration_s is None:
+                    result.duration_s = json.loads(record["plan_json"])["rubric"]["exercise_limit_s"]
+                # Archived snapshots also identify disruptions in reports saved without this flag.
+                result.disrupted = record["status"] == "ARCHIVED"
+                return result
+            rubric = AssessmentPlan.model_validate_json(record["plan_json"]).rubric if record["plan_json"] is not None else None
+            return SessionAssessment(session_id=session_id, scenario_revision_id=record["scenario_revision_id"],
+                rubric_revision=rubric.revision if rubric else None, points=None, maximum=100 if rubric else None,
+                duration_s=rubric.exercise_limit_s if rubric else None,
+                pass_mark=rubric.pass_mark if rubric else None, through_tick=None, through_event_sequence=None,
+                status="IN_PROGRESS" if rubric else "PRACTICE",
+                explanation=("The assessment is saved when this exercise ends." if rubric else "This is a practice session."))
+
+    def prepare_assessment(self, snapshot: FullSnapshot, events: tuple[Event, ...]) -> PreparedAssessment | None:
+        """Read one consistent journal boundary and run all evaluators on the caller's thread."""
+        if snapshot.session.status not in _TERMINAL:
+            return
+        with self._reading() as connection:
+            connection.execute("BEGIN")
+            row = connection.execute("SELECT plan_json FROM session_assessments WHERE session_id=? AND result_json IS NULL",
+                                     (snapshot.session_id,)).fetchone()
+            if row is None:
+                return
+            previous = self._stored_boundary(connection, snapshot.session_id)
+            if snapshot.event_sequence != previous["event_sequence"] + len(events):
+                return  # The writer will apply its ordinary stale-boundary checks.
+            journal = [item[0] for item in connection.execute(
+                "SELECT event_json FROM events WHERE session_id=? AND event_sequence<=? ORDER BY event_sequence",
+                (snapshot.session_id, previous["event_sequence"]))]
+        grade = finalize(AssessmentPlan.model_validate_json(row["plan_json"]), snapshot,
+                         chain((Event.model_validate_json(raw) for raw in journal), events))
+        return PreparedAssessment(previous["snapshot_id"], row["plan_json"], grade.model_dump(mode="json"))
+
+    @staticmethod
+    def _save_assessment(connection: sqlite3.Connection, snapshot: FullSnapshot,
+                         prepared: PreparedAssessment | None, previous_snapshot_id: str) -> None:
+        """Verify and save a prepared grade atomically with the terminal boundary."""
+        row = connection.execute(
+            "SELECT plan_json FROM session_assessments WHERE session_id=? AND result_json IS NULL",
+            (snapshot.session_id,)).fetchone()
+        if row is None:
+            return
+        if prepared is None or prepared.snapshot_id != previous_snapshot_id or prepared.plan_json != row["plan_json"]:
+            raise TrainingStoreError("STALE_REVISION", "Assessment evidence changed before the terminal commit")
+        # Expired command receipts are appended by the writer after preparation.
+        report = {**prepared.result, "through_tick": snapshot.tick, "through_event_sequence": snapshot.event_sequence}
+        connection.execute("UPDATE session_assessments SET result_json=? WHERE session_id=? AND result_json IS NULL",
+                           (_json(report), snapshot.session_id))
+
+    @staticmethod
+    def _expire_pending(connection: sqlite3.Connection, snapshot: FullSnapshot, *, except_id: str = "") -> None:
+        """Settle accepted receipts before retiring their runtime."""
+        pending = connection.execute(
+            "SELECT command_id, target_revision FROM commands"
+            " WHERE session_id=? AND status='QUEUED' AND command_id<>? ORDER BY rowid",
+            (snapshot.session_id, except_id),
+        ).fetchall()
+        for waiting in pending:
+            snapshot.event_sequence += 1
+            event = TrainingStore._event(snapshot, snapshot.event_sequence, "COMMAND_EXPIRED", "COMMAND",
+                waiting["command_id"], waiting["target_revision"],
+                {"status": "EXPIRED", "failure_code": "INVALID_TRANSITION"})
+            TrainingStore._append_event(connection, snapshot.session_id, event)
+            connection.execute(
+                "UPDATE commands SET status='EXPIRED', finished_at_utc=?, result_event_id=?,"
+                " failure_code='INVALID_TRANSITION' WHERE command_id=?",
+                (_now(), event.event_id, waiting["command_id"]),
+            )
 
     def _read_connection(self, *, check_same_thread: bool = True) -> sqlite3.Connection:
         connection = sqlite3.connect(f"file:{self.path.as_posix()}?mode=ro", uri=True,
@@ -739,9 +919,12 @@ class TrainingStore:
         payload_hash = _hash(_json(command.model_dump(mode="json", exclude={"command_id", "idempotency_key"})))
         def write(connection: sqlite3.Connection) -> CommandStatus:
             connection.execute("BEGIN IMMEDIATE")
-            session = connection.execute("SELECT * FROM sessions WHERE session_id=?", (command.session_id,)).fetchone()
+            session = connection.execute(
+                "SELECT s.*, a.trainee_id FROM sessions s LEFT JOIN session_assessments a USING(session_id)"
+                " WHERE s.session_id=?", (command.session_id,)).fetchone()
             if session is None:
                 raise TrainingStoreError("INVALID_REFERENCE", "Training session was not found")
+            self._check_assessment_owner(session["trainee_id"], actor_id, supervisor=command.command_type == "ARCHIVE")
             snapshot = _load_snapshot(session)
             prior = connection.execute(
                 "SELECT * FROM commands WHERE actor_id=? AND session_id=? AND idempotency_key=?",
@@ -753,6 +936,8 @@ class TrainingStore:
                 connection.commit()
                 return self._status(prior, snapshot)
             if snapshot.session.status in {"RECOVERING", "COMPLETED", "ARCHIVED", "FAILED"}:
+                if snapshot.session.status in _TERMINAL and (command.command_type == "ARCHIVE" or session["trainee_id"] is not None):
+                    raise TrainingStoreError("INVALID_TRANSITION", "This attempt has already ended. View the saved result in Reports.")
                 raise TrainingStoreError("SESSION_RECOVERING", "Session does not accept commands")
             expected_status = {"START": "READY", "PAUSE": "RUNNING", "RESUME": "PAUSED"}.get(command.command_type)
             if expected_status is not None and snapshot.session.status != expected_status:
@@ -791,7 +976,8 @@ class TrainingStore:
     def _apply(self, command_id: str, proposed: FullSnapshot | None = None,
                domain_events: tuple[Event, ...] = (), *, rejection_code: str | None = None,
                expected_snapshot_id: str | None = None, runtime_state: dict | None = None,
-               trace_fields: dict, published: dict | None = None) -> CommandStatus:
+               trace_fields: dict, published: dict | None = None,
+               prepared_assessment: PreparedAssessment | None = None) -> CommandStatus:
         """Commit one actor-staged boundary, rechecking preconditions in the writer.
 
         On a stale command or staged boundary, the proposed state is discarded
@@ -807,6 +993,9 @@ class TrainingStore:
             proposed = FullSnapshot.model_validate(proposed.model_dump(mode="json"))
         domain_events = tuple(Event.model_validate(event.model_dump(mode="json")) for event in domain_events)
         runtime = _EncodedRuntime.of(runtime_state)
+        prepared = prepared_assessment
+        if prepared is None and proposed is not None:
+            prepared = self.prepare_assessment(proposed, domain_events)
         def write(connection: sqlite3.Connection) -> CommandStatus:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute("SELECT * FROM commands WHERE command_id=?", (command_id,)).fetchone()
@@ -870,24 +1059,7 @@ class TrainingStore:
             for domain_event in domain_events if status == "APPLIED" else ():
                 self._append_event(connection, result.session_id, domain_event)
             if status == "APPLIED" and command.command_type == "ARCHIVE":
-                # Another client may still be reconciling an accepted command.
-                # Retiring the actor must settle that receipt in this transaction.
-                pending = connection.execute(
-                    "SELECT command_id, target_revision FROM commands"
-                    " WHERE session_id=? AND status='QUEUED' AND command_id<>? ORDER BY rowid",
-                    (result.session_id, command_id),
-                ).fetchall()
-                for waiting in pending:
-                    result.event_sequence += 1
-                    expired = self._event(result, result.event_sequence, "COMMAND_EXPIRED", "COMMAND",
-                                          waiting["command_id"], waiting["target_revision"],
-                                          {"status": "EXPIRED", "failure_code": "INVALID_TRANSITION"})
-                    self._append_event(connection, result.session_id, expired)
-                    connection.execute(
-                        "UPDATE commands SET status='EXPIRED', finished_at_utc=?, result_event_id=?,"
-                        " failure_code='INVALID_TRANSITION' WHERE command_id=?",
-                        (_now(), expired.event_id, waiting["command_id"]),
-                    )
+                self._expire_pending(connection, result, except_id=command_id)
             result.event_sequence += 1
             result.snapshot_id = str(uuid4())
             event = self._event(result, result.event_sequence, f"COMMAND_{status}", "COMMAND",
@@ -896,11 +1068,16 @@ class TrainingStore:
             encoded = self._write_snapshot(connection, result)
             if status == "APPLIED":
                 self._write_runtime(connection, result.session_id, runtime)
+                if result.session_id in self._assessment_owners:
+                    connection.execute("UPDATE session_assessments SET activity_at_utc=? WHERE session_id=?",
+                                       (_now(), result.session_id))
             connection.execute(
                 "UPDATE commands SET status=?, finished_at_utc=?, applied_tick=?, result_event_id=?, failure_code=?, target_revision=? WHERE command_id=?",
                 (status, _now(), result.tick if status == "APPLIED" else None,
                  event.event_id, code, target_revision, command_id),
             )
+            if status == "APPLIED" and result.session.status in {"COMPLETED", "ARCHIVED", "FAILED"}:
+                self._save_assessment(connection, result, prepared, snapshot.snapshot_id)
             row = connection.execute("SELECT * FROM commands WHERE command_id=?", (command_id,)).fetchone()
             connection.commit()
             self._publish(result.session_id, encoded)
@@ -942,6 +1119,8 @@ class TrainingStore:
         commit = self.encode_commit(snapshot, domain_events, expected_snapshot_id=expected_snapshot_id,
                                     runtime_state=runtime_state)
         self.submit_commit(commit).result()
+        if commit.snapshot.status in _TERMINAL:
+            return self.snapshot(snapshot.session_id)
         snapshot.snapshot_id = commit.snapshot_id
         return snapshot
 
@@ -949,7 +1128,9 @@ class TrainingStore:
                       expected_snapshot_id: str | None = None, runtime_state: dict | None = None) -> EncodedCommit:
         """The caller's half of commit_snapshot: validates the events and serialises the publication
         under a new snapshot ID, leaving snapshot as it was. Needs no writer, so a worker process can do it."""
-        events = tuple(_encode_event(Event.model_validate(event.model_dump(mode="json"))) for event in domain_events)
+        validated = tuple(Event.model_validate(event.model_dump(mode="json")) for event in domain_events)
+        prepared = self.prepare_assessment(snapshot, validated)
+        events = tuple(_encode_event(event) for event in validated)
         snapshot_id = str(uuid4())
         previous_id, snapshot.snapshot_id = snapshot.snapshot_id, snapshot_id
         try:
@@ -959,12 +1140,13 @@ class TrainingStore:
         if self.validate_publications:
             FullSnapshot.model_validate_json(encoded.raw)
         return EncodedCommit(snapshot.session_id, snapshot_id, encoded, events, _EncodedRuntime.of(runtime_state),
-                             expected_snapshot_id)
+                             expected_snapshot_id, prepared)
 
     def submit_commit(self, commit: EncodedCommit) -> Future[None]:
         """The writer's half of commit_snapshot: queues the encoded publication and returns at once. The
         future completes once it is durable (and published for reads), or fails, as with STALE_REVISION
-        when it no longer follows the committed boundary. Nothing here parses JSON or touches Pydantic."""
+        when it no longer follows the committed boundary. Active publications use the encoded data.
+        Terminal publications also settle pending receipts and freeze any assessment in this transaction."""
         proposed = commit.snapshot.boundary
         session_id = commit.session_id
         def write(connection: sqlite3.Connection) -> None:
@@ -984,10 +1166,17 @@ class TrainingStore:
                                     previous["event_sequence"], proposed["tick"])
             for sequence, event_id, _, raw in commit.events:
                 connection.execute("INSERT INTO events VALUES (?, ?, ?, ?)", (session_id, sequence, event_id, raw))
-            self._write_encoded(connection, session_id, commit.snapshot)
+            encoded = commit.snapshot
+            if encoded.status in _TERMINAL:
+                snapshot = FullSnapshot.model_validate_json(encoded.raw)
+                if encoded.status == "COMPLETED":
+                    self._expire_pending(connection, snapshot)
+                    encoded = _EncodedSnapshot.of(snapshot)
+                self._save_assessment(connection, snapshot, commit.assessment, previous["snapshot_id"])
+            self._write_encoded(connection, session_id, encoded)
             self._write_runtime(connection, session_id, commit.runtime)
             connection.commit()
-            self._publish(session_id, commit.snapshot)
+            self._publish(session_id, encoded)
         return self._submit_async(write)
 
     def recover_session(self, session_id: str) -> None:

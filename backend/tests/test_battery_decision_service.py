@@ -120,6 +120,8 @@ def test_reservation_event_records_reason_response_time_and_consequence(store, c
     assert status.result_event_id is not None
     assert (event.entity_type, event.entity_id, event.entity_revision) == ("CHARGER", "charger-1", 2)
     assert event.data == {
+        "booking_id": next(booking.booking_id for booking in store.snapshot(snapshot.session_id).charge_bookings
+                           if booking.vehicle_id == "shuttle-05" and booking.status == "ACTIVE"),
         "option_id": OPTION, "option_revision": 1, "vehicle_id": "shuttle-05", "reason": "Shuttle-05 is near reserve",
         "response_time_s": pytest.approx(3.0), "out_of_service_s": 1200.0,
         "battery_after_kwh": 22.0, "loops_after": 42, "min_in_service_vehicles": coverage, "rejected_attempts": 0,

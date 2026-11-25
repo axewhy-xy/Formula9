@@ -87,6 +87,12 @@ async def session_stream(websocket: WebSocket, session_id: str, traffic: bool = 
         await websocket.send_text(error_message(session_id, "ROLE_DENIED", "Training API requires an authenticated actor"))
         await websocket.close(code=close_code("ROLE_DENIED"), reason="ROLE_DENIED")
         return
+    try:
+        await asyncio.to_thread(service.store.check_read_access, session_id, actor_id)
+    except TrainingStoreError as error:
+        await websocket.send_text(error_message(session_id, error.code, str(error)))
+        await websocket.close(code=close_code(error.code), reason=error.code)
+        return
     stream = SessionStream(websocket, service, session_id, traffic=traffic, after_tick=after_tick,
                            snapshot_interval_ms=clamp_interval_ms(snapshot_interval_ms),
                            login_check=login_check_for(websocket, actor_id))

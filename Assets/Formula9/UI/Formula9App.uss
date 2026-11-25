@@ -328,7 +328,6 @@
     margin-bottom: 8px;
 }
 
-.scenario { min-width: 240px; margin-right: 8px; }
 .session-id { flex-grow: 1; flex-basis: 200px; min-width: 200px; margin-right: 8px; }
 .sessions { flex-grow: 1; flex-basis: 300px; margin-right: 8px; }
 .muted { color: rgb(74, 93, 97); white-space: normal; }
@@ -353,18 +352,32 @@
 .session-badge-running, .session-badge-completed { color: rgb(22, 101, 52); background-color: rgb(220, 245, 228); }
 .session-badge-paused, .session-badge-recovering { color: rgb(117, 76, 12); background-color: rgb(255, 242, 209); }
 .session-badge-offline, .session-badge-failed { color: rgb(151, 57, 57); background-color: rgb(252, 232, 232); }
+.assessment-active .session-header { border-bottom-color: rgb(112, 96, 175); }
+.assessment-mode-badge, .assessment-timer {
+    flex-shrink: 0;
+    padding: 4px 10px;
+    margin: 4px 8px 4px 0;
+    border-radius: 12px;
+    -unity-font-style: bold;
+    color: rgb(59, 37, 121);
+    background-color: rgb(237, 232, 252);
+}
+.assessment-mode-badge { font-size: 12px; }
+.assessment-timer { margin-left: 8px; font-size: 15px; }
+.assessment-timer-urgent { color: rgb(151, 42, 42); background-color: rgb(252, 225, 225); }
 .session-utilities, .session-playback { flex-direction: row; align-items: center; flex-shrink: 0; margin: 4px 0; }
 .session-utilities { padding-right: 16px; }
 .session-playback { margin-left: auto; padding-left: 16px; border-left-width: 1px; border-left-color: rgb(211, 222, 222); }
 .session-create-group, .session-join-group { flex-direction: row; flex-wrap: wrap; align-items: center; flex-grow: 1; flex-basis: 440px; margin: 4px 0; }
 .session-create-group { margin-right: 16px; }
-.session-create-group .scenario { flex-grow: 1; flex-shrink: 1; min-width: 200px; }
 .session-maintenance { flex-shrink: 0; margin-bottom: 8px; color: rgb(74, 93, 97); }
 .session-maintenance .row { margin-top: 8px; }
 
 .app Button.session-button { border-width: 1px; }
 .app Button.session-primary { color: rgb(255, 255, 255); background-color: rgb(26, 106, 106); border-color: rgb(26, 106, 106); -unity-font-style: bold; }
 .app Button.session-primary:hover { background-color: rgb(19, 85, 85); border-color: rgb(19, 85, 85); }
+.app Button.assessment-mode-button { color: rgb(255, 255, 255); background-color: rgb(74, 52, 145); border-color: rgb(74, 52, 145); -unity-font-style: bold; }
+.app Button.assessment-mode-button:hover { background-color: rgb(59, 37, 121); border-color: rgb(59, 37, 121); }
 .app Button.session-secondary { color: rgb(26, 106, 106); background-color: rgb(255, 255, 255); border-color: rgb(26, 106, 106); -unity-font-style: bold; }
 .app Button.session-secondary:hover { background-color: rgb(229, 243, 242); }
 .app Button.session-pause { color: rgb(88, 57, 10); background-color: rgb(250, 205, 111); border-color: rgb(210, 160, 60); -unity-font-style: bold; }
@@ -390,7 +403,8 @@
 .session-summary-behind { color: rgb(150, 98, 18); -unity-font-style: bold; }
 .session-compact .session-header { padding-bottom: 0; margin-bottom: 8px; border-bottom-width: 0; }
 .session-compact .session-heading, .session-compact .session-utilities, .session-compact .session-playback,
-.session-compact .session-title, .session-compact .session-badge { margin-top: 0; margin-bottom: 0; }
+.session-compact .session-title, .session-compact .session-badge,
+.session-compact .assessment-mode-badge, .session-compact .assessment-timer { margin-top: 0; margin-bottom: 0; }
 .session-compact .session-status-bar { display: none; }
 
 .view-bar {

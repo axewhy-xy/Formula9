@@ -88,6 +88,8 @@ class ScenarioRevision(WireModel):
     seed: int
     provenance: Provenance
     spatial: SpatialReference | None = None
+    assessment_duration_s: int | None = Field(default=None, gt=0,
+        description="Simulation seconds available in a scored attempt, pinned at creation.")
 
 
 class TrainingSession(WireModel):
@@ -620,7 +622,7 @@ class CommandStatus(Envelope):
 
 
 class ValidationFailure(WireModel):
-    code: Literal["STALE_REVISION", "OPTION_EXPIRED", "UNKNOWN_CONSTRAINT", "NO_FEASIBLE_ROUTE", "CHARGER_CONFLICT", "ROLE_DENIED", "QUEUE_FULL", "SESSION_RECOVERING", "INVALID_REFERENCE", "INVALID_TRANSITION", "UNSUPPORTED_VERSION", "INVALID_PAYLOAD"]
+    code: Literal["STALE_REVISION", "OPTION_EXPIRED", "UNKNOWN_CONSTRAINT", "NO_FEASIBLE_ROUTE", "CHARGER_CONFLICT", "ROLE_DENIED", "QUEUE_FULL", "SESSION_RECOVERING", "INVALID_REFERENCE", "INVALID_TRANSITION", "UNSUPPORTED_VERSION", "INVALID_PAYLOAD", "ASSESSMENT_NOT_READY"]
     message: Text
     field: str | None = None
     retryable: bool

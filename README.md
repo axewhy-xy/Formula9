@@ -237,6 +237,10 @@ Any screen showing this data must credit LTA with the `attribution` in each file
 
 ## Training workspace
 
+Click **Assessment mode** to create the timed Toa Payoh exercise and receive a grade for route
+planning, incident response, and charging under **Reports → Assessment**. See the [grading rubric](docs/grading.md) for the
+exercise, point rules and automatic failures.
+
 All seven remaining Qt client workflows are available in Unity. The workspace tabs beside
 the world view are **Fleet**, **Route planning**, **Charging** and **Reports**. Incidents are
 decided on Route planning, and reviewed in Reports.
@@ -353,26 +357,29 @@ ambientCG, ShareTextures and Poly Haven:
 the shared `contracts/v2/alert_cues.json` (embedded by the generator as `AlertCues`) play a
 sound; each event ID plays at most once, even when a reconnect replays it; history never plays;
 and muting still marks events as seen, so unmuting causes no burst. The sounds in
-`Resources/Formula9/Audio` are the Qt client's `alert_*.wav`. **Mute alerts** is kept across
+`Resources/Formula9/Audio` are the Qt client's `alert_*.wav`, except the incident alert
+(`ui_accident.wav`, played at half volume), battery critical (`ui_battery_low.wav`, the only battery sound, played once when a shuttle's
+gauge turns red below 20%; a shuttle with no battery capacity reads a red 0%), disconnect
+(`ui_dull_01.wav`) and reconnect (`ui_confirmation.wav`, after any outage that ends). When the
+backend comes back with a session it recovered after a crash, its `SESSION_RECOVERED` event plays
+the session recovered alert instead of the reconnect sound, so the two never play together. **Mute alerts** is kept across
 restarts in `PlayerPrefs` (`training.muteAlerts`); tests use in-memory preferences.
 
 ## Interface sounds
 
-`UiSounds` applies amee's sound review the same way the Formula_9 web app does (`uiAudio.ts`).
-The clips in `Resources/Formula9/Audio` are copies of the web app's files:
+`UiSounds` applies amee's sound consultation with Vuk and the audio professor's review. Buttons
+make no hover sound, and every press not listed below stays silent:
 
 | Sound | Clip | Plays when |
 |---|---|---|
-| Button hover | `ui_button_hover.wav` (TileHover 2) | the pointer enters an enabled button of the main simulator, including Start scenario; never on click |
-| Start | `ui_start_click.wav` (UI_Hover 6) | **Start scenario** or **Start and watch in 3D** is clicked |
+| Start session | `ui_start_session.wav` (UI Button Click-Dull) | **Start scenario**, **Start and watch in 3D** or **Resume simulation** is clicked |
+| Confirmation | `ui_confirmation.wav` (UI Confirmation_2) | A decision from **Approve route** (a re-route), Route Planning's **Confirm** (keep route, hold or request assistance) or the Charging page's **Apply decision** (a battery decision) is sent. A click its checks stop (options withdrawn or refreshed, an invalid reason, a busy session) sends nothing and stays silent |
 | Map point | `ui_map_point.wav` (UI Hover New 1) | a road is picked for a route on the map |
-| Dropdown | `ui_map_point.wav` at 1.15× pitch | a dropdown is opened, and when the user chooses an option |
+| Refused | `alert_command_rejected.wav` | a greyed-out button is pressed while nothing is being sent |
 
-The big primary buttons (**Create training session**, **Join**) and the login page stay silent
-on hover. Hovering dropdown options is silent, and so are values the app sets while it renders
-snapshots: a change only plays within 30 s of the user opening that dropdown, once per opening.
-The sounds listen once on the simulator's root, so controls built later (charging decisions,
-map zoom) are covered without extra wiring. Interface sounds play at 0.35 volume and are
+The refused sound listens once on the simulator's root, so controls built later are covered
+without extra wiring. Interface sounds play at 0.35 volume, except the confirmation, a soft
+chime that plays at full volume; all clips are loaded when the app starts. They are
 separate from training alerts, so **Mute alerts** does not silence them.
 
 ## Tests

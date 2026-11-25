@@ -4,7 +4,7 @@
  * Author: Choo Jian Wei
  * Contributors: Rishika (fleet card tests), Lau Xiang Yang (session cleanup tests)
  * Date Created: 30/10/2026
- * Last Modified: 30/10/2026
+ * Last Modified: 23/11/2026
  *
  * Description:
  *     Checks what the screens show, using the shared snapshot fixture: login and command messages
@@ -388,16 +388,98 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: OnlyTheSingaporeExerciseIsOffered
+        // Function: AssessmentModeUsesTheSessionMetadata
         // -----------------------------------------------------------------------------------
         // Description:
-        //     New sessions offer only the Singapore exercise.
+        //     The header reflects the joined exercise and still recognizes saved scored sessions.
         [Test]
-        public void OnlyTheSingaporeExerciseIsOffered()
+        public void AssessmentModeUsesTheSessionMetadata()
         {
-            Assert.AreEqual(1, TrainingPresenter.Scenarios.Count);
-            Assert.AreEqual(SessionController.IntegratedScenario, TrainingPresenter.Scenarios[0].Id);
-            StringAssert.StartsWith("Singapore", TrainingPresenter.ScenarioTitle(SessionController.IntegratedScenario));
+            var snapshot = new FullSnapshot
+            {
+                Scenario = new ScenarioRevision(),
+                Session = new TrainingSession { ScenarioRevisionId = SessionController.IntegratedScenario, Status = "RUNNING" },
+            };
+            StringAssert.StartsWith("Singapore", TrainingPresenter.Title(snapshot));
+            Assert.IsFalse(TrainingPresenter.IsAssessment(snapshot));
+            Assert.IsNull(TrainingPresenter.AssessmentClock(snapshot, true).Text);
+            snapshot.Session.ScenarioRevisionId = "scored-toa-payoh-example";
+            Assert.IsTrue(TrainingPresenter.IsAssessment(snapshot));
+            StringAssert.Contains("scored", TrainingPresenter.Title(snapshot));
+        }
+
+        [TestCase("READY", true)]
+        [TestCase("RUNNING", true)]
+        [TestCase("PAUSED", true)]
+        [TestCase("RECOVERING", true)]
+        [TestCase("ARCHIVED", false)]
+        [TestCase("COMPLETED", false)]
+        [TestCase("FAILED", false)]
+        public void AssessmentModeEndsWithTheAttempt(string status, bool active)
+        {
+            var snapshot = new FullSnapshot
+            {
+                Scenario = new ScenarioRevision { AssessmentDurationS = 120 },
+                Session = new TrainingSession { ScenarioRevisionId = SessionController.IntegratedScenario, Status = status },
+            };
+            Assert.AreEqual(active, TrainingPresenter.IsAssessmentActive(snapshot));
+            Assert.IsTrue(TrainingPresenter.IsAssessment(snapshot), "Ended attempts remain identifiable in Reports.");
+            snapshot.Scenario.AssessmentDurationS = null;
+            Assert.IsFalse(TrainingPresenter.IsAssessmentActive(snapshot), "Practice sessions have no assessment controls.");
+            Assert.IsFalse(TrainingPresenter.IsAssessmentActive(null));
+        }
+
+        [TestCase("INCOMPLETE", true, 22d, "Assessment disrupted · 22/100")]
+        [TestCase("FAIL", true, 80d, "Assessment disrupted · Fail · 80/100")]
+        [TestCase("INCOMPLETE", false, 22d, "Incomplete · 22/100")]
+        [TestCase("PASS", false, 100d, "Pass · 100/100")]
+        [TestCase("FAIL", false, 70d, "Fail · 70/100")]
+        [TestCase("IN_PROGRESS", false, null, "In progress")]
+        public void AssessmentReportsDistinguishDisruptionFromMissingEvidence(string status, bool disrupted,
+            double? points, string expected)
+        {
+            var grade = new SessionAssessment { Status = status, Disrupted = disrupted, Points = points, Maximum = 100 };
+            Assert.AreEqual(expected, TrainingPresenter.AssessmentResult(grade));
+        }
+
+        // The countdown follows simulation time and the deadline pinned to the joined attempt.
+        [TestCase("READY", 120, 0, true, null, false)]
+        [TestCase("RUNNING", 120, 0, true, "2:00 left", false)]
+        [TestCase("RUNNING", 120, 119.95, true, "0:01 left", true)]
+        [TestCase("PAUSED", 120, 92.25, true, "Paused · 0:28 left", false)]
+        [TestCase("RUNNING", 120, 92.25, false, "Last seen · 0:28 left", false)]
+        [TestCase("RECOVERING", 120, 92.25, false, "Last seen · 0:28 left", false)]
+        [TestCase("RUNNING", 300, 30.0, true, "4:30 left", false)]
+        [TestCase("COMPLETED", 120, 120, true, "Time’s up · 0:00", false)]
+        [TestCase("ARCHIVED", 120, 22, true, null, false)]
+        public void CountdownFollowsTheScoredSnapshot(string status, int duration, double elapsed, bool available,
+            string text, bool urgent)
+        {
+            var snapshot = new FullSnapshot
+            {
+                Scenario = new ScenarioRevision { AssessmentDurationS = duration },
+                Session = new TrainingSession { Status = status },
+                SimulationTimeS = elapsed,
+            };
+            var clock = TrainingPresenter.AssessmentClock(snapshot, available);
+            Assert.AreEqual(text, clock.Text);
+            Assert.AreEqual(urgent, clock.Urgent);
+        }
+
+        // A missing deadline stays visible as a diagnostic. A completed attempt has finished its clock.
+        [TestCase("RUNNING", "Timer unavailable")]
+        [TestCase("PAUSED", "Timer unavailable")]
+        [TestCase("RECOVERING", "Timer unavailable")]
+        [TestCase("COMPLETED", "Time’s up · 0:00")]
+        public void CountdownRequiresTheSnapshotDeadline(string status, string text)
+        {
+            var snapshot = new FullSnapshot
+            {
+                Scenario = new ScenarioRevision(),
+                Session = new TrainingSession { ScenarioRevisionId = "scored-toa-payoh-example", Status = status },
+                SimulationTimeS = 73.45,
+            };
+            Assert.AreEqual(text, TrainingPresenter.AssessmentClock(snapshot, true).Text);
         }
 
         // -----------------------------------------------------------------------------------
@@ -458,18 +540,47 @@ namespace Formula9.Tests
         [Test]
         public void PurgeKeepsTheNewestAndSaysHowManyGo()
         {
-            var list = new SessionListResponse { LiveCount = 16, Capacity = 16, Total = 37, Sessions = new System.Collections.Generic.List<SessionListEntry>() };
+            var list = new SessionListResponse { LiveCount = 16, Capacity = 16, Total = 37, TerminalPracticeCount = 21,
+                Sessions = new System.Collections.Generic.List<SessionListEntry>() };
             Assert.AreEqual(1, TrainingPresenter.PurgeCount(list, 20), "21 finished, 20 kept");
-            Assert.AreEqual("Permanently delete the 1 oldest finished session? The 20 newest finished sessions and every live session are kept. " +
+            Assert.AreEqual("Permanently delete 1 old finished practice session? The 20 newest finished practice sessions and all assessment records are kept. " +
                             "Their history is removed for everyone. This cannot be undone.", TrainingPresenter.PurgeQuestion(list, 20));
             list.Total = 50;
-            StringAssert.StartsWith("Permanently delete the 14 oldest finished sessions?", TrainingPresenter.PurgeQuestion(list, 20));
+            list.TerminalPracticeCount = 34;
+            StringAssert.StartsWith("Permanently delete 14 old finished practice sessions?", TrainingPresenter.PurgeQuestion(list, 20));
             list.Total = 30;
+            list.TerminalPracticeCount = 14;
             Assert.AreEqual(0, TrainingPresenter.PurgeCount(list, 20));
-            Assert.AreEqual("Nothing to delete: there are 14 finished sessions, and the 20 newest are always kept.",
+            Assert.AreEqual("No old practice sessions to delete. The 20 newest are kept.",
                 TrainingPresenter.PurgeQuestion(list, 20));
             Assert.AreEqual("Deleted 1 old training session.", TrainingPresenter.Purged(1));
             Assert.AreEqual("No old sessions to delete.", TrainingPresenter.Purged(0));
+        }
+
+        [Test]
+        public void AssessmentRetentionUsesServerPermissionsAndPracticeCounts()
+        {
+            StringAssert.Contains("charging task", TrainingPresenter.Outcome(new CommandOutcome
+                { Status = "REJECTED", FailureCode = "ASSESSMENT_NOT_READY" }));
+            var entry = new SessionListEntry { IsAssessment = true, Status = "COMPLETED" };
+            Assert.IsFalse(TrainingPresenter.CanDelete(entry));
+            entry.IsAssessment = false;
+            entry.ScenarioRevisionId = "scored-toa-payoh-earlier";
+            Assert.IsFalse(TrainingPresenter.CanDelete(entry));
+            entry.CanDelete = true;
+            Assert.IsTrue(TrainingPresenter.CanDelete(entry));
+            var list = new SessionListResponse { LiveCount = 1, Total = 100, TerminalPracticeCount = 22 };
+            Assert.AreEqual(2, TrainingPresenter.PurgeCount(list, 20));
+            StringAssert.Contains("2 old finished practice sessions", TrainingPresenter.PurgeQuestion(list, 20));
+            StringAssert.Contains("cannot be undone", TrainingPresenter.PurgeQuestion(list, 20));
+            list.TerminalPracticeCount = 2;
+            Assert.AreEqual(0, TrainingPresenter.PurgeCount(list, 20));
+            list.Total = 30;
+            list.TerminalPracticeCount = 20; // Twenty practice attempts and ten retained assessments.
+            Assert.AreEqual(0, TrainingPresenter.PurgeCount(list, 20));
+            list.TerminalPracticeCount = null;
+            Assert.AreEqual(0, TrainingPresenter.PurgeCount(list, 20));
+            StringAssert.StartsWith("Refresh the session list", TrainingPresenter.PurgeQuestion(list, 20));
         }
 
         // -----------------------------------------------------------------------------------
