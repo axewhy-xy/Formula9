@@ -34,44 +34,171 @@ namespace Formula9.World
         // index in BuildingStyles; the vertex colour is the building's body colour and the fourth texture
         // coordinate its accent colour.
         // With details, roofs also get their style's parapet and rooftop structures (lift rooms, tanks, plant)
-        public static Mesh Build(IEnumerable<CityBuilding> buildings, IReadOnlyList<Corridor> corridors = null, BuildingStyles styles = null, bool details = false)
+        public static Mesh Build(IEnumerable<CityBuilding> buildings, IReadOnlyList<Corridor> corridors = null, BuildingStyles styles = null, bool details = false, Cache cache = null)
         {
             var mesh = new Mesh { name = "City buildings" };
-            Fill(mesh, buildings, corridors, styles, details);
+            Fill(mesh, buildings, corridors, styles, details, cache);
             return mesh;
         }
 
-        // Rebuilds a mesh in place, for when the corridors change
-        public static void Fill(Mesh mesh, IEnumerable<CityBuilding> buildings, IReadOnlyList<Corridor> corridors = null, BuildingStyles styles = null, bool details = false)
+        // Each building outline's finished geometry, kept between rebuilds of the same buildings: an
+        // outline is only built again when the corridors over it change, so a route that moves redoes the
+        // few buildings it passes rather than the whole detailed city. It is for one list of buildings; a
+        // different list (or styles, or details) starts it afresh.
+        public sealed class Cache
+        {
+            internal object Buildings;
+            internal BuildingStyles Styles;
+            internal bool Details;
+            internal readonly List<Piece> Pieces = new List<Piece>();
+            // The mesh last filled from these pieces
+            internal Mesh Filled;
+
+            // How many outlines the last Fill built rather than reused
+            public int LastBuilt { get; internal set; }
+        }
+
+        internal sealed class Piece
+        {
+            // The cleaned-up outline, anticlockwise; null when there is nothing to draw
+            public List<Vector2> Points;
+            public Rect Box;
+            // The corridors over it when Geometry was built
+            public List<Corridor> Cuts;
+            public Lists Geometry;
+        }
+
+        // Rebuilds a mesh in place, for when the corridors change. With a cache, only outlines whose
+        // corridors changed since the last fill are built again.
+        public static void Fill(Mesh mesh, IEnumerable<CityBuilding> buildings, IReadOnlyList<Corridor> corridors = null, BuildingStyles styles = null, bool details = false, Cache cache = null)
         {
             styles = styles ?? BuildingStyles.Default;
-            var lists = new Lists();
+            cache = cache ?? new Cache();
+            var changed = false;
+            if (!ReferenceEquals(cache.Buildings, buildings) || cache.Styles != styles || cache.Details != details)
+            {
+                changed = true;
+                cache.Pieces.Clear();
+                cache.Buildings = buildings; cache.Styles = styles; cache.Details = details;
+            }
+            cache.LastBuilt = 0;
+            var next = 0;
             foreach (var building in buildings)
             {
-                var style = StyleFor(building, styles);
-                var saturation = styles.ColorSaturation;
-                var paint = new Paint
-                {
-                    Style = style,
-                    Saturation = saturation,
-                    Body = PaintColor(BuildingStyles.Pick(styles.Styles[style].BodyColors, building.Id, 1), saturation),
-                    Accent = PaintColor(BuildingStyles.Pick(styles.Styles[style].AccentColors, building.Id, 2), saturation),
-                };
-                var roofs = styles.Styles[style].RoofColors;
-                paint.Roof = roofs.Count > 0 ? PaintColor(BuildingStyles.Pick(roofs, building.Id, 3), saturation) : paint.Body;
-                paint.Spec = details ? styles.Styles[style] : null;
-                paint.Id = building.Id ?? "";
-                paint.SimplifyM = styles.SimplifyM;
+                Paint paint = null;
+                var height = (float)building.HeightM;
                 foreach (var ring in building.Rings)
-                    Extrude(ring.Select(p => new Vector2((float)p.X, (float)p.Y)).ToList(), (float)building.HeightM, paint, corridors, lists);
+                {
+                    Piece piece;
+                    if (next < cache.Pieces.Count) piece = cache.Pieces[next];
+                    else
+                    {
+                        piece = new Piece { Points = Prepare(ring.Select(p => new Vector2((float)p.X, (float)p.Y)).ToList(), height, styles.SimplifyM) };
+                        if (piece.Points != null) piece.Box = BoxAround(piece.Points);
+                        cache.Pieces.Add(piece);
+                    }
+                    next++;
+                    if (piece.Points == null) continue;
+                    var cuts = corridors == null ? new List<Corridor>() : corridors.Where(c => c.Box.Overlaps(piece.Box)).ToList();
+                    if (piece.Geometry != null && SameCorridors(piece.Cuts, cuts)) continue;
+                    paint = paint ?? PaintFor(building, styles, details);
+                    piece.Geometry = new Lists();
+                    Extrude(piece.Points, height, paint, cuts, piece.Geometry);
+                    Shade(piece.Geometry);
+                    piece.Cuts = cuts;
+                    cache.LastBuilt++;
+                }
+            }
+            if (cache.Pieces.Count > next) { cache.Pieces.RemoveRange(next, cache.Pieces.Count - next); changed = true; }
+            // Nothing new since this mesh was last filled
+            if (!changed && cache.LastBuilt == 0 && ReferenceEquals(cache.Filled, mesh)) return;
+            cache.Filled = mesh;
+            var all = new Lists();
+            foreach (var piece in cache.Pieces)
+            {
+                var geometry = piece.Geometry;
+                if (geometry == null) continue;
+                var offset = all.Vertices.Count;
+                all.Vertices.AddRange(geometry.Vertices); all.Normals.AddRange(geometry.Normals); all.Tangents.AddRange(geometry.Tangents);
+                all.Colors.AddRange(geometry.Colors); all.Uvs.AddRange(geometry.Uvs); all.Accents.AddRange(geometry.Accents);
+                foreach (var index in geometry.Triangles) all.Triangles.Add(offset + index);
             }
             mesh.Clear();
             mesh.indexFormat = IndexFormat.UInt32;
-            mesh.SetVertices(lists.Vertices); mesh.SetColors(lists.Colors); mesh.SetUVs(0, lists.Uvs); mesh.SetUVs(3, lists.Accents);
-            mesh.SetTriangles(lists.Triangles, 0);
-            mesh.RecalculateNormals(); mesh.RecalculateBounds();
-            // For the facades' normal maps: along the wall and up it, following the first texture coordinate
-            if (lists.Vertices.Count > 0) mesh.RecalculateTangents();
+            mesh.SetVertices(all.Vertices); mesh.SetNormals(all.Normals); mesh.SetTangents(all.Tangents);
+            mesh.SetColors(all.Colors); mesh.SetUVs(0, all.Uvs); mesh.SetUVs(3, all.Accents);
+            mesh.SetTriangles(all.Triangles, 0);
+            mesh.RecalculateBounds();
+        }
+
+        private static Paint PaintFor(CityBuilding building, BuildingStyles styles, bool details)
+        {
+            var style = StyleFor(building, styles);
+            var saturation = styles.ColorSaturation;
+            var paint = new Paint
+            {
+                Style = style,
+                Saturation = saturation,
+                Body = PaintColor(BuildingStyles.Pick(styles.Styles[style].BodyColors, building.Id, 1), saturation),
+                Accent = PaintColor(BuildingStyles.Pick(styles.Styles[style].AccentColors, building.Id, 2), saturation),
+            };
+            var roofs = styles.Styles[style].RoofColors;
+            paint.Roof = roofs.Count > 0 ? PaintColor(BuildingStyles.Pick(roofs, building.Id, 3), saturation) : paint.Body;
+            paint.Spec = details ? styles.Styles[style] : null;
+            paint.Id = building.Id ?? "";
+            return paint;
+        }
+
+        // Corridors are made afresh for each fill, so they are compared by their corners
+        private static bool SameCorridors(List<Corridor> before, List<Corridor> now)
+        {
+            if (before == null || before.Count != now.Count) return false;
+            for (var i = 0; i < now.Count; i++)
+            {
+                if (ReferenceEquals(before[i], now[i])) continue;
+                Vector2[] a = before[i].Corners, b = now[i].Corners;
+                if (a.Length != b.Length) return false;
+                for (var k = 0; k < a.Length; k++) if (a[k] != b[k]) return false;
+            }
+            return true;
+        }
+
+        // Normals and tangents for one outline's geometry, as RecalculateNormals and RecalculateTangents
+        // would give them (every surface here is flat, so area weighting changes nothing), but per outline
+        // so a cached outline keeps its own. Tangents run along the first texture coordinate, for the
+        // facades' normal maps.
+        private static void Shade(Lists lists)
+        {
+            var vertices = lists.Vertices; var uvs = lists.Uvs; var triangles = lists.Triangles;
+            var count = vertices.Count;
+            var normals = new Vector3[count]; var alongU = new Vector3[count]; var alongV = new Vector3[count];
+            for (var i = 0; i + 2 < triangles.Count; i += 3)
+            {
+                int a = triangles[i], b = triangles[i + 1], c = triangles[i + 2];
+                Vector3 e1 = vertices[b] - vertices[a], e2 = vertices[c] - vertices[a];
+                // Facing whoever sees the triangle clockwise, weighted by its area
+                var face = Vector3.Cross(e1, e2);
+                normals[a] += face; normals[b] += face; normals[c] += face;
+                float s1 = uvs[b].x - uvs[a].x, t1 = uvs[b].y - uvs[a].y, s2 = uvs[c].x - uvs[a].x, t2 = uvs[c].y - uvs[a].y;
+                var det = s1 * t2 - s2 * t1;
+                if (Mathf.Abs(det) < 1e-12f) continue;
+                var r = 1 / det;
+                var u = (e1 * t2 - e2 * t1) * r;
+                var v = (e2 * s1 - e1 * s2) * r;
+                alongU[a] += u; alongU[b] += u; alongU[c] += u;
+                alongV[a] += v; alongV[b] += v; alongV[c] += v;
+            }
+            for (var i = 0; i < count; i++)
+            {
+                var n = normals[i].sqrMagnitude > 0 ? normals[i].normalized : Vector3.up;
+                var t = alongU[i] - n * Vector3.Dot(n, alongU[i]);
+                // Plain surfaces have no texture to follow: any direction across the surface will do
+                if (t.sqrMagnitude < 1e-12f) t = Vector3.Cross(n, Mathf.Abs(n.y) < 0.99f ? Vector3.up : Vector3.forward);
+                t.Normalize();
+                var w = Vector3.Dot(Vector3.Cross(n, t), alongV[i]) < 0 ? -1f : 1f;
+                lists.Normals.Add(n);
+                lists.Tangents.Add(new Vector4(t.x, t.y, t.z, w));
+            }
         }
 
         // Which style a building takes, from the styles file's rules
@@ -100,12 +227,13 @@ namespace Formula9.World
             // The style, when the roof gets its details; null for none
             public BuildingStyle Spec;
             public string Id;
-            public float SimplifyM;
         }
 
-        private sealed class Lists
+        internal sealed class Lists
         {
             public readonly List<Vector3> Vertices = new List<Vector3>();
+            public readonly List<Vector3> Normals = new List<Vector3>();
+            public readonly List<Vector4> Tangents = new List<Vector4>();
             public readonly List<Color> Colors = new List<Color>();
             public readonly List<Vector4> Uvs = new List<Vector4>();
             public readonly List<Vector4> Accents = new List<Vector4>();
@@ -137,20 +265,31 @@ namespace Formula9.World
             return Rect.MinMaxRect(min.x, min.y, max.x, max.y);
         }
 
+        // An outline as Extrude takes it: unclosed, anticlockwise and simplified; null if nothing is left
+        private static List<Vector2> Prepare(List<Vector2> outline, float height, float simplifyM)
+        {
+            var points = new List<Vector2>(outline);
+            if (points.Count > 1 && points[0] == points[points.Count - 1]) points.RemoveAt(points.Count - 1);
+            if (points.Count < 3 || height <= 0) return null;
+            if (SignedArea(points) < 0) points.Reverse();
+            if (simplifyM > 0) points = Simplify(points, simplifyM);
+            return points.Count < 3 ? null : points;
+        }
+
+        // A wall along the outline or a cut, with the building on its left; alongA and alongB are how far
+        // a and b are along the wall in metres, so windows keep their width
+        private struct WallPiece
+        {
+            public Vector2 A, B;
+            public float AlongA, AlongB;
+        }
+
         // Canonical (x, y) is Unity (x, z). Front faces are clockwise seen from outside.
-        private static void Extrude(List<Vector2> outline, float height, Paint paint, IReadOnlyList<Corridor> corridors, Lists lists)
+        private static void Extrude(List<Vector2> points, float height, Paint paint, List<Corridor> cuts, Lists lists)
         {
             var vertices = lists.Vertices; var colors = lists.Colors; var uvs = lists.Uvs; var triangles = lists.Triangles;
             var color = paint.Body; float style = paint.Style;
             var accent = new Vector4(paint.Accent.r, paint.Accent.g, paint.Accent.b, 1);
-            var points = new List<Vector2>(outline);
-            if (points.Count > 1 && points[0] == points[points.Count - 1]) points.RemoveAt(points.Count - 1);
-            if (points.Count < 3 || height <= 0) return;
-            if (SignedArea(points) < 0) points.Reverse();
-            if (paint.SimplifyM > 0) points = Simplify(points, paint.SimplifyM);
-            if (points.Count < 3) return;
-            var box = BoxAround(points);
-            var cuts = corridors == null ? new List<Corridor>() : corridors.Where(c => c.Box.Overlaps(box)).ToList();
             var whole = Triangulate(points);
             var roofPieces = new List<List<Vector2>>();
             for (var i = 0; cuts.Count > 0 && i < whole.Count; i += 3)
@@ -160,8 +299,7 @@ namespace Formula9.World
                 roofPieces.AddRange(pieces);
             }
             if (cuts.Count > 0 && roofPieces.Sum(piece => Mathf.Abs(SignedArea(piece))) < MinLeftShare * SignedArea(points)) return;
-            // alongA and alongB are how far a and b are along the wall in metres, so windows keep their width
-            var wallSegments = new List<(Vector2 A, Vector2 B)>();
+            var walls = new List<WallPiece>();
             // An open ground floor: the walls start above it, and VoidDeck builds what is under them
             var deck = paint.Spec?.VoidDeck;
             var groundM = paint.Spec?.GroundFloorM ?? 0;
@@ -169,7 +307,7 @@ namespace Formula9.World
             var bottom = deck != null ? groundM : 0;
             void Wall(Vector2 a, Vector2 b, float alongA, float alongB)
             {
-                wallSegments.Add((a, b));
+                walls.Add(new WallPiece { A = a, B = b, AlongA = alongA, AlongB = alongB });
                 var start = vertices.Count;
                 vertices.Add(new Vector3(a.x, bottom, a.y)); vertices.Add(new Vector3(a.x, height, a.y));
                 vertices.Add(new Vector3(b.x, height, b.y)); vertices.Add(new Vector3(b.x, bottom, b.y));
@@ -180,7 +318,6 @@ namespace Formula9.World
                 uvs.Add(new Vector4(alongB, height, style, 0)); uvs.Add(new Vector4(alongB, bottom, style, 0));
                 for (var k = 0; k < 4; k++) lists.Accents.Add(accent);
                 triangles.AddRange(new[] { start, start + 1, start + 2, start, start + 2, start + 3 });
-                if (deck != null) VoidDeck(a, b, alongA, alongB, groundM, deck, paint, lists);
             }
             void RoofPoint(Vector2 point)
             {
@@ -220,14 +357,70 @@ namespace Formula9.World
                     foreach (var point in piece) RoofPoint(point);
                     for (var j = 1; j + 1 < piece.Count; j++) triangles.AddRange(new[] { roof, roof + j + 1, roof + j });
                 }
-            if (paint.Spec != null) RoofDetails(wallSegments, points, cuts, height, paint, lists);
+            if (paint.Spec == null) return;
+            var mitres = walls.Select((_, i) => Mitres(walls, i)).ToList();
+            if (deck != null)
+                for (var i = 0; i < walls.Count; i++) VoidDeck(walls[i], mitres[i], groundM, deck, paint, lists);
+            RoofDetails(walls, mitres, points, cuts, height, paint, lists);
+        }
+
+        // Inset strips (a void deck's back wall and ceiling, a parapet) stop short of each end of their
+        // wall by this much per metre of depth, so that neighbouring strips meet on the line halving the
+        // corner between them instead of poking out through the facade at a sharp corner: 1 at a square
+        // corner, more at a sharper one, below 0 (running on) at an inside corner, 0 at an open end
+        private static (float Start, float End) Mitres(List<WallPiece> walls, int index)
+        {
+            var wall = walls[index];
+            var dir = (wall.B - wall.A).normalized;
+            float start = 0, end = 0;
+            for (var j = 0; j < walls.Count; j++)
+            {
+                if (j == index) continue;
+                var other = walls[j];
+                if ((other.B - other.A).sqrMagnitude < 1e-6f) continue;
+                var otherDir = (other.B - other.A).normalized;
+                if ((other.B - wall.A).sqrMagnitude < JoinM * JoinM) start = Mitre(otherDir, dir);
+                if ((other.A - wall.B).sqrMagnitude < JoinM * JoinM) end = Mitre(dir, otherDir);
+            }
+            return (start, end);
+        }
+
+        // Wall ends closer than this meet at a corner
+        private const float JoinM = 0.01f;
+        // A corner sharper than about 2 degrees is treated as that sharp
+        private const float MaxMitre = 60;
+
+        // The tangent of half the turn from one wall to the next, left turns (outside corners) positive
+        private static float Mitre(Vector2 incoming, Vector2 outgoing)
+        {
+            var sin = incoming.x * outgoing.y - incoming.y * outgoing.x;
+            var cos = Vector2.Dot(incoming, outgoing);
+            return 1 + cos < 1e-4f ? MaxMitre : Mathf.Clamp(sin / (1 + cos), -MaxMitre, MaxMitre);
+        }
+
+        // How far a square standing in a corner, flush with this wall, must move along it per metre of its
+        // size to stay clear of the neighbouring wall: 0 at a square or blunter corner
+        private static float Overhang(float mitre) => mitre > 1 ? (mitre * mitre - 1) / (2 * mitre) : 0;
+
+        // The inner edge of a strip depthM deep along a wall, mitred at both ends; shallower if the wall
+        // is too short for the mitres at full depth
+        private static (Vector2 A, Vector2 B, float Depth) Inset(WallPiece wall, (float Start, float End) mitre, float depthM)
+        {
+            var along = wall.B - wall.A;
+            var length = along.magnitude;
+            var dir = along / length;
+            var inward = new Vector2(-dir.y, dir.x);
+            var shortening = Mathf.Max(0, mitre.Start) + Mathf.Max(0, mitre.End);
+            var depth = shortening * depthM > length ? length / shortening : depthM;
+            return (wall.A + inward * depth + dir * (mitre.Start * depth), wall.B + inward * depth - dir * (mitre.End * depth), depth);
         }
 
         // Under one wall of an open ground floor: the back wall set in from the outline (textured with the
         // style's wall), the ceiling over the gap, and columns along the outline, wide piers at its ends so
         // the corners stay closed
-        private static void VoidDeck(Vector2 a, Vector2 b, float alongA, float alongB, float groundM, VoidDeckSpec deck, Paint paint, Lists lists)
+        private static void VoidDeck(WallPiece wall, (float Start, float End) mitre, float groundM, VoidDeckSpec deck, Paint paint, Lists lists)
         {
+            Vector2 a = wall.A, b = wall.B;
             var along = b - a;
             var length = along.magnitude;
             if (length < 1e-3f) return;
@@ -238,7 +431,8 @@ namespace Formula9.World
             var plain = new Vector4(0, 0, style, 1);
             Vector3 At(Vector2 p, float y) => new Vector3(p.x, y, p.y);
             void Add(Vector3 p, Color color, Vector4 uv) { lists.Vertices.Add(p); lists.Colors.Add(color); lists.Uvs.Add(uv); lists.Accents.Add(accent); }
-            Vector2 ai = a + inward * deck.DepthM, bi = b + inward * deck.DepthM;
+            var (ai, bi, depth) = Inset(wall, mitre, deck.DepthM);
+            float alongA = wall.AlongA + mitre.Start * depth, alongB = wall.AlongB - mitre.End * depth;
             // The back wall, facing out, in the shade of the floor above
             var start = lists.Vertices.Count;
             var back = paint.Body * (1 - deck.Shade);
@@ -250,58 +444,77 @@ namespace Formula9.World
             start = lists.Vertices.Count;
             foreach (var p in new[] { a, b, bi, ai }) Add(At(p, groundM), ceiling, plain);
             lists.Triangles.AddRange(new[] { start, start + 1, start + 2, start, start + 2, start + 3 });
-            // Columns: their outer faces on the outline
+            // Columns: their outer faces on the outline, kept clear of the next wall at a sharp corner
             var columnColor = Named(deck.ColumnColor, paint);
-            var corner = Mathf.Min(Mathf.Max(deck.ColumnM, deck.DepthM), length / 2);
-            var gaps = Mathf.Max(1, Mathf.CeilToInt(length / Mathf.Max(deck.SpacingM, 0.5f)));
-            for (var k = 0; k <= gaps; k++)
+            void Column(float from, float size)
             {
-                var end = k == 0 || k == gaps;
-                var size = end ? corner : deck.ColumnM;
-                var centre = Mathf.Clamp(length * k / gaps, size / 2, length - size / 2);
-                if (!end && (centre - size / 2 < corner || centre + size / 2 > length - corner)) continue;
-                var p0 = a + dir * (centre - size / 2);
-                var p1 = a + dir * (centre + size / 2);
+                var p0 = a + dir * from;
+                var p1 = a + dir * (from + size);
                 var corners = new[] { p0, p1, p1 + inward * size, p0 + inward * size };
                 for (var c = 0; c < 4; c++)
                 {
                     start = lists.Vertices.Count;
-                    Vector2 from = corners[c], to = corners[(c + 1) % 4];
-                    Add(At(from, 0), columnColor * 0.9f, plain); Add(At(from, groundM), columnColor, plain);
-                    Add(At(to, groundM), columnColor, plain); Add(At(to, 0), columnColor * 0.9f, plain);
+                    Vector2 p = corners[c], q = corners[(c + 1) % 4];
+                    Add(At(p, 0), columnColor * 0.9f, plain); Add(At(p, groundM), columnColor, plain);
+                    Add(At(q, groundM), columnColor, plain); Add(At(q, 0), columnColor * 0.9f, plain);
                     lists.Triangles.AddRange(new[] { start, start + 1, start + 2, start, start + 2, start + 3 });
                 }
             }
+            var corner = Mathf.Max(deck.ColumnM, deck.DepthM);
+            float lo = Overhang(mitre.Start) * corner, hi = length - Overhang(mitre.End) * corner;
+            corner = Mathf.Min(corner, (hi - lo) / 2);
+            if (corner < 0.05f) return;
+            Column(lo, corner);
+            Column(hi - corner, corner);
+            var gaps = Mathf.Max(1, Mathf.CeilToInt(length / Mathf.Max(deck.SpacingM, 0.5f)));
+            for (var k = 1; k < gaps; k++)
+            {
+                var centre = length * k / gaps;
+                if (centre - deck.ColumnM / 2 < lo + corner || centre + deck.ColumnM / 2 > hi - corner) continue;
+                Column(centre - deck.ColumnM / 2, deck.ColumnM);
+            }
         }
 
-        // Drops corners that stick out of the line between their neighbours by less than toleranceM, so
-        // footprints traced with tiny jogs read as clean blocks
+        // Drops corners while the outline stays within toleranceM of every original corner, so footprints
+        // traced with tiny jogs read as clean blocks. Each removal is checked against the original corners
+        // it skips, not just its current neighbours, so a curve cannot drift further than toleranceM.
         public static List<Vector2> Simplify(List<Vector2> points, float toleranceM)
         {
-            var result = new List<Vector2>(points);
-            for (var removed = true; removed && result.Count > 3;)
+            var count = points.Count;
+            // Indices of the corners kept, in order round the outline
+            var kept = Enumerable.Range(0, count).ToList();
+            bool Fits(int from, int to)
+            {
+                for (var j = (from + 1) % count; j != to; j = (j + 1) % count)
+                    if (DistanceToSegment(points[j], points[from], points[to]) >= toleranceM) return false;
+                return true;
+            }
+            for (var removed = true; removed && kept.Count > 3;)
             {
                 removed = false;
-                for (var i = 0; i < result.Count && result.Count > 3; i++)
+                for (var i = 0; i < kept.Count && kept.Count > 3; i++)
                 {
-                    Vector2 before = result[(i + result.Count - 1) % result.Count], at = result[i], after = result[(i + 1) % result.Count];
-                    var span = after - before;
-                    var off = span.sqrMagnitude < 1e-8f ? (at - before).magnitude : Mathf.Abs(span.x * (at.y - before.y) - span.y * (at.x - before.x)) / span.magnitude;
-                    if (off >= toleranceM) continue;
-                    result.RemoveAt(i);
+                    if (!Fits(kept[(i + kept.Count - 1) % kept.Count], kept[(i + 1) % kept.Count])) continue;
+                    kept.RemoveAt(i);
                     removed = true;
                     i--;
                 }
             }
-            return SignedArea(result) > MinRoofM2 ? result : points;
+            var result = kept.Select(i => points[i]).ToList();
+            // Corners within the tolerance move the area little; much more means the outline folded
+            float before = SignedArea(points), after = SignedArea(result);
+            return Mathf.Sign(before) == Mathf.Sign(after) && Mathf.Abs(after - before) <= MaxSimplifyAreaShare * Mathf.Abs(before) ? result : points;
         }
+
+        // Simplifying may change an outline's area by at most this share of it
+        private const float MaxSimplifyAreaShare = 0.25f;
 
         // A colour named in the styles file: body, accent or roof (the building's own) or #RRGGBB
         private static Color Named(string name, Paint paint) =>
             name == "body" ? paint.Body : name == "accent" ? paint.Accent : name == "roof" ? paint.Roof : PaintColor(name, paint.Saturation);
 
         // The style's parapet round the roof and its rooftop structures, as plain-coloured surfaces
-        private static void RoofDetails(List<(Vector2 A, Vector2 B)> walls, List<Vector2> outline, List<Corridor> cuts, float height, Paint paint, Lists lists)
+        private static void RoofDetails(List<WallPiece> walls, List<(float Start, float End)> mitres, List<Vector2> outline, List<Corridor> cuts, float height, Paint paint, Lists lists)
         {
             var spec = paint.Spec;
             var plain = new Vector4(0, 0, paint.Style, 1);
@@ -329,13 +542,12 @@ namespace Formula9.World
                 var trim = Named(parapet.Color, paint);
                 var top = height + parapet.HeightM;
                 inset = parapet.ThicknessM;
-                foreach (var (a, b) in walls)
+                for (var i = 0; i < walls.Count; i++)
                 {
-                    var along = b - a;
-                    if (along.sqrMagnitude < 1e-6f) continue;
-                    // The building is on the left of each wall
-                    var inward = new Vector2(-along.y, along.x).normalized * parapet.ThicknessM;
-                    Vector2 ai = a + inward, bi = b + inward;
+                    Vector2 a = walls[i].A, b = walls[i].B;
+                    if ((b - a).sqrMagnitude < 1e-6f) continue;
+                    // The building is on the left of each wall; the inner face is mitred at the corners
+                    var (ai, bi, _) = Inset(walls[i], mitres[i], parapet.ThicknessM);
                     Quad(At(a, height), At(a, top), At(b, top), At(b, height), trim);
                     Quad(At(bi, height), At(bi, top), At(ai, top), At(ai, height), trim * 0.9f);
                     Cap(new[] { a, b, bi, ai }, top, trim * 1.05f);
@@ -362,7 +574,7 @@ namespace Formula9.World
             var margin = inset + 0.4f;
             bool Clear(Vector2 p)
             {
-                if (!Contains(outline, p) || cuts.Any(c => Contains(c.Corners.ToList(), p))) return false;
+                if (!Contains(outline, p) || cuts.Any(c => Contains(c.Corners, p))) return false;
                 for (var i = 0; i < outline.Count; i++)
                     if (DistanceToSegment(p, outline[i], outline[(i + 1) % outline.Count]) < margin) return false;
                 return true;
@@ -465,7 +677,7 @@ namespace Formula9.World
             parts.Where(p => p.To > p.From).Select(p => (From: Vector2.LerpUnclamped(a, b, p.From), To: Vector2.LerpUnclamped(a, b, p.To)))
                 .Where(s => (s.To - s.From).magnitude > MinWallM).ToList();
 
-        private static bool Contains(List<Vector2> outline, Vector2 point)
+        private static bool Contains(IReadOnlyList<Vector2> outline, Vector2 point)
         {
             var inside = false;
             for (var i = 0; i < outline.Count; i++)

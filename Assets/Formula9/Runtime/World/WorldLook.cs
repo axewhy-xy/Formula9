@@ -80,14 +80,21 @@ namespace Formula9.World
 
         private static WorldLook loaded;
 
-        // The project's look, read once; the defaults above if the file is missing
+        // The project's look, read once; the defaults above if the file is missing or broken
         public static WorldLook Default
         {
             get
             {
                 if (loaded != null) return loaded;
                 var asset = Resources.Load<TextAsset>(ResourcePath);
-                return loaded = asset == null ? new WorldLook() : Parse(asset.text);
+                if (asset == null) return loaded = new WorldLook();
+                try { return loaded = Parse(asset.text); }
+                catch (Exception e)
+                {
+                    // A broken file should not stop the world showing
+                    Debug.LogError($"{ResourcePath}.json could not be read, so the world uses its default look: {e.Message}");
+                    return loaded = new WorldLook();
+                }
             }
         }
 

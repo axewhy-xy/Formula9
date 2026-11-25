@@ -70,5 +70,26 @@ namespace Formula9.Tests
             Assert.AreEqual(3, At(0, 2));
             Assert.AreEqual(1, At(2, 2), "the empty cell repeats the first slice");
         }
+
+        [Test]
+        public void TheTextureSignatureChangesWithWhatIsPaintedButNotWithBuildingColours()
+        {
+            const string A = "{\"name\":\"a\",\"bodyColors\":[\"#111111\"],\"wall\":{\"tileM\":[2,2]}}";
+            const string B = "{\"name\":\"b\"}";
+            string Signature(string styles) => BuildingStyles.Parse("{\"defaultStyle\":\"a\",\"styles\":[" + styles + "]}").TextureSignature();
+            var signature = Signature(A + "," + B);
+            Assert.AreEqual(signature, Signature(A + "," + B), "the same file gives the same signature");
+            Assert.AreEqual(signature, Signature(A.Replace("#111111", "#222222") + "," + B), "body colours are painted by the shader, not into the textures");
+            Assert.AreNotEqual(signature, Signature(B + "," + A), "reordered styles move the slices");
+            Assert.AreNotEqual(signature, Signature(A.Replace("[2,2]", "[3,2]") + "," + B), "a resized wall tile needs repainting");
+        }
+
+        [Test]
+        public void TheSavedSignatureMatchesTheStylesFile()
+        {
+            var saved = UnityEngine.Resources.Load<UnityEngine.TextAsset>("Formula9/Textures/" + CityView.BuildingTextureSignature);
+            if (saved == null) Assert.Ignore("No signature saved yet; Formula9 > Generate Building Textures saves one");
+            Assert.AreEqual(BuildingStyles.Default.TextureSignature(), saved.text.Trim(), "the textures are out of date: run Formula9 > Generate Building Textures");
+        }
     }
 }

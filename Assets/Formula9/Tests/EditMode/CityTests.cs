@@ -152,7 +152,8 @@ namespace Formula9.Tests
                 // inside the outline, and its ceiling faces down
                 var deck = hdb.VoidDeck;
                 bool At(float x, float y, float z) => vertices.Any(v => (v - new Vector3(x, y, z)).magnitude < 1e-3f);
-                Assert.IsTrue(At(0, 0, deck.DepthM) && At(40, 0, deck.DepthM) && At(40, hdb.GroundFloorM, deck.DepthM), "the back wall of the long side is set in");
+                // mitred at the corners, so it meets the short sides' back walls rather than crossing them
+                Assert.IsTrue(At(deck.DepthM, 0, deck.DepthM) && At(40 - deck.DepthM, 0, deck.DepthM) && At(40 - deck.DepthM, hdb.GroundFloorM, deck.DepthM), "the back wall of the long side is set in");
                 var triangles = detailed.triangles;
                 var down = 0;
                 for (var i = 0; i < triangles.Length; i += 3)
@@ -160,6 +161,135 @@ namespace Formula9.Tests
                 Assert.Greater(down, 0, "the void deck has a ceiling");
             }
             finally { UnityEngine.Object.DestroyImmediate(bare); UnityEngine.Object.DestroyImmediate(detailed); }
+        }
+
+        [Test]
+        public void WithDetailsAWedgeShapedBlockKeepsItsVoidDeckAndParapetInsideItsOutline()
+        {
+            // Two 45 degree corners, where insets set square to each wall would poke out through the next
+            var block = Square("way/8", 40);
+            block.Rings[0] = new List<(double X, double Y)> { (0, 0), (60, 0), (0, 60), (0, 0) };
+            var mesh = CityMesh.Build(new[] { block }, details: true);
+            try
+            {
+                Assert.IsNotNull(BuildingStyles.Default.Styles[CityMesh.StyleFor(block)].VoidDeck, "the style has a void deck to test");
+                foreach (var v in mesh.vertices)
+                {
+                    Assert.GreaterOrEqual(v.x, -1e-3f, "inside the outline: " + v);
+                    Assert.GreaterOrEqual(v.z, -1e-3f, "inside the outline: " + v);
+                    Assert.LessOrEqual(v.x + v.z, 60 + 1e-3f, "inside the outline: " + v);
+                }
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
+        public void SimplifyingACurveStaysWithinTheTolerance()
+        {
+            // A round building traced with 32 corners: removals must not add up past the tolerance
+            var circle = Enumerable.Range(0, 32).Select(k => new Vector2(10 * Mathf.Cos(k * Mathf.PI / 16), 10 * Mathf.Sin(k * Mathf.PI / 16))).ToList();
+            var simple = CityMesh.Simplify(circle, 0.8f);
+            Assert.Less(simple.Count, circle.Count, "small steps round the curve are dropped");
+            foreach (var p in circle)
+            {
+                var nearest = Enumerable.Range(0, simple.Count).Min(i => DistanceToSegment(p, simple[i], simple[(i + 1) % simple.Count]));
+                Assert.Less(nearest, 0.8f, "every original corner stays within the tolerance");
+            }
+        }
+
+        private static float DistanceToSegment(Vector2 p, Vector2 a, Vector2 b)
+        {
+            var ab = b - a;
+            var t = Mathf.Clamp01(Vector2.Dot(p - a, ab) / ab.sqrMagnitude);
+            return (p - (a + ab * t)).magnitude;
+        }
+
+        [Test]
+        public void ACachedFillOnlyRebuildsTheBuildingsWhoseCorridorsChanged()
+        {
+            var near = Square("way/1", 30);
+            var far = Square("way/2", 30);
+            far.Rings[0] = far.Rings[0].Select(p => (p.X + 500, p.Y)).ToList();
+            var buildings = new List<CityBuilding> { near, far };
+            var cache = new CityMesh.Cache();
+            var mesh = CityMesh.Build(buildings, details: true, cache: cache);
+            var corridors = CityMesh.Corridors(new[] { (IReadOnlyList<Vector2>)new[] { new Vector2(5, -20), new Vector2(5, 30) } }, 2);
+            var fresh = CityMesh.Build(buildings, corridors, details: true);
+            try
+            {
+                Assert.AreEqual(2, cache.LastBuilt);
+                CityMesh.Fill(mesh, buildings, corridors, details: true, cache: cache);
+                Assert.AreEqual(1, cache.LastBuilt, "only the building the corridor crosses");
+                CollectionAssert.AreEqual(fresh.vertices, mesh.vertices, "the same mesh as building it all again");
+                CollectionAssert.AreEqual(fresh.triangles, mesh.triangles);
+                CollectionAssert.AreEqual(fresh.normals, mesh.normals);
+                CityMesh.Fill(mesh, buildings, CityMesh.Corridors(new[] { (IReadOnlyList<Vector2>)new[] { new Vector2(5, -20), new Vector2(5, 30) } }, 2), details: true, cache: cache);
+                Assert.AreEqual(0, cache.LastBuilt, "the same corridors again change nothing");
+                CityMesh.Fill(mesh, buildings, null, details: true, cache: cache);
+                Assert.AreEqual(1, cache.LastBuilt, "the corridor going gives the building back");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); UnityEngine.Object.DestroyImmediate(fresh); }
+        }
+
+        [Test]
+        public void TangentsRunAlongTheWall()
+        {
+            var mesh = CityMesh.Build(new[] { Square("way/1", 30) });
+            try
+            {
+                var vertices = mesh.vertices; var tangents = mesh.tangents; var normals = mesh.normals;
+                Assert.AreEqual(vertices.Length, tangents.Length);
+                // The first wall runs from (0, 0) to (10, 0): along +x, and up the wall is the texture's v
+                for (var i = 0; i < 4; i++)
+                {
+                    Assert.AreEqual(1, tangents[i].x, 1e-4f);
+                    var up = Vector3.Cross(normals[i], tangents[i]) * tangents[i].w;
+                    Assert.Greater(up.y, 0.99f, "the bitangent points up the wall");
+                }
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
+        public void ABrokenStylesFileFallsBackToOnePlainStyle()
+        {
+            var styles = BuildingStyles.Fallback();
+            Assert.IsTrue(styles.IsFallback);
+            Assert.AreEqual(1, styles.Styles.Count);
+            Assert.IsFalse(BuildingStyles.Default.IsFallback, "the project's own file reads");
+            var mesh = CityMesh.Build(new[] { Square("way/1", 30) }, styles: styles, details: true);
+            try { Assert.AreEqual(30, mesh.bounds.max.y, 1e-3f, "buildings still stand"); }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
+        public void TheWorldsLightingIsPutBackWhenItsSunGoes()
+        {
+            var rig = new GameObject("Lighting rig");
+            var distance = QualitySettings.shadowDistance;
+            var cascades = QualitySettings.shadowCascades;
+            var shadows = QualitySettings.shadows;
+            var anisotropic = QualitySettings.anisotropicFiltering;
+            var skybox = RenderSettings.skybox;
+            var ambient = RenderSettings.ambientSkyColor;
+            var fog = RenderSettings.fog;
+            Material sky;
+            try
+            {
+                WorldLighting.Apply(rig.transform);
+                sky = RenderSettings.skybox;
+                Assert.AreEqual(ShadowQuality.All, QualitySettings.shadows, "the sun's shadows show at any quality level");
+                Assert.AreEqual(AnisotropicFiltering.Enable, QualitySettings.anisotropicFiltering, "facades stay sharp at any quality level");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(rig); }
+            Assert.AreEqual(distance, QualitySettings.shadowDistance);
+            Assert.AreEqual(cascades, QualitySettings.shadowCascades);
+            Assert.AreEqual(shadows, QualitySettings.shadows);
+            Assert.AreEqual(anisotropic, QualitySettings.anisotropicFiltering);
+            Assert.AreEqual(skybox, RenderSettings.skybox);
+            Assert.AreEqual(ambient, RenderSettings.ambientSkyColor);
+            Assert.AreEqual(fog, RenderSettings.fog);
+            if (sky != skybox) Assert.IsTrue(sky == null, "the world's sky material is destroyed with it");
         }
 
         [Test]
@@ -514,6 +644,11 @@ namespace Formula9.Tests
                     Assert.AreEqual(TextureWrapMode.Repeat, texture.wrapMode, property + " tiles along the wall");
                 }
                 Assert.AreEqual(0, buildings.GetFloat("_Plain"));
+                foreach (var file in CityView.BuildingTextures.Select(t => t.File))
+                {
+                    var importer = (UnityEditor.TextureImporter)UnityEditor.AssetImporter.GetAtPath($"Assets/Formula9/Resources/Formula9/Textures/{file}.png");
+                    Assert.IsTrue(importer.ignoreMipmapLimit, file + " keeps full resolution at low quality levels");
+                }
 
                 var snapshot = (FullSnapshot)ContractParser.ParseMessage(File.ReadAllText(Path.Combine(Application.dataPath, "Formula9/Tests/EditMode/Fixtures/snapshot.json")));
                 view.Show(snapshot, new ShuttleMotion(), 0);

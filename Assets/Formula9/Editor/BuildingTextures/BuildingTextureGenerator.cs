@@ -10,7 +10,8 @@ namespace Formula9.EditorTools
 {
     // Formula9 > Generate Building Textures: paints every style in Resources/Formula9/building_styles.json
     // and saves them as the four texture arrays CityView loads (ground-floor walls and facades, each with a
-    // normal map), one slice per style in the file's order. Run it again after editing the styles file.
+    // normal map), one slice per style in the file's order, and building_textures_signature.txt recording what they
+    // were painted from. Run it again after editing the styles file.
     public static class BuildingTextureGenerator
     {
         public const string StylesPath = "Assets/Formula9/Resources/Formula9/building_styles.json";
@@ -53,6 +54,10 @@ namespace Formula9.EditorTools
             Save("building_wall_normals", walls.Select(p => p.Normal).ToList(), size, columns, true);
             Save("building_facades", facades.Select(p => p.Color).ToList(), size, columns, false);
             Save("building_facade_normals", facades.Select(p => p.Normal).ToList(), size, columns, true);
+            // What these textures were painted from, so CityView can tell when they no longer match the file
+            var signature = $"{Folder}/{CityView.BuildingTextureSignature}.txt";
+            File.WriteAllText(signature, styles.TextureSignature() + "\n");
+            AssetDatabase.ImportAsset(signature, ImportAssetOptions.ForceSynchronousImport);
         }
 
         private static void Save(string name, List<byte[]> slices, int size, int columns, bool normal)
@@ -86,6 +91,8 @@ namespace Formula9.EditorTools
             settings.alphaIsTransparency = false;
             importer.SetTextureSettings(settings);
             importer.maxTextureSize = 16384;
+            // Full resolution at every quality level: a low level's texture limit would blur the windows
+            importer.ignoreMipmapLimit = true;
             importer.textureCompression = normal ? TextureImporterCompression.CompressedHQ : TextureImporterCompression.Compressed;
             importer.SaveAndReimport();
         }

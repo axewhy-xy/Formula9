@@ -43,18 +43,61 @@ namespace Formula9.World
 #if UNITY_2017_1_OR_NEWER
         private static BuildingStyles loaded;
 
-        // The project's styles, read once
+        // The project's styles, read once. A missing or broken file is logged and the city falls back to
+        // one plain style, so a typo in the file leaves plain buildings rather than no city at all.
         public static BuildingStyles Default
         {
             get
             {
                 if (loaded != null) return loaded;
-                var asset = UnityEngine.Resources.Load<UnityEngine.TextAsset>(ResourcePath);
-                if (asset == null) throw new InvalidOperationException($"Resources/{ResourcePath}.json is missing");
-                return loaded = Parse(asset.text);
+                try
+                {
+                    var asset = UnityEngine.Resources.Load<UnityEngine.TextAsset>(ResourcePath);
+                    if (asset == null) throw new InvalidOperationException($"Resources/{ResourcePath}.json is missing");
+                    return loaded = Parse(asset.text);
+                }
+                catch (Exception e)
+                {
+                    UnityEngine.Debug.LogError($"Building styles could not be read, so buildings are plain colour: {e.Message}");
+                    return loaded = Fallback();
+                }
             }
         }
 #endif
+
+        // One untextured style for every building, for when the styles file cannot be used
+        public static BuildingStyles Fallback()
+        {
+            var styles = Parse("{\"defaultStyle\":\"plain\",\"styles\":[{\"name\":\"plain\",\"bodyColors\":[\"#D9D4C9\"],\"roofColors\":[\"#B8B4AC\"]}]}");
+            styles.IsFallback = true;
+            return styles;
+        }
+
+        // True for the built-in plain style, which has no textures to show
+        [JsonIgnore] public bool IsFallback { get; private set; }
+
+        // What the texture arrays are painted from, as a short hash: the painting settings and, slice by
+        // slice, each style's name, wall and facade. Generate Building Textures saves it beside the
+        // textures, so textures painted from an older file (styles reordered, a tile resized) are noticed
+        // at load instead of showing stretched or wrong facades. Colours outside the textures do not count.
+        public string TextureSignature()
+        {
+            var painted = new
+            {
+                TextureSize,
+                NormalStrength,
+                RecessShade,
+                Slices = Styles.Select(s => new { s.Name, s.Wall, s.Facade }).ToList(),
+            };
+            var json = JsonConvert.SerializeObject(painted, Formatting.None);
+            unchecked
+            {
+                // FNV-1a, 64 bits
+                var hash = 14695981039346656037UL;
+                foreach (var c in json) { hash ^= c; hash *= 1099511628211UL; }
+                return hash.ToString("x16", CultureInfo.InvariantCulture);
+            }
+        }
 
         public int IndexOf(string name)
         {
