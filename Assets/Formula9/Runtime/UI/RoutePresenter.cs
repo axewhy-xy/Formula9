@@ -419,17 +419,6 @@ namespace Formula9.UI
             return rows;
         }
 
-        // The line over the 3D view while the shuttle runs the route.
-        public static string ExecutionLine(FullSnapshot snapshot, RouteOutcome outcome)
-        {
-            var vehicle = snapshot?.Vehicles.FirstOrDefault(v => v.VehicleId == outcome?.VehicleId);
-            if (vehicle == null || outcome.State == "NOT_APPROVED" || snapshot.Session.Status == "READY") return null;
-            var state = vehicle.ServiceState == "DWELLING" ? "at a stop" : vehicle.ServiceState == "AWAITING_GUIDANCE" ? "held at an incident" :
-                vehicle.ServiceState == "BLOCKED" ? "held in traffic" : "on its approved route";
-            var served = outcome.Stops.Count(s => s.ServedThisLoop);
-            return $"{vehicle.VehicleId} · {state} · stops this loop {served} of {outcome.Stops.Count} · loops finished {outcome.Loops.Count}";
-        }
-
         // "shuttle-03" reads "Shuttle 03"; any other ID is shown as it is.
         public static string ShuttleName(string vehicleId)
         {

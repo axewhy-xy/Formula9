@@ -76,10 +76,11 @@ class StoreClient(TrainingStore):
 
     def create_session(self, snapshot: FullSnapshot, *, runtime_state: dict | None = None,
                        creation: tuple[str, str, str] | None = None,
-                       assessment_plan: AssessmentPlan | None = None) -> FullSnapshot:
+                       assessment_plan: AssessmentPlan | None = None, name: str | None = None) -> FullSnapshot:
         reply = self._call("create_session", {"snapshot": snapshot.model_dump_json(),
                                               "runtime": _EncodedRuntime.of(runtime_state), "creation": creation,
-                                              "assessment_plan": assessment_plan.model_dump_json() if assessment_plan else None})
+                                              "assessment_plan": assessment_plan.model_dump_json() if assessment_plan else None,
+                                              "name": name})
         self._published_as(snapshot.session_id, reply["published"])
         return FullSnapshot.model_validate_json(reply["snapshot"])
 
@@ -139,7 +140,8 @@ def serve_store_call(store: TrainingStore, kind: str, payload: Any) -> Any:
                                        runtime_state=payload["runtime"],
                                        creation=tuple(payload["creation"]) if payload["creation"] else None,
                                        assessment_plan=AssessmentPlan.model_validate_json(payload["assessment_plan"])
-                                       if payload.get("assessment_plan") else None)
+                                       if payload.get("assessment_plan") else None,
+                                       name=payload.get("name"))
         return {"snapshot": created.model_dump_json(), "published": store.published_snapshot_json(created.session_id)}
     if kind == "accept":
         # The worker's TrainingStore.accept already records the command.accept span around this call

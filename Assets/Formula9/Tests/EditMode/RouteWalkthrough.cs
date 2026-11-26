@@ -104,22 +104,19 @@ namespace Formula9.Tests
                 yield return Shoot("approved");
 
                 Press("route-start");
-                yield return Until(() => root.Q("world-hud")?.resolvedStyle.display == DisplayStyle.Flex, "the 3D status line");
+                yield return Until(() => !UnityEngine.Object.FindFirstObjectByType<WorldView>().ShowingMap, "the 3D view");
                 yield return Seconds(8);
-                Note("HUD: " + Text("world-hud"));
+                Note("Incidents: " + Cards());
                 yield return Shoot("3d-driving");
 
-                // The line follows the view straight away, with no snapshot in between
                 Press("view-map");
-                Note("HUD on map: " + root.Q("world-hud").style.display.value);
                 yield return Frames(3);
                 yield return Shoot("map-running");
                 Press("view-world");
-                Note("HUD back in 3D: " + root.Q("world-hud").style.display.value);
 
                 // The seeded signal fault and collision each ask for a decision within seconds of the start
                 yield return Until(() => DecideButtons().Count > 0, "an incident to decide", 60);
-                Note("HUD: " + Text("world-hud"));
+                Note("Incidents: " + Cards());
                 Note("Outcome during hold: " + Text("route-outcome-headline") + " | " + Text("route-outcome-notes"));
                 yield return Seconds(3);
                 Note("Outcome 3 s into the hold: " + Text("route-outcome-headline") + " | " + Text("route-outcome-notes"));
@@ -155,7 +152,7 @@ namespace Formula9.Tests
                     // The decision leaves the map up, and a later closure opens it again
                     if (UnityEngine.Object.FindFirstObjectByType<WorldView>().ShowingMap) Press("view-world");
                     yield return Seconds(30);
-                    Note($"{Time.realtimeSinceStartup - began:0}s HUD: {Text("world-hud")}");
+                    Note($"{Time.realtimeSinceStartup - began:0}s incidents: {Cards()}");
                     if (pictures < 12) yield return Shoot($"3d-run-{++pictures}");
                 }
                 Note("Outcome: " + Text("route-outcome-headline"));
@@ -223,7 +220,7 @@ namespace Formula9.Tests
                 yield return Until(() => root.Q<Button>("route-start").resolvedStyle.display == DisplayStyle.Flex, "start offered");
                 yield return Seconds(2);
                 Press("route-start");
-                yield return Until(() => root.Q("world-hud")?.resolvedStyle.display == DisplayStyle.Flex, "the 3D status line");
+                yield return Until(() => !UnityEngine.Object.FindFirstObjectByType<WorldView>().ShowingMap, "the 3D view");
 
                 var world = UnityEngine.Object.FindFirstObjectByType<WorldView>();
                 var workspaceIncident = root.Q<DropdownField>("reports-incidents");
@@ -243,15 +240,15 @@ namespace Formula9.Tests
                 Note("Problem: " + Text("route-problem"));
                 Press(nav);
                 Press("view-world");
-                yield return Until(() => Text("world-hud").Contains("Road") || Text("world-hud").Contains("Collision") || Text("world-hud").Contains("incident"), "the first incident on the status line");
-                Note("HUD: " + Text("world-hud"));
+                yield return Until(() => Incidents().Contains("Road") || Incidents().Contains("Collision") || Incidents().Contains("incident"), "the first incident in the city");
+                Note("Incidents: " + Incidents());
                 Note("Focus: " + world.FocusIncident(workspaceIncident.choices.Last()));
                 yield return Seconds(1);
                 yield return Shoot("incident-start");
                 yield return Seconds(12);
                 yield return Shoot("incident-12s");
                 yield return Seconds(18);
-                Note("HUD: " + Text("world-hud"));
+                Note("Incidents: " + Incidents());
                 yield return Shoot("incident-30s");
 
 
@@ -263,10 +260,10 @@ namespace Formula9.Tests
                     if (world.ShowingMap) Press("view-world");
                     yield return Seconds(2);
                     // The seeded collision, or a random accident after it
-                    if (!shownAccident && (Text("world-hud").Contains("Road accident") || Text("world-hud").Contains("Collision")))
+                    if (!shownAccident && (Incidents().Contains("Road accident") || Incidents().Contains("Collision")))
                     {
                         shownAccident = true;
-                        Note("HUD: " + Text("world-hud"));
+                        Note("Incidents: " + Incidents());
                         var latest = workspaceIncident.choices.LastOrDefault(c => c.Contains("accident")) ?? workspaceIncident.choices.First(c => c.Contains("two-shuttles"));
                         Note("Focus: " + world.FocusIncident(latest));
                         yield return Seconds(1);
@@ -274,13 +271,13 @@ namespace Formula9.Tests
                         yield return Seconds(10);
                         yield return Shoot("accident-10s");
                         yield return Seconds(14);
-                        Note("HUD: " + Text("world-hud"));
+                        Note("Incidents: " + Incidents());
                         yield return Shoot("accident-24s");
                     }
-                    if (!sawSlow && Text("world-hud").Contains("slowed to"))
+                    if (!sawSlow && Incidents().Contains("slowed to"))
                     {
                         sawSlow = true;
-                        Note("HUD: " + Text("world-hud"));
+                        Note("Incidents: " + Incidents() + " | cards: " + Cards());
                         world.WatchShuttle("shuttle-01");
                         yield return Seconds(1);
                         yield return Shoot("shuttle-slowed");
@@ -362,6 +359,13 @@ namespace Formula9.Tests
         }
 
         private string Text(string name) => root.Q<Label>(name)?.text ?? "";
+
+        // The live incidents in the 3D city, one line each, as the 3D status box used to show them
+        private static string Incidents() => UnityEngine.Object.FindFirstObjectByType<WorldView>()?.IncidentSummary ?? "";
+
+        // The incident notifications as the operator reads them: each card's title and detail line
+        private string Cards() => string.Join(" | ", root.Query(className: "notification").ToList().Select(card =>
+            string.Join(" · ", card.Query<Label>().ToList().Where(l => l.ClassListContains("notification-title") || l.ClassListContains("notification-detail")).Select(l => l.text))));
 
         private string Rows(string name) => string.Join("; ", root.Q(name).Children().Select(row => string.Join(" ", row.Query<Label>().ToList().Select(l => l.text))));
 
