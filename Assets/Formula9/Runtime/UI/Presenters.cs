@@ -4,10 +4,10 @@
  * Author: Choo Jian Wei
  * Contributors: Rishika (fleet cards, next stop and ETA), Lau Xiang Yang (session list and cleanup, exit)
  * Date Created: 30/10/2026
- * Last Modified: 23/11/2026
+ * Last Modified: 26/11/2026
  *
  * Description:
- *     Part of the Unity client's UI. Pure functions that turn login results, snapshots, session
+ *     Part of the Unity client's UI. Presentation helpers that turn login results, snapshots, session
  *     lists and command outcomes into what the screens show, so the wording and rules are tested
  *     without building any UI. The wording follows the Qt client's LoginPage and TrainingWorkspace.
  */
@@ -23,6 +23,44 @@ using Formula9.Session;
 
 namespace Formula9.UI
 {
+    /// <summary>Show a brief notice only when the assessment being viewed completes.</summary>
+    public sealed class AssessmentEndNoticePresenter
+    {
+        public const double DurationSeconds = 5;
+        private string observedSessionId, noticeSessionId;
+        private bool observedActive;
+        private double expiresAt;
+
+        /// <summary>Advance notice state using an unscaled, monotonic clock in seconds.</summary>
+        public (bool Visible, double RemainingSeconds) Present(FullSnapshot snapshot, double now)
+        {
+            var id = snapshot?.SessionId;
+            var completed = TrainingPresenter.IsAssessment(snapshot) && snapshot.Session?.Status == "COMPLETED";
+            if (completed && observedActive && observedSessionId == id)
+            {
+                noticeSessionId = id;
+                expiresAt = now + DurationSeconds;
+            }
+            if (!completed || noticeSessionId != id)
+            {
+                noticeSessionId = null;
+                expiresAt = 0;
+            }
+            observedSessionId = id;
+            observedActive = TrainingPresenter.IsAssessmentActive(snapshot);
+            var remaining = completed && noticeSessionId == id ? Math.Max(0, expiresAt - now) : 0;
+            return (remaining > 0, remaining);
+        }
+
+        /// <summary>Discard pending completion state when its screen closes.</summary>
+        public void Reset()
+        {
+            observedSessionId = noticeSessionId = null;
+            observedActive = false;
+            expiresAt = 0;
+        }
+    }
+
     // -----------------------------------------------------------------------------------
     // Class: LoginMessages
     // -----------------------------------------------------------------------------------
@@ -186,6 +224,10 @@ namespace Formula9.UI
     public sealed class FleetRow
     {
         public string ShuttleId, State, Status, Route, RouteLine, Battery, Provenance, NextStop, Eta;
+        // What Eta is the time to (the next depot), for its tooltip.
+        public string EtaTarget;
+        // The last stop of the shuttle's route before the loop starts again, by name.
+        public string FinalStop;
         // A line for the shuttle's open incident; null when it has none.
         public string Incident;
         public double BatteryPercent;
@@ -252,9 +294,10 @@ namespace Formula9.UI
 
         public static SessionSetupView SessionSetup(FullSnapshot snapshot, bool charging, bool? toolsOpen)
         {
+            // The setup panel stays closed until Create/join training session opens it, joined or not
             var joined = snapshot != null;
-            var showTools = !joined || (toolsOpen ?? IsTerminalSession(snapshot.Session?.Status));
-            return new SessionSetupView(showTools, joined, charging && !showTools);
+            var showTools = toolsOpen ?? false;
+            return new SessionSetupView(showTools, true, charging && joined && !showTools);
         }
 
         private static (string Text, string Class) SessionBadge(string state) => state switch
@@ -295,18 +338,19 @@ namespace Formula9.UI
         // Function: Title
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function names the joined session's scenario: spatial sessions are the 3D
-        //     exercise.
+        //     This function names the kind of session joined, in plain words: practice, the
+        //     scored assessment or the 3D road exercise. With none joined it is the page's name.
         //
         // Args:
-        //     snapshot (FullSnapshot): The accepted snapshot.
+        //     snapshot (FullSnapshot): The accepted snapshot, or null.
         //
         // Returns:
         //     string: The title.
         public static string Title(FullSnapshot snapshot) =>
-            IsAssessment(snapshot) ? "Toa Payoh · scored exercise" :
-            snapshot?.Spatial != null ? "3D fleet exercise · road, ramp and obstruction" :
-            "Singapore, real streets · incidents, detours, charging";
+            snapshot == null ? "Fleet training" :
+            IsAssessment(snapshot) ? "Assessment · scored, timed exercise" :
+            snapshot.Spatial != null ? "3D road exercise" :
+            "Practice session";
 
         // -----------------------------------------------------------------------------------
         // Function: Controls
@@ -389,7 +433,9 @@ namespace Formula9.UI
                     BatteryPercent = BatteryWatch.Percent(v),
                     Provenance = v.Provenance.Kind,
                     NextStop = NextStopLine(v, route),
+                    FinalStop = FinalStopLine(v, route),
                     Eta = EtaLine(snapshot.EnergyForecasts?.FirstOrDefault(f => f.VehicleId == v.VehicleId)),
+                    EtaTarget = EtaTargetLine(snapshot.EnergyForecasts?.FirstOrDefault(f => f.VehicleId == v.VehicleId)),
                     Incident = IncidentLine(snapshot, v.VehicleId, selectedIncident),
                     Index = index,
                 };
@@ -430,21 +476,22 @@ namespace Formula9.UI
         // Function: NextStopLine
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function writes a shuttle's next-stop line.
+        //     This function writes a shuttle's next stop for the Fleet List's Next stop column:
+        //     the stop's name alone, as the column heading already says what it is.
         //
         // Args:
         //     vehicle (FleetVehicle): The shuttle.
         //     route (RouteRevision): Its route, or null.
         //
         // Returns:
-        //     string: The line.
+        //     string: The stop's name, or a dash, "Unknown" or "No stops" when there is none to name.
         private static string NextStopLine(FleetVehicle vehicle, RouteRevision route)
         {
-            if (vehicle.RouteId == null) return "Next stop —";
-            if (route == null) return "Next stop unknown";
-            if (route.StopsM.Count == 0) return "No stops on this route";
+            if (vehicle.RouteId == null) return "—";
+            if (route == null) return "Unknown";
+            if (route.StopsM.Count == 0) return "No stops";
             var next = NextStop(route, vehicle.Position.XM, vehicle.Position.YM);
-            return next == null ? "Next stop unknown" : $"Next stop {next}";
+            return next == null ? "Unknown" : Formula9.World.RouteDraftView.StopName(next);
         }
 
         // -----------------------------------------------------------------------------------
@@ -474,6 +521,47 @@ namespace Formula9.UI
             foreach (var stop in ordered)
                 if (stop.At + reachedM >= shuttleAt) return stop.StopId;
             return ordered[0].StopId;
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: FinalStop
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function finds the route's final stop: the last one along its path, after which
+        //     the loop starts again at the first.
+        //
+        // Args:
+        //     route (RouteRevision): The route.
+        //
+        // Returns:
+        //     string: The stop ID, or null when the route has no path or stops.
+        public static string FinalStop(RouteRevision route)
+        {
+            var path = route.EdgePathsM.SelectMany(p => p).ToList();
+            if (path.Count < 2 || route.StopsM.Count == 0) return null;
+            return route.StopsM.OrderBy(s => DistanceAlong(path, s.Position.XM, s.Position.YM)).Last().StopId;
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: FinalStopLine
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function writes a shuttle's final stop for the Fleet List's Final stop column,
+        //     as its name alone, like the Next stop column.
+        //
+        // Args:
+        //     vehicle (FleetVehicle): The shuttle.
+        //     route (RouteRevision): Its route, or null.
+        //
+        // Returns:
+        //     string: The stop's name, or a dash, "Unknown" or "No stops" when there is none to name.
+        private static string FinalStopLine(FleetVehicle vehicle, RouteRevision route)
+        {
+            if (vehicle.RouteId == null) return "—";
+            if (route == null) return "Unknown";
+            if (route.StopsM.Count == 0) return "No stops";
+            var final = FinalStop(route);
+            return final == null ? "Unknown" : Formula9.World.RouteDraftView.StopName(final);
         }
 
         // -----------------------------------------------------------------------------------
@@ -509,20 +597,26 @@ namespace Formula9.UI
         // Function: EtaLine
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function writes the ETA to the shuttle's next depot, in seconds under a minute
-        //     and minutes after.
+        //     This function writes the ETA to the shuttle's next depot for the Fleet List's ETA
+        //     column: the duration alone, in seconds under a minute and minutes after. Which depot
+        //     is in EtaTarget, shown when the ETA is hovered.
         //
         // Args:
         //     forecast (EnergyForecast): The shuttle's energy forecast, or null.
         //
         // Returns:
-        //     string: The line.
+        //     string: The duration, or a dash when there is none.
         private static string EtaLine(EnergyForecast forecast)
         {
-            if (forecast?.NextDepotEtaS == null) return "ETA —";
+            if (forecast?.NextDepotEtaS == null) return "—";
             var seconds = forecast.NextDepotEtaS.Value;
-            return $"Depot {forecast.NextDepotId} ETA {(seconds < 60 ? $"{Math.Round(seconds)} s" : $"{Math.Round(seconds / 60)} min")}";
+            return seconds < 60 ? $"{Math.Round(seconds)} s" : $"{Math.Round(seconds / 60)} min";
         }
+
+        // What the ETA is to, for its tooltip: the duration alone does not say it is the depot's
+        private static string EtaTargetLine(EnergyForecast forecast) =>
+            forecast?.NextDepotEtaS == null ? "No depot ETA yet" :
+            forecast.NextDepotId == null ? "Time to reach the next depot" : $"Time to reach depot {forecast.NextDepotId}";
 
         // -----------------------------------------------------------------------------------
         // Function: IncidentLine
@@ -669,8 +763,9 @@ namespace Formula9.UI
         //     entry (SessionListEntry): The session.
         //
         // Returns:
-        //     string: Its status and ID.
-        public static string SessionLabel(SessionListEntry entry) => $"{entry.Status} · {entry.SessionId}";
+        //     string: Its status, its name if it was given one, and its ID, which Join by ID takes.
+        public static string SessionLabel(SessionListEntry entry) =>
+            string.IsNullOrEmpty(entry.Name) ? $"{entry.Status} · {entry.SessionId}" : $"{entry.Status} · {entry.Name} ({entry.SessionId})";
 
         // -----------------------------------------------------------------------------------
         // Function: Capacity
@@ -817,27 +912,27 @@ namespace Formula9.UI
         // Function: Outcome
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function says what happened to a command, in the Qt client's wording, with
-        //     plainer messages for a kept-in-service shuttle, a reserved charger, and a Start
-        //     refused because a route crosses a closed road.
+        //     This function says what happened to a command, in plain words for the operator.
+        //     Routine decisions say nothing: the session badge and the Route Planning panel
+        //     already show them, and command IDs and ticks are for the console, not the screen.
         //
         // Args:
         //     outcome (CommandOutcome): The outcome.
         //
         // Returns:
-        //     string: The message.
+        //     string: The message, or null when there is nothing to tell the operator.
         public static string Outcome(CommandOutcome outcome)
         {
             switch (outcome.Status)
             {
                 case "QUEUED":
-                    return $"Decision {outcome.CommandId} for {outcome.TargetId} is QUEUED and durably accepted; awaiting authoritative outcome.";
+                    return null;
                 case "APPLIED":
                     if (outcome.CommandType == "SCHEDULE_CHARGE") return $"Charging slot booked on {outcome.TargetId}";
                     if (outcome.CommandType == "CANCEL_CHARGE_BOOKING") return $"Charging booking on {outcome.TargetId} cancelled";
                     if (outcome.TargetType == "VEHICLE") return $"Shuttle {outcome.TargetId} kept in service";
                     if (outcome.TargetType == "CHARGER") return $"Charger {outcome.TargetId} reserved";
-                    return $"Decision {outcome.CommandId} APPLIED for {outcome.TargetId} at tick {outcome.AppliedTick?.ToString() ?? "unknown"}.";
+                    return null;
                 case "REJECTED":
                     if (outcome.FailureCode == "ASSESSMENT_NOT_READY")
                         return "The assessment's charging task is unavailable. Create a fresh assessment, then try again.";
@@ -847,13 +942,49 @@ namespace Formula9.UI
                         return outcome.FailureCode == "STALE_REVISION" ? $"{outcome.TargetId} changed just now. Check the slot again."
                             : outcome.FailureCode == "CHARGER_CONFLICT" ? $"That slot on {outcome.TargetId} is already taken."
                             : $"The charging change was refused: {outcome.FailureCode ?? "no code"}.";
-                    return $"Decision {outcome.CommandId} REJECTED for {outcome.TargetId}: {outcome.FailureCode ?? "no code"}.";
+                    return $"The decision for {outcome.TargetId} was refused: {RefusalReason(outcome.FailureCode)}";
                 case "NEEDS_RECONFIRMATION":
-                    return $"Decision {outcome.CommandId} for {outcome.TargetId} needs reconfirmation after recovery; review and submit again.";
+                    return $"The decision for {outcome.TargetId} needs reconfirmation after the session recovered. Review it and send it again.";
                 case "EXPIRED":
-                    return $"Decision {outcome.CommandId} for {outcome.TargetId} expired; refresh and choose a current option.";
+                    return $"The decision for {outcome.TargetId} expired. Refresh and choose a current option.";
                 default:
-                    return $"Decision {outcome.CommandId} returned status {outcome.Status} for {outcome.TargetId}.";
+                    return null;
+            }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: RefusalReason
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function words why the backend refused a decision, so the operator knows whether
+        //     trying again can help. Only a stale choice asks for a refresh; an unknown code is shown
+        //     as it is.
+        //
+        // Args:
+        //     code (string): The outcome's failure code, or null.
+        //
+        // Returns:
+        //     string: The reason, as the end of a sentence.
+        public static string RefusalReason(string code)
+        {
+            switch (code)
+            {
+                case "STALE_REVISION":
+                    return "the situation changed after it was chosen. Refresh and choose again.";
+                case "INVALID_REFERENCE":
+                    return "what it refers to no longer exists, for example an incident that has closed.";
+                case "INVALID_TRANSITION":
+                    return "the session can't do that in its current state.";
+                case "INVALID_PAYLOAD":
+                    return "the request was incomplete.";
+                case "ROLE_DENIED":
+                    return "this account isn't allowed to do that.";
+                case "SESSION_CLOSED":
+                    return "the session has ended.";
+                case "NO_FEASIBLE_ROUTE":
+                    return "no route reaches the destination.";
+                default:
+                    return $"reason {code ?? "not given"}.";
             }
         }
 

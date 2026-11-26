@@ -43,6 +43,8 @@ Shader "Formula9/CityRoadTexture"
             float4 _AsphaltLightDirection;
             float _UseAsphaltMaps;
             float _VaryAsphaltTiling;
+            // DayCycle's night: 0 by day, nearer 1 as the unlit ground darkens
+            float4 _Formula9GroundDim;
             float4 _Color;
             float _UseRoadAtlas;
             float _UseMappedDividers;
@@ -253,27 +255,22 @@ Shader "Formula9/CityRoadTexture"
                 dash = lerp(dash, finalDash, useFinalDash);
 
                 float2 footprint = clamp(fwidth(i.barDistances) * 0.5, 0.005, 0.5);
-                float stopBar = max(lowIncoming * Coverage(i.barDistances.x, 0.15, footprint.x),
-                    highIncoming * Coverage(i.barDistances.y, 0.15, footprint.y));
-                // Negative lane count identifies a shared two-way carriageway.
-                float centreDistance = i.lane.x - i.lane.w * 0.5;
-                float centreFootprint = clamp(fwidth(centreDistance) * 0.5, 0.005, 0.5);
-                // Ordinary segment ends only shorten the dashes.
-                // The solid separator runs to the end of the paved strip.
-                float centreLimit = step(i.paintBounds.x, i.paintBounds.y) *
-                    lerp(1.0, step(0.0, lowCutoff), step(0.5, i.paintBounds.z)) *
-                    lerp(1.0, step(0.0, highCutoff), step(0.5, i.paintBounds.w));
-                float mappedDividers = step(0.5, _UseMappedDividers);
-                float twoWay = step(0.5, -i.lane.z);
-                dividerCoverage *= 1.0 - mappedDividers * twoWay *
-                    (1.0 - step(0.5, abs(divider - laneCount * 0.5)));
-                float centreLine = (1.0 - mappedDividers) * twoWay * centreLimit *
-                    Coverage(centreDistance, 0.15, centreFootprint);
-                float paint = step(1.0, laneCount) *
-                    max(stopBar, max(dividerCoverage * dash * withinStrip, centreLine));
-                float3 colour = saturate(asphalt * _Color.rgb);
-                return fixed4(lerp(colour, float3(1.0, 1.0, 1.0), paint), 1.0);
-            }
+float stopBar = max(
+    lowIncoming * Coverage(i.barDistances.x, 0.15, footprint.x),
+    highIncoming * Coverage(i.barDistances.y, 0.15, footprint.y)
+);
+
+float mappedDividers = step(0.5, _UseMappedDividers);
+float twoWay = step(0.5, -i.lane.z);
+dividerCoverage *= 1.0 - mappedDividers * twoWay *
+    (1.0 - step(0.5, abs(divider - laneCount * 0.5)));
+
+float paint = step(1.0, laneCount) *
+    max(stopBar, dividerCoverage * dash * withinStrip);
+
+float3 asphaltRGB = saturate(asphalt * _Color.rgb);
+float3 roadRGB = lerp(asphaltRGB, float3(1.0, 1.0, 1.0), paint);
+return fixed4(roadRGB * (1.0 - _Formula9GroundDim.rgb), 1.0);           }
             ENDCG
         }
     }

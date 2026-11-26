@@ -41,6 +41,9 @@ Shader "Formula9/CityRoadAsh"
             float4 _SurveyMaskBounds;
             struct appdata { float4 vertex : POSITION; float2 uv : TEXCOORD0; float4 lane : TEXCOORD1; float4 paintBounds : TEXCOORD2; float2 barDistances : TEXCOORD3; };
             struct v2f { float4 pos : SV_POSITION; float2 cityXZ : TEXCOORD4; float2 uv : TEXCOORD0; float4 lane : TEXCOORD1; float4 paintBounds : TEXCOORD2; float2 barDistances : TEXCOORD3; };
+            // DayCycle's night: 0 by day, nearer 1 as the unlit ground darkens
+            float4 _Formula9GroundDim;
+         
             v2f vert(appdata v)
             {
                 v2f o;
@@ -61,8 +64,9 @@ Shader "Formula9/CityRoadAsh"
 
             fixed4 frag(v2f i) : SV_Target
             {
-                fixed4 asphalt = tex2D(_MainTex, i.uv) * _Color;
-                return asphalt;
+                fixed4 color = tex2D(_MainTex, i.uv) * _Color;
+                color.rgb *= 1 - _Formula9GroundDim.rgb;
+                return color;
             }
             ENDCG
         }

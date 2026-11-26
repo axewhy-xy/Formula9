@@ -25,10 +25,14 @@ namespace Formula9.UI
         private readonly DropdownField shuttles;
         private readonly Dictionary<string, string> shuttleByChoice = new Dictionary<string, string>();
         private readonly VisualElement routePending, routePendingItems;
-        private readonly Label routePendingTitle, routeBadge;
+        private readonly Label routePendingTitle, routeName;
+        // A TextElement, not a Label: the sidebar's rules for its names (.nav-item Label) hide and fade
+        // every Label in a nav item as it collapses and opens, and must never reach the badge
+        private readonly TextElement routeBadge;
+        private readonly VisualElement navPanel;
         private readonly TextField routeReason;
         private readonly Label routeProblem, routeOptionsExpiry, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes;
-        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowProblem, routeCameras, fleetCameras, approve, routeStart, routeWatch;
+        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowProblem, routeReload, routeCameras, viewCameras, approve, routeStart, routeWatch;
         private readonly VisualElement routeStages, routeWaypoints, routeIssues, routeMetrics, routeDecide, routeFeedback, routeApply, routeOutcomePanel, routeOutcomeRows, fleetTable;
         private readonly List<VisualElement> operationalViews;
         private readonly ChargingPage charging;
@@ -39,7 +43,6 @@ namespace Formula9.UI
         private readonly Button sessionToggle;
         private readonly VisualElement sessionCard;
         private bool? sessionToolsOpen;
-        private string sessionToolsState;
         private readonly List<List<RouteWaypoint>> draftHistory = new List<List<RouteWaypoint>> { new List<RouteWaypoint>() };
         private List<RouteWaypoint> draft = new List<RouteWaypoint>();
         private int historyIndex;
@@ -49,6 +52,8 @@ namespace Formula9.UI
         // answer, and the shuttles that were waiting for a decision at the last snapshot.
         private string selectedVehicle, route, selectedDetour, pendingSeen, pendingStrip;
         private bool routeBusy, reloadContext, previewQueued, suggesting, outcomeBusy;
+        // The last load of the route's road graph failed in a way another try may fix
+        private bool contextFailed;
         private float acceptedAt, outcomeAt;
         private long outcomeSequence = -1;
         private RouteEditorContext context;
@@ -122,8 +127,8 @@ namespace Formula9.UI
                 if (button != null) button.clicked+= () => {ShowPage(index); Render();};
             }
             Bind(root, "follow-selected", () => world.FollowSelected());
-            fleetCameras = Bind(root, "fleet-cameras", ToggleSelectedCameras);
-            Bind(root, "camera-overview", () => world.Overview());
+            // The Cameras segment beside 2D Map and 3D View; 3D View does what Overview did
+            viewCameras = Bind(root, "view-cameras", ToggleSelectedCameras);
             fleetPage = root.Q("fleet-page");
             fleetPanel = root.Q("fleet-panel");
             fleetHeaderBar = fleetPage?.Q(className: "fleet-panel-header");
@@ -139,8 +144,18 @@ namespace Formula9.UI
             routePending = root.Q("route-pending");
             routePendingTitle = root.Q<Label>("route-pending-title");
             routePendingItems = root.Q("route-pending-items");
-            routeBadge = root.Q<Label>("nav-route-badge");
-            Bind(root, "refresh", RequestContext);
+            routeBadge = root.Q<TextElement>("nav-route-badge");
+            // The badge follows the nav item as the sidebar opens and closes: placed on every size change
+            // of the sidebar and the item, and checked again with the buttons every 250 ms in case a
+            // change sends no event (a hidden name sends none)
+            routeName = root.Q<Label>("nav-route-name");
+            navPanel = root.Q("nav-panel");
+            if (routeBadge != null && routeName != null && navPanel != null)
+            {
+                navPanel.RegisterCallback<GeometryChangedEvent>(_ => PlaceRouteBadge());
+                routeBadge.parent.RegisterCallback<GeometryChangedEvent>(_ => PlaceRouteBadge());
+                routeName.RegisterCallback<GeometryChangedEvent>(_ => PlaceRouteBadge());
+            }
             routeCameras = Bind(root, "route-cameras", ToggleCameras);
             routeStages = root.Q("route-stages");
             foreach (var stage in RoutePresenter.Stages) { var chip = new Label(stage); chip.AddToClassList("route-stage"); routeStages.Add(chip); }
@@ -169,6 +184,8 @@ namespace Formula9.UI
             routeClear = Bind(root, "route-cancel", () => { if (!session.HasPendingCommand) { routeReason.value = ""; SetDraft(new List<RouteWaypoint>()); } });
             routeSuggest = Bind(root, "route-suggest", SuggestDetour);
             routeShowProblem = Bind(root, "route-show-problem", ShowProblem);
+            // Shown only while there is no road graph, so it never drops a loaded route or its checked preview
+            routeReload = Bind(root, "route-reload", () => { if (context == null && !routeBusy) RequestContext(); });
             routeOptions = root.Q("route-options");
             routeOptionsTitle = root.Q<Label>("route-options-title");
             routeOptionsHint = root.Q<Label>("route-options-hint");
@@ -203,7 +220,13 @@ namespace Formula9.UI
             root.Q<Button>("reports-tab-assessment").clicked += Render;
             session.SnapshotAccepted += (_, __) => { acceptedAt = Time.realtimeSinceStartup; Render(); };
             session.EventsAccepted += _ => RenderReports();
-            session.AvailabilityChanged += _ => { if (!session.Available) InvalidateRoute(); Render(); };
+            session.AvailabilityChanged += _ =>
+            {
+                if (!session.Available) InvalidateRoute();
+                // Back online after the road graph failed to load (often because the backend was down): load it again
+                else if (contextFailed && context == null && !routeBusy) RequestContext();
+                Render();
+            };
             session.CommandLedgerChanged += outcome =>
             {
                 ledger.RemoveAll(o => o.CommandId == outcome.CommandId); ledger.Add(outcome);
@@ -225,7 +248,7 @@ namespace Formula9.UI
             world.RouteNodeSelected += AppendNode;
             world.RoadClicked += AddRoad;
             world.WaypointClicked += RemoveWaypoint;
-            root.schedule.Execute(UpdateActions).Every(250);
+            root.schedule.Execute(() => { UpdateActions(); PlaceRouteBadge(); }).Every(250);
             ShowPage(FleetPage);
         }
 
@@ -283,8 +306,11 @@ namespace Formula9.UI
             var currentBoundary = s == null ? null : $"{s.SessionId}/{s.SessionEpoch}";
             if (boundary != currentBoundary)
             {
-                sessionToolsOpen = null;
-                boundary = currentBoundary; dependencies = null; context = null; requestGeneration++; approvedDraft = null;
+                // Joining closes the setup panel, except a finished session joined from it: it was picked
+                // to look at or delete, and the session list's trash icons are in that panel
+                var keepTools = sessionToolsOpen == true && TrainingPresenter.IsTerminalSession(s?.Session?.Status);
+                sessionToolsOpen = keepTools ? true : (bool?)null;
+                boundary = currentBoundary; dependencies = null; context = null; requestGeneration++; approvedDraft = null; contextFailed = false;
                 selectedVehicle = route = selectedDetour = pendingSeen = pendingStrip = null;
                 choice = null; choiceCandidate = confirmCommand = optionsNote = null; rerouting = awaitingError = false;
                 // Incident IDs repeat across sessions, so another session's selection would mark the wrong one
@@ -296,12 +322,6 @@ namespace Formula9.UI
                 draft = new List<RouteWaypoint>(); draftHistory.Clear(); draftHistory.Add(new List<RouteWaypoint>()); historyIndex = 0;
                 preview = null; draftView = null; outcome = null; outcomeSequence = -1; suggesting = false;
                 world.SetRouteDraft(null, null, null);
-            }
-            var setupState = s?.Session?.Status;
-            if (sessionToolsState != setupState)
-            {
-                if (TrainingPresenter.IsTerminalSession(setupState)) sessionToolsOpen = null;
-                sessionToolsState = setupState;
             }
             FitSessionControls();
             incidentReports.Render(s);
@@ -352,7 +372,9 @@ namespace Formula9.UI
             Select(tabs[0].Button);
         }
 
-        private bool Current => session.Available && !session.HasPendingCommand && Time.realtimeSinceStartup - acceptedAt <= 5;
+        // Heartbeats confirm unchanged state, but each confirmation still expires after five seconds.
+        private bool Fresh => session.StreamIsFresh || Time.realtimeSinceStartup - acceptedAt <= SessionController.ActionFreshnessLimit.TotalSeconds;
+        private bool Current => session.Available && !session.HasPendingCommand && Fresh;
 
         private void UpdateActions()
         {
@@ -363,8 +385,9 @@ namespace Formula9.UI
             routeUndo.SetEnabled(edit && historyIndex > 0);
             routeRedo.SetEnabled(edit && historyIndex + 1 < draftHistory.Count);
             routeClear.SetEnabled(edit && (draft.Count > 0 || preview != null));
-            approve.SetEnabled(edit && !routeBusy && preview != null && preview.Approvable && DecisionRules.RoutePreviewMatches(s, selectedVehicle, preview) && !string.IsNullOrWhiteSpace(routeReason.value));
-            routeApplyNote.text = RoutePresenter.ApprovalNote(s, preview, routeReason.value);
+            var matches = DecisionRules.RoutePreviewMatches(s, selectedVehicle, preview);
+            approve.SetEnabled(edit && !routeBusy && preview != null && preview.Approvable && matches && !string.IsNullOrWhiteSpace(routeReason.value));
+            routeApplyNote.text = ApprovalBlocker(s, edit, matches) ?? RoutePresenter.ApprovalNote(s, preview, routeReason.value);
             // Any shuttle can be picked, even with others waiting: the operator decides in which order
             shuttles.SetEnabled(!session.HasPendingCommand && !routeBusy);
             var routeClosed = s != null && TrainingPresenter.AssignedRouteIsClosed(s);
@@ -374,9 +397,10 @@ namespace Formula9.UI
             routeCameras.SetEnabled(world.CamerasShown || (world.HasCity && RouteVehicle() != null));
             routeCameras.text = world.CamerasShown ? "Hide cameras" : "Cameras";
             routeCameras.EnableInClassList("segment-selected", world.CamerasShown);
-            fleetCameras.SetEnabled(world.CamerasShown || (world.HasCity && s?.Vehicles.Any(v => v.VehicleId == world.SelectedId) == true));
-            fleetCameras.text = world.CamerasShown ? "Hide cameras" : "Cameras";
-            fleetCameras.EnableInClassList("segment-selected", world.CamerasShown);
+            // Always on the map's bar; greyed out until a shuttle in the 3D city is selected, lit while its
+            // cameras show. Pressed again (or 3D View) closes them.
+            viewCameras.SetEnabled(world.CamerasShown || (world.HasCity && s?.Vehicles.Any(v => v.VehicleId == world.SelectedId) == true));
+            viewCameras.EnableInClassList("segment-selected", world.CamerasShown);
             charging.UpdateActions();
             // UpdateActions can run before the constructor has created the panel, so emergency may still be null
             emergency?.UpdateActions();
@@ -388,13 +412,34 @@ namespace Formula9.UI
             routeConfirmBack.SetEnabled(confirmCommand == null);
             confirmReason.SetEnabled(confirmCommand == null);
             routeRerouteBack.SetEnabled(!session.HasPendingCommand);
-            var hint = optionsNote ?? RoutePresenter.OptionsHint(s, session.Available, session.HasPendingCommand, Time.realtimeSinceStartup - acceptedAt <= 5);
+            var hint = optionsNote ?? RoutePresenter.OptionsHint(s, session.Available, session.HasPendingCommand, Fresh);
             routeOptionsHint.text = hint ?? "";
             routeOptionsHint.style.display = string.IsNullOrEmpty(hint) ? DisplayStyle.None : DisplayStyle.Flex;
             world.RouteEditing = edit;
             // A decision or a lost connection withdraws the verdict but leaves the draft: ask once more.
             if (edit && draft.Count > 0 && preview == null && !routeBusy && approvedDraft == null && checkedRevision != draftRevision && !previewTimer.isActive) SchedulePreview();
             if (draftView != null && draftView.Editable != (edit && shownPage == RoutePage)) ShowDraftInViews();
+        }
+
+        /// <summary>Explain connection, loading and revision checks that prevent route approval.</summary>
+        private string ApprovalBlocker(FullSnapshot snapshot, bool editable, bool matches)
+        {
+            if (snapshot == null) return "Create or join a session before approving a route.";
+            if (!session.Available) return "Waiting for the backend to reconnect before approving.";
+            if (session.HasPendingCommand) return "Waiting for the last command to finish before approving.";
+            if (!Fresh) return "Waiting for a fresh session update. Refresh the current session to try again.";
+            if (TrainingPresenter.IsTerminalSession(snapshot.Session.Status)) return "This session has ended. Create or join a live session to edit a route.";
+            if (selectedVehicle == null || snapshot.Vehicles.All(v => v.VehicleId != selectedVehicle)) return "Select a shuttle to plan its route.";
+            if (snapshot.Session.Status == "PAUSED") return "The session is paused. Resume it before changing routes.";
+            if (snapshot.Session.Status != "READY" && !rerouting)
+                return DecisionRules.ReroutableRoute(snapshot, selectedVehicle) == null
+                    ? "No reroute is currently offered for this shuttle."
+                    : "Choose Re-route to edit this shuttle's route.";
+            if (routeBusy) return context == null ? "Loading the roads for this route…" : "Checking the route…";
+            if (context == null) return "The road network is unavailable. Refresh the current session to reload it.";
+            if (!editable) return "The reroute offer is no longer available. Choose a current option.";
+            if (preview?.Approvable == true && !matches) return "The session changed after this route was checked. Suggest a detour or check the draft again.";
+            return null;
         }
 
         private bool Editable(FullSnapshot s) => Current && context != null &&
@@ -517,14 +562,40 @@ namespace Formula9.UI
             }
         }
 
+        // Expanded, the badge sits at the top right of the name's last letter; while the sidebar is still
+        // opening, the name runs past the item's edge and is clipped, so the badge stops at that edge
+        // instead of being clipped with it. Collapsed, the stylesheet puts it in the icon's corner.
+        private void PlaceRouteBadge()
+        {
+            if (routeBadge == null || routeName == null || navPanel == null) return;
+            var button = routeBadge.parent;
+            var width = float.IsNaN(routeBadge.layout.width) ? 16 : Mathf.Max(16, routeBadge.layout.width);
+            var atEdge = button.layout.width - width - 6;
+            if (float.IsNaN(atEdge)) return;
+            float left, top;
+            // The sidebar's own class says whether it is collapsed: the name's style or layout can lag behind it.
+            // Collapsed, the icon's top-right corner; both states are placed here, so no stylesheet rule can move it.
+            if (navPanel.ClassListContains("collapsed")) { left = atEdge + 4; top = 2; }
+            else
+            {
+                // Before the name is laid out it has no width yet; the edge keeps the badge in view meanwhile
+                var named = routeName.resolvedStyle.display != DisplayStyle.None && routeName.layout.width > 0 && !float.IsNaN(routeName.layout.xMax);
+                left = named ? Mathf.Min(routeName.layout.xMax - 4, atEdge) : atEdge;
+                top = named ? routeName.layout.yMin - 8 : 4;
+            }
+            left = Mathf.Max(0, left); top = Mathf.Max(0, top);
+            if (routeBadge.style.left.keyword != StyleKeyword.Undefined || Math.Abs(routeBadge.style.left.value.value - left) > 0.5f) routeBadge.style.left = left;
+            if (routeBadge.style.top.keyword != StyleKeyword.Undefined || Math.Abs(routeBadge.style.top.value.value - top) > 0.5f) routeBadge.style.top = top;
+        }
+
         // How many shuttles need a decision, on the Route Planning nav item; nothing when none do.
         private void RenderBadge(int shuttles)
         {
             if (routeBadge == null) return;
             var text = shuttles.ToString();
             if (routeBadge.text != text) routeBadge.text = text;
-            // Shown, the stylesheet decides: it keeps the badge when the nav panel collapses
-            routeBadge.style.display = shuttles > 0 ? new StyleEnum<DisplayStyle>(StyleKeyword.Null) : new StyleEnum<DisplayStyle>(DisplayStyle.None);
+            // Shown or hidden here only, collapsed or not; the sidebar's styles never decide it
+            routeBadge.style.display = shuttles > 0 ? DisplayStyle.Flex : DisplayStyle.None;
             var hint = shuttles == 0 ? "Route Planning" : shuttles == 1 ? "Route Planning: 1 shuttle needs a decision" : $"Route Planning: {shuttles} shuttles need a decision";
             var button = routeBadge.parent;
             if (button != null && button.tooltip != hint) button.tooltip = hint;
@@ -562,9 +633,18 @@ namespace Formula9.UI
 
         private void RequestContext()
         {
-            requestGeneration++; reloadContext = true;
-            context = null; InvalidateRoute();
+            requestGeneration++; reloadContext = true; contextFailed = false;
+            context = null; InvalidateRoute(); ShowRouteReload();
             if (!routeBusy) run(LoadContext());
+        }
+
+        // Reload the route is offered only after a failed load, while no road graph is loaded
+        private void ShowRouteReload()
+        {
+            if (routeReload == null) return;
+            var shown = contextFailed && context == null && !string.IsNullOrEmpty(route);
+            routeReload.style.display = shown ? DisplayStyle.Flex : DisplayStyle.None;
+            routeReload.SetEnabled(!routeBusy);
         }
 
         private async Task LoadContext()
@@ -576,13 +656,15 @@ namespace Formula9.UI
             var asked = route;
             var stamp = DecisionRules.RouteDependencies(s, asked);
             context = null; InvalidateRoute(); routeBusy = true; UpdateActions();
+            // Stays true unless the graph loads or the route has none to load
+            var failed = true;
             try
             {
                 var result = await api.GetRouteEditorAsync(s.SessionId, asked);
                 if (generation != requestGeneration || stamp != DecisionRules.RouteDependencies(session.Store.Snapshot, route)) return;
                 if (result.SessionEpoch != s.SessionEpoch || result.SceneRevision != s.SceneRevision || result.RouteRevision != s.Routes.Single(r => r.RouteId == asked).Revision)
-                    throw new ContractException("Route graph is stale; refresh it.");
-                context = result; dependencies = stamp;
+                    throw new ContractException("Route graph is stale; press Reload the route on Route Planning.");
+                context = result; dependencies = stamp; failed = false;
                 routeAssumptions.text = string.Join("\n", result.Assumptions);
                 ShowDraftInViews();
                 RenderExercise(session.Store.Snapshot);
@@ -593,9 +675,16 @@ namespace Formula9.UI
             // as the Qt editor does, rather than raising it.
             catch (BackendErrorException error) when (error.Error.Code == "INVALID_REFERENCE")
             {
+                failed = false;
                 if (generation == requestGeneration) routeProblem.text = $"{asked} can't be edited in this scenario: {error.Error.Message}.";
             }
-            finally { routeBusy = false; UpdateActions(); if (reloadContext) run(LoadContext()); }
+            finally
+            {
+                routeBusy = false;
+                if (generation == requestGeneration) contextFailed = failed;
+                UpdateActions(); ShowRouteReload();
+                if (reloadContext) run(LoadContext());
+            }
         }
 
         private void SchedulePreview()
@@ -681,7 +770,7 @@ namespace Formula9.UI
             UpdateActions();
         }
 
-        // The Cameras button on Fleet Overview: the selected shuttle's cameras, or back to 3D.
+        // The Cameras segment on the map's bar: the selected shuttle's cameras, or back to 3D.
         private void ToggleSelectedCameras()
         {
             if (world.CamerasShown) CloseCameras();
@@ -782,6 +871,7 @@ namespace Formula9.UI
             routeProblem.text = RoutePresenter.Problem(context, s, selectedVehicle);
             var incident = RoutePresenter.ProblemIncidents(s, selectedVehicle).Count > 0;
             routeShowProblem.style.display = incident || (context != null && context.Edges.Any(e => e.Closed)) ? DisplayStyle.Flex : DisplayStyle.None;
+            ShowRouteReload();
             var expiry = RoutePresenter.OptionsExpiry(s, selectedVehicle);
             routeOptionsExpiry.text = expiry ?? "";
             routeOptionsExpiry.style.display = expiry == null ? DisplayStyle.None : DisplayStyle.Flex;
@@ -1027,7 +1117,6 @@ namespace Formula9.UI
             FillMetrics(routeOutcomeRows, RoutePresenter.OutcomeRows(outcome));
             routeOutcomeNotes.text = outcome == null ? "" : string.Join("\n", outcome.Summary);
             world.SetServedStops(outcome == null ? (IReadOnlyCollection<string>)Array.Empty<string>() : outcome.Stops.Where(stop => stop.ServedThisLoop).Select(stop => stop.StopId).ToList());
-            world.SetExecutionStatus(RoutePresenter.ExecutionLine(s, outcome));
         }
 
         private void RenderReports() => reports.Render(session.Store.SelectedSessionId, session.Store.Events, ledger);
@@ -1038,14 +1127,15 @@ namespace Formula9.UI
             FitSessionControls();
         }
 
-        // Finished attempts reopen setup; Charging keeps its one-screen layout while tools are closed.
+        // Setup opens only from Create/join training session, and closes again on joining or leaving
+        // a session; Charging keeps its one-screen layout while tools are closed.
         private void FitSessionControls()
         {
             var setup = TrainingPresenter.SessionSetup(session.Store.Snapshot, shownPage == ChargingPageIndex, sessionToolsOpen);
             sessionToggle.style.display = setup.ToggleVisible ? DisplayStyle.Flex : DisplayStyle.None;
             sessionCard.EnableInClassList("session-tools-hidden", !setup.ToolsVisible);
             sessionCard.EnableInClassList("session-compact", setup.Compact);
-            sessionToggle.text = setup.ToolsVisible ? "Hide session options" : "Session options";
+            sessionToggle.EnableInClassList("session-toggle-open", setup.ToolsVisible);
         }
 
         private void ShowPage(int index)

@@ -4,7 +4,7 @@
  * Author: Choo Jian Wei
  * Contributors: Lau Xiang Yang (session retention and cleanup, waiting for the bundled backend)
  * Date Created: 30/10/2026
- * Last Modified: 10/11/2026
+ * Last Modified: 26/11/2026
  *
  * Description:
  *     Part of the Unity client's backend layer. AuthClient logs in against the team's shared
@@ -529,7 +529,11 @@ namespace Formula9.Backend
             CancellationToken cancellation = default)
         {
             RequireId(idempotencyKey, nameof(idempotencyKey));
-            var body = ContractParser.Serialize(request);
+            var document = (JObject)ContractParser.ReadJson(ContractParser.Serialize(request));
+            // An unnamed session sends no name at all, as before sessions had names, so a backend
+            // without them (which forbids unknown fields) still accepts it.
+            if (document["name"]?.Type == JTokenType.Null) document.Remove("name");
+            var body = document.ToString(Formatting.None);
             return ContractParser.Parse<TrainingSession>(await SendTrainingAsync("POST", "", body, cancellation,
                 http => http.Headers["Idempotency-Key"] = idempotencyKey));
         }

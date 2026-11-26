@@ -149,7 +149,8 @@ namespace Formula9.Tests
             Assert.AreEqual(DisplayStyle.None, Panel().style.display.value, "camera view hidden");
             Assert.IsFalse(view.CamerasShown);
             var labels = Tiles().Select(t => t.Q<Label>().text).ToArray();
-            CollectionAssert.AreEqual(Names, labels, "one labelled thumbnail per camera, in order");
+            // The thumbnail of the camera shown large says so
+            CollectionAssert.AreEqual(new[] { "Front · showing", "Rear", "Left", "Right" }, labels, "one labelled thumbnail per camera, in order");
             Assert.AreEqual("Front", MainLabel().text, "the front camera is shown large first");
             Assert.IsTrue(Tiles()[0].ClassListContains("camera-tile-selected"), "and its thumbnail is marked");
             Assert.IsTrue(Cams().All(c => !c.enabled), "cameras off while nobody watches");

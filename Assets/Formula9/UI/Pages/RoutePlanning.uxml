@@ -29,6 +29,8 @@
                 <ui:Label name="route-problem" text="Join a session to see its routes." class="route-card-text" />
                 <ui:VisualElement class="route-problem-actions">
                     <ui:Button name="route-show-problem" text="Show on map" class="route-link" />
+                    <!-- Only after the route's road graph failed to load; TrainingWorkspace shows it -->
+                    <ui:Button name="route-reload" text="Reload the route" class="route-link" style="display: none;" />
                     <ui:Label name="route-options-expiry" class="route-options-expiry" />
                 </ui:VisualElement>
             </ui:VisualElement>

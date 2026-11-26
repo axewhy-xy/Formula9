@@ -124,6 +124,7 @@ namespace Formula9.World
             ? "LTA" : "mapped";
         public Bounds Bounds { get; private set; }
         public string IncidentStatus => incidents.Status;
+        public FleetVehicle IncidentSlowing(string incidentId) => incidents.SlowedBy(incidentId);
 
         // The city can be opened with the legacy two-argument constructor, the
         // LTA transit client, the traffic-light prefab, or both dependencies.

@@ -27,10 +27,163 @@ namespace Formula9.Tests
             public Task<HttpResponse> SendAsync(HttpRequest request, CancellationToken cancellation = default) => Reply(request);
         }
 
+        // Ready assessments can wait without a new snapshot while their stream sends heartbeats.
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task ReadyAssessmentRoutingRemainsUsableWithHeartbeatsOrSuccessfulPolling(bool streaming)
+        {
+            var raw = Fixture("snapshot");
+            raw["session"]["status"] = "READY";
+            raw["scenario"]["assessment_duration_s"] = 120;
+            raw["disruptions"] = new JArray();
+            var routeId = (string)raw["routes"][0]["route_id"];
+            var context = Fixture("route_editor_context");
+            context["route_id"] = routeId;
+            context["route_revision"] = raw["routes"][0]["revision"].DeepClone();
+            var checkedRoute = Fixture("route_edit_preview");
+            checkedRoute["route_id"] = routeId;
+            checkedRoute["route_revision"] = context["route_revision"].DeepClone();
+            checkedRoute["closure_revisions"] = new JObject();
+            var snapshotRequests = 0;
+            var failPoll = false;
+            var backend = new Backend();
+            backend.Reply = request =>
+            {
+                var path = request.Url.AbsolutePath;
+                if (path.EndsWith("/snapshot"))
+                {
+                    snapshotRequests++;
+                    return Task.FromResult(failPoll ? new HttpResponse { Failure = HttpFailure.Incomplete } :
+                        new HttpResponse { Status = 200, Body = raw.ToString() });
+                }
+                if (path.EndsWith("/editor")) return Task.FromResult(new HttpResponse { Status = 200, Body = context.ToString() });
+                if (path.EndsWith("/route-previews"))
+                {
+                    checkedRoute["preview_revision"] = JObject.Parse(request.Body)["draft_revision"].DeepClone();
+                    return Task.FromResult(new HttpResponse { Status = 200, Body = checkedRoute.ToString() });
+                }
+                if (path.EndsWith("/events"))
+                {
+                    var replay = Fixture("event_replay");
+                    replay["events"] = new JArray(); replay["has_more"] = false;
+                    replay["after_sequence"] = raw["event_sequence"].DeepClone();
+                    replay["next_sequence"] = raw["event_sequence"].DeepClone();
+                    return Task.FromResult(new HttpResponse { Status = 200, Body = replay.ToString() });
+                }
+                return Task.FromResult(new HttpResponse { Failure = HttpFailure.Incomplete });
+            };
+            var auth = new AuthSession(); auth.Begin("trainee", "token", 3600);
+            var api = new TrainingApi(backend, auth, new Uri("http://backend.test"));
+            var socket = new SessionControllerTests.FakeStreamSocket();
+            api.StreamSockets = () => socket;
+            var clock = DateTime.UtcNow;
+            var session = new SessionController(api, auth, now: () => clock) { UseStream = streaming };
+            var root = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/Formula9/UI/Formula9App.uxml").CloneTree();
+            var rig = new GameObject("Ready assessment routing test");
+            var world = rig.AddComponent<WorldView>();
+            var errors = new List<Exception>();
+            async void Run(Task task) { try { await task; } catch (Exception error) { errors.Add(error); } }
+            try
+            {
+                world.Attach(root.Q("world"), new SceneLoader(backend, new Uri("http://backend.test")));
+                var workspace = new TrainingWorkspace(root, api, session, world, Run, _ => { });
+                var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+                void Update() => typeof(TrainingWorkspace).GetMethod("UpdateActions", flags).Invoke(workspace, null);
+                void AgeSnapshot() => typeof(TrainingWorkspace).GetField("acceptedAt", flags).SetValue(workspace, Time.realtimeSinceStartup - 10);
+                await session.JoinAsync((string)raw["session_id"]);
+                if (streaming)
+                {
+                    session.PumpStream(false);
+                    socket.Push(new JObject { ["type"] = "snapshot", ["session_id"] = raw["session_id"], ["snapshot"] = raw.DeepClone() }.ToString());
+                    session.PumpStream(false);
+                    clock += TimeSpan.FromSeconds(10);
+                    socket.Push(new JObject { ["type"] = "heartbeat", ["session_id"] = raw["session_id"] }.ToString());
+                    session.PumpStream(false);
+                    Assert.IsTrue(session.Streaming);
+                }
+                AgeSnapshot(); Update();
+                var suggest = root.Q<Button>("route-suggest");
+                Assert.AreEqual(streaming, suggest.enabledSelf, "A live stream keeps the unchanged Ready snapshot current.");
+                var polled = snapshotRequests;
+                await session.RefreshAsync();
+                Assert.AreEqual(polled + (streaming ? 0 : 1), snapshotRequests);
+                Assert.IsTrue(suggest.enabledSelf, string.Join("; ", errors.Select(e => e.Message)));
+                Assert.IsTrue(root.Q<Button>("route-start").enabledSelf);
+                typeof(TrainingWorkspace).GetMethod("SuggestDetour", flags).Invoke(workspace, null);
+                root.Q<TextField>("route-reason").value = "Use the checked detour";
+                Update();
+                var approve = root.Q<Button>("route-approve");
+                Assert.IsTrue(approve.enabledSelf, root.Q<Label>("route-apply-note").text);
+                AgeSnapshot(); Update();
+                Assert.AreEqual(streaming, approve.enabledSelf);
+                if (!streaming)
+                {
+                    StringAssert.Contains("fresh session update", root.Q<Label>("route-apply-note").text);
+                    await session.RefreshAsync();
+                    Assert.IsTrue(approve.enabledSelf);
+                }
+                var preview = (RouteEditPreview)typeof(TrainingWorkspace).GetField("preview", flags).GetValue(workspace);
+                preview.RouteRevision++; Update();
+                Assert.IsFalse(approve.enabledSelf, "A heartbeat never authorizes an outdated route preview.");
+                StringAssert.Contains("session changed", root.Q<Label>("route-apply-note").text);
+                preview.RouteRevision--; preview.Approvable = false; Update();
+                StringAssert.StartsWith("Fix the problems", root.Q<Label>("route-apply-note").text);
+                preview.Approvable = true;
+                root.Q<TextField>("route-reason").value = ""; Update();
+                Assert.IsFalse(approve.enabledSelf);
+                StringAssert.StartsWith("Say why", root.Q<Label>("route-apply-note").text);
+                root.Q<TextField>("route-reason").value = "Use the checked detour";
+                if (streaming)
+                {
+                    clock += SessionController.ActionFreshnessLimit + TimeSpan.FromMilliseconds(1);
+                    AgeSnapshot(); Update();
+                    Assert.IsTrue(session.Streaming);
+                    Assert.IsFalse(suggest.enabledSelf, "A connected socket cannot keep old state actionable.");
+                    Assert.IsFalse(approve.enabledSelf);
+                    StringAssert.Contains("fresh session update", root.Q<Label>("route-apply-note").text);
+                    socket.Push(new JObject { ["type"] = "heartbeat", ["session_id"] = raw["session_id"] }.ToString());
+                    session.PumpStream(false); Update();
+                    Assert.IsTrue(approve.enabledSelf, "A new heartbeat confirms the unchanged Ready state.");
+                }
+                var selected = typeof(TrainingWorkspace).GetField("selectedVehicle", flags);
+                var originalVehicle = selected.GetValue(workspace);
+                selected.SetValue(workspace, null); Update();
+                StringAssert.StartsWith("Select a shuttle", root.Q<Label>("route-apply-note").text);
+                selected.SetValue(workspace, originalVehicle);
+                var state = session.Store.Snapshot;
+                state.Session.Status = "PAUSED"; Update();
+                StringAssert.Contains("Resume", root.Q<Label>("route-apply-note").text);
+                state.Session.Status = "RUNNING";
+                var candidates = state.Candidates.ToList(); state.Candidates.Clear(); Update();
+                StringAssert.StartsWith("No reroute is currently offered", root.Q<Label>("route-apply-note").text);
+                typeof(TrainingWorkspace).GetField("rerouting", flags).SetValue(workspace, true); Update();
+                StringAssert.StartsWith("The reroute offer is no longer available", root.Q<Label>("route-apply-note").text);
+                typeof(TrainingWorkspace).GetField("rerouting", flags).SetValue(workspace, false);
+                state.Candidates.AddRange(candidates); state.Session.Status = "READY"; Update();
+                if (streaming)
+                {
+                    clock += SessionController.StreamSilenceLimit + TimeSpan.FromSeconds(1);
+                    session.PumpStream(false);
+                    Assert.IsFalse(session.Streaming);
+                    Assert.IsTrue(socket.Disposed);
+                    Assert.AreEqual(polled + 1, snapshotRequests, "A silent stream hands control back to polling.");
+                    Assert.IsTrue(approve.enabledSelf, "The successful fallback poll restores route actions.");
+                }
+                failPoll = true;
+                await session.RefreshAsync();
+                Assert.IsFalse(suggest.enabledSelf);
+                Assert.IsFalse(approve.enabledSelf);
+                Assert.IsFalse(root.Q<Button>("route-start").enabledSelf);
+                StringAssert.Contains("reconnect", root.Q<Label>("route-apply-note").text);
+                Assert.IsEmpty(errors);
+            }
+            finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
+        }
+
         [TestCase("ARCHIVED")]
         [TestCase("COMPLETED")]
         [TestCase("FAILED")]
-        public async Task ChargingFoldsTheStatusBarAndFinishedAttemptsReopenSetup(string terminalState)
+        public async Task ChargingFoldsTheStatusBarAndSetupOpensOnlyFromItsButton(string terminalState)
         {
             var raw = Fixture("snapshot"); raw["session"]["status"] = "RUNNING";
             var context = Fixture("route_editor_context");
@@ -59,14 +212,16 @@ namespace Formula9.Tests
                 world.Attach(root.Q("world"), new SceneLoader(backend, new Uri("http://backend.test")));
                 var workspace = new TrainingWorkspace(root, api, session, world, Run, _ => { });
                 var card = root.Q("content-card");
+                var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+                var toggle = typeof(TrainingWorkspace).GetMethod("ToggleSessionTools", flags);
+                Assert.IsTrue(card.ClassListContains("session-tools-hidden"), "closed until Create/join training session opens it");
+                toggle.Invoke(workspace, null);
                 Assert.IsFalse(card.ClassListContains("session-tools-hidden"));
                 await session.JoinAsync((string)raw["session_id"]);
-                Assert.IsTrue(card.ClassListContains("session-tools-hidden"));
+                Assert.IsTrue(card.ClassListContains("session-tools-hidden"), "joining closes it again");
                 Assert.IsFalse(card.ClassListContains("session-compact"), "Fleet keeps its status bar");
-                var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
                 typeof(TrainingWorkspace).GetMethod("ShowPage", flags).Invoke(workspace, new object[] { 2 });
                 Assert.IsTrue(card.ClassListContains("session-compact"), "Charging folds the extra status row and header spacing");
-                var toggle = typeof(TrainingWorkspace).GetMethod("ToggleSessionTools", flags);
                 toggle.Invoke(workspace, null);
                 Assert.IsFalse(card.ClassListContains("session-tools-hidden"));
                 Assert.IsFalse(card.ClassListContains("session-compact"));
@@ -75,8 +230,9 @@ namespace Formula9.Tests
                 raw["session"]["status"] = terminalState;
                 raw["snapshot_id"] = Guid.NewGuid().ToString();
                 await session.RefreshAsync();
-                Assert.IsFalse(card.ClassListContains("session-tools-hidden"), "Create and Join must reappear when the attempt ends");
-                Assert.IsFalse(card.ClassListContains("session-compact"));
+                Assert.IsTrue(card.ClassListContains("session-tools-hidden"), "an ended attempt leaves setup closed; its button stays");
+                Assert.IsTrue(card.ClassListContains("session-compact"));
+                Assert.AreEqual(DisplayStyle.Flex, root.Q<Button>("session-toggle").style.display.value);
                 Assert.IsEmpty(errors);
             }
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
@@ -277,7 +433,7 @@ namespace Formula9.Tests
                 world.Attach(root.Q("world"), new SceneLoader(backend, url), null, null, new CityClient(backend, url));
                 var notices = new List<string>();
                 var workspace = new TrainingWorkspace(root, api, session, world, _ => { }, message => notices.Add(message));
-                var toggle = root.Q<Button>("fleet-cameras");
+                var toggle = root.Q<Button>("view-cameras");
                 var press = typeof(TrainingWorkspace).GetMethod("ToggleSelectedCameras", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 var choose = typeof(TrainingWorkspace).GetMethod("ChooseShuttle", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 var picker = root.Q<DropdownField>("shuttles");
@@ -298,7 +454,7 @@ namespace Formula9.Tests
                 StringAssert.EndsWith("● needs a decision", picker.value);
                 CollectionAssert.AreEqual(new[] { "● Shuttle 01 · ~8 s" }, Strip());
                 Assert.AreEqual("Needs a decision (1)", root.Q<Label>("route-pending-title").text);
-                var badge = root.Q<Label>("nav-route-badge");
+                var badge = root.Q<TextElement>("nav-route-badge");
                 Assert.AreEqual("1", badge.text, "the Route Planning nav item counts the shuttles waiting");
                 Assert.AreNotEqual(DisplayStyle.None, badge.style.display.value);
 
@@ -328,7 +484,7 @@ namespace Formula9.Tests
                 Assert.IsTrue(Shown("page-fleet"), "the page stays");
                 Assert.IsTrue(world.CamerasShown, "still watching");
                 Assert.AreEqual("shuttle-04", world.WatchedId, "still watching the shuttle they chose");
-                Assert.AreEqual("Hide cameras", toggle.text);
+                Assert.IsTrue(toggle.ClassListContains("segment-selected"), "the map bar's Cameras segment is lit while they show");
 
                 // Mid-draft the panel never moves
                 choose.Invoke(workspace, new object[] { "shuttle-04" });
@@ -682,6 +838,35 @@ namespace Formula9.Tests
         }
 
         private sealed class IncidentsWindow : EditorWindow { }
+
+        [Test]
+        public void DisablingTheAppCancelsItsScheduledAssessmentNotice()
+        {
+            var window = ScriptableObject.CreateInstance<IncidentsWindow>();
+            var rig = new GameObject("Assessment notice cleanup test");
+            rig.SetActive(false);
+            var app = rig.AddComponent<Formula9App>();
+            var label = new Label();
+            var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+            try
+            {
+                window.ShowUtility();
+                window.rootVisualElement.Add(label);
+                var item = label.schedule.Execute(() => Assert.Fail("A disabled app must not run its pending notice callback.")).StartingIn(5000);
+                typeof(Formula9App).GetField("assessmentEndNoticeExpiry", flags).SetValue(app, item);
+                Assert.IsTrue(item.isActive);
+                typeof(Formula9App).GetMethod("OnDisable", flags).Invoke(app, null);
+                Assert.IsFalse(item.isActive);
+                Assert.IsNull(typeof(Formula9App).GetField("assessmentEndNoticeExpiry", flags).GetValue(app));
+                UnityEngine.Object.DestroyImmediate(rig);
+                Assert.IsFalse(item.isActive, "Destroying the owner cannot leave its callback queued on the surviving panel.");
+            }
+            finally
+            {
+                if (rig != null) UnityEngine.Object.DestroyImmediate(rig);
+                window.Close();
+            }
+        }
 
         // The app on a real panel, so value-change and click events reach their callbacks. The
         // session has incident-2 beside incident-1, and answers History and Debrief through Report.
