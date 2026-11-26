@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -37,6 +38,9 @@ namespace Formula9.World
         // Bus stop names in a darker shade of the bus stop icon's blue, to read on white
         private static readonly Color BusStopText = new Color(0.067f, 0.302f, 0.635f);
         private const float BusStopIconSize = 14;
+        // Where routes share a road, the distance in points between their lanes: the 6 point width of a
+        // route line, so the lanes sit edge to edge
+        private const float RouteLaneSpacing = 6;
         private static readonly Color DotOutline = new Color(0.118f, 0.157f, 0.176f);
         private static readonly Color Frozen = new Color(0.627f, 0.627f, 0.627f);
         public static Color FrozenColor => Frozen;
@@ -665,6 +669,9 @@ namespace Formula9.World
                 // (which left a notch at each join).
                 var open = new List<(Vector2[] Path, Color Outline, Color Middle)>();
                 var closed = new List<Vector2[]>();
+                // Open pieces before they are placed: where routes share a road piece, each gets its own lane
+                // beside the others, so every colour shows rather than the last one drawn
+                var pieces = new List<(Vector2[] Path, string Key, bool Reversed, string RouteId, bool Driven, Color Outline, Color Middle)>();
                 // While editing, only the route being edited: the rest of the fleet would hide the roads
                 foreach (var route in snapshot.Routes.Where(r => draft == null || r.RouteId == draft.Context.RouteId))
                 {
@@ -679,8 +686,24 @@ namespace Formula9.World
                     {
                         var path = route.EdgePathsM[i].Select(p => Project(p.XM, p.YM)).ToArray();
                         if (i < route.DirectedEdgeIds.Count && closures.Contains(route.DirectedEdgeIds[i])) closed.Add(path);
-                        else open.Add((path, outline, routeColor));
+                        else
+                        {
+                            var (key, reversed) = PieceKey(route.EdgePathsM[i]);
+                            pieces.Add((path, key, reversed, route.RouteId, driven, outline, routeColor));
+                        }
                     }
+                }
+                // Only routes a shuttle drives get lanes. The rest stay in the middle of the road, drawn first, so
+                // the shuttles' lanes cover them as before rather than being pushed aside by them.
+                var sharing = pieces.Where(p => p.Driven).GroupBy(p => p.Key).ToDictionary(g => g.Key, g => g.Select(p => p.RouteId).Distinct().ToList());
+                foreach (var piece in pieces.Where(p => !p.Driven)) open.Add((piece.Path, piece.Outline, piece.Middle));
+                foreach (var piece in pieces.Where(p => p.Driven))
+                {
+                    var routes = sharing[piece.Key];
+                    // Lanes centred on the road; a piece driven the other way is shifted the other way, so
+                    // each route keeps the same side of the road whichever way it runs
+                    var shift = (routes.IndexOf(piece.RouteId) - (routes.Count - 1) / 2f) * RouteLaneSpacing;
+                    open.Add((Offset(piece.Path, piece.Reversed ? -shift : shift), piece.Outline, piece.Middle));
                 }
                 // Round a detour, the shuttle's colour as a 3 px edge each side, saying whose it is (a planned
                 // route has none, being in that colour already); then the route's colour down the middle
@@ -767,6 +790,66 @@ namespace Formula9.World
                 var at = Project(busStopPositions[i].X, busStopPositions[i].Y);
                 if (contentRect.Contains(at) && !ServedByARoute(busStops[i].Code)) Glyph.DrawBusStop(painter, at, BusStopIconSize);
             }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: PieceKey
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function names a road piece by its two ends, the same whichever way a route
+        //     drives it, so routes sharing the piece can be found.
+        //
+        // Args:
+        //     path (List<Contracts.Position>): The piece's points, in metres.
+        //
+        // Returns:
+        //     (string, bool): The name, and whether this path runs from the higher end to the lower.
+        private static (string Key, bool Reversed) PieceKey(List<Contracts.Position> path)
+        {
+            if (path.Count == 0) return ("", false);
+            string End(Contracts.Position p) => $"{Math.Round(p.XM, 1).ToString(CultureInfo.InvariantCulture)},{Math.Round(p.YM, 1).ToString(CultureInfo.InvariantCulture)}";
+            var first = End(path[0]);
+            var last = End(path[path.Count - 1]);
+            var reversed = string.CompareOrdinal(first, last) > 0;
+            return (reversed ? last + "|" + first : first + "|" + last, reversed);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: Offset
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function moves a line sideways by a distance, keeping its shape: each point moves
+        //     along the line's normal there, lengthened at a bend so the lane keeps its width.
+        //
+        // Args:
+        //     points (Vector2[]): The line, in panel points.
+        //     distance (float): How far to move it; the sign picks the side.
+        //
+        // Returns:
+        //     Vector2[]: The moved line, or the same line for no distance.
+        private static Vector2[] Offset(Vector2[] points, float distance)
+        {
+            if (Mathf.Approximately(distance, 0) || points.Length < 2) return points;
+            Vector2 Normal(Vector2 a, Vector2 b)
+            {
+                var d = b - a;
+                return d.sqrMagnitude < 1e-6f ? Vector2.zero : new Vector2(-d.y, d.x).normalized;
+            }
+            var moved = new Vector2[points.Length];
+            for (var i = 0; i < points.Length; i++)
+            {
+                var before = i > 0 ? Normal(points[i - 1], points[i]) : Vector2.zero;
+                var after = i < points.Length - 1 ? Normal(points[i], points[i + 1]) : Vector2.zero;
+                var normal = before + after;
+                if (normal.sqrMagnitude < 1e-6f) normal = before.sqrMagnitude > 0 ? before : after;
+                normal = normal.normalized;
+                // At a bend the normal is between the two segments': lengthened to keep the lane's width,
+                // but not past twice the distance at a sharp turn
+                var reference = before.sqrMagnitude > 0 ? before : after;
+                var cos = Vector2.Dot(normal, reference);
+                moved[i] = points[i] + normal * distance * (cos > 0.5f ? 1 / cos : 2);
+            }
+            return moved;
         }
 
         private static void Line(Painter2D painter, Vector2[] points, Color color, float width)
