@@ -467,6 +467,30 @@ namespace Formula9.Tests
             Assert.AreEqual(2, sockets.Count, "no stream without a session");
         }
 
+        [Test]
+        public async Task StreamActionFreshnessExpiresAfterFiveSecondsAndPollingChecksTheState()
+        {
+            UseFakeStreams();
+            await controller.JoinAsync(SessionId);
+            controller.PumpStream(false);
+            sockets[0].Push(SnapshotMessage(backend.Snapshot));
+            controller.PumpStream(false);
+            Assert.IsTrue(controller.StreamIsFresh);
+            clock += SessionController.ActionFreshnessLimit;
+            Assert.IsTrue(controller.StreamIsFresh);
+            clock += TimeSpan.FromMilliseconds(1);
+            Assert.IsFalse(controller.StreamIsFresh);
+            Assert.IsTrue(controller.Streaming, "The transport timeout is independent of action freshness.");
+            var polled = backend.To("/snapshot").Count();
+            await controller.RefreshAsync();
+            Assert.AreEqual(polled + 1, backend.To("/snapshot").Count(), "Probe the snapshot before the fifteen-second transport timeout.");
+            sockets[0].Push("{\"type\":\"heartbeat\",\"session_id\":\"session-001\"}");
+            controller.PumpStream(false);
+            Assert.IsTrue(controller.StreamIsFresh);
+            controller.Leave();
+            Assert.IsFalse(controller.StreamIsFresh);
+        }
+
         // -----------------------------------------------------------------------------------
         // Function: StreamMessagesAreCheckedAgainstTheContract
         // -----------------------------------------------------------------------------------

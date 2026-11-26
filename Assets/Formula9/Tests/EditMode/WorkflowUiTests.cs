@@ -135,6 +135,33 @@ namespace Formula9.Tests
                 root.Q<TextField>("route-reason").value = "Use the checked detour";
                 if (streaming)
                 {
+                    clock += SessionController.ActionFreshnessLimit + TimeSpan.FromMilliseconds(1);
+                    AgeSnapshot(); Update();
+                    Assert.IsTrue(session.Streaming);
+                    Assert.IsFalse(suggest.enabledSelf, "A connected socket cannot keep old state actionable.");
+                    Assert.IsFalse(approve.enabledSelf);
+                    StringAssert.Contains("fresh session update", root.Q<Label>("route-apply-note").text);
+                    socket.Push(new JObject { ["type"] = "heartbeat", ["session_id"] = raw["session_id"] }.ToString());
+                    session.PumpStream(false); Update();
+                    Assert.IsTrue(approve.enabledSelf, "A new heartbeat confirms the unchanged Ready state.");
+                }
+                var selected = typeof(TrainingWorkspace).GetField("selectedVehicle", flags);
+                var originalVehicle = selected.GetValue(workspace);
+                selected.SetValue(workspace, null); Update();
+                StringAssert.StartsWith("Select a shuttle", root.Q<Label>("route-apply-note").text);
+                selected.SetValue(workspace, originalVehicle);
+                var state = session.Store.Snapshot;
+                state.Session.Status = "PAUSED"; Update();
+                StringAssert.Contains("Resume", root.Q<Label>("route-apply-note").text);
+                state.Session.Status = "RUNNING";
+                var candidates = state.Candidates.ToList(); state.Candidates.Clear(); Update();
+                StringAssert.StartsWith("No reroute is currently offered", root.Q<Label>("route-apply-note").text);
+                typeof(TrainingWorkspace).GetField("rerouting", flags).SetValue(workspace, true); Update();
+                StringAssert.StartsWith("The reroute offer is no longer available", root.Q<Label>("route-apply-note").text);
+                typeof(TrainingWorkspace).GetField("rerouting", flags).SetValue(workspace, false);
+                state.Candidates.AddRange(candidates); state.Session.Status = "READY"; Update();
+                if (streaming)
+                {
                     clock += SessionController.StreamSilenceLimit + TimeSpan.FromSeconds(1);
                     session.PumpStream(false);
                     Assert.IsFalse(session.Streaming);
@@ -808,6 +835,35 @@ namespace Formula9.Tests
         }
 
         private sealed class IncidentsWindow : EditorWindow { }
+
+        [Test]
+        public void DisablingTheAppCancelsItsScheduledAssessmentNotice()
+        {
+            var window = ScriptableObject.CreateInstance<IncidentsWindow>();
+            var rig = new GameObject("Assessment notice cleanup test");
+            rig.SetActive(false);
+            var app = rig.AddComponent<Formula9App>();
+            var label = new Label();
+            var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+            try
+            {
+                window.ShowUtility();
+                window.rootVisualElement.Add(label);
+                var item = label.schedule.Execute(() => Assert.Fail("A disabled app must not run its pending notice callback.")).StartingIn(5000);
+                typeof(Formula9App).GetField("assessmentEndNoticeExpiry", flags).SetValue(app, item);
+                Assert.IsTrue(item.isActive);
+                typeof(Formula9App).GetMethod("OnDisable", flags).Invoke(app, null);
+                Assert.IsFalse(item.isActive);
+                Assert.IsNull(typeof(Formula9App).GetField("assessmentEndNoticeExpiry", flags).GetValue(app));
+                UnityEngine.Object.DestroyImmediate(rig);
+                Assert.IsFalse(item.isActive, "Destroying the owner cannot leave its callback queued on the surviving panel.");
+            }
+            finally
+            {
+                if (rig != null) UnityEngine.Object.DestroyImmediate(rig);
+                window.Close();
+            }
+        }
 
         // The app on a real panel, so value-change and click events reach their callbacks. The
         // session has incident-2 beside incident-1, and answers History and Debrief through Report.

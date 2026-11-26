@@ -4,10 +4,10 @@
  * Author: Choo Jian Wei
  * Contributors: Rishika (fleet cards, next stop and ETA), Lau Xiang Yang (session list and cleanup, exit)
  * Date Created: 30/10/2026
- * Last Modified: 23/11/2026
+ * Last Modified: 26/11/2026
  *
  * Description:
- *     Part of the Unity client's UI. Pure functions that turn login results, snapshots, session
+ *     Part of the Unity client's UI. Presentation helpers that turn login results, snapshots, session
  *     lists and command outcomes into what the screens show, so the wording and rules are tested
  *     without building any UI. The wording follows the Qt client's LoginPage and TrainingWorkspace.
  */
@@ -23,6 +23,44 @@ using Formula9.Session;
 
 namespace Formula9.UI
 {
+    /// <summary>Show a brief notice only when the assessment being viewed completes.</summary>
+    public sealed class AssessmentEndNoticePresenter
+    {
+        public const double DurationSeconds = 5;
+        private string observedSessionId, noticeSessionId;
+        private bool observedActive;
+        private double expiresAt;
+
+        /// <summary>Advance notice state using an unscaled, monotonic clock in seconds.</summary>
+        public (bool Visible, double RemainingSeconds) Present(FullSnapshot snapshot, double now)
+        {
+            var id = snapshot?.SessionId;
+            var completed = TrainingPresenter.IsAssessment(snapshot) && snapshot.Session?.Status == "COMPLETED";
+            if (completed && observedActive && observedSessionId == id)
+            {
+                noticeSessionId = id;
+                expiresAt = now + DurationSeconds;
+            }
+            if (!completed || noticeSessionId != id)
+            {
+                noticeSessionId = null;
+                expiresAt = 0;
+            }
+            observedSessionId = id;
+            observedActive = TrainingPresenter.IsAssessmentActive(snapshot);
+            var remaining = completed && noticeSessionId == id ? Math.Max(0, expiresAt - now) : 0;
+            return (remaining > 0, remaining);
+        }
+
+        /// <summary>Discard pending completion state when its screen closes.</summary>
+        public void Reset()
+        {
+            observedSessionId = noticeSessionId = null;
+            observedActive = false;
+            expiresAt = 0;
+        }
+    }
+
     // -----------------------------------------------------------------------------------
     // Class: LoginMessages
     // -----------------------------------------------------------------------------------

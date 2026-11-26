@@ -352,9 +352,8 @@ namespace Formula9.UI
             Select(tabs[0].Button);
         }
 
-        // A live stream keeps unchanged snapshots current through heartbeats. Silent streams
-        // expire in SessionController, which resumes the snapshot poll.
-        private bool Fresh => session.Streaming || Time.realtimeSinceStartup - acceptedAt <= 5;
+        // Heartbeats confirm unchanged state, but each confirmation still expires after five seconds.
+        private bool Fresh => session.StreamIsFresh || Time.realtimeSinceStartup - acceptedAt <= SessionController.ActionFreshnessLimit.TotalSeconds;
         private bool Current => session.Available && !session.HasPendingCommand && Fresh;
 
         private void UpdateActions()
@@ -409,9 +408,15 @@ namespace Formula9.UI
             if (session.HasPendingCommand) return "Waiting for the last command to finish before approving.";
             if (!Fresh) return "Waiting for a fresh session update. Refresh the current session to try again.";
             if (TrainingPresenter.IsTerminalSession(snapshot.Session.Status)) return "This session has ended. Create or join a live session to edit a route.";
+            if (selectedVehicle == null || snapshot.Vehicles.All(v => v.VehicleId != selectedVehicle)) return "Select a shuttle to plan its route.";
+            if (snapshot.Session.Status == "PAUSED") return "The session is paused. Resume it before changing routes.";
+            if (snapshot.Session.Status != "READY" && !rerouting)
+                return DecisionRules.ReroutableRoute(snapshot, selectedVehicle) == null
+                    ? "No reroute is currently offered for this shuttle."
+                    : "Choose Re-route to edit this shuttle's route.";
             if (routeBusy) return context == null ? "Loading the roads for this route…" : "Checking the route…";
             if (context == null) return "The road network is unavailable. Refresh the current session to reload it.";
-            if (!editable) return "This shuttle's route is no longer available for editing. Select a current reroute option.";
+            if (!editable) return "The reroute offer is no longer available. Choose a current option.";
             if (preview?.Approvable == true && !matches) return "The session changed after this route was checked. Suggest a detour or check the draft again.";
             return null;
         }

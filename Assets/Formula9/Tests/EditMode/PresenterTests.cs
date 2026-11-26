@@ -4,7 +4,7 @@
  * Author: Choo Jian Wei
  * Contributors: Rishika (fleet card tests), Lau Xiang Yang (session cleanup tests)
  * Date Created: 30/10/2026
- * Last Modified: 23/11/2026
+ * Last Modified: 26/11/2026
  *
  * Description:
  *     Checks what the screens show, using the shared snapshot fixture: login and command messages
@@ -440,6 +440,44 @@ namespace Formula9.Tests
         {
             var grade = new SessionAssessment { Status = status, Disrupted = disrupted, Points = points, Maximum = 100 };
             Assert.AreEqual(expected, TrainingPresenter.AssessmentResult(grade));
+        }
+
+        [Test]
+        public void AssessmentEndNoticeExpiresWithoutBeingExtendedByRepeatedUpdates()
+        {
+            var presenter = new AssessmentEndNoticePresenter();
+            var snapshot = new FullSnapshot { SessionId = "assessment-1", Scenario = new ScenarioRevision { AssessmentDurationS = 120 },
+                Session = new TrainingSession { Status = "RUNNING" } };
+            Assert.IsFalse(presenter.Present(snapshot, 10).Visible);
+            snapshot.Session.Status = "COMPLETED";
+            Assert.AreEqual((true, 5d), presenter.Present(snapshot, 20));
+            Assert.AreEqual((true, 1d), presenter.Present(snapshot, 24));
+            Assert.AreEqual((false, 0d), presenter.Present(snapshot, 25));
+            Assert.IsFalse(presenter.Present(snapshot, 30).Visible);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void OpeningOrRejoiningAnOldAssessmentDoesNotReplayItsEndNotice(bool leave)
+        {
+            var presenter = new AssessmentEndNoticePresenter();
+            var snapshot = new FullSnapshot { SessionId = "assessment-1", Scenario = new ScenarioRevision { AssessmentDurationS = 120 },
+                Session = new TrainingSession { Status = "COMPLETED" } };
+            Assert.IsFalse(presenter.Present(snapshot, 0).Visible, "Opening a saved result is not a new completion.");
+            snapshot.SessionId = "new-assessment";
+            snapshot.Session.Status = "RUNNING";
+            presenter.Present(snapshot, 1);
+            snapshot.Session.Status = "COMPLETED";
+            Assert.IsTrue(presenter.Present(snapshot, 2).Visible);
+            var other = new FullSnapshot { SessionId = "assessment-2", Scenario = new ScenarioRevision { AssessmentDurationS = 120 },
+                Session = new TrainingSession { Status = "RUNNING" } };
+            Assert.IsFalse(presenter.Present(leave ? null : other, 3).Visible);
+            Assert.IsFalse(presenter.Present(snapshot, 4).Visible, "Returning to the completed attempt cannot re-arm its timer.");
+            presenter.Present(other, 5);
+            other.Session.Status = "COMPLETED";
+            Assert.AreEqual((true, 5d), presenter.Present(other, 6), "A different assessment gets its own completion notice.");
+            presenter.Reset();
+            Assert.IsFalse(presenter.Present(other, 7).Visible, "Disabling the screen discards pending presentation state.");
         }
 
         // The countdown follows simulation time and the deadline pinned to the joined attempt.
