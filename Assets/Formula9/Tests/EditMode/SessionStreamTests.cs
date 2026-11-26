@@ -3,7 +3,7 @@
  *
  * Author: Lau Xiang Yang
  * Date Created: 18/11/2026
- * Last Modified: 18/11/2026
+ * Last Modified: 26/11/2026
  *
  * Description:
  *     Part of SessionControllerTests, over the same scripted backend, with a fake WebSocket the
@@ -45,7 +45,7 @@ namespace Formula9.Tests
         //     to fail the connection; Hold to keep it connecting until FinishConnecting;
         //     FailSends to fail every send; Disposed once the client closed it. As a real
         //     WebSocket, it refuses a send before it has connected.
-        private sealed class FakeStreamSocket : IStreamSocket
+        internal sealed class FakeStreamSocket : IStreamSocket
         {
             public Uri Url;
             public IReadOnlyDictionary<string, string> Headers;
@@ -465,6 +465,30 @@ namespace Formula9.Tests
             Assert.IsTrue(sockets[1].Disposed);
             controller.PumpStream(false);
             Assert.AreEqual(2, sockets.Count, "no stream without a session");
+        }
+
+        [Test]
+        public async Task StreamActionFreshnessExpiresAfterFiveSecondsAndPollingChecksTheState()
+        {
+            UseFakeStreams();
+            await controller.JoinAsync(SessionId);
+            controller.PumpStream(false);
+            sockets[0].Push(SnapshotMessage(backend.Snapshot));
+            controller.PumpStream(false);
+            Assert.IsTrue(controller.StreamIsFresh);
+            clock += SessionController.ActionFreshnessLimit;
+            Assert.IsTrue(controller.StreamIsFresh);
+            clock += TimeSpan.FromMilliseconds(1);
+            Assert.IsFalse(controller.StreamIsFresh);
+            Assert.IsTrue(controller.Streaming, "The transport timeout is independent of action freshness.");
+            var polled = backend.To("/snapshot").Count();
+            await controller.RefreshAsync();
+            Assert.AreEqual(polled + 1, backend.To("/snapshot").Count(), "Probe the snapshot before the fifteen-second transport timeout.");
+            sockets[0].Push("{\"type\":\"heartbeat\",\"session_id\":\"session-001\"}");
+            controller.PumpStream(false);
+            Assert.IsTrue(controller.StreamIsFresh);
+            controller.Leave();
+            Assert.IsFalse(controller.StreamIsFresh);
         }
 
         // -----------------------------------------------------------------------------------

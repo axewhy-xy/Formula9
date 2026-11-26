@@ -243,7 +243,7 @@ def test_session_list_includes_history_and_updates_capacity_after_archive(api, m
     after = client.get(path, headers=HEADERS).json()
     assert after["live_count"] == 1
     assert after["sessions"] == [full["sessions"][1], {**full["sessions"][0], "status": "ARCHIVED",
-                                                       "occupies_capacity": False}]
+                                                       "occupies_capacity": False, "can_delete": True, "can_archive": False}]
     assert client.post(path, headers={**HEADERS, "Idempotency-Key": "replacement"}, json=BODY).status_code == 201
 
 

@@ -3,7 +3,7 @@ Live push of a training session's snapshots and traffic frames over a WebSocket.
 
 Author: Lau Xiang Yang
 Date Created: 18/11/2026
-Last Modified: 18/11/2026
+Last Modified: 26/11/2026
 
 Description:
     Phase 3 of the multi-core sessions plan. A client used to poll GET /snapshot once a second and
@@ -45,7 +45,8 @@ MIN_SNAPSHOT_INTERVAL_MS = 100
 MAX_SNAPSHOT_INTERVAL_MS = 5000
 # A stream with nothing to send (a paused or ended session) says it is still there this often, so a
 # client can tell a quiet session from a lost connection
-HEARTBEAT_S = 5.0
+# Keep idle streams comfortably inside the client's five-second action freshness window.
+HEARTBEAT_S = 2.0
 # How often a stream with no new snapshot checks that its session is still available
 AVAILABILITY_CHECK_S = 1.0
 # How often an open stream checks that its login is still valid (logged out, expired): each check is an
