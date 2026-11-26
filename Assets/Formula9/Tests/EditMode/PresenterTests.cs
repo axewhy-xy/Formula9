@@ -376,13 +376,21 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: OutcomeMessagesMatchTheQtClient
+        // Function: OutcomeMessagesArePlainWordsWithTheReason
         // -----------------------------------------------------------------------------------
         // Description:
-        //     Routine outcomes say nothing on screen; the rest are plain words with no command IDs.
+        //     Routine outcomes say nothing on screen; the rest are plain words with no command IDs,
+        //     and a refusal says why, asking for a refresh only when one can help.
         [Test]
-        public void OutcomeMessagesMatchTheQtClient()
+        public void OutcomeMessagesArePlainWordsWithTheReason()
         {
+            var closed = new CommandOutcome { CommandId = "c-6", TargetId = "incident-7", Status = "REJECTED", FailureCode = "INVALID_REFERENCE" };
+            StringAssert.Contains("no longer exists", TrainingPresenter.Outcome(closed));
+            StringAssert.DoesNotContain("Refresh", TrainingPresenter.Outcome(closed));
+            var stale = new CommandOutcome { CommandId = "c-7", TargetId = "incident-7", Status = "REJECTED", FailureCode = "STALE_REVISION" };
+            StringAssert.Contains("Refresh", TrainingPresenter.Outcome(stale));
+            var unknown = new CommandOutcome { CommandId = "c-8", TargetId = "incident-7", Status = "REJECTED", FailureCode = "SOMETHING_NEW" };
+            StringAssert.Contains("SOMETHING_NEW", TrainingPresenter.Outcome(unknown));
             var applied = new CommandOutcome { CommandId = "c-1", TargetId = "session-001", TargetType = "SESSION", Status = "APPLIED", AppliedTick = 210 };
             Assert.IsNull(TrainingPresenter.Outcome(applied));
             Assert.IsNull(TrainingPresenter.Outcome(new CommandOutcome { CommandId = "c-4", TargetId = "shuttle-01", Status = "QUEUED" }));

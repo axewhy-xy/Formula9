@@ -4,7 +4,7 @@
  * Author: Choo Jian Wei
  * Contributors: Lau Xiang Yang (leaving a deleted session, the session stream)
  * Date Created: 30/10/2026
- * Last Modified: 18/11/2026
+ * Last Modified: 26/11/2026
  *
  * Description:
  *     Part of the Unity client's session layer. A port of the training half of the Qt client's
@@ -152,7 +152,7 @@ namespace Formula9.Session
         private long trafficCursor = -1;
         private string trafficKey, noTrafficKey;
         private DateTime noTrafficUntil;
-        private string creationKey, creationOwner, creationScenario;
+        private string creationKey, creationOwner, creationScenario, creationName;
         private PendingCommand pending;
         // The joined session's stream, the join it belongs to, whether it has delivered a snapshot and
         // whether it was told to send traffic; when it was last heard from; when to try the next, and
@@ -176,6 +176,8 @@ namespace Formula9.Session
         internal string SignedInUsername => auth.IsLoggedIn ? auth.Username : null;
         // Scenario for the next creation; an unresolved creation keeps the one it started with.
         public string Scenario { get; set; } = IntegratedScenario;
+        // Name for the next creation, or null for none; an unresolved creation keeps the one it started with.
+        public string SessionName { get; set; }
         // Whether PumpStream keeps a stream of the joined session open. Off by default, so a caller
         // that never pumps polls exactly as before; the app turns it on.
         public bool UseStream { get; set; }
@@ -273,13 +275,14 @@ namespace Formula9.Session
                 creationKey = Guid.NewGuid().ToString();
                 creationOwner = owner;
                 creationScenario = Scenario;
+                creationName = string.IsNullOrWhiteSpace(SessionName) ? null : SessionName.Trim();
             }
             var token = createRequest = new object();
             var started = generation;
             TrainingSession created;
             try
             {
-                created = await api.CreateSessionAsync(new CreateSessionRequest { ScenarioRevisionId = creationScenario }, creationKey, lifetime.Token);
+                created = await api.CreateSessionAsync(new CreateSessionRequest { ScenarioRevisionId = creationScenario, Name = creationName }, creationKey, lifetime.Token);
             }
             catch (NotLoggedInException)
             {
@@ -299,7 +302,7 @@ namespace Formula9.Session
             if (createRequest == token) createRequest = null;
             // A late success for another login must not select its session or drop its retry key.
             if (started != generation || !auth.IsLoggedIn || auth.Username != owner) return;
-            creationKey = creationOwner = creationScenario = null;
+            creationKey = creationOwner = creationScenario = creationName = null;
             await JoinAsync(created.SessionId);
         }
 

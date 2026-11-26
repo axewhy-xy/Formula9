@@ -10,7 +10,7 @@
             <ui:VisualElement name="brand" class="brand-row">
                 <f9:Glyph kind="Bus" tint="#FFFFFF" size="36" />
                 <ui:VisualElement class="brand-names">
-                    <ui:Label text="Formula9" class="brand-name" />
+                    <ui:Label text="AVisuals" class="brand-name" />
                     <ui:Label text="FLEET MANAGER" class="brand-tagline" />
                 </ui:VisualElement>
             </ui:VisualElement>
@@ -79,8 +79,8 @@
                     <ui:VisualElement class="session-setup-group session-setup-new">
                         <ui:Label text="Start a new session" class="session-setup-heading" />
                         <ui:VisualElement class="session-setup-line">
-                            <!-- For show until the backend stores session names: what is typed is not sent yet -->
-                            <ui:TextField name="session-name" class="session-name" max-length="64" placeholder-text="Name your session…" tooltip="Session names are not saved yet; the session is listed by its ID." />
+                            <!-- Optional: the session list shows the name with the session's ID. Enter creates, as Create does. -->
+                            <ui:TextField name="session-name" class="session-name" max-length="64" placeholder-text="Name your session (optional)…" />
                             <ui:Button name="create" text="Create" class="session-button session-primary" tooltip="Practise freely: no timer and no score." />
                         </ui:VisualElement>
                     </ui:VisualElement>

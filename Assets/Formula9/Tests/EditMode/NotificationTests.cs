@@ -126,6 +126,16 @@ namespace Formula9.Tests
         }
 
         [Test]
+        public void BeforeTheSnapshotListsTheIncidentItClearsWhenTheEventSaid()
+        {
+            var s = Snapshot();
+            s.Tick = 200; s.SimulationTimeS = 10; // 0.05 s a tick
+            var n = new IncidentNotification { Impact = "Lane blocked", ActiveUntilTick = 700 };
+            Assert.AreEqual("Lane blocked · clears in 25 s", NotificationQueue.Detail(n, null, s, null));
+            Assert.AreEqual("Lane blocked", NotificationQueue.Detail(n, null, null, null), "no snapshot, no tick to count from");
+        }
+
+        [Test]
         public void BeforeAnySnapshotTheTextComesFromTheEvent()
         {
             var queue = new NotificationQueue();

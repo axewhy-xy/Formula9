@@ -3,7 +3,7 @@
  *
  * Author: Lau Xiang Yang
  * Date Created: 15/11/2026
- * Last Modified: 24/11/2026
+ * Last Modified: 26/11/2026
  *
  * Description:
  *     Part of the incident handling reform (phase 5). NotificationQueue is the logic: it takes the
@@ -321,11 +321,12 @@ namespace Formula9.UI
         {
             var parts = new List<string>();
             if (!string.IsNullOrEmpty(n.Impact)) parts.Add(n.Impact);
-            if (incident != null && s != null)
+            // The snapshot gives the current tick; until it lists the incident, the opening event's end is used
+            if (s != null)
             {
-                var edge = incident.Location?.EdgeId;
+                var edge = incident?.Location?.EdgeId;
                 var closure = edge == null ? null : s.Disruptions?.FirstOrDefault(d => d.AffectedEdgeIds.Contains(edge) && d.ActiveFromTick >= incident.DetectedTick);
-                if ((closure?.ActiveUntilTick ?? incident.ClearsAtTick ?? n.ActiveUntilTick) is long until)
+                if ((closure?.ActiveUntilTick ?? incident?.ClearsAtTick ?? n.ActiveUntilTick) is long until)
                 {
                     var seconds = Math.Ceiling(Math.Max(0, until - s.Tick) * World.IncidentSimulation.SecondsPerTick(s));
                     parts.Add("clears in " + RoutePresenter.Rough(seconds));

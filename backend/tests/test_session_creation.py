@@ -117,7 +117,22 @@ def test_session_list_requires_login_and_returns_empty_capacity(api):
     assert client.get("/api/v2/sessions", headers={"Authorization": "Bearer invalid"}).status_code == 401
     response = client.get("/api/v2/sessions", headers=HEADERS)
     assert response.status_code == 200
-    assert response.json() == {"sessions": [], "live_count": 0, "total": 0, "capacity": 16}
+    assert response.json() == {"sessions": [], "live_count": 0, "total": 0, "capacity": 16, "terminal_practice_count": 0}
+
+
+def test_a_session_keeps_the_name_it_was_created_with(api):
+    """The name is display text in the list: the ID stays the key, and a retry keeps the first name."""
+    client, store = api
+    named = create(client, name="Morning drill")
+    assert named.status_code == 201
+    unnamed = client.post("/api/v2/sessions", headers={**HEADERS, "Idempotency-Key": "unnamed"}, json=BODY)
+    listed = {s["session_id"]: s["name"] for s in client.get("/api/v2/sessions", headers=HEADERS).json()["sessions"]}
+    assert listed == {named.json()["session_id"]: "Morning drill", unnamed.json()["session_id"]: None}
+    assert create(client, name="Morning drill").json()["session_id"] == named.json()["session_id"]
+    assert create(client, name="Evening drill").status_code == 409
+    for bad in ["", " padded ", "two\nlines", "x" * 65, 7]:
+        assert client.post("/api/v2/sessions", headers={**HEADERS, "Idempotency-Key": "bad-name"},
+                           json={**BODY, "name": bad}).status_code == 422
 
 
 def archived_attempts(client, store, count):
@@ -220,7 +235,8 @@ def test_session_list_includes_history_and_updates_capacity_after_archive(api, m
     assert full["live_count"] == full["capacity"] == 2
     assert [s["session_id"] for s in full["sessions"]] == [second, first]
     assert all(s["occupies_capacity"] and s["status"] == "READY" for s in full["sessions"])
-    assert all(set(s) == {"session_id", "scenario_revision_id", "status", "occupies_capacity"}
+    assert all(set(s) == {"session_id", "name", "scenario_revision_id", "status", "occupies_capacity",
+                          "is_assessment", "can_delete", "can_archive"}
                for s in full["sessions"])
     baseline = store.snapshot(second).model_dump(mode="json")
     assert control(client, baseline, "ARCHIVE").json()["status"] == "APPLIED"

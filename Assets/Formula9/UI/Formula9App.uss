@@ -432,6 +432,10 @@
 .session-setup .sessions { margin: 0 8px 0 0; }
 
 /* A tooltip in the running app (HoverTip): a small dark label under the hovered element */
+/* A short note at the top centre that fades out by itself (Formula9App.ShowToast) */
+.toast { position: absolute; top: 16px; left: 50%; translate: -50% 0; max-width: 480px; padding: 10px 18px; margin: 0; border-radius: 8px; font-size: 13px; white-space: normal; -unity-font-style: bold; color: rgb(255, 255, 255); background-color: rgb(30, 42, 46); opacity: 1; transition-property: opacity; transition-duration: 0.3s; }
+.toast-hidden { opacity: 0; }
+
 .hover-tip { position: absolute; max-width: 320px; padding: 6px 10px; margin: 0; border-radius: 6px; font-size: 12px; white-space: normal; color: rgb(255, 255, 255); background-color: rgb(30, 42, 46); }
 
 /* The session picker: a field like a dropdown's, and its list of sessions with a trash icon each */

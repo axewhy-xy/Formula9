@@ -69,9 +69,13 @@ namespace Formula9.UI
         private Button viewMap, viewWorld;
         private Button muteToggle;
         private const string RememberedUserKey = "login.rememberedUser";
-        private TextField username, password, confirm, sessionId;
+        private TextField username, password, confirm, sessionId, sessionName;
         private Label signUpHint, loginError, title, user, capacity, status, message, sessionBadge, worldNotice;
         private Label assessmentBadge, assessmentTimer;
+        // The note that pops up at the top and fades by itself (ShowToast), and its timers
+        private Label toast;
+        private IVisualElementScheduledItem toastFade, toastRemove;
+        private const long ToastShownMs = 2500;
         private string sessionBadgeClass;
         private readonly SessionStatusPresenter sessionStatusPresenter = new SessionStatusPresenter();
         private Button forgot, submit, modeSwitch, start, pause, resume, archive, refreshSessions;
@@ -227,6 +231,8 @@ namespace Formula9.UI
             world.RouteNodeSelected += _ => uiSounds.PointPicked();
             world.RoadClicked += (_, __) => uiSounds.PointPicked();
             world.ViewChanged += Render;
+            // Opening the cameras raises ViewChanged before they show, so the view bar is drawn again once they have
+            world.CamerasToggled += _ => Render();
 
             ShowLogin(null);
             StartCoroutine(Poll());
@@ -448,6 +454,7 @@ namespace Formula9.UI
             worldNotice = root.Q<Label>("world-notice");
             fleet = root.Q("fleet");
             sessionId = root.Q<TextField>("session-id");
+            sessionName = root.Q<TextField>("session-name");
             sessions = root.Q<SessionPicker>("sessions");
             createPractice = root.Q<Button>("create");
             assessmentMode = root.Q<Button>("assessment-mode");
@@ -489,7 +496,8 @@ namespace Formula9.UI
             sessions.Picked += _ =>
             {
                 RenderCleanup();
-                if (SelectedEntry != null) Run(Join(SelectedEntry.SessionId));
+                // Picking the session already joined changes nothing: rejoining it would drop its requests in flight
+                if (SelectedEntry != null && SelectedEntry.SessionId != session.SessionId) Run(Join(SelectedEntry.SessionId));
             };
             // Each session's trash icon in the list deletes that session, picked or not
             sessions.DeleteRequested += index => { if (index >= 0 && index < listedSessions.Count) ConfirmDeleteSession(listedSessions[index]); };
@@ -515,8 +523,15 @@ namespace Formula9.UI
                 Run(authClient.LogOutAsync());
             };
             root.Q<Button>("exit-app").clicked += ConfirmExit;
-            createPractice.clicked += () => Run(Create(SessionController.IntegratedScenario));
-            assessmentMode.clicked += () => Run(Create(SessionController.ScoredScenario));
+            // The name typed beside Create names the practice session; an assessment is listed by its ID
+            createPractice.clicked += () => Run(Create(SessionController.IntegratedScenario, sessionName.value));
+            assessmentMode.clicked += () => Run(Create(SessionController.ScoredScenario, null));
+            sessionName.RegisterCallback<KeyDownEvent>(e =>
+            {
+                if (e.keyCode != KeyCode.Return && e.keyCode != KeyCode.KeypadEnter) return;
+                e.StopPropagation();
+                Run(Create(SessionController.IntegratedScenario, sessionName.value));
+            }, TrickleDown.TrickleDown);
             // Join by ID swaps the session list for the ID field; pressed again, or Enter in the field,
             // joins. Leaving the field any other way brings the list back.
             joinById = root.Q<Button>("join");
@@ -687,11 +702,16 @@ namespace Formula9.UI
         // Description:
         //     This function creates a training session, showing progress meanwhile. The progress
         //     note goes once the attempt finishes; a failure has already replaced it with its own
-        //     message, which stays.
-        private async Task Create(string scenario)
+        //     message, which stays. The name box is emptied once the session is created.
+        //
+        // Args:
+        //     scenario (string): The scenario to create.
+        //     name (string): The session's name, or empty or null for none.
+        private async Task Create(string scenario, string name)
         {
             if (creatingSession || (session.CreationPending && session.PendingCreationScenario != scenario)) return;
             session.Scenario = scenario;
+            session.SessionName = name;
             var creating = scenario == SessionController.ScoredScenario ? "Creating an assessment…" : "Creating a training session…";
             creatingSession = true;
             RenderAssessment(session.Store.Snapshot);
@@ -700,6 +720,7 @@ namespace Formula9.UI
             {
                 await session.CreateAsync();
                 if (message.text == creating) ShowMessage("");
+                if (!session.CreationPending && !string.IsNullOrEmpty(name)) sessionName.SetValueWithoutNotify("");
             }
             finally
             {
@@ -742,7 +763,8 @@ namespace Formula9.UI
             joinById.EnableInClassList("session-toggle-open", show);
             if (!show) return;
             sessionId.SetValueWithoutNotify("");
-            sessionId.Focus();
+            // Focused on the next frame: until the styles are applied the field still counts as hidden and refuses focus
+            sessionId.schedule.Execute(() => { if (sessionId.style.display.value == DisplayStyle.Flex) sessionId.Focus(); });
         }
 
         // -----------------------------------------------------------------------------------
@@ -937,7 +959,13 @@ namespace Formula9.UI
             cleanupBusy = true;
             RenderCleanup();
             ShowMessage(progress);
-            try { ShowMessage(await work()); }
+            // Done says so briefly at the top and goes; a failure stays in the message line to be read
+            try
+            {
+                var done = await work();
+                ShowMessage("");
+                ShowToast(done);
+            }
             catch (Exception error) when (!(error is NotLoggedInException))
             {
                 ShowMessage($"Cleanup did not finish: {error.Message} If no reply arrived it may still complete; refresh the list to check.");
@@ -1290,6 +1318,43 @@ namespace Formula9.UI
         {
             message.text = text ?? "";
             message.style.display = string.IsNullOrEmpty(text) ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: ShowToast
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function shows a short note at the top centre of the app that fades out by
+        //     itself after a few seconds, for news that needs no answer, such as a finished
+        //     deletion. A new note replaces one still showing. Without the app element (class
+        //     "app") it falls back to the message line.
+        //
+        // Args:
+        //     text (string): The note, or empty for none.
+        private void ShowToast(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            var host = message.parent;
+            while (host != null && !host.ClassListContains("app")) host = host.parent;
+            if (host == null)
+            {
+                ShowMessage(text);
+                return;
+            }
+            if (toast == null)
+            {
+                toast = new Label { pickingMode = PickingMode.Ignore };
+                toast.AddToClassList("toast");
+            }
+            toastFade?.Pause();
+            toastRemove?.Pause();
+            toast.text = text;
+            toast.RemoveFromClassList("toast-hidden");
+            host.Add(toast);
+            toast.BringToFront();
+            // Fades for the stylesheet's 0.3 s, then leaves the hierarchy
+            toastFade = toast.schedule.Execute(() => toast.AddToClassList("toast-hidden")).StartingIn(ToastShownMs);
+            toastRemove = toast.schedule.Execute(() => toast.RemoveFromHierarchy()).StartingIn(ToastShownMs + 300);
         }
 
         // Replays only for map placement, without altering the SessionController's

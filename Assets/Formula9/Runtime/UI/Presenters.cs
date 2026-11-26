@@ -725,8 +725,9 @@ namespace Formula9.UI
         //     entry (SessionListEntry): The session.
         //
         // Returns:
-        //     string: Its status and ID.
-        public static string SessionLabel(SessionListEntry entry) => $"{entry.Status} · {entry.SessionId}";
+        //     string: Its status, its name if it was given one, and its ID, which Join by ID takes.
+        public static string SessionLabel(SessionListEntry entry) =>
+            string.IsNullOrEmpty(entry.Name) ? $"{entry.Status} · {entry.SessionId}" : $"{entry.Status} · {entry.Name} ({entry.SessionId})";
 
         // -----------------------------------------------------------------------------------
         // Function: Capacity
@@ -903,13 +904,49 @@ namespace Formula9.UI
                         return outcome.FailureCode == "STALE_REVISION" ? $"{outcome.TargetId} changed just now. Check the slot again."
                             : outcome.FailureCode == "CHARGER_CONFLICT" ? $"That slot on {outcome.TargetId} is already taken."
                             : $"The charging change was refused: {outcome.FailureCode ?? "no code"}.";
-                    return $"The decision for {outcome.TargetId} was refused. Refresh and try again.";
+                    return $"The decision for {outcome.TargetId} was refused: {RefusalReason(outcome.FailureCode)}";
                 case "NEEDS_RECONFIRMATION":
                     return $"The decision for {outcome.TargetId} needs reconfirmation after the session recovered. Review it and send it again.";
                 case "EXPIRED":
                     return $"The decision for {outcome.TargetId} expired. Refresh and choose a current option.";
                 default:
                     return null;
+            }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: RefusalReason
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function words why the backend refused a decision, so the operator knows whether
+        //     trying again can help. Only a stale choice asks for a refresh; an unknown code is shown
+        //     as it is.
+        //
+        // Args:
+        //     code (string): The outcome's failure code, or null.
+        //
+        // Returns:
+        //     string: The reason, as the end of a sentence.
+        public static string RefusalReason(string code)
+        {
+            switch (code)
+            {
+                case "STALE_REVISION":
+                    return "the situation changed after it was chosen. Refresh and choose again.";
+                case "INVALID_REFERENCE":
+                    return "what it refers to no longer exists, for example an incident that has closed.";
+                case "INVALID_TRANSITION":
+                    return "the session can't do that in its current state.";
+                case "INVALID_PAYLOAD":
+                    return "the request was incomplete.";
+                case "ROLE_DENIED":
+                    return "this account isn't allowed to do that.";
+                case "SESSION_CLOSED":
+                    return "the session has ended.";
+                case "NO_FEASIBLE_ROUTE":
+                    return "no route reaches the destination.";
+                default:
+                    return $"reason {code ?? "not given"}.";
             }
         }
 

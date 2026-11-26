@@ -325,7 +325,7 @@ namespace Formula9.World
             var gliding = !offline && motion.IsGliding(Time.realtimeSinceStartup);
             if (gliding) MoveVehicleLabels();
             // An incident's ring pulses around its shuttle
-            if (gliding || (!offline && snapshot.Incidents.Any(i => i.State != "RESOLVED"))) vehicleLayer.MarkDirtyRepaint();
+            if (gliding || (!offline && snapshot.Incidents.Any(i => !IncidentEnded(i)))) vehicleLayer.MarkDirtyRepaint();
             if (draft?.Highlighted.Count > 0) drawing.MarkDirtyRepaint();
         }
 
@@ -467,7 +467,7 @@ namespace Formula9.World
                     if (label == null) continue;
                     vehicleLabels[vehicle.VehicleId] = (label, at);
                     // A shuttle caught in an open incident has its name box turned red, in place of a "!"
-                    if (snapshot.Incidents.Any(i => i.Involves(vehicle.VehicleId) && i.State != "RESOLVED"))
+                    if (snapshot.Incidents.Any(i => i.Involves(vehicle.VehicleId) && !IncidentEnded(i)))
                     {
                         label.style.backgroundColor = RoadClosed;
                         label.style.color = Color.white;
@@ -749,7 +749,7 @@ namespace Formula9.World
             for (var i = 0; i < ordered.Count; i++)
             {
                 var vehicle = ordered[i]; var at = ShownAt(vehicle);
-                if (!offline && snapshot.Incidents.Any(n => n.Involves(vehicle.VehicleId) && n.State != "RESOLVED"))
+                if (!offline && snapshot.Incidents.Any(n => n.Involves(vehicle.VehicleId) && !IncidentEnded(n)))
                 {
                     painter.strokeColor = new Color(RoadClosed.r, RoadClosed.g, RoadClosed.b, 1 - 0.6f * pulse); painter.lineWidth = 3;
                     painter.BeginPath(); painter.Arc(at, 10 + 8 * pulse, 0, 360); painter.Stroke();

@@ -56,14 +56,35 @@ namespace Formula9.UI
                 host.Add(tip);
                 tip.BringToFront();
             }
-            target.RegisterCallback<PointerEnterEvent>(_ =>
+            void Wait()
             {
                 Hide();
                 if (!string.IsNullOrEmpty(target.tooltip)) pending = target.schedule.Execute(Show).StartingIn(DelayMs);
-            });
+            }
+            target.RegisterCallback<PointerEnterEvent>(_ => Wait());
             target.RegisterCallback<PointerLeaveEvent>(_ => Hide());
             target.RegisterCallback<PointerDownEvent>(_ => Hide(), TrickleDown.TrickleDown);
             target.RegisterCallback<DetachFromPanelEvent>(_ => Hide());
+            // A disabled (greyed out) element gets no pointer events, yet its tip is often the only thing
+            // that says what it does and why it is unavailable: while it is disabled, its parent's
+            // pointer moves say when the pointer is over it
+            VisualElement watched = null;
+            void Watch(VisualElement parent)
+            {
+                if (parent == null || parent == watched) return;
+                watched = parent;
+                parent.RegisterCallback<PointerMoveEvent>(e =>
+                {
+                    if (target.enabledInHierarchy) return;
+                    var over = target.worldBound.Contains(e.position);
+                    var waitingOrShown = pending != null || tip?.parent != null;
+                    if (over && !waitingOrShown) Wait();
+                    else if (!over && waitingOrShown) Hide();
+                });
+                parent.RegisterCallback<PointerLeaveEvent>(_ => { if (!target.enabledInHierarchy) Hide(); });
+            }
+            Watch(target.parent);
+            target.RegisterCallback<AttachToPanelEvent>(_ => Watch(target.parent));
         }
 
         // The app's root element (class "app"), which the stylesheet styles, or the panel's root

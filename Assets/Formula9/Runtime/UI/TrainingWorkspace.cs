@@ -154,8 +154,6 @@ namespace Formula9.UI
                 routeBadge.parent.RegisterCallback<GeometryChangedEvent>(_ => PlaceRouteBadge());
                 routeName.RegisterCallback<GeometryChangedEvent>(_ => PlaceRouteBadge());
             }
-            // The setup panel's Refresh also reloads the route editor's context
-            Bind(root, "refresh-sessions", RequestContext);
             routeCameras = Bind(root, "route-cameras", ToggleCameras);
             routeStages = root.Q("route-stages");
             foreach (var stage in RoutePresenter.Stages) { var chip = new Label(stage); chip.AddToClassList("route-stage"); routeStages.Add(chip); }
