@@ -3,7 +3,7 @@ Build Formula9.exe with the backend bundled beside it.
 
 Author: Lau Xiang Yang
 Date Created: 06/11/2026
-Last Modified: 10/11/2026
+Last Modified: 24/11/2026
 
 Description:
     A plain Unity build only contains the client. This script builds the Windows player in batch
@@ -26,6 +26,8 @@ Description:
 from __future__ import annotations
 
 import argparse
+import ctypes
+from ctypes import wintypes
 import os
 from pathlib import Path
 import shutil
@@ -100,6 +102,92 @@ def safe_to_replace(folder: Path) -> bool:
         return False
     names = {entry.name for entry in folder.iterdir()}
     return not names or MARKER in names or EXECUTABLE in names
+
+
+"""
+# -----------------------------------------------------------------------------------
+# Function: busy_file
+# -----------------------------------------------------------------------------------
+Description:
+    This function finds a file under folder that Windows would refuse to delete right now: a program
+    or library a running process has loaded, or a file it holds open, such as a log. It asks for
+    write and delete access to each file without using either, which Windows refuses for such files.
+
+Args:
+    folder (Path): The folder to check.
+
+Returns:
+    Path | None: The first such file, or None if every file can be deleted.
+"""
+def busy_file(folder: Path) -> Path | None:
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                                     wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    access = 0x40000000 | 0x00010000  # GENERIC_WRITE | DELETE
+    share = 0x1 | 0x2 | 0x4  # FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
+    open_existing = 3
+    invalid = wintypes.HANDLE(-1).value
+    file_not_found = 2
+    for path in folder.rglob("*"):
+        if not path.is_file():
+            continue
+        handle = kernel32.CreateFileW(str(path), access, share, None, open_existing, 0, None)
+        if handle == invalid:
+            if ctypes.get_last_error() != file_not_found:
+                return path
+        else:
+            kernel32.CloseHandle(handle)
+    return None
+
+
+"""
+# -----------------------------------------------------------------------------------
+# Function: remove_folder
+# -----------------------------------------------------------------------------------
+Description:
+    This function deletes an earlier build folder, or its Backend folder. It first moves the folder
+    aside, which Windows refuses while a process has its working directory inside it, so nothing
+    new can start from it. A program from the folder can still be running from elsewhere, so it
+    then checks every file and puts the folder back untouched if any is in use. That way, a build
+    that is still open is left whole instead of half deleted.
+
+Args:
+    folder (Path): The folder to delete.
+
+Raises:
+    SystemExit: If something in the folder is running. Only if a running program opened a file
+        after the check is the folder partly deleted; it is then moved back to its name when possible.
+"""
+def remove_folder(folder: Path) -> None:
+    if not folder.exists():
+        return
+    close = "Close every Formula9 window started from it (its backend stops a few seconds later), then build again."
+    aside = folder.with_name(f"{folder.name}.deleting-{os.getpid()}")
+    try:
+        os.rename(folder, aside)
+    except PermissionError:
+        raise SystemExit(f"{folder} is in use. {close}") from None
+
+    def put_back() -> Path:
+        try:
+            os.rename(aside, folder)
+            return folder
+        except OSError:
+            return aside
+
+    busy = busy_file(aside)
+    if busy is not None:
+        where = put_back()
+        raise SystemExit(f"{where} is in use: {busy.relative_to(aside)} is open in a running program. {close}")
+    try:
+        shutil.rmtree(aside)
+    except OSError as error:
+        where = put_back()
+        opened = os.path.relpath(error.filename, aside) if error.filename else "a file"
+        raise SystemExit(f"{where} is in use and was only partly deleted: {opened} was opened while it was "
+                         f"being deleted. {close}") from None
 
 
 """
@@ -246,13 +334,17 @@ def precompile(backend: Path) -> None:
 Description:
     This function starts the bundled backend the way the player does, from outside the repository
     with a clean environment, on a free port with temporary session data and no MongoDB, and waits
-    for /api/health. It proves the copy runs on its own rather than on files from this checkout.
+    for /api/health. It proves the copy runs on its own rather than on files from this checkout,
+    and that its session workers start, since the backend would otherwise quietly run sessions in
+    one process. A stand-in process plays the player: closing it stops the backend the way closing
+    the last Formula9 window does, so its clean shutdown is checked too and nothing is left running.
 
 Args:
     backend (Path): The Backend folder.
 
 Raises:
-    SystemExit: If the backend does not answer within two minutes.
+    SystemExit: If the backend does not answer within two minutes, its workers do not start, or it
+        does not stop after its player closes.
 """
 def smoke_test(backend: Path) -> None:
     with socket.socket() as probe:
@@ -266,31 +358,98 @@ def smoke_test(backend: Path) -> None:
     environment["PYTHONNOUSERSITE"] = "1"
     environment["MONGODB_URI"] = ""
     print(f"Checking the bundled backend on port {port}...", flush=True)
-    with tempfile.TemporaryDirectory(prefix="formula9-build-check-") as scratch:
-        environment["TRAINING_DATABASE_PATH"] = str(Path(scratch) / "sessions.sqlite")
-        log = Path(scratch) / "backend.log"
-        server = subprocess.Popen([str(backend / "python" / "python.exe"), str(backend / "serve.py"),
-                                   "--port", str(port), "--parent-pid", str(os.getpid()), "--log", str(log),
-                                   "--state", scratch],
-                                  cwd=scratch, env=environment)
-        try:
-            deadline = time.monotonic() + 120
-            while time.monotonic() < deadline:
-                if server.poll() is not None:
-                    break
-                try:
-                    with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=2) as reply:
-                        if reply.status == 200:
-                            print("The bundled backend answered /api/health.", flush=True)
-                            return
-                except OSError:
-                    pass
-                time.sleep(0.5)
-            print(log.read_text(encoding="utf-8", errors="replace") if log.is_file() else "", file=sys.stderr)
+    scratch = Path(tempfile.mkdtemp(prefix="formula9-build-check-"))
+    environment["TRAINING_DATABASE_PATH"] = str(scratch / "sessions.sqlite")
+    log = scratch / "backend.log"
+    player = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+    server = subprocess.Popen([str(backend / "python" / "python.exe"), str(backend / "serve.py"),
+                               "--port", str(port), "--parent-pid", str(player.pid), "--log", str(log),
+                               "--state", str(scratch)],
+                              cwd=scratch, env=environment)
+
+    def output() -> str:
+        return log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
+
+    try:
+        if not answers_health(port, server):
+            print(output(), file=sys.stderr)
             raise SystemExit("The bundled backend did not start; its output is above.")
-        finally:
-            server.kill()
-            server.wait(timeout=10)
+        # The app starts its session workers before it listens, and says so if they could not start
+        if "Session workers could not start" in output():
+            print(output(), file=sys.stderr)
+            raise SystemExit("The bundled backend's session workers did not start; its output is above.")
+        print("The bundled backend answered /api/health.", flush=True)
+        player.kill()
+        player.wait()
+        try:
+            server.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            print(output(), file=sys.stderr)
+            raise SystemExit("The bundled backend did not stop after its player closed; its output is above.")
+        if "Every Formula9 window has closed" not in output():
+            print(output(), file=sys.stderr)
+            raise SystemExit(f"The bundled backend exited with code {server.returncode} instead of shutting down "
+                             "after its player closed; its output is above.")
+        print("The bundled backend stopped after its player closed.", flush=True)
+    finally:
+        for process in (player, server):
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=10)
+        remove_scratch(scratch)
+
+
+"""
+# -----------------------------------------------------------------------------------
+# Function: answers_health
+# -----------------------------------------------------------------------------------
+Description:
+    This function waits up to two minutes for /api/health on port to answer.
+
+Args:
+    port (int): The backend's port.
+    server (subprocess.Popen): serve.py, which ends the wait if it exits.
+
+Returns:
+    bool: True once /api/health answered 200.
+"""
+def answers_health(port: int, server: subprocess.Popen) -> bool:
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline and server.poll() is None:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=2) as reply:
+                if reply.status == 200:
+                    return True
+        except OSError:
+            pass
+        time.sleep(0.5)
+    return False
+
+
+"""
+# -----------------------------------------------------------------------------------
+# Function: remove_scratch
+# -----------------------------------------------------------------------------------
+Description:
+    This function deletes the smoke test's temporary folder. The session workers exit a moment
+    after the backend and hold their logs until then, so it retries for a few seconds.
+
+Args:
+    scratch (Path): The folder to delete.
+"""
+def remove_scratch(scratch: Path) -> None:
+    deadline = time.monotonic() + 15
+    while True:
+        try:
+            shutil.rmtree(scratch)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as error:
+            if time.monotonic() > deadline:
+                print(f"Could not delete {scratch}: {error}", file=sys.stderr)
+                return
+            time.sleep(0.5)
 
 
 """
@@ -340,16 +499,14 @@ def main() -> int:
     else:
         if not safe_to_replace(output):
             parser.error(f"{output} is not empty and is not an earlier build; choose another --output.")
-        if output.exists():
-            shutil.rmtree(output)
+        remove_folder(output)
         output.mkdir(parents=True)
         (output / MARKER).write_text("Made by Tools/build_executable.py; a new build replaces this folder.\n",
                                      encoding="utf-8")
         build_player(output)
 
     backend = output / BACKEND_FOLDER
-    if backend.exists():
-        shutil.rmtree(backend)
+    remove_folder(backend)
     bundle_backend(backend, args.include_env)
     smoke_test(backend)
 

@@ -355,5 +355,22 @@ namespace Formula9.Tests
                 Assert.Greater(clip.length, 0.05f, file);
             }
         }
+
+        // -----------------------------------------------------------------------------------
+        // Function: IncidentAlertPlaysQuieter
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     The incident alert plays below full volume, and every lowered volume belongs to a
+        //     real cue and is still audible.
+        [Test]
+        public void IncidentAlertPlaysQuieter()
+        {
+            Assert.Less(AlertPlayer.Volumes["incident_alert"], 1f);
+            foreach (var entry in AlertPlayer.Volumes)
+            {
+                Assert.IsTrue(AlertPlayer.SoundFiles.ContainsKey(entry.Key) || AlertPlayer.ClientSoundFiles.ContainsKey(entry.Key), entry.Key);
+                Assert.That(entry.Value, Is.InRange(0.05f, 1f), entry.Key);
+            }
+        }
     }
 }

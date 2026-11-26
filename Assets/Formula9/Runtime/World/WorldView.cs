@@ -43,7 +43,7 @@ namespace Formula9.World
     {
         public const string NoWorld = "3D unavailable · this session has no spatial capability.";
         public const string MapHint = "2D map · press 3D View for the buildings in 3D.";
-        private const string CityArea = "toa-payoh";
+        internal const string CityArea = "toa-payoh";
         private const float CityMaxDistance = 3000, CityFarClip = 8000, CityPanMargin = 150;
         private static readonly Color CitySky = new Color(0.72f, 0.84f, 0.92f), WorldBackground = new Color(0.10f, 0.10f, 0.12f);
         private const float MinDistance = 5, MaxDistance = 300, MinPitch = 0.12f, MaxPitch = 1.45f;
@@ -274,6 +274,7 @@ namespace Formula9.World
             }
             city?.SetVisible(false);
             maxDistance = MaxDistance; viewCamera.farClipPlane = 1200; viewCamera.backgroundColor = WorldBackground;
+            viewCamera.clearFlags = CameraClearFlags.SolidColor;
             map.style.display = preferMap ? DisplayStyle.Flex : DisplayStyle.None;
             if (preferMap) map.Show(snapshot);
             surfaces.parent.style.display = preferMap ? DisplayStyle.None : DisplayStyle.Flex;
@@ -324,6 +325,8 @@ namespace Formula9.World
             map.style.display = DisplayStyle.None;
             viewCamera.farClipPlane = CityFarClip;
             viewCamera.backgroundColor = CitySky;
+            // The sky from world_look.json, or the plain sky colour without it
+            viewCamera.clearFlags = RenderSettings.skybox != null ? CameraClearFlags.Skybox : CameraClearFlags.SolidColor;
             // Cameras opened while the city was loading take its sky now
             if (camerasShown) shuttleCameras.Match(viewCamera);
             maxDistance = CityMaxDistance;

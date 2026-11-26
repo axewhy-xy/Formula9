@@ -68,6 +68,8 @@ namespace Formula9.World
         private Material Paint(Color color)
         {
             var material = new Material(basis) { color = color };
+            // Wrecks, vans and cones are not buildings: their own colour, no walls or windows on them
+            material.SetFloat("_Plain", 1);
             owned.Add(material);
             return material;
         }

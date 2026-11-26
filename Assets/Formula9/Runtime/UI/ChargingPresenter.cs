@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Formula9.Audio;
 using Formula9.Contracts;
 
 namespace Formula9.UI
@@ -56,6 +57,8 @@ namespace Formula9.UI
         public const long TicksPerSecond = 20, SnapTicks = 200;
         public const long WindowTicks = 20 * 60 * TicksPerSecond;
         private const long LeadTicks = 60 * TicksPerSecond;
+        // Below this a shuttle is at least Medium urgency; below BatteryWatch.RedPercent it is High.
+        private const double MediumPercent = 30;
         private static readonly HashSet<string> Live = new HashSet<string> { "SCHEDULED", "ACTIVE" };
 
         public static string SimClock(long tick)
@@ -88,7 +91,7 @@ namespace Formula9.UI
             return new ChargingQueueRow
             {
                 VehicleId = v.VehicleId, Rank = rank, Urgency = urgency, UrgencyClass = css,
-                BatteryPercent = v.BatteryCapacityKwh > 0 ? Math.Max(0, Math.Min(100, 100 * v.BatteryKwh / v.BatteryCapacityKwh)) : 0,
+                BatteryPercent = BatteryWatch.Percent(v),
                 Battery = $"{v.BatteryKwh:0.#} kWh", Loops = f?.LoopsRemaining?.ToString() ?? "—", State = StateName(v.ServiceState),
                 Eta = f?.NextDepotEtaS == null ? "—" : Duration(f.NextDepotEtaS.Value),
                 Booking = booking == null ? "—" : $"{booking.ChargerId} · {SimClock(booking.StartTick)}",
@@ -101,9 +104,13 @@ namespace Formula9.UI
             // Holding a port starts at dispatch, so the shuttle may still be driving: say what it is doing.
             if (charging) return (5, ChargerStage(v.ServiceState), "charge-urgency-charging");
             if (f?.ReachesDepotAboveReserve == false) return (1, "Critical", "charge-urgency-critical");
+            // Loops count only the energy above the 15% reserve, so on a short loop a nearly flat
+            // battery still forecasts several loops. Take the worse of the loops and the gauge, so the
+            // chip never says Low beside a red battery bar.
+            var percent = BatteryWatch.Percent(v);
+            if (f?.LoopsRemaining <= 1 || BatteryWatch.IsRed(percent)) return (2, "High", "charge-urgency-high");
+            if (f?.LoopsRemaining <= 3 || percent < MediumPercent) return (3, "Medium", "charge-urgency-medium");
             if (f?.LoopsRemaining == null) return (4, "Unknown", "charge-urgency-none");
-            if (f.LoopsRemaining <= 1) return (2, "High", "charge-urgency-high");
-            if (f.LoopsRemaining <= 3) return (3, "Medium", "charge-urgency-medium");
             return (4, "Low", "charge-urgency-low");
         }
 
@@ -146,7 +153,7 @@ namespace Formula9.UI
                 new ChargingKpi { Title = "Average fleet battery", Value = capacity > 0 ? $"{100 * s.Vehicles.Sum(v => v.BatteryKwh) / capacity:0}%" : "—", Note = $"{s.Vehicles.Count} shuttles", Tone = "teal" },
                 new ChargingKpi { Title = "Chargers free", Value = $"{free} / {s.Chargers.Count}", Note = "right now", Tone = free == 0 ? "amber" : "green" },
                 new ChargingKpi { Title = "Bookings", Value = (active + scheduled).ToString(), Note = $"{active} active · {scheduled} scheduled", Tone = "blue" },
-                new ChargingKpi { Title = "Shuttles at risk", Value = risk.ToString(), Note = "stranded, critical or last loop", Tone = risk > 0 ? "red" : "green" },
+                new ChargingKpi { Title = "Shuttles at risk", Value = risk.ToString(), Note = "stranded, critical, last loop or red battery", Tone = risk > 0 ? "red" : "green" },
                 new ChargingKpi { Title = "Decisions waiting", Value = s.ChargeOptions.Select(o => o.VehicleId).Distinct().Count().ToString(), Note = "backend offers open", Tone = "violet" },
             };
         }
@@ -263,7 +270,7 @@ namespace Formula9.UI
         public static int Stage(string vehicleId, string choice, bool checkedOk) => vehicleId == null ? 0 : choice == null ? 1 : checkedOk ? 3 : 2;
 
         // Battery colours, the same thresholds as the Fleet Overview gauge.
-        public static string BatteryClass(double percent) => percent < 20 ? "charge-battery-low" : percent < 50 ? "charge-battery-mid" : "charge-battery-good";
+        public static string BatteryClass(double percent) => BatteryWatch.IsRed(percent) ? "charge-battery-low" : percent < 50 ? "charge-battery-mid" : "charge-battery-good";
 
         public static string StatusClass(string status)
         {
