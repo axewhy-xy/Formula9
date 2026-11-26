@@ -543,6 +543,19 @@ namespace Formula9.Tests
                 typeof(TrainingWorkspace).GetMethod("ChooseOption", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
                     .Invoke(workspace, new object[] { "ROAD_DETOUR" });
                 Assert.AreEqual(DisplayStyle.Flex, root.Q("route-decide").style.display.value, "re-routing again");
+                // A suggested detour leaves the drawn route empty, but is kept the same way
+                var suggesting = typeof(TrainingWorkspace).GetField("suggesting", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                suggesting.SetValue(workspace, true);
+                typeof(TrainingWorkspace).GetMethod("ChooseOption", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    .Invoke(workspace, new object[] { "ROAD_DETOUR" });
+                Assert.AreEqual(DisplayStyle.Flex, root.Q("route-decide").style.display.value, "the suggestion is kept");
+                Assert.AreEqual(RoutePresenter.LeaveRerouteNote, root.Q<Label>("route-options-hint").text);
+                suggesting.SetValue(workspace, false);
+                // Changing the route takes the first press back, and its note
+                typeof(TrainingWorkspace).GetMethod("ApplyDraft", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    .Invoke(workspace, new object[] { new List<RouteWaypoint>() });
+                Assert.AreNotEqual(RoutePresenter.LeaveRerouteNote, root.Q<Label>("route-options-hint").text);
+                Assert.IsFalse((bool)typeof(TrainingWorkspace).GetField("leavingReroute", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).GetValue(workspace));
                 Assert.IsTrue(Items().Single(b => b.Q<Label>(className: "route-pending-name").text == "Shuttle 05").ClassListContains("route-pending-item-selected"));
                 Assert.IsFalse(Items().Single(b => b.Q<Label>(className: "route-pending-name").text == "Shuttle 01").ClassListContains("route-pending-item-selected"));
 
@@ -747,6 +760,7 @@ namespace Formula9.Tests
                 Assert.IsTrue(Shown("route-confirm"));
                 Assert.IsFalse(Option("option-hold").enabledSelf);
                 Assert.IsTrue(Option("option-keep").enabledSelf, "the way back from the confirm card");
+                Assert.AreEqual(RoutePresenter.CloseChoiceHint, Option("option-keep").tooltip, "it says what pressing it does, not that the session is paused");
                 Assert.IsFalse(root.Q<Button>("route-confirm-send").enabledSelf);
                 Choose("KEEP_ROUTE");
                 Assert.IsFalse(Shown("route-confirm"));

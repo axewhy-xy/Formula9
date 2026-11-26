@@ -394,7 +394,7 @@ namespace Formula9.Tests
             // Only "<incident>-detour-<this shuttle>" is a detour: a scenario route or another shuttle's keeps its ID
             Assert.AreEqual("route-detour-north · original", Route("route-detour-north", 1));
             Assert.AreEqual("incident-1-detour-shuttle-02 · original", Route("incident-1-detour-shuttle-02", 1));
-            Assert.AreEqual("incident-9-detour-shuttle-01 · original", Route("incident-9-detour-shuttle-01", 1), "no such incident");
+            Assert.AreEqual("Incident detour", Route("incident-9-detour-shuttle-01", 1), "still driving it after its incident has gone");
             Assert.AreEqual("—", Route(null, null));
         }
 

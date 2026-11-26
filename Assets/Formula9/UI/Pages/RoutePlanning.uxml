@@ -96,7 +96,8 @@
                 </ui:VisualElement>
 
                 <ui:VisualElement name="route-outcome" class="route-card">
-                    <ui:Label text="What happened" class="route-card-title" />
+                    <!-- The title, headline, rows and notes hide with nothing to report, leaving the view buttons -->
+                    <ui:Label name="route-outcome-title" text="What happened" class="route-card-title" />
                     <ui:Label name="route-outcome-headline" class="route-verdict" />
                     <ui:VisualElement name="route-outcome-rows" class="route-metrics" />
                     <ui:Label name="route-outcome-notes" class="route-card-text" />

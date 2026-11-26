@@ -35,7 +35,7 @@ namespace Formula9.UI
         private readonly TextElement routeBadge;
         private readonly VisualElement navPanel;
         private readonly TextField routeReason;
-        private readonly Label routeProblem, routeOptionsExpiry, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes;
+        private readonly Label routeProblem, routeOptionsExpiry, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeTitle, routeOutcomeHeadline, routeOutcomeNotes;
         private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowProblem, routeReload, routeCameras, viewCameras, approve, routeStart, routeWatch;
         // The exercise's cards in page order, each with its step in RoutePresenter.Stages. The options
         // are part of the problem's card.
@@ -172,6 +172,7 @@ namespace Formula9.UI
             routeVerdict = root.Q<Label>("route-verdict");
             routeAssumptions = root.Q<Label>("route-assumptions");
             routeApplyNote = root.Q<Label>("route-apply-note");
+            routeOutcomeTitle = root.Q<Label>("route-outcome-title");
             routeOutcomeHeadline = root.Q<Label>("route-outcome-headline");
             routeOutcomeNotes = root.Q<Label>("route-outcome-notes");
             routeWaypoints = root.Q("route-waypoints");
@@ -322,7 +323,7 @@ namespace Formula9.UI
                 sessionToolsOpen = keepTools ? true : (bool?)null;
                 boundary = currentBoundary; dependencies = null; context = null; requestGeneration++; approvedDraft = null; contextFailed = false;
                 selectedVehicle = route = selectedDetour = pendingSeen = pendingStrip = null;
-                choice = null; choiceCandidate = confirmCommand = optionsNote = null; rerouting = awaitingError = false;
+                choice = null; choiceCandidate = confirmCommand = optionsNote = null; rerouting = awaitingError = leavingReroute = false;
                 // Incident IDs repeat across sessions, so another session's selection would mark the wrong one
                 SelectIncident(null);
                 if (ledgerSession != s?.SessionId) { ledger.Clear(); ledgerSession = s?.SessionId; }
@@ -433,7 +434,8 @@ namespace Formula9.UI
                 // possible while the others are greyed out: it is the only way back from it
                 var closes = option.Action == "ROAD_DETOUR" ? rerouting && !session.HasPendingCommand : option.Action == choice?.Action && confirmCommand == null;
                 button.SetEnabled(closes || (free && option.Enabled));
-                button.tooltip = option.Tooltip;
+                // Chosen, it says what pressing it again does, not why it couldn't be chosen now
+                button.tooltip = !closes ? option.Tooltip : option.Action == "ROAD_DETOUR" ? RoutePresenter.LeaveRerouteHint : RoutePresenter.CloseChoiceHint;
             }
             routeConfirmSend.SetEnabled(free && choice != null && s?.Session.Status == "RUNNING" && !string.IsNullOrWhiteSpace(confirmReason.value));
             confirmReason.SetEnabled(confirmCommand == null);
@@ -503,7 +505,7 @@ namespace Formula9.UI
             var detour = DecisionRules.DetourCandidate(s, selectedVehicle)?.IncidentId;
             var ended = false;
             if (detour != selectedDetour) { ended = detour == null && selectedDetour != null; selectedDetour = detour; ClearDraft(); }
-            if (detour == null) rerouting = false;
+            if (detour == null) { rerouting = false; KeepReroute(); }
             FollowChoice(s);
 
             if (changed && pending.Count > 0 && !pending.Contains(selectedVehicle) && Idle) { SetShuttle(s, pending[0]); return; }
@@ -523,7 +525,7 @@ namespace Formula9.UI
             selectedVehicle = vehicleId;
             route = s?.Vehicles.FirstOrDefault(v => v.VehicleId == vehicleId)?.RouteId;
             selectedDetour = DecisionRules.DetourCandidate(s, vehicleId)?.IncidentId;
-            choice = null; choiceCandidate = optionsNote = null; rerouting = false;
+            choice = null; choiceCandidate = optionsNote = null; rerouting = leavingReroute = false;
             ClearDraft();
         }
 
@@ -859,7 +861,7 @@ namespace Formula9.UI
         private void ApplyDraft(List<RouteWaypoint> next)
         {
             // Changing the route takes back a first press of Re-route to leave it
-            if (leavingReroute) { leavingReroute = false; if (optionsNote == RoutePresenter.LeaveRerouteNote) optionsNote = null; }
+            KeepReroute();
             draft = next;
             InvalidateRoute();
             RenderWaypoints();
@@ -902,9 +904,7 @@ namespace Formula9.UI
         {
             if (routeProblem == null) return;
             routeProblem.text = RoutePresenter.Problem(context, s, selectedVehicle);
-            // A problem: an incident the shuttle is up against, or a closed road near its route
-            var problem = RoutePresenter.ProblemIncidents(s, selectedVehicle).Count > 0 || (context != null && context.Edges.Any(e => e.Closed));
-            routeShowProblem.style.display = problem ? DisplayStyle.Flex : DisplayStyle.None;
+            routeShowProblem.style.display = HasProblem(s) ? DisplayStyle.Flex : DisplayStyle.None;
             ShowRouteReload();
             // When the options are next refreshed, beside the question above them
             var expiry = RoutePresenter.OptionsExpiry(s, selectedVehicle);
@@ -912,8 +912,7 @@ namespace Formula9.UI
             routeOptionsExpiry.style.display = expiry == null ? DisplayStyle.None : DisplayStyle.Flex;
             // Before the start: the problem, the editor while a route is closed, else the outcome. Running
             // with a decision to make: the problem and the options, and the editor while re-routing.
-            // Otherwise: the problem and the outcome. With no problem and nothing to report, the outcome
-            // card keeps only its Start, Watch and Cameras buttons.
+            // Otherwise: the problem and the outcome (RenderOutcome hides what it has nothing to say in).
             var ready = s?.Session.Status == "READY";
             var pending = s != null && DecisionRules.OptionsFor(s, selectedVehicle).Count > 0;
             var editing = ready ? s != null && TrainingPresenter.AssignedRouteIsClosed(s) : Drafting(s);
@@ -922,10 +921,6 @@ namespace Formula9.UI
             routeFeedback.style.display = editing ? DisplayStyle.Flex : DisplayStyle.None;
             routeApply.style.display = editing ? DisplayStyle.Flex : DisplayStyle.None;
             routeOutcomePanel.style.display = editing || (!ready && pending) ? DisplayStyle.None : DisplayStyle.Flex;
-            var report = problem || (outcome != null && outcome.State != "NOT_APPROVED") ? DisplayStyle.Flex : DisplayStyle.None;
-            routeOutcomeHeadline.style.display = report;
-            routeOutcomeRows.style.display = report;
-            routeOutcomeNotes.style.display = report;
             RenderOptions(s);
             RenderOutcome(s);
         }
@@ -960,8 +955,9 @@ namespace Formula9.UI
         {
             if (action == "ROAD_DETOUR" && rerouting && !session.HasPendingCommand)
             {
-                // A drawn route is only dropped on a second press, so one press by mistake loses nothing
-                if (draft.Count > 0 && !leavingReroute)
+                // A drawn or suggested route is only dropped on a second press, so one press by mistake
+                // loses nothing
+                if ((draft.Count > 0 || suggesting || preview != null) && !leavingReroute)
                 {
                     leavingReroute = true;
                     optionsNote = RoutePresenter.LeaveRerouteNote;
@@ -1000,6 +996,13 @@ namespace Formula9.UI
             confirmReason.value = option.Reason;
             SetConfirmNote("", false);
             Render();
+        }
+
+        // Takes back a first press of Re-route to leave it, and the note saying what a second press does.
+        private void KeepReroute()
+        {
+            leavingReroute = false;
+            if (optionsNote == RoutePresenter.LeaveRerouteNote) optionsNote = null;
         }
 
         // Leaves the re-route; the route drawn for it is dropped.
@@ -1202,8 +1205,19 @@ namespace Formula9.UI
             finally { outcomeBusy = false; }
         }
 
+        // A problem: an incident the shuttle is up against, or a closed road near its route.
+        private bool HasProblem(FullSnapshot s) =>
+            RoutePresenter.ProblemIncidents(s, selectedVehicle).Count > 0 || (context != null && context.Edges.Any(e => e.Closed));
+
+        // The outcome card. With no problem and nothing to report it keeps only its Start, Watch and
+        // Cameras buttons; worked out here, so a loaded outcome shows at once.
         private void RenderOutcome(FullSnapshot s)
         {
+            var report = HasProblem(s) || (outcome != null && outcome.State != "NOT_APPROVED") ? DisplayStyle.Flex : DisplayStyle.None;
+            routeOutcomeTitle.style.display = report;
+            routeOutcomeHeadline.style.display = report;
+            routeOutcomeRows.style.display = report;
+            routeOutcomeNotes.style.display = report;
             routeOutcomeHeadline.text = RoutePresenter.OutcomeHeadline(outcome);
             routeOutcomeHeadline.EnableInClassList("route-verdict-good", outcome?.ServicePreserved == true);
             routeOutcomeHeadline.EnableInClassList("route-verdict-bad", outcome?.ServicePreserved == false);

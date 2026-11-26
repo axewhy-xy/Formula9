@@ -273,6 +273,9 @@ namespace Formula9.UI
         public const string OptionsWithdrawn = "That option is no longer offered; choose again.";
         // Said under the options after Re-route is pressed again with a route drawn: a second press drops it
         public const string LeaveRerouteNote = "Press Re-route on the map again to drop the route you drew.";
+        // The chosen option's tooltip: pressing it again closes it
+        public const string CloseChoiceHint = "Press again to close this decision.";
+        public const string LeaveRerouteHint = "Press again to leave the re-route.";
 
         // What the confirm row says when a decision was not applied: it stays open for another try.
         public static string Refusal(CommandOutcome outcome)
