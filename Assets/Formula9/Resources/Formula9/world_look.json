@@ -32,6 +32,11 @@
   },
   "buildingSelfLight": 0.05,
   "groundShadowDarkness": 0.55,
+  "grass": {
+    "enabled": true,
+    "repeatM": 2,
+    "strength": 0.9
+  },
   "dayCycle": {
     "latitudeDeg": 1.335,
     "longitudeDeg": 103.85,

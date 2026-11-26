@@ -483,6 +483,8 @@ namespace Formula9.World
                 // Nobody pressed a button, so tell the workspace to redraw its Cameras buttons
                 ViewChanged?.Invoke();
             }
+            // Use each camera's final pose, including the overview camera while it follows a shuttle.
+            if (CityShown) city?.DrawVegetation(trafficCameras);
         }
 
         // -----------------------------------------------------------------------------------
