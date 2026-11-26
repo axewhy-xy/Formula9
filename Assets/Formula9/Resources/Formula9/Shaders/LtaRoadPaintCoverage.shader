@@ -33,16 +33,6 @@ Shader "Formula9/LtaRoadPaintCoverage"
                 return o;
             }
 
-            // World-space variation fades out as the grain becomes smaller than a pixel.
-            float PaintWear(float2 metres)
-            {
-                float footprint = max(length(ddx(metres)), length(ddy(metres)));
-                float2 patch = metres * 9.0;
-                float grain = sin(dot(patch, float2(1.37, 2.11))) *
-                    sin(dot(patch, float2(-2.43, 1.19)));
-                return (1.0 - smoothstep(.025, .16, footprint)) *
-                    smoothstep(.15, .85, grain);
-            }
 
             fixed4 frag(Varyings i) : SV_Target
             {
@@ -53,9 +43,7 @@ Shader "Formula9/LtaRoadPaintCoverage"
                 float4 covers = saturate(0.5 + (i.edges + expansion) / feather);
                 float coverage = min(min(covers.x, covers.y), min(covers.z, covers.w));
                 clip(coverage - 0.0039);
-                float wear = PaintWear(i.metres);
-                float3 tint = _Color.rgb * (0.93 - 0.12 * wear);
-                return fixed4(tint, _Color.a * coverage * (0.98 - 0.18 * wear));
+                return fixed4(_Color.rgb * 0.93, _Color.a * coverage * 0.98);
             }
             ENDCG
         }

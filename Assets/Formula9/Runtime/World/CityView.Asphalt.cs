@@ -57,7 +57,7 @@ namespace Formula9.World
                 if (disposed) throw new OperationCanceledException();
 
                 const string materialFolder = "Formula9/LtaRoads/Materials/";
-                var coverageShader = Resources.Load<Shader>("Formula9/LtaRoadPaintCoverage");
+                var coverageShader = Resources.Load<Shader>("Formula9/Shaders/LtaRoadPaintCoverage");
                 bool useCoverage = coverageShader != null && coverageShader.isSupported;
 
                 if (!useCoverage)
@@ -77,9 +77,7 @@ namespace Formula9.World
                     return mat;
                 }
 
-                var symbolShader = Resources.Load<Shader>("Formula9/LtaReadableMarkings");
-                var symbols = symbolShader != null && symbolShader.isSupported
-                    ? Own(new Material(symbolShader) { name = "LTA directional arrow overlay" }) : null;
+                var symbolShader = Resources.Load<Shader>("Formula9/Shaders/LtaReadableMarkings");
                 var white = Paint("WhitePaint", MarkingColor);
                 var yellow = Paint("YellowPaint", new Color(.94f, .73f, .13f));
                 holder = new GameObject("LTA paint over original roads");
@@ -126,9 +124,7 @@ namespace Formula9.World
                     // The mesh is placement context. Survey paint can cross gaps in it.
                     if (tile["markings"] != null)
                     {
-                        var builder = new LtaCityRoadPaint.PaintMeshBuilder(
-                            points.ToArray(), triangles, Vector2.zero, half, useCoverage)
-                            { DrawArrowsAsSymbols = symbols != null };
+                        var builder = new LtaCityRoadPaint.PaintMeshBuilder(points.ToArray(), triangles, Vector2.zero, half, useCoverage);
                         painted = child.AddComponent<LtaCityRoadPaint>().Build(tile, white, yellow, half, builder, meshes.Add);
                         if (painted) built++;
                     }
@@ -146,10 +142,7 @@ namespace Formula9.World
                     Debug.LogWarning($"[CityView] LTA paint overlay generated zero meshes from {indexed.Tiles.Count} tiles.");
                     return false;
                 }
-                if (symbols != null)
-                {
-                    LtaOverviewSymbols.Build(indexed.Tiles, holder.transform, symbols, meshes.Add);
-                }
+               
                 owned.AddRange(meshes);
                 committed = true;
                 Debug.Log($"[CityView] LTA paint overlay loaded on {built} tiles.");

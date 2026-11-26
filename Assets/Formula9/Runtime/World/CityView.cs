@@ -297,7 +297,7 @@ namespace Formula9.World
                 const string roadTextureFolder = "Formula9/Textures/";
                 var asphaltColorMap = LoadRoadTexture(roadTextureFolder + "asphalt_02", TextureWrapMode.Mirror);
                 if (asphaltColorMap != null) asphaltColorMap.anisoLevel = 16;
-                var textureShader = Resources.Load<Shader>("Formula9/CityRoadWithCentreDividers");
+                var textureShader = Resources.Load<Shader>("Formula9/Shaders/CityRoadWithCentreDividers");
                 bool hasTextureShader = textureShader != null && textureShader.isSupported;
                 bool useAsphaltMaps = asphaltColorMap != null;
                 var atlas = !useAsphaltMaps ? LoadRoadTexture(roadTextureFolder + "road_lane_texture") : null;
@@ -853,7 +853,12 @@ namespace Formula9.World
                     YellowS = (int)first.YL_duration,
                     AllRedS = (int)first.RL_duration,
                 });
-                if (traffic != null) TrafficLightManager.Instance.SetClock(() => traffic.SignalClockS);
+                
+                if (traffic != null)
+                {
+                    TrafficLightManager.Instance.SetClock(() => traffic.SignalClockS);
+                    TrafficLightManager.Instance.SetFaults(junction => traffic.SignalFaulted(junction));
+                }
             }
 
             var trafficLightsContainer = new GameObject("TrafficLights");
@@ -1272,6 +1277,7 @@ namespace Formula9.World
                 else if (motion.Sample(pair.Key, now, out var position, out var rotation))
                     pair.Value.SetPositionAndRotation(position, rotation);
             }
+            incidents.DrawQueues = !FollowsBackendTraffic;
             incidents.Tick(now, id => shuttles.TryGetValue(id, out var shuttle) ? shuttle : null);
         }
 
