@@ -1,10 +1,67 @@
 {
-  "_about": "Sun, sky and shadows of the 3D world. Colours are #RRGGBB, angles degrees. Changes show the next time the 3D view opens.",
-  "sun": { "color": "#FFF6EA", "intensity": 1.0, "pitchDeg": 42, "yawDeg": -35, "shadowStrength": 0.85 },
-  "ambient": { "sky": "#A9C6E6", "horizon": "#CBCFCC", "ground": "#8E8A80", "intensity": 0.48 },
-  "shadows": { "distanceM": 450, "cascades": 4, "resolution": "VeryHigh" },
-  "haze": { "enabled": false, "color": "#D6E2EA", "density": 0.00022 },
-  "sky": { "top": "#3F7FC6", "horizon": "#D6E6F2", "below": "#BFC7CA", "cloudCover": 0.45, "cloudColor": "#FFFFFF" },
+  "_about": "Sun, sky and shadows of the 3D world. Colours are #RRGGBB, angles degrees. Changes show the next time the 3D view opens. dayCycle.keys say how each hour looks (blended between keys, around midnight); with no keys, sun/ambient/sky/haze below hold all day. While the sun is down a key's light is the moon's. weather is how the world opens; DayCycle.Weather changes it at run time.",
+  "sun": {
+    "color": "#FFF6EA",
+    "intensity": 1.0,
+    "pitchDeg": 42,
+    "yawDeg": -35,
+    "shadowStrength": 0.85
+  },
+  "ambient": {
+    "sky": "#A9C6E6",
+    "horizon": "#CBCFCC",
+    "ground": "#8E8A80",
+    "intensity": 0.48
+  },
+  "shadows": {
+    "distanceM": 450,
+    "cascades": 4,
+    "resolution": "VeryHigh"
+  },
+  "haze": {
+    "enabled": false,
+    "color": "#D6E2EA",
+    "density": 0.00022
+  },
+  "sky": {
+    "top": "#3F7FC6",
+    "horizon": "#D6E6F2",
+    "below": "#BFC7CA",
+    "cloudCover": 0.45,
+    "cloudColor": "#FFFFFF"
+  },
   "buildingSelfLight": 0.05,
-  "groundShadowDarkness": 0.55
+  "groundShadowDarkness": 0.55,
+  "dayCycle": {
+    "latitudeDeg": 1.335,
+    "longitudeDeg": 103.85,
+    "utcOffsetHours": 8,
+    "dayOfYear": 80,
+    "startHour": 10,
+    "timeScale": 5.5,
+    "minLightPitchDeg": 10,
+    "keys": [
+      {"hour": 5.5, "_": "night: dark blue-black, moonlight", "skyTop": "#04060E", "skyHorizon": "#0B1222", "skyBelow": "#070A12", "cloudColor": "#1A2133", "lightColor": "#8EA6D8", "lightIntensity": 0.12, "shadowStrength": 0.5, "ambientSky": "#3A4C78", "ambientHorizon": "#2C3858", "ambientGround": "#1A1E28", "ambientIntensity": 0.6, "hazeColor": "#0B1222", "groundLight": "#3A4766", "stars": 1},
+      {"hour": 6.5, "_": "6-7am: mid navy, a little lighter than 7-8pm", "skyTop": "#24386A", "skyHorizon": "#3E5486", "skyBelow": "#1E2840", "cloudColor": "#4A5878", "lightColor": "#9FB4DE", "lightIntensity": 0.1, "shadowStrength": 0.5, "ambientSky": "#4F6496", "ambientHorizon": "#3E4E74", "ambientGround": "#24283A", "ambientIntensity": 0.65, "hazeColor": "#3E5486", "groundLight": "#5A6A90", "stars": 0.3},
+      {"hour": 7.25, "_": "sunrise: peach horizon", "skyTop": "#4B6EA8", "skyHorizon": "#E8B48C", "skyBelow": "#5A6280", "cloudColor": "#F2C6A8", "lightColor": "#FFB98A", "lightIntensity": 0.45, "shadowStrength": 0.6, "ambientSky": "#7F98C2", "ambientHorizon": "#C9A994", "ambientGround": "#5E5A58", "ambientIntensity": 0.5, "hazeColor": "#C7A890", "groundLight": "#B8B4BC", "stars": 0},
+      {"hour": 8.0, "_": "morning: the usual blue", "skyTop": "#3F7FC6", "skyHorizon": "#D6E6F2", "skyBelow": "#BFC7CA", "cloudColor": "#FFFFFF", "lightColor": "#FFF6EA", "lightIntensity": 1.0, "shadowStrength": 0.85, "ambientSky": "#A9C6E6", "ambientHorizon": "#CBCFCC", "ambientGround": "#8E8A80", "ambientIntensity": 0.48, "hazeColor": "#D6E2EA", "groundLight": "#FFFFFF", "stars": 0},
+      {"hour": 10.75, "_": "morning: the usual blue", "skyTop": "#3F7FC6", "skyHorizon": "#D6E6F2", "skyBelow": "#BFC7CA", "cloudColor": "#FFFFFF", "lightColor": "#FFF6EA", "lightIntensity": 1.0, "shadowStrength": 0.85, "ambientSky": "#A9C6E6", "ambientHorizon": "#CBCFCC", "ambientGround": "#8E8A80", "ambientIntensity": 0.48, "hazeColor": "#D6E2EA", "groundLight": "#FFFFFF", "stars": 0},
+      {"hour": 11.5, "_": "midday: bright sky", "skyTop": "#2D86E0", "skyHorizon": "#E2F0FA", "skyBelow": "#C4CDD0", "cloudColor": "#FFFFFF", "lightColor": "#FFFBF4", "lightIntensity": 1.1, "shadowStrength": 0.85, "ambientSky": "#B3D0F0", "ambientHorizon": "#D2D6D2", "ambientGround": "#938F85", "ambientIntensity": 0.5, "hazeColor": "#DCE8F0", "groundLight": "#FFFFFF", "stars": 0},
+      {"hour": 15.0, "_": "midday: bright sky", "skyTop": "#2D86E0", "skyHorizon": "#E2F0FA", "skyBelow": "#C4CDD0", "cloudColor": "#FFFFFF", "lightColor": "#FFFBF4", "lightIntensity": 1.1, "shadowStrength": 0.85, "ambientSky": "#B3D0F0", "ambientHorizon": "#D2D6D2", "ambientGround": "#938F85", "ambientIntensity": 0.5, "hazeColor": "#DCE8F0", "groundLight": "#FFFFFF", "stars": 0},
+      {"hour": 16.0, "_": "golden hour: yellowish", "skyTop": "#5E95CF", "skyHorizon": "#F4D79A", "skyBelow": "#C9C2AE", "cloudColor": "#FFF0CC", "lightColor": "#FFD9A0", "lightIntensity": 1.0, "shadowStrength": 0.85, "ambientSky": "#B7C3D6", "ambientHorizon": "#E2D0AA", "ambientGround": "#8F8676", "ambientIntensity": 0.48, "hazeColor": "#EED9AE", "groundLight": "#FFF6E6", "stars": 0},
+      {"hour": 16.75, "_": "golden hour: yellowish", "skyTop": "#5E95CF", "skyHorizon": "#F4D79A", "skyBelow": "#C9C2AE", "cloudColor": "#FFF0CC", "lightColor": "#FFD9A0", "lightIntensity": 1.0, "shadowStrength": 0.85, "ambientSky": "#B7C3D6", "ambientHorizon": "#E2D0AA", "ambientGround": "#8F8676", "ambientIntensity": 0.48, "hazeColor": "#EED9AE", "groundLight": "#FFF6E6", "stars": 0},
+      {"hour": 17.5, "_": "5-6pm: orangish", "skyTop": "#6F8DBF", "skyHorizon": "#F5A462", "skyBelow": "#A88E80", "cloudColor": "#FFD2A6", "lightColor": "#FFB070", "lightIntensity": 0.85, "shadowStrength": 0.8, "ambientSky": "#9EA8C8", "ambientHorizon": "#E0AE84", "ambientGround": "#7A6A60", "ambientIntensity": 0.45, "hazeColor": "#E8A878", "groundLight": "#F6E2D0", "stars": 0},
+      {"hour": 18.5, "_": "6-7pm: orange with blue", "skyTop": "#2F4F8A", "skyHorizon": "#F0874A", "skyBelow": "#5A4E5A", "cloudColor": "#E89A78", "lightColor": "#FF8C50", "lightIntensity": 0.5, "shadowStrength": 0.7, "ambientSky": "#6B7AAA", "ambientHorizon": "#C08070", "ambientGround": "#4A4048", "ambientIntensity": 0.5, "hazeColor": "#B07A6A", "groundLight": "#C8B8B8", "stars": 0},
+      {"hour": 19.5, "_": "7-8pm: navy blue, moonlight", "skyTop": "#1B2A4E", "skyHorizon": "#2E4170", "skyBelow": "#161D30", "cloudColor": "#3A4565", "lightColor": "#9AB0DC", "lightIntensity": 0.1, "shadowStrength": 0.5, "ambientSky": "#42557F", "ambientHorizon": "#33405F", "ambientGround": "#1E222E", "ambientIntensity": 0.6, "hazeColor": "#2E4170", "groundLight": "#4C5A7C", "stars": 0.4},
+      {"hour": 20.5, "_": "night: dark blue-black, moonlight", "skyTop": "#04060E", "skyHorizon": "#0B1222", "skyBelow": "#070A12", "cloudColor": "#1A2133", "lightColor": "#8EA6D8", "lightIntensity": 0.12, "shadowStrength": 0.5, "ambientSky": "#3A4C78", "ambientHorizon": "#2C3858", "ambientGround": "#1A1E28", "ambientIntensity": 0.6, "hazeColor": "#0B1222", "groundLight": "#3A4766", "stars": 1}
+    ]
+  },
+  "weather": {
+    "cloudCover": 0.45,
+    "overcast": 0,
+    "windTowardsDeg": 250,
+    "windSpeedMps": 6,
+    "fog": 0,
+    "rain": 0
+  }
 }

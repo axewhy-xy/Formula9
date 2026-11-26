@@ -1019,6 +1019,17 @@
     color: rgb(255, 255, 255);
     background-color: rgba(15, 30, 38, 0.85);
 }
+/* The world's time of day, bottom left, shaded like the large camera's name label */
+.world-clock {
+    position: absolute;
+    left: 10px;
+    bottom: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 14px;
+    color: rgb(255, 255, 255);
+    background-color: rgba(15, 30, 38, 0.85);
+}
 /* Shuttle cameras: they cover the whole 3D view, one camera large with the rest as thumbnails in a
    foldable rail over its top-left corner (kept high so the Fleet List sheet does not cover it). */
 .camera-panel {

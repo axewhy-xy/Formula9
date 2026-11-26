@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using Newtonsoft.Json;
 using UnityEngine;
@@ -20,6 +21,65 @@ namespace Formula9.World
         [JsonProperty("buildingSelfLight")] public float BuildingSelfLight = 0.06f;
         // How much darker the unlit ground is in shadow, 0 to 1
         [JsonProperty("groundShadowDarkness")] public float GroundShadowDarkness = 0.45f;
+        // The sky through the day; with no keys the sun, ambient, sky and haze above hold all day
+        [JsonProperty("dayCycle")] public DayCycleSpec DayCycle = new DayCycleSpec();
+        // The weather the world opens with; DayCycle.Weather changes it at run time
+        [JsonProperty("weather")] public WeatherSpec Weather = new WeatherSpec();
+
+        public sealed class DayCycleSpec
+        {
+            // Where and when the sun is worked out for: Toa Payoh, Singapore time
+            [JsonProperty("latitudeDeg")] public float LatitudeDeg = 1.335f;
+            [JsonProperty("longitudeDeg")] public float LongitudeDeg = 103.85f;
+            [JsonProperty("utcOffsetHours")] public float UtcOffsetHours = 8;
+            // 1 to 366; 0 for today's date
+            [JsonProperty("dayOfYear")] public int DayOfYear;
+            // The time of day at the session's first tick, and with no session joined
+            [JsonProperty("startHour")] public float StartHour = 10;
+            // Hours of the world's day a session hour: 1 for real time, 24 for a day an hour
+            [JsonProperty("timeScale")] public float TimeScale = 1;
+            // The light never comes from lower than this, so shadows stay short enough to read near sunrise and sunset
+            [JsonProperty("minLightPitchDeg")] public float MinLightPitchDeg = 10;
+            // How the sky looks at each hour, blended between neighbours and around midnight. While the sun is
+            // down, the key's light is the moon's.
+            [JsonProperty("keys")] public List<SkyKey> Keys = new List<SkyKey>();
+        }
+
+        public sealed class SkyKey
+        {
+            [JsonProperty("hour")] public float Hour;
+            [JsonProperty("skyTop")] public string SkyTop = "#3F7FC6";
+            [JsonProperty("skyHorizon")] public string SkyHorizon = "#D6E6F2";
+            [JsonProperty("skyBelow")] public string SkyBelow = "#BFC7CA";
+            [JsonProperty("cloudColor")] public string CloudColor = "#FFFFFF";
+            [JsonProperty("lightColor")] public string LightColor = "#FFF6EA";
+            [JsonProperty("lightIntensity")] public float LightIntensity = 1;
+            [JsonProperty("shadowStrength")] public float ShadowStrength = 0.85f;
+            [JsonProperty("ambientSky")] public string AmbientSky = "#A9C6E6";
+            [JsonProperty("ambientHorizon")] public string AmbientHorizon = "#CBCFCC";
+            [JsonProperty("ambientGround")] public string AmbientGround = "#8E8A80";
+            [JsonProperty("ambientIntensity")] public float AmbientIntensity = 0.48f;
+            [JsonProperty("hazeColor")] public string HazeColor = "#D6E2EA";
+            // What the unlit map tiles and roads are multiplied by: white by day, dark at night
+            [JsonProperty("groundLight")] public string GroundLight = "#FFFFFF";
+            // 0 for none, 1 for a clear night's stars
+            [JsonProperty("stars")] public float Stars;
+        }
+
+        public sealed class WeatherSpec
+        {
+            // 0 for a clear sky, 1 for cloud everywhere
+            [JsonProperty("cloudCover")] public float CloudCover = 0.45f;
+            // 0 for bright, 1 for a heavy grey sky that hides the sun
+            [JsonProperty("overcast")] public float Overcast;
+            // The compass direction the wind blows towards (0 north, 90 east) and its speed at cloud height
+            [JsonProperty("windTowardsDeg")] public float WindTowardsDeg = 250;
+            [JsonProperty("windSpeedMps")] public float WindSpeedMps = 6;
+            // 0 to 1: extra mist on top of the haze
+            [JsonProperty("fog")] public float Fog;
+            // 0 to 1: kept for rain effects; it darkens the sky now
+            [JsonProperty("rain")] public float Rain;
+        }
 
         public sealed class SunSpec
         {
@@ -75,6 +135,17 @@ namespace Formula9.World
             var look = JsonConvert.DeserializeObject<WorldLook>(json, settings) ?? new WorldLook();
             foreach (var hex in new[] { look.Sun.Color, look.Ambient.Sky, look.Ambient.Horizon, look.Ambient.Ground, look.Sky.Top, look.Sky.Horizon, look.Sky.Below, look.Sky.CloudColor, look.Haze.Color })
                 Color(hex);
+            look.DayCycle ??= new DayCycleSpec();
+            look.Weather ??= new WeatherSpec();
+            look.DayCycle.Keys ??= new List<SkyKey>();
+            look.DayCycle.Keys.RemoveAll(k => k == null);
+            foreach (var key in look.DayCycle.Keys)
+            {
+                if (key.Hour < 0 || key.Hour >= 24) throw new FormatException($"dayCycle key hour {key.Hour} is not between 0 and 24");
+                foreach (var hex in new[] { key.SkyTop, key.SkyHorizon, key.SkyBelow, key.CloudColor, key.LightColor, key.AmbientSky, key.AmbientHorizon, key.AmbientGround, key.HazeColor, key.GroundLight })
+                    Color(hex);
+            }
+            look.DayCycle.Keys.Sort((a, b) => a.Hour.CompareTo(b.Hour));
             return look;
         }
 
