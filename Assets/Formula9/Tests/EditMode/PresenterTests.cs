@@ -371,8 +371,26 @@ namespace Formula9.Tests
             CollectionAssert.IsOrdered(rows.Select(r => r.ShuttleId).ToList());
             var first = rows.First();
             Assert.AreEqual("shuttle-01", first.ShuttleId);
-            Assert.AreEqual("route-a / 2", first.Route);
+            Assert.AreEqual("route-a · edited once", first.Route, "revision 2: one approved edit");
             Assert.AreEqual("28 / 40 kWh", first.Battery);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: TheRouteSaysWhetherItIsTheOriginalOrEdited
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     Every route starts at revision 1 and each approved edit adds one; a shuttle's own
+        //     detour round an incident is named as one.
+        [Test]
+        public void TheRouteSaysWhetherItIsTheOriginalOrEdited()
+        {
+            string Route(string id, long? revision) => TrainingPresenter.RouteState(new FleetVehicle { VehicleId = "shuttle-01", RouteId = id, RouteRevision = revision });
+            Assert.AreEqual("route-a · original", Route("route-a", 1));
+            Assert.AreEqual("route-a · edited twice", Route("route-a", 3));
+            Assert.AreEqual("route-a · edited 4 times", Route("route-a", 5));
+            Assert.AreEqual("Incident detour", Route("incident-1-detour-shuttle-01", 1));
+            Assert.AreEqual("Incident detour · edited once", Route("incident-1-detour-shuttle-01", 2));
+            Assert.AreEqual("—", Route(null, null));
         }
 
         // -----------------------------------------------------------------------------------

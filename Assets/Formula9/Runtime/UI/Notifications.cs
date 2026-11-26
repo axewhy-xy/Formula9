@@ -553,10 +553,11 @@ namespace Formula9.UI
             card.Decide = new Button(() => decide?.Invoke(vehicleId, incidentId)) { tooltip = "Open Route Planning for this shuttle and show the incident." };
             card.Decide.AddToClassList("notification-decide");
             actions.Add(card.Decide);
+            card.Root.Add(actions);
+            // The × in the card's top-right corner, over the text's right margin (position: absolute)
             var close = new Button(() => queue.Dismiss(incidentId, vehicleId)) { text = "×", tooltip = "Close this notification. The shuttle stays on Route Planning's Needs a decision list." };
             close.AddToClassList("notification-close");
-            actions.Add(close);
-            card.Root.Add(actions);
+            card.Root.Add(close);
             return card;
         }
 

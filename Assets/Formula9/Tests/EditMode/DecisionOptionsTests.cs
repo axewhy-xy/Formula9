@@ -192,7 +192,7 @@ namespace Formula9.Tests
             var s = Snapshot(); s.Tick = 1401;
             var keep = Option(RoutePresenter.Options(s, "shuttle-04", null), "KEEP_ROUTE");
             Assert.IsFalse(keep.Enabled);
-            Assert.AreEqual("Options are being renewed.", keep.Tooltip);
+            Assert.AreEqual("Options are being refreshed.", keep.Tooltip);
 
             s = Snapshot(); s.Candidates.Single(c => c.CandidateId == Keep).Validation = "FAIL";
             Assert.IsFalse(Option(RoutePresenter.Options(s, "shuttle-04", null), "KEEP_ROUTE").Enabled);

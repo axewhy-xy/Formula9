@@ -185,7 +185,7 @@ namespace Formula9.UI
     //     and the card.
     public sealed class FleetRow
     {
-        public string ShuttleId, State, Status, Route, RouteLine, Battery, Provenance, NextStop, Eta;
+        public string ShuttleId, State, Status, Route, Battery, Provenance, NextStop, Eta;
         // What Eta is the time to (the next depot), for its tooltip.
         public string EtaTarget;
         // The last stop of the shuttle's route before the loop starts again, by name.
@@ -389,8 +389,7 @@ namespace Formula9.UI
                     ShuttleId = v.VehicleId,
                     State = v.ServiceState,
                     Status = StatusText(v.ServiceState),
-                    Route = v.RouteId == null ? "—" : $"{v.RouteId} / {v.RouteRevision}",
-                    RouteLine = v.RouteId == null ? "No route assigned" : $"Route {v.RouteId} · rev {v.RouteRevision}",
+                    Route = RouteState(v),
                     Battery = $"{Number(v.BatteryKwh)} / {Number(v.BatteryCapacityKwh)} kWh",
                     BatteryPercent = BatteryWatch.Percent(v),
                     Provenance = v.Provenance.Kind,
@@ -403,6 +402,30 @@ namespace Formula9.UI
                 };
             })
             .ToList();
+
+        // -----------------------------------------------------------------------------------
+        // Function: RouteState
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function names a shuttle's route and says whether it is still as the scenario
+        //     set it or has been edited. The backend starts every route at revision 1 and adds one
+        //     for each approved edit; a shuttle sent round an incident drives a route of its own,
+        //     named "<incident>-detour-<shuttle>", which is called a detour instead.
+        //
+        // Args:
+        //     vehicle (FleetVehicle): The shuttle.
+        //
+        // Returns:
+        //     string: As "route-a · original", "route-a · edited twice" or "Incident detour"; "—"
+        //         without a route.
+        public static string RouteState(FleetVehicle vehicle)
+        {
+            if (vehicle.RouteId == null) return "—";
+            var edits = (vehicle.RouteRevision ?? 1) - 1;
+            var changes = edits <= 0 ? null : edits == 1 ? "edited once" : edits == 2 ? "edited twice" : $"edited {edits} times";
+            if (vehicle.RouteId.Contains("-detour")) return "Incident detour" + (changes == null ? "" : " · " + changes);
+            return $"{vehicle.RouteId} · {changes ?? "original"}";
+        }
 
         // -----------------------------------------------------------------------------------
         // Function: StatusText

@@ -68,6 +68,8 @@ namespace Formula9.UI
         private Toggle remember;
         private Button viewMap, viewWorld;
         private Button muteToggle;
+        // The training world's time of day and temperature, left of the alert bell
+        private Label worldWeather;
         private const string RememberedUserKey = "login.rememberedUser";
         private TextField username, password, confirm, sessionId, sessionName;
         private Label signUpHint, loginError, title, user, capacity, status, message, sessionBadge, worldNotice;
@@ -564,6 +566,19 @@ namespace Formula9.UI
             var clock = root.Q<Label>("clock");
             clock.schedule.Execute(() => clock.text = DateTime.Now.ToString("d MMM yyyy · HH:mm", CultureInfo.InvariantCulture)).Every(10000);
             clock.text = DateTime.Now.ToString("d MMM yyyy · HH:mm", CultureInfo.InvariantCulture);
+
+            // The training world's time and temperature, as "12:44 pm · 31°C", whichever view is open.
+            // Checked twice a second, so it turns with the world's minute; Render shows it only while a
+            // session is joined.
+            worldWeather = root.Q<Label>("world-weather");
+            worldWeather.tooltip = "Time and temperature in the training world. They follow the session's clock and the sky in the 3D view, not the real time or weather.";
+            HoverTip.Attach(worldWeather);
+            worldWeather.schedule.Execute(() =>
+            {
+                if (world == null || !world.TryGetDayAndWeather(out var hour, out var temperature)) return;
+                var text = $"{DayCycle.Clock(hour)} · {Mathf.RoundToInt(temperature)}°C";
+                if (worldWeather.text != text) worldWeather.text = text;
+            }).Every(500);
             Render();
 
             // Toggle the sidebar between full width and icons only. It starts as icons only, so the
@@ -1049,6 +1064,8 @@ namespace Formula9.UI
             sessionPlayback.style.display = controls.PlaybackVisible ? DisplayStyle.Flex : DisplayStyle.None;
             // Alerts only sound in a joined session, so the mute is offered only then
             if (muteToggle != null) muteToggle.style.display = snapshot != null ? DisplayStyle.Flex : DisplayStyle.None;
+            // Before a session the world's clock stands still at its start hour, so there is no time to show
+            if (worldWeather != null) worldWeather.style.display = snapshot != null ? DisplayStyle.Flex : DisplayStyle.None;
             if (world != null)
             {
                 viewMap.EnableInClassList("segment-selected", world.ShowingMap);

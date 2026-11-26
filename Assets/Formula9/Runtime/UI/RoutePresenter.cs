@@ -41,6 +41,7 @@ namespace Formula9.UI
     // came from the backend.
     public static class RoutePresenter
     {
+        // The exercise's steps, each with its card on Route Planning numbered in this order
         public static readonly string[] Stages = { "Problem", "Detour", "Check", "Approve", "Outcome" };
 
         // The decision card's buttons, in order.
@@ -106,19 +107,20 @@ namespace Formula9.UI
                 .ToList();
         }
 
-        // How long the shuttle's first options stand before the backend reissues them, or null when it
-        // has none. Ticks are turned into seconds at the session's own pace.
+        // When the backend next refreshes the shuttle's first options (it reissues them with new
+        // figures), as "Refreshes in 53 s", or null when it has none. Ticks are turned into seconds at
+        // the session's own pace.
         public static string OptionsExpiry(FullSnapshot snapshot, string vehicleId)
         {
             var first = DecisionRules.OptionsFor(snapshot, vehicleId).FirstOrDefault();
             if (first == null || first.Candidates.Count == 0) return null;
             var ticks = first.Candidates.Values.Min(c => c.ExpiresAtTick) - snapshot.Tick;
-            if (ticks <= 0) return "Options are being renewed";
-            return "Options for " + Rough(Math.Max(1, ticks * (double)IncidentSimulation.SecondsPerTick(snapshot)), 1);
+            if (ticks <= 0) return "Refreshing now";
+            return "Refreshes in " + Rough(Math.Max(1, ticks * (double)IncidentSimulation.SecondsPerTick(snapshot)), 1);
         }
 
-        // One incident as the shuttle meets it: what and where, when it gets there and what keeping its
-        // route costs, or what was decided for it.
+        // One incident as the shuttle meets it: what and where, and when it gets there, or what was
+        // decided for it. What keeping its route costs is on the Keep route option, not here.
         private static string Describe(Incident incident, string vehicleId, string name, bool pending)
         {
             var road = incident.Location?.RoadName;
@@ -129,8 +131,6 @@ namespace Formula9.UI
             if (exposure != null)
                 text += "\n" + (exposure.EtaS < 0.5 ? $"{name} is at it now." : $"{name} reaches it in about {Rough(exposure.EtaS)} ({Distance(exposure.DistanceM)}).");
             if (!pending) return text + "\nNo decision is asked for it now.";
-            if (exposure?.KeepRouteDelayS is double delay)
-                text += "\n" + (delay < 1 ? "Keeping its route costs it next to no time." : $"Keeping its route costs about {Rough(delay)}.");
             return text;
         }
 
@@ -240,7 +240,7 @@ namespace Formula9.UI
         {
             if (paused) option.Tooltip = "The session is paused. Resume it to decide.";
             else if (candidate.Validation != "PASS") option.Tooltip = "The backend can't clear this option now.";
-            else if (candidate.ExpiresAtTick < snapshot.Tick) option.Tooltip = "Options are being renewed.";
+            else if (candidate.ExpiresAtTick < snapshot.Tick) option.Tooltip = "Options are being refreshed.";
             else option.Enabled = true;
         }
 
@@ -432,11 +432,10 @@ namespace Formula9.UI
         public static string ShuttleChoice(FleetVehicle vehicle, bool pending) =>
             $"{ShuttleName(vehicle.VehicleId)} · {vehicle.RouteId ?? "no route"}" + (pending ? "   ● needs a decision" : "");
 
-        public static string PendingTitle(int shuttles) => $"Needs a decision ({shuttles})";
-
-        // A shuttle on the Needs a decision strip, and about how soon it reaches its first incident.
-        public static string PendingChip(PendingDecision decision) =>
-            "● " + ShuttleName(decision.VehicleId) +
+        // A shuttle on the Needs a decision strip, after its name (shown in a red box): how many
+        // decisions it has waiting, and about how soon it reaches the first one's incident.
+        public static string PendingChip(PendingDecision decision, int decisions) =>
+            $"needs a decision ({decisions})" +
             (decision.EtaS is double eta ? " · " + (eta < 0.5 ? "now" : "~" + Duration(eta)) : "");
 
         public static string Duration(double seconds)
