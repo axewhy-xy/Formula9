@@ -86,7 +86,8 @@ namespace Formula9.UI
         private string choiceCandidate, confirmCommand, optionsNote;
         // rerouting: the operator chose Re-route on the map, so the route editor is open for the shuttle.
         // awaitingError: a refusal whose backend message comes next, through ErrorOccurred.
-        private bool rerouting, awaitingError;
+        // leavingReroute: Re-route was pressed again with a route drawn; the next press drops it.
+        private bool rerouting, awaitingError, leavingReroute;
 
         private readonly List<Button> navButtons = new List<Button>();
         // The Fleet List: its page (which remembers being collapsed), the panel it shares with the
@@ -432,8 +433,7 @@ namespace Formula9.UI
                 // possible while the others are greyed out: it is the only way back from it
                 var closes = option.Action == "ROAD_DETOUR" ? rerouting && !session.HasPendingCommand : option.Action == choice?.Action && confirmCommand == null;
                 button.SetEnabled(closes || (free && option.Enabled));
-                // Leaving a re-route drops the route drawn for it and its undo history
-                button.tooltip = option.Action == "ROAD_DETOUR" && rerouting && draft.Count > 0 ? RoutePresenter.LeaveRerouteHint : option.Tooltip;
+                button.tooltip = option.Tooltip;
             }
             routeConfirmSend.SetEnabled(free && choice != null && s?.Session.Status == "RUNNING" && !string.IsNullOrWhiteSpace(confirmReason.value));
             confirmReason.SetEnabled(confirmCommand == null);
@@ -858,6 +858,8 @@ namespace Formula9.UI
 
         private void ApplyDraft(List<RouteWaypoint> next)
         {
+            // Changing the route takes back a first press of Re-route to leave it
+            if (leavingReroute) { leavingReroute = false; if (optionsNote == RoutePresenter.LeaveRerouteNote) optionsNote = null; }
             draft = next;
             InvalidateRoute();
             RenderWaypoints();
@@ -951,12 +953,22 @@ namespace Formula9.UI
 
         // The operator pressing an option. Re-route opens the editor; any other opens its confirm card,
         // with a reason to start from, and leaves a re-route. Pressed again, the option chosen closes
-        // again (dropping a re-route's drawn route), so the options themselves take the operator back:
-        // there is no separate Back. Closing needs only that nothing is on its way, as Back did.
+        // again, so the options themselves take the operator back: there is no separate Back. A
+        // re-route with a route drawn asks for a second press first, as closing drops the route.
+        // Closing needs only that nothing is on its way, as Back did.
         private void ChooseOption(string action)
         {
             if (action == "ROAD_DETOUR" && rerouting && !session.HasPendingCommand)
             {
+                // A drawn route is only dropped on a second press, so one press by mistake loses nothing
+                if (draft.Count > 0 && !leavingReroute)
+                {
+                    leavingReroute = true;
+                    optionsNote = RoutePresenter.LeaveRerouteNote;
+                    UpdateActions();
+                    return;
+                }
+                optionsNote = null;
                 LeaveReroute();
                 Render();
                 return;
@@ -993,7 +1005,7 @@ namespace Formula9.UI
         // Leaves the re-route; the route drawn for it is dropped.
         private void LeaveReroute()
         {
-            rerouting = false;
+            rerouting = false; leavingReroute = false;
             routeReason.value = "";
             draft = new List<RouteWaypoint>(); draftHistory.Clear(); draftHistory.Add(new List<RouteWaypoint>()); historyIndex = 0;
             InvalidateRoute();

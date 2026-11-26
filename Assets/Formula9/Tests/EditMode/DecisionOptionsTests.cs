@@ -95,11 +95,15 @@ namespace Formula9.Tests
             foreach (var evidence in new[] { null, Ready(Closure), Ready(keep: "scheduled-collision-1-r2-shuttle-04-keep_route", hold: "scheduled-collision-1-r2-shuttle-04-hold_at_stop") })
             {
                 var options = RoutePresenter.Options(s, "shuttle-04", evidence);
-                Assert.AreEqual("Keep route", Option(options, "KEEP_ROUTE").Label, "no event, another incident's, or one for options since reissued");
+                // Keeping the route's cost is also in the snapshot, so it never goes missing
+                Assert.AreEqual("Keep route ~+25 s", Option(options, "KEEP_ROUTE").Label, "no event, another incident's, or one for options since reissued");
                 Assert.AreEqual("Hold at a stop", Option(options, "HOLD_AT_STOP").Label);
                 Assert.AreEqual("Hold Shuttle 04 at the stop before it until the collision on Lorong 6 Toa Payoh clears.", Option(options, "HOLD_AT_STOP").Confirm);
                 Assert.IsTrue(Option(options, "HOLD_AT_STOP").Enabled, "the decision itself comes from the snapshot");
             }
+            // Without the snapshot's figure either, Keep route has none
+            Incident(s, Collision).Exposures.Single(e => e.VehicleId == "shuttle-04").KeepRouteDelayS = null;
+            Assert.AreEqual("Keep route", Option(RoutePresenter.Options(s, "shuttle-04", null), "KEEP_ROUTE").Label);
         }
 
         [Test]

@@ -526,6 +526,23 @@ namespace Formula9.Tests
                 Assert.AreEqual("2", root.Q("route-decide").Q<Label>("route-step-number").text);
                 Assert.IsTrue(root.Q("route-problem-card").Q("route-step-mark").ClassListContains("route-step-done"));
                 Assert.IsTrue(root.Q("route-decide").Q<Label>("route-step-number").ClassListContains("route-step-current"), "drawing the detour");
+                // With a route drawn, pressing Re-route again first says what a second press does,
+                // so one press by mistake loses nothing
+                var drawn = typeof(TrainingWorkspace).GetField("draft", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                drawn.SetValue(workspace, new List<RouteWaypoint> { new RouteWaypoint { EdgeId = "edge-1", Road = "Lorong 6 Toa Payoh" } });
+                typeof(TrainingWorkspace).GetMethod("ChooseOption", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    .Invoke(workspace, new object[] { "ROAD_DETOUR" });
+                Assert.AreEqual(DisplayStyle.Flex, root.Q("route-decide").style.display.value, "still re-routing");
+                Assert.AreEqual(1, ((List<RouteWaypoint>)drawn.GetValue(workspace)).Count, "the route is kept");
+                Assert.AreEqual(RoutePresenter.LeaveRerouteNote, root.Q<Label>("route-options-hint").text);
+                typeof(TrainingWorkspace).GetMethod("ChooseOption", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    .Invoke(workspace, new object[] { "ROAD_DETOUR" });
+                Assert.AreEqual(DisplayStyle.None, root.Q("route-decide").style.display.value, "the second press leaves");
+                Assert.IsEmpty((List<RouteWaypoint>)drawn.GetValue(workspace));
+                Assert.AreNotEqual(RoutePresenter.LeaveRerouteNote, root.Q<Label>("route-options-hint").text);
+                typeof(TrainingWorkspace).GetMethod("ChooseOption", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    .Invoke(workspace, new object[] { "ROAD_DETOUR" });
+                Assert.AreEqual(DisplayStyle.Flex, root.Q("route-decide").style.display.value, "re-routing again");
                 Assert.IsTrue(Items().Single(b => b.Q<Label>(className: "route-pending-name").text == "Shuttle 05").ClassListContains("route-pending-item-selected"));
                 Assert.IsFalse(Items().Single(b => b.Q<Label>(className: "route-pending-name").text == "Shuttle 01").ClassListContains("route-pending-item-selected"));
 

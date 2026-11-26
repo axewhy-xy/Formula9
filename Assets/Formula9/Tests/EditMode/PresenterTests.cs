@@ -380,16 +380,21 @@ namespace Formula9.Tests
         // -----------------------------------------------------------------------------------
         // Description:
         //     Every route starts at revision 1 and each approved edit adds one; a shuttle's own
-        //     detour round an incident is named as one.
+        //     detour round an incident is named as one, by the backend's exact naming rule.
         [Test]
         public void TheRouteSaysWhetherItIsTheOriginalOrEdited()
         {
-            string Route(string id, long? revision) => TrainingPresenter.RouteState(new FleetVehicle { VehicleId = "shuttle-01", RouteId = id, RouteRevision = revision });
+            var incidents = new[] { new Incident { IncidentId = "incident-1", EventType = "COLLISION", Location = new IncidentLocation { RoadName = "Lorong 6 Toa Payoh" } } };
+            string Route(string id, long? revision) => TrainingPresenter.RouteState(new FleetVehicle { VehicleId = "shuttle-01", RouteId = id, RouteRevision = revision }, incidents);
             Assert.AreEqual("route-a · original", Route("route-a", 1));
             Assert.AreEqual("route-a · edited twice", Route("route-a", 3));
             Assert.AreEqual("route-a · edited 4 times", Route("route-a", 5));
-            Assert.AreEqual("Incident detour", Route("incident-1-detour-shuttle-01", 1));
-            Assert.AreEqual("Incident detour · edited once", Route("incident-1-detour-shuttle-01", 2));
+            Assert.AreEqual("Detour round the collision on Lorong 6 Toa Payoh", Route("incident-1-detour-shuttle-01", 1));
+            Assert.AreEqual("Detour round the collision on Lorong 6 Toa Payoh · edited once", Route("incident-1-detour-shuttle-01", 2));
+            // Only "<incident>-detour-<this shuttle>" is a detour: a scenario route or another shuttle's keeps its ID
+            Assert.AreEqual("route-detour-north · original", Route("route-detour-north", 1));
+            Assert.AreEqual("incident-1-detour-shuttle-02 · original", Route("incident-1-detour-shuttle-02", 1));
+            Assert.AreEqual("incident-9-detour-shuttle-01 · original", Route("incident-9-detour-shuttle-01", 1), "no such incident");
             Assert.AreEqual("—", Route(null, null));
         }
 

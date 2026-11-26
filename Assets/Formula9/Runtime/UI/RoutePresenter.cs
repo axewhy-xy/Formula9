@@ -153,7 +153,8 @@ namespace Formula9.UI
         // Problem card lists first). A re-route answers the latest-detected incident that offers the
         // shuttle a detour, as the backend checks a drafted route against that one. Figures come from
         // optionsEvent, and only when it describes the options the snapshot has now; without it, the
-        // buttons show none. Nothing is shown when the shuttle has no decision to make.
+        // buttons show none but Keep route's, which the snapshot also has. Nothing is shown when the
+        // shuttle has no decision to make.
         public static List<DecisionOption> Options(FullSnapshot snapshot, string vehicleId, Event optionsEvent)
         {
             var decision = DecisionRules.OptionsFor(snapshot, vehicleId).FirstOrDefault();
@@ -195,7 +196,9 @@ namespace Formula9.UI
                 }
 
                 var candidate = decision.Option(action) ?? (action == "KEEP_ROUTE" ? decision.Option("WAIT") : null);
-                var delay = Delay(candidate);
+                // Keeping the route's cost is also in the snapshot (the shuttle's exposure), so it shows
+                // even when the options event is no longer stored
+                var delay = Delay(candidate) ?? (action == "KEEP_ROUTE" && candidate != null ? decision.KeepRouteDelayS : null);
                 var figure = delay == null ? "" : delay < 1 ? " ~no delay" : " ~+" + Rough(delay.Value);
                 switch (action)
                 {
@@ -248,7 +251,7 @@ namespace Formula9.UI
             action == "HOLD_AT_STOP" ? "Hold at a stop" : action == "ROAD_DETOUR" ? "Re-route on the map" : TrainingPresenter.ActionLabel(action);
 
         // "the collision on Lorong 6 Toa Payoh", or "the collision" when it is on no named road.
-        private static string IncidentPhrase(Incident incident)
+        internal static string IncidentPhrase(Incident incident)
         {
             var road = incident.Location?.RoadName;
             return "the " + TrainingPresenter.IncidentName(incident).ToLowerInvariant() + (string.IsNullOrEmpty(road) ? "" : " on " + road);
@@ -268,8 +271,8 @@ namespace Formula9.UI
 
         public const string OptionsRefreshed = "Options were refreshed; choose again.";
         public const string OptionsWithdrawn = "That option is no longer offered; choose again.";
-        // The re-route button's tooltip while a route is drawn: pressing it again leaves the re-route
-        public const string LeaveRerouteHint = "Press again to leave the re-route. The route drawn for it is dropped.";
+        // Said under the options after Re-route is pressed again with a route drawn: a second press drops it
+        public const string LeaveRerouteNote = "Press Re-route on the map again to drop the route you drew.";
 
         // What the confirm row says when a decision was not applied: it stays open for another try.
         public static string Refusal(CommandOutcome outcome)
