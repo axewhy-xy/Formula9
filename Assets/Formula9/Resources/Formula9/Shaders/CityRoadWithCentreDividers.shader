@@ -226,8 +226,58 @@ Shader "Formula9/CityRoadWithCentreDividers"
                     asphalt = VariedAsphalt(asphaltMetres, i.worldPosition.xz, roadDx, roadDy);
                 else
                     asphalt = tex2D(_MainTex, asphaltMetres / 8.0).rgb;
-                float3 colour = saturate(asphalt * _Color.rgb);
-                return fixed4(colour, 1.0);
+                float laneCount = round(abs(i.lane.z));
+                float widthPerLane = max(0.001, i.lane.w / max(1.0, laneCount));
+                float lanePosition = i.lane.x / widthPerLane;
+                float divider = floor(lanePosition + 0.5);
+                float lineFootprint = clamp(fwidth(lanePosition) * widthPerLane * 0.5, 0.005, 0.5);
+                float dividerCoverage = Coverage((lanePosition - divider) * widthPerLane, 0.08, lineFootprint);
+                dividerCoverage *= step(1.0, divider) * step(divider, laneCount - 1.0);
+
+                float along = i.lane.y;
+                float dashPhase = frac(along / 6.0) * 6.0 - 3.0;
+                float dashFootprint = clamp(fwidth(along) * 0.5, 0.005, 3.0);
+                float dash = Coverage(dashPhase, 1.5, dashFootprint) +
+                    Coverage(dashPhase - 6.0, 1.5, dashFootprint) +
+                    Coverage(dashPhase + 6.0, 1.5, dashFootprint);
+                float fromLow = along - i.paintBounds.x;
+                float fromHigh = i.paintBounds.y - along;
+                // Use the perpendicular bar near the stop station. Use the
+                // strip coordinate farther away so a curved road cannot hit
+                // the same infinite plane a second time.
+                float barWindow = max(4.0, i.lane.w * 0.5 + 3.0);
+                float useLow = step(0.5, i.paintBounds.z) * step(abs(fromLow), barWindow);
+                float useHigh = step(0.5, i.paintBounds.w) * step(abs(fromHigh), barWindow);
+                float lowCutoff = lerp(fromLow, i.barDistances.x, useLow);
+                float highCutoff = lerp(fromHigh, i.barDistances.y, useHigh);
+                float withinStrip = step(0.0, min(lowCutoff, highCutoff));
+
+                float across = i.lane.x / max(0.001, i.lane.w);
+                float lowIncoming = useLow * IncomingMask(i.paintBounds.z, across);
+                float highIncoming = useHigh * IncomingMask(i.paintBounds.w, across);
+                float stopDistance = min(lowIncoming > 0.5 ? lowCutoff : 1e6,
+                    highIncoming > 0.5 ? highCutoff : 1e6);
+                float finalDash = step(0.0, stopDistance) * step(stopDistance, 3.0);
+                float useFinalDash = step(0.0, stopDistance) * step(stopDistance, 6.0);
+                dash = lerp(dash, finalDash, useFinalDash);
+
+                float2 footprint = clamp(fwidth(i.barDistances) * 0.5, 0.005, 0.5);
+                float stopBar = max(
+                    lowIncoming * Coverage(i.barDistances.x, 0.15, footprint.x),
+                    highIncoming * Coverage(i.barDistances.y, 0.15, footprint.y)
+                );
+
+                float mappedDividers = step(0.5, _UseMappedDividers);
+                float twoWay = step(0.5, -i.lane.z);
+                dividerCoverage *= 1.0 - mappedDividers * twoWay *
+                    (1.0 - step(0.5, abs(divider - laneCount * 0.5)));
+
+                float paint = step(1.0, laneCount) *
+                    max(stopBar, dividerCoverage * dash * withinStrip);
+
+                float3 asphaltRGB = saturate(asphalt * _Color.rgb);
+                float3 roadRGB = lerp(asphaltRGB, float3(1.0, 1.0, 1.0), paint);
+                return fixed4(roadRGB * (1.0 - _Formula9GroundDim.rgb), 1.0);
             }
             ENDCG
         }

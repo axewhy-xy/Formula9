@@ -271,7 +271,7 @@ namespace Formula9.World
             return mesh;
         }
 
-        private const float DashPeriodM = 6f; // Match CityRoadTexture.shader.
+        private const float DashPeriodM = 6f; 
         private const float TextureRepeatLengthM = 24f;
 
         private static void SetDashPhases(List<RoadPath> paths)

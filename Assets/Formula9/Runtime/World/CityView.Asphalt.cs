@@ -4,9 +4,80 @@ using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
+using System.Linq;
 
 namespace Formula9.World
 {
+    internal sealed class AsphaltTriangleSpatialIndex
+    {
+        private readonly struct BoundsXZ
+        {
+            public readonly float MinX, MinZ, MaxX, MaxZ;
+
+            public BoundsXZ(Vector3 a, Vector3 b, Vector3 c)
+            {
+                MinX = Math.Min(a.x, Math.Min(b.x, c.x));
+                MinZ = Math.Min(a.z, Math.Min(b.z, c.z));
+                MaxX = Math.Max(a.x, Math.Max(b.x, c.x));
+                MaxZ = Math.Max(a.z, Math.Max(b.z, c.z));
+            }
+
+            public bool Overlaps(float minX, float minZ, float maxX, float maxZ) =>
+                MinX <= maxX && MaxX >= minX && MinZ <= maxZ && MaxZ >= minZ;
+        }
+
+        private readonly float cellSize;
+        private readonly BoundsXZ[] bounds;
+        private readonly Dictionary<(int X, int Z), List<int>> cells =
+            new Dictionary<(int X, int Z), List<int>>();
+
+        public AsphaltTriangleSpatialIndex(Vector3[] vertices, int[] triangles, float cellSize,
+            CancellationToken cancellation)
+        {
+            if (!(cellSize > 0) || float.IsInfinity(cellSize) || float.IsNaN(cellSize))
+                throw new ArgumentOutOfRangeException(nameof(cellSize));
+
+            this.cellSize = cellSize;
+            bounds = new BoundsXZ[triangles.Length / 3];
+
+            for (int i = 0; i < triangles.Length; i += 3)
+            {
+                if ((i & 4095) == 0) cancellation.ThrowIfCancellationRequested();
+
+                int triangle = i / 3;
+                var triangleBounds = new BoundsXZ(
+                    vertices[triangles[i]], vertices[triangles[i + 1]], vertices[triangles[i + 2]]);
+                bounds[triangle] = triangleBounds;
+
+                for (int x = Cell(triangleBounds.MinX); x <= Cell(triangleBounds.MaxX); x++)
+                for (int z = Cell(triangleBounds.MinZ); z <= Cell(triangleBounds.MaxZ); z++)
+                {
+                    var key = (x, z);
+                    if (!cells.TryGetValue(key, out var entries))
+                        cells[key] = entries = new List<int>();
+                    entries.Add(triangle);
+                }
+            }
+        }
+
+        public int[] Query(Vector2 center, float half)
+        {
+            float minX = center.x - half, minZ = center.y - half;
+            float maxX = center.x + half, maxZ = center.y + half;
+            var found = new HashSet<int>();
+
+            for (int x = Cell(minX); x <= Cell(maxX); x++)
+            for (int z = Cell(minZ); z <= Cell(maxZ); z++)
+                if (cells.TryGetValue((x, z), out var entries))
+                    foreach (int triangle in entries)
+                        if (bounds[triangle].Overlaps(minX, minZ, maxX, maxZ))
+                            found.Add(triangle);
+
+            return found.OrderBy(triangle => triangle).ToArray();
+        }
+
+        private int Cell(float coordinate) => (int)Math.Floor((double)coordinate / cellSize);
+    }
     public sealed partial class CityView
     {
         // The legacy road mesh is the only pavement. The LTA export supplies paint records.
@@ -58,7 +129,7 @@ namespace Formula9.World
 
                 LoadCentreDividerMask(area, asphaltMaterial, indexed.Bounds);
 
-                const string materialFolder = "Formula9/LtaRoads/Materials/";
+                
                 var coverageShader = Resources.Load<Shader>("Formula9/Shaders/LtaRoadPaintCoverage");
                 bool useCoverage = coverageShader != null && coverageShader.isSupported;
 
@@ -67,8 +138,7 @@ namespace Formula9.World
 
                 Material Paint(string name, Color colour)
                 {
-                    var preset = Resources.Load<Material>(materialFolder + name);
-                    if (preset != null && preset.HasProperty("_Color")) colour = preset.color;
+                   
                     var mat = Own(new Material(useCoverage ? coverageShader : shader)
                         { name = name, color = colour, renderQueue = 2460 });
                     if (!useCoverage && mat.HasProperty("_StencilComp"))
@@ -85,8 +155,14 @@ namespace Formula9.World
                 holder = new GameObject("LTA paint over original roads");
                 holder.transform.SetParent(root, false);
                 var roadMesh = roadRenderer.GetComponent<MeshFilter>().sharedMesh;
-                var roadVertices = roadMesh.vertices;
                 var asphaltTriangles = roadMesh.GetTriangles(RoadMesh.AsphaltLayer);
+                var roadVertices = roadMesh.vertices;
+                var asphaltIndex = await Task.Run(
+                    () => new AsphaltTriangleSpatialIndex(roadVertices, asphaltTriangles, indexed.Size, cancellation),
+                    cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+
                 int built = 0;
                 var clock = System.Diagnostics.Stopwatch.StartNew();
                 foreach (var record in indexed.Tiles)
@@ -104,23 +180,28 @@ namespace Formula9.World
                     float half = indexed.Size * .5f;
                     var points = new List<Vector3>();
                     var triangles = new List<int>();
-                    for (int i = 0; i < asphaltTriangles.Length; i += 3)
+                    foreach (int triangle in asphaltIndex.Query(center, half))
                     {
+                        int i = triangle * 3;
                         var a = roadVertices[asphaltTriangles[i]];
                         var b = roadVertices[asphaltTriangles[i + 1]];
                         var c = roadVertices[asphaltTriangles[i + 2]];
-                        if (Mathf.Min(a.x, Mathf.Min(b.x, c.x)) > center.x + half ||
-                            Mathf.Max(a.x, Mathf.Max(b.x, c.x)) < center.x - half ||
-                            Mathf.Min(a.z, Mathf.Min(b.z, c.z)) > center.y + half ||
-                            Mathf.Max(a.z, Mathf.Max(b.z, c.z)) < center.y - half)
-                            continue;
                         var offset = new Vector3(center.x, 0, center.y);
+
                         triangles.Add(points.Count);
                         triangles.Add(points.Count + 1);
                         triangles.Add(points.Count + 2);
                         points.Add(a - offset);
                         points.Add(b - offset);
                         points.Add(c - offset);
+
+                        if (clock.Elapsed.TotalMilliseconds >= 4)
+                        {
+                            cancellation.ThrowIfCancellationRequested();
+                            if (disposed) throw new OperationCanceledException();
+                            await Task.Yield();
+                            clock.Restart();
+                        }
                     }
                     bool painted = false;
                     // The mesh is placement context. Survey paint can cross gaps in it.
@@ -168,11 +249,7 @@ namespace Formula9.World
                         holder.SetActive(false);
                         WorldBuilder.Remove(holder);
                     }
-                    if (roadRenderer != null)
-                    {
-                        var fallback = roadRenderer.sharedMaterials[RoadMesh.AsphaltLayer];
-                        if (fallback.HasProperty("_MappedPaintReady")) fallback.SetFloat("_MappedPaintReady", 0f);
-                    }
+                   
                     foreach (var mesh in meshes)
                     {
                         if (Application.isPlaying) UnityEngine.Object.Destroy(mesh);

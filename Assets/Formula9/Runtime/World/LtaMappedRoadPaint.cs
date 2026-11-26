@@ -25,15 +25,10 @@ namespace Formula9.World
         private const string ResourcesFolder = "Formula9/RoadData/";
 
         public enum PaintColour { White, Yellow, Red }
-        public sealed class PaintedMesh
-        {
-            public Mesh Mesh;
-            public PaintColour Colour;
-        }
+        
         public sealed class Result
         {
-            public readonly List<PaintedMesh> Meshes = new List<PaintedMesh>();
-            public readonly List<Vector2> CrossingCenters = new List<Vector2>();
+           
             public readonly List<Vector2> SignalJunctionCenters = new List<Vector2>();
             internal readonly List<List<Vector2>> StopLines = new List<List<Vector2>>();
             public int GroundLaneFeatures;
@@ -59,109 +54,8 @@ namespace Formula9.World
             public int SkippedUnmatchedStopBars;
         }
 
-        private sealed class Batch
-        {
-            public readonly List<Vector3> Vertices = new List<Vector3>();
-            public readonly List<int> Triangles = new List<int>();
-            public void Quad(Vector2 a, Vector2 b, Vector2 c, Vector2 d, float height)
-            {
-                // Orient every polygon to face upward in Unity's X/Z plane.
-                float signedUp = (b.y - a.y) * (c.x - a.x) - (b.x - a.x) * (c.y - a.y);
-                if (Mathf.Abs(signedUp) < .00001f) return;
-                int start = Vertices.Count;
-                if (signedUp > 0f)
-                {
-                    Vertices.Add(new Vector3(a.x, height, a.y));
-                    Vertices.Add(new Vector3(b.x, height, b.y));
-                    Vertices.Add(new Vector3(c.x, height, c.y));
-                    Vertices.Add(new Vector3(d.x, height, d.y));
-                }
-                else
-                {
-                    Vertices.Add(new Vector3(a.x, height, a.y));
-                    Vertices.Add(new Vector3(d.x, height, d.y));
-                    Vertices.Add(new Vector3(c.x, height, c.y));
-                    Vertices.Add(new Vector3(b.x, height, b.y));
-                }
-                Triangles.Add(start); Triangles.Add(start + 1); Triangles.Add(start + 2);
-                Triangles.Add(start); Triangles.Add(start + 2); Triangles.Add(start + 3);
-            }
-            public Mesh MakeMesh(string title)
-            {
-                var mesh = new Mesh { name = title, indexFormat = IndexFormat.UInt32 };
-                mesh.SetVertices(Vertices);
-                mesh.SetTriangles(Triangles, 0);
-                mesh.RecalculateNormals();
-                mesh.RecalculateBounds();
-                return mesh;
-            }
-        }
-        private sealed class Painter
-        {
-            private readonly Dictionary<(int X, int Y, PaintColour C), Batch> batches =
-                new Dictionary<(int X, int Y, PaintColour C), Batch>();
-            private Batch At(Vector2 center, PaintColour c)
-            {
-                var id = (Mathf.FloorToInt(center.x / ChunkMetres),
-                    Mathf.FloorToInt(center.y / ChunkMetres), c);
-                if (!batches.TryGetValue(id, out var batch))
-                    batches.Add(id, batch = new Batch());
-                return batch;
-            }
-            public void Quad(Vector2 a, Vector2 b, Vector2 c, Vector2 d,
-                PaintColour colour, float y) => At((a + b + c + d) * .25f, colour).Quad(a,b,c,d,y);
-            public void Stroke(Vector2 from, Vector2 to, float width,
-                PaintColour colour, float y)
-            {
-                var delta = to - from;
-                if (delta.sqrMagnitude < .000625f) return;
-                var n = new Vector2(-delta.y, delta.x).normalized * width * .5f;
-                Quad(from+n, from-n, to-n, to+n, colour, y);
-            }
-            public void Path(List<Vector2> points, float width, PaintColour colour,
-                float y, float dash = 0f, float gap = 0f)
-            {
-                float distance = 0;
-                for (int i = 1; i < points.Count; i++)
-                {
-                    Vector2 a = points[i-1], b = points[i];
-                    var delta = b - a;
-                    float length = delta.magnitude;
-                    if (length < .025f) continue;
-                    if (dash <= 0 || gap <= 0) Stroke(a,b,width,colour,y);
-                    else
-                    {
-                        var direction = delta / length;
-                        float cursor = 0;
-                        while (cursor < length - .001f)
-                        {
-                            float phase = (distance + cursor) % (dash + gap);
-                            bool visible = phase < dash;
-                            float run = visible ? dash - phase : dash + gap - phase;
-                            run = Mathf.Min(length - cursor, Mathf.Max(.01f, run));
-                            if (visible && run >= .025f)
-                                Stroke(a + direction * cursor,
-                                    a + direction * (cursor + run), width, colour, y);
-                            cursor += run;
-                        }
-                    }
-                    distance += length;
-                }
-            }
-            public void Export(Result result)
-            {
-                foreach (var pair in batches)
-                {
-                    if (pair.Value.Triangles.Count == 0) continue;
-                    result.Meshes.Add(new PaintedMesh
-                    {
-                        Colour = pair.Key.C,
-                        Mesh = pair.Value.MakeMesh("LTA special paint " + pair.Key.C +
-                            " " + pair.Key.X + "," + pair.Key.Y)
-                    });
-                }
-            }
-        }
+        
+       
 
         private static JToken TryLoad(string name)
         {
@@ -178,9 +72,7 @@ namespace Formula9.World
             Debug.Log("[LtaMappedRoadPaint] Loaded Resources fallback: " + name);
             return JToken.Parse(resource.text);
         }
-        private static JToken Load(string name) => TryLoad(name) ??
-            throw new FileNotFoundException("Missing " + name + ".json. Expected " +
-                "backend/fixtures/traffic/ or Resources/" + ResourcesFolder);
+        
         private static List<Vector2> Points(JToken input)
         {
             var output = new List<Vector2>();

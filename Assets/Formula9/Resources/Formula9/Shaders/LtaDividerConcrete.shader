@@ -19,6 +19,7 @@ Shader "Formula9/LtaDividerConcrete"
             #include "UnityCG.cginc"
 
             fixed4 _Color;
+            float4 _Formula9GroundDim;
             float _BlockLength;
             struct Input { float4 vertex:POSITION; float2 paint:TEXCOORD0; };
             struct Output { float4 position:SV_POSITION; float3 metres:TEXCOORD0; float2 paint:TEXCOORD1; };
@@ -51,7 +52,7 @@ Shader "Formula9/LtaDividerConcrete"
                 float white = smoothstep(-smoothing,smoothing,wave);
                 float3 paint = lerp(float3(.11,.105,.10),float3(.84,.83,.77),white);
                 float3 tint = lerp(_Color.rgb,paint,saturate(i.paint.y));
-                return fixed4(saturate(tint + grain),1);
+                return fixed4(saturate(tint + grain) * (1.0 - _Formula9GroundDim.rgb), 1);
             }
             ENDCG
         }

@@ -12,6 +12,7 @@ Shader "Formula9/LtaReadableMarkings"
             #pragma fragment frag
             #pragma target 3.0
             #include "UnityCG.cginc"
+            float4 _Formula9GroundDim;
             struct Input { float4 vertex:POSITION; float4 shape:TEXCOORD0; float4 placement:TEXCOORD1; };
             struct Output { float4 pos:SV_POSITION; float2 uv:TEXCOORD0; float2 halfSize:TEXCOORD1; float kind:TEXCOORD2; float2 metres:TEXCOORD3; };
             Output vert(Input v)
@@ -105,7 +106,8 @@ Shader "Formula9/LtaReadableMarkings"
                 float ink=1-smoothstep(.55,1.22,d);
                 float wear = PaintWear(i.metres);
                 float3 colour = float3(.91,.91,.87) * (1.0 - .12 * wear);
-                return fixed4(colour, ink * (.98 - .18 * wear));
+                return fixed4(colour * (1.0 - _Formula9GroundDim.rgb),
+                ink * (.98 - .18 * wear));
             }
             ENDCG
         }

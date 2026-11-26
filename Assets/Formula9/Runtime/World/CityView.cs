@@ -298,7 +298,7 @@ namespace Formula9.World
                 const string roadTextureFolder = "Formula9/Textures/";
                 var asphaltColorMap = LoadRoadTexture(roadTextureFolder + "asphalt_02", TextureWrapMode.Mirror);
                 if (asphaltColorMap != null) asphaltColorMap.anisoLevel = 16;
-                var textureShader = Resources.Load<Shader>("Formula9/Shaders/CityRoadWithCentreDividers");
+                var textureShader = Resources.Load<Shader>("Formula9/Shaders/CityRoadTexture");
                 bool hasTextureShader = textureShader != null && textureShader.isSupported;
                 bool useAsphaltMaps = asphaltColorMap != null;
                 var atlas = !useAsphaltMaps ? LoadRoadTexture(roadTextureFolder + "road_lane_texture") : null;
@@ -343,10 +343,6 @@ namespace Formula9.World
                             asphalt.SetFloat("_NormalStrength", normalMap != null ? 0.25f : 0f);
                             asphalt.SetFloat("_HeightScale", heightMap != null ? 0.0005f : 0f);
                         }
-                    }
-                    else if (useAsphaltMaps)
-                    {
-                        Debug.LogWarning("[CityView] Install the updated CityRoadTexture shader to enable asphalt detail maps.");
                     }
                 }
 
@@ -441,12 +437,12 @@ namespace Formula9.World
         // The per-area city map supplies the world extent used to sample its divider mask.
         private void LoadCentreDividerMask(string area, Material asphalt, JToken boundsToken)
         {
-            if (!asphalt.HasProperty("_SurveyPaintMask"))
+            if (!asphalt.HasProperty("_SurveyPaintMask") || !asphalt.HasProperty("_SurveyMaskBounds") || !asphalt.HasProperty("_SurveyMaskEnabled"))
             {
                 Debug.LogWarning($"[CityView] Centre-divider shader inactive. Active shader: {asphalt.shader.name}.");
                 return;
             }
-
+            asphalt.SetFloat("_SurveyMaskEnabled", 0f);
             var maskAsset = Resources.Load<TextAsset>($"Formula9/RoadData/{area}-centre-divider-mask");
             if (maskAsset == null)
             {
@@ -471,9 +467,10 @@ namespace Formula9.World
                 Debug.LogWarning("[CityView] Centre-divider mask could not be decoded.");
                 return;
             }
-
             asphalt.SetTexture("_SurveyPaintMask", mask);
             asphalt.SetVector("_SurveyMaskBounds", maskBounds);
+             asphalt.SetFloat("_SurveyMaskEnabled", 1f);
+
             Debug.Log("[CityView] Centre-divider mask active for two-way roads.");
         }
 

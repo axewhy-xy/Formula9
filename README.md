@@ -166,6 +166,11 @@ need a free [DataMall key](https://datamall.lta.gov.sg) in `backend/.env` as `LT
 `python -m src.routing.build_singapore_fleet_fixture` rebuilds the scenario from the committed
 extract in `backend/fixtures/osm`.
 
+<a href="https://www.magnific.com/free-photo/asphalt-texture-close-up_1018386.htm#fromView=keyword&page=1&position=3&uuid=9e16651c-7b98-44d9-a748-0051cc4a3ac3&track=ais_hybrid&query=Asphalt+texture">Image by borjandreu on Magnific</a>
+
+<a href="https://www.magnific.com/free-photo/asphalt-road-texture-dark-gray-color_5247630.htm#fromView=keyword&page=1&position=0&uuid=9e16651c-7b98-44d9-a748-0051cc4a3ac3&track=ais_hybrid&query=Asphalt+texture">Image by starline on Magnific</a>
+
+
 ## Background traffic data
 
 `backend/fixtures/traffic/toa-payoh.json` holds the background traffic prepared for the 3D view. The 3D

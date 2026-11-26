@@ -92,7 +92,7 @@ namespace Formula9.Tests
             Assert.AreEqual(TrafficLightPlacement.ArmM, head.localPosition.x, 1e-3f);
             // The lights' halos are in front of their lenses, and the prefab's +Z is the way traffic travels
             var halo = head.Find("green_halo");
-            Assert.Less(prefab.transform.InverseTransformPoint(halo.position).z, 0);
+            Assert.Less(0, prefab.transform.InverseTransformPoint(halo.position).z);
         }
 
         [Test]

@@ -558,12 +558,12 @@ namespace Formula9.Tests
                 float asphaltHalf = RoadMesh.LaneWidthM + RoadMesh.ShoulderM;
                 // The centre vertex belongs to an unmarked rounded Cap(). The textured
                 // ribbon crosses the node at x = 500 +/- asphaltHalf, z = 100.
-                bool UntrimmedAtNode(int i) =>
-                    Mathf.Abs(vertices[i].z - 100f) < 1e-3f &&
-                    Mathf.Abs(Mathf.Abs(vertices[i].x - 500f) - asphaltHalf) < 1e-3f &&
-                    Mathf.Abs(uv1[i].z) > .5f &&
-                    Mathf.Abs(uv2[i].x) < 1e-4f &&
-                    uv2[i].w < .5f;
+                // bool UntrimmedAtNode(int i) =>
+                //     Mathf.Abs(vertices[i].z - 100f) < 1e-3f &&
+                //     Mathf.Abs(Mathf.Abs(vertices[i].x - 500f) - asphaltHalf) < 1e-3f &&
+                //     Mathf.Abs(uv1[i].z) > .5f &&
+                //     Mathf.Abs(uv2[i].x) < 1e-4f &&
+                //     uv2[i].w < .5f;
 
                Assert.IsTrue(asphalt.Any(i =>
                 vertices[i].x < -95f &&

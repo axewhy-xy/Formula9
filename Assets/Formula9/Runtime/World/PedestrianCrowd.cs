@@ -31,7 +31,7 @@ namespace Formula9.World
     public sealed class PedestrianCrowd : IDisposable
     {
         // Off: tall and short blue boxes. On: the character models in Assets/Animated Men Characters.
-        private static readonly bool UseCharacterModels = false;
+        private static readonly bool UseCharacterModels = true;
         private const string CatalogPath = "Assets/Formula9/Pedestrians/PedestrianModelCatalog.asset";
         // Poses baked per walk cycle; a person travels PedestrianLocalSim.StrideM in one
         private const int WalkFrames = 8;
@@ -225,7 +225,7 @@ namespace Formula9.World
                 {
                     if (entry == null || entry.prefab == null) continue;
                     var walk = entry.walkClip != null ? entry.walkClip : FindClip(entry.prefab, entry.walkClipName, "walk");
-                    var idle = FindClip(entry.prefab, null, "idle");
+                    var idle = entry.idleClip != null ? entry.idleClip : FindClip(entry.prefab, null, "idle");
                     AddModel(BakeModel(entry.prefab, walk, idle));
                 }
             }

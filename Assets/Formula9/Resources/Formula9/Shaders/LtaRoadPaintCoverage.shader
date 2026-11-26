@@ -21,6 +21,7 @@ Shader "Formula9/LtaRoadPaintCoverage"
             #include "UnityCG.cginc"
 
             fixed4 _Color;
+            float4 _Formula9GroundDim;
             struct Input { float4 position : POSITION; float4 edges : TEXCOORD0; };
             struct Varyings { float4 position : SV_POSITION; float4 edges : TEXCOORD0; float2 metres : TEXCOORD1; };
 
@@ -43,7 +44,8 @@ Shader "Formula9/LtaRoadPaintCoverage"
                 float4 covers = saturate(0.5 + (i.edges + expansion) / feather);
                 float coverage = min(min(covers.x, covers.y), min(covers.z, covers.w));
                 clip(coverage - 0.0039);
-                return fixed4(_Color.rgb * 0.93, _Color.a * coverage * 0.98);
+                return fixed4(_Color.rgb * 0.93 * (1.0 - _Formula9GroundDim.rgb),
+                _Color.a * coverage * 0.98);
             }
             ENDCG
         }
