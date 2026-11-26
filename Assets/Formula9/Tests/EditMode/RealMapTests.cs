@@ -170,6 +170,23 @@ namespace Formula9.Tests
             Assert.AreEqual("a", TrainingPresenter.NextStop(route, 190, 0));
         }
 
+        [Test]
+        public void TheFinalStopIsTheLastOneAlongThePathWhateverItsListOrder()
+        {
+            Position At(double x) => new Position { XM = x, YM = 0 };
+            var route = new RouteRevision
+            {
+                EdgePathsM = new List<List<Position>> { new List<Position> { At(0), At(100) }, new List<Position> { At(100), At(200) } },
+                StopsM = new List<RouteStop> { new RouteStop { StopId = "c", Position = At(180) }, new RouteStop { StopId = "a", Position = At(50) }, new RouteStop { StopId = "b", Position = At(150) } },
+            };
+            Assert.AreEqual("c", TrainingPresenter.FinalStop(route));
+            route.StopsM.Clear();
+            Assert.IsNull(TrainingPresenter.FinalStop(route), "no stops, no final stop");
+            route.StopsM.Add(new RouteStop { StopId = "a", Position = At(50) });
+            route.EdgePathsM.Clear();
+            Assert.IsNull(TrainingPresenter.FinalStop(route), "no path to order the stops along");
+        }
+
         [TestCase("IN_SERVICE", "Moving")]
         [TestCase("AWAITING_GUIDANCE", "Awaiting guidance")]
         [TestCase("SOMETHING_NEW", "SOMETHING_NEW")]

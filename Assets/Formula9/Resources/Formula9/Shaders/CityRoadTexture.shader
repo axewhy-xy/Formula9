@@ -35,6 +35,8 @@ Shader "Formula9/CityRoadTexture"
             #include "UnityCG.cginc"
 
             sampler2D _MainTex;
+            // DayCycle's night: 0 by day, nearer 1 as the unlit ground darkens
+            float4 _Formula9GroundDim;
             float4 _Color;
 
             struct appdata
@@ -134,7 +136,7 @@ Shader "Formula9/CityRoadTexture"
                     }
                 }
 
-                return fixed4(saturate(roadRGB * _Color.rgb), 1.0);
+                return fixed4(saturate(roadRGB * _Color.rgb) * (1 - _Formula9GroundDim.rgb), 1.0);
             }
             ENDCG
         }

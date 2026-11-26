@@ -183,7 +183,7 @@ namespace Formula9.Tests
         [TestCase("ARCHIVED")]
         [TestCase("COMPLETED")]
         [TestCase("FAILED")]
-        public async Task ChargingFoldsTheStatusBarAndFinishedAttemptsReopenSetup(string terminalState)
+        public async Task ChargingFoldsTheStatusBarAndSetupOpensOnlyFromItsButton(string terminalState)
         {
             var raw = Fixture("snapshot"); raw["session"]["status"] = "RUNNING";
             var context = Fixture("route_editor_context");
@@ -212,14 +212,16 @@ namespace Formula9.Tests
                 world.Attach(root.Q("world"), new SceneLoader(backend, new Uri("http://backend.test")));
                 var workspace = new TrainingWorkspace(root, api, session, world, Run, _ => { });
                 var card = root.Q("content-card");
+                var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+                var toggle = typeof(TrainingWorkspace).GetMethod("ToggleSessionTools", flags);
+                Assert.IsTrue(card.ClassListContains("session-tools-hidden"), "closed until Create/join training session opens it");
+                toggle.Invoke(workspace, null);
                 Assert.IsFalse(card.ClassListContains("session-tools-hidden"));
                 await session.JoinAsync((string)raw["session_id"]);
-                Assert.IsTrue(card.ClassListContains("session-tools-hidden"));
+                Assert.IsTrue(card.ClassListContains("session-tools-hidden"), "joining closes it again");
                 Assert.IsFalse(card.ClassListContains("session-compact"), "Fleet keeps its status bar");
-                var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
                 typeof(TrainingWorkspace).GetMethod("ShowPage", flags).Invoke(workspace, new object[] { 2 });
                 Assert.IsTrue(card.ClassListContains("session-compact"), "Charging folds the extra status row and header spacing");
-                var toggle = typeof(TrainingWorkspace).GetMethod("ToggleSessionTools", flags);
                 toggle.Invoke(workspace, null);
                 Assert.IsFalse(card.ClassListContains("session-tools-hidden"));
                 Assert.IsFalse(card.ClassListContains("session-compact"));
@@ -228,8 +230,9 @@ namespace Formula9.Tests
                 raw["session"]["status"] = terminalState;
                 raw["snapshot_id"] = Guid.NewGuid().ToString();
                 await session.RefreshAsync();
-                Assert.IsFalse(card.ClassListContains("session-tools-hidden"), "Create and Join must reappear when the attempt ends");
-                Assert.IsFalse(card.ClassListContains("session-compact"));
+                Assert.IsTrue(card.ClassListContains("session-tools-hidden"), "an ended attempt leaves setup closed; its button stays");
+                Assert.IsTrue(card.ClassListContains("session-compact"));
+                Assert.AreEqual(DisplayStyle.Flex, root.Q<Button>("session-toggle").style.display.value);
                 Assert.IsEmpty(errors);
             }
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }
@@ -430,7 +433,7 @@ namespace Formula9.Tests
                 world.Attach(root.Q("world"), new SceneLoader(backend, url), null, null, new CityClient(backend, url));
                 var notices = new List<string>();
                 var workspace = new TrainingWorkspace(root, api, session, world, _ => { }, message => notices.Add(message));
-                var toggle = root.Q<Button>("fleet-cameras");
+                var toggle = root.Q<Button>("view-cameras");
                 var press = typeof(TrainingWorkspace).GetMethod("ToggleSelectedCameras", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 var choose = typeof(TrainingWorkspace).GetMethod("ChooseShuttle", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 var picker = root.Q<DropdownField>("shuttles");
@@ -451,7 +454,7 @@ namespace Formula9.Tests
                 StringAssert.EndsWith("● needs a decision", picker.value);
                 CollectionAssert.AreEqual(new[] { "● Shuttle 01 · ~8 s" }, Strip());
                 Assert.AreEqual("Needs a decision (1)", root.Q<Label>("route-pending-title").text);
-                var badge = root.Q<Label>("nav-route-badge");
+                var badge = root.Q<TextElement>("nav-route-badge");
                 Assert.AreEqual("1", badge.text, "the Route Planning nav item counts the shuttles waiting");
                 Assert.AreNotEqual(DisplayStyle.None, badge.style.display.value);
 
@@ -481,7 +484,7 @@ namespace Formula9.Tests
                 Assert.IsTrue(Shown("page-fleet"), "the page stays");
                 Assert.IsTrue(world.CamerasShown, "still watching");
                 Assert.AreEqual("shuttle-04", world.WatchedId, "still watching the shuttle they chose");
-                Assert.AreEqual("Hide cameras", toggle.text);
+                Assert.IsTrue(toggle.ClassListContains("segment-selected"), "the map bar's Cameras segment is lit while they show");
 
                 // Mid-draft the panel never moves
                 choose.Invoke(workspace, new object[] { "shuttle-04" });

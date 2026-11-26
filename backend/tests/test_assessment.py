@@ -174,7 +174,7 @@ def test_database_upgrade_from_either_branch_preserves_assessments(tmp_path, ass
         with TrainingStore(path) as store:
             with store._reading() as connection:
                 assert "boundary_json" in {row[1] for row in connection.execute("PRAGMA table_info(sessions)")}
-                assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 7
+                assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 8
                 assert connection.execute("SELECT COUNT(*) FROM session_assessments").fetchone()[0] == int(assessment_v5)
             if assessment_v5:
                 assert store.snapshot(snapshot.session_id) == snapshot

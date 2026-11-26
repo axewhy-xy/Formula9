@@ -336,7 +336,8 @@ class SessionServiceBase:
 
     @staticmethod
     def _creation_digest(request: CreateSessionRequest) -> str:
-        return hashlib.sha256(request.model_dump_json().encode()).hexdigest()
+        # Without a name the digest is what it was before names existed, so a retry across an upgrade still matches
+        return hashlib.sha256(request.model_dump_json(exclude_none=True).encode()).hexdigest()
 
     @staticmethod
     def _check_scenario(request: CreateSessionRequest) -> None:
@@ -638,7 +639,7 @@ class TrainingSessionService(SessionServiceBase):
         snapshot = actor.generate_snapshot()
         snapshot.session.status = "READY"
         snapshot = self.store.create_session(snapshot, runtime_state=checkpoint(actor), creation=(actor_id, key, digest),
-                                             **actor.admission_options())
+                                             name=request.name, **actor.admission_options())
         return snapshot, actor
 
     def traffic_sessions(self) -> int:

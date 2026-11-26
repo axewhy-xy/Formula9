@@ -3,12 +3,12 @@
  *
  * Author: Choo Jian Wei
  * Date Created: 30/10/2026
- * Last Modified: 30/10/2026
+ * Last Modified: 26/11/2026
  *
  * Description:
- *     Part of the Unity client's 3D world. One fixed setup (flat ambient light and one soft-
- *     shadowed directional light, no fog), so the blockout materials read as their authored colours
- *     instead of washing out under Unity's default sky lighting.
+ *     Part of the Unity client's 3D world. Trilight ambient light and one soft-shadowed directional
+ *     light, so the blockout materials read as their authored colours instead of washing out under
+ *     Unity's default sky lighting. DayCycle moves and colours them through the day.
  */
 
 using UnityEngine;
@@ -45,34 +45,19 @@ namespace Formula9.World
             // Taken before anything changes, and put back when the sun goes
             var restorer = light.gameObject.AddComponent<WorldSettingsRestorer>();
             restorer.Capture();
-            RenderSettings.ambientMode = AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = WorldLook.Color(look.Ambient.Sky) * look.Ambient.Intensity;
-            RenderSettings.ambientEquatorColor = WorldLook.Color(look.Ambient.Horizon) * look.Ambient.Intensity;
-            RenderSettings.ambientGroundColor = WorldLook.Color(look.Ambient.Ground) * look.Ambient.Intensity;
-            RenderSettings.fog = look.Haze.Enabled;
-            RenderSettings.fogMode = FogMode.ExponentialSquared;
-            RenderSettings.fogDensity = look.Haze.Density;
-            RenderSettings.fogColor = WorldLook.Color(look.Haze.Color);
-            Shader.SetGlobalFloat("_Formula9ShadowDarkness", look.GroundShadowDarkness);
+            Material sky = null;
             var shader = Shader.Find("Formula9/Sky");
             if (shader != null)
             {
-                var sky = new Material(shader) { name = "City sky", hideFlags = HideFlags.DontSave };
-                sky.SetColor("_Top", WorldLook.Color(look.Sky.Top));
-                sky.SetColor("_Horizon", WorldLook.Color(look.Sky.Horizon));
-                sky.SetColor("_Below", WorldLook.Color(look.Sky.Below));
-                sky.SetColor("_CloudColor", WorldLook.Color(look.Sky.CloudColor));
-                sky.SetFloat("_CloudCover", look.Sky.CloudCover);
+                sky = new Material(shader) { name = "City sky", hideFlags = HideFlags.DontSave };
                 RenderSettings.skybox = sky;
                 restorer.Own(sky);
             }
             light.type = LightType.Directional;
-            light.color = WorldLook.Color(look.Sun.Color);
-            light.intensity = look.Sun.Intensity;
             light.shadows = LightShadows.Soft;
-            light.shadowStrength = look.Sun.ShadowStrength;
-            light.transform.rotation = Quaternion.Euler(look.Sun.PitchDeg, look.Sun.YawDeg, 0);
             RenderSettings.sun = light;
+            // The sun, sky, ambient light and haze for the time of day and weather, set now and each frame
+            light.gameObject.AddComponent<DayCycle>().Init(light, sky, look);
             if (!System.Enum.TryParse(look.Shadows.Resolution, true, out ShadowResolution resolution)) resolution = ShadowResolution.High;
             // Set outright, so a low quality level (shadows off) still shows the sun's shadows
             QualitySettings.shadows = ShadowQuality.All;
@@ -153,6 +138,8 @@ namespace Formula9.World
                 RenderSettings.fogDensity = fogDensity;
                 RenderSettings.fogColor = fogColor;
                 RenderSettings.sun = sun;
+                // The unlit ground at full brightness again
+                Shader.SetGlobalVector("_Formula9GroundDim", Vector4.zero);
                 if (ownedSky != null)
                 {
                     if (Application.isPlaying) Destroy(ownedSky);

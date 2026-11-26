@@ -112,7 +112,8 @@ namespace Formula9.Tests
         [Test]
         public void TitleDescribesTheSnapshot()
         {
-            StringAssert.StartsWith("Singapore, real streets", TrainingPresenter.Title(Snapshot()));
+            Assert.AreEqual("Practice session", TrainingPresenter.Title(Snapshot()));
+            Assert.AreEqual("Fleet training", TrainingPresenter.Title(null));
         }
 
         // -----------------------------------------------------------------------------------
@@ -206,14 +207,15 @@ namespace Formula9.Tests
         [TestCase("ARCHIVED")]
         [TestCase("COMPLETED")]
         [TestCase("FAILED")]
-        public void FinishedSessionsDefaultToVisibleSetup(string state)
+        public void FinishedSessionsKeepSetupClosedUntilOpened(string state)
         {
             foreach (var charging in new[] { true, false })
             {
                 var setup = TrainingPresenter.SessionSetup(WithStatus(state), charging, null);
-                Assert.IsTrue(setup.ToolsVisible);
+                Assert.IsFalse(setup.ToolsVisible);
                 Assert.IsTrue(setup.ToggleVisible);
-                Assert.IsFalse(setup.Compact);
+                Assert.AreEqual(charging, setup.Compact);
+                Assert.IsTrue(TrainingPresenter.SessionSetup(WithStatus(state), charging, true).ToolsVisible);
             }
         }
 
@@ -228,10 +230,12 @@ namespace Formula9.Tests
             Assert.IsTrue(open.ToolsVisible);
             Assert.IsFalse(open.Compact);
             Assert.IsFalse(TrainingPresenter.SessionSetup(s, false, null).Compact);
-            var empty = TrainingPresenter.SessionSetup(null, true, false);
-            Assert.IsTrue(empty.ToolsVisible);
-            Assert.IsFalse(empty.ToggleVisible);
-            Assert.IsFalse(empty.Compact);
+            // With no session, setup is still closed until Create/join training session opens it
+            var empty = TrainingPresenter.SessionSetup(null, true, null);
+            Assert.IsFalse(empty.ToolsVisible);
+            Assert.IsTrue(empty.ToggleVisible);
+            Assert.IsFalse(empty.Compact, "nothing to fold before a session is joined");
+            Assert.IsTrue(TrainingPresenter.SessionSetup(null, true, true).ToolsVisible);
         }
 
         [Test]
@@ -372,15 +376,25 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: OutcomeMessagesMatchTheQtClient
+        // Function: OutcomeMessagesArePlainWordsWithTheReason
         // -----------------------------------------------------------------------------------
         // Description:
-        //     Every command outcome shows the Qt client's wording.
+        //     Routine outcomes say nothing on screen; the rest are plain words with no command IDs,
+        //     and a refusal says why, asking for a refresh only when one can help.
         [Test]
-        public void OutcomeMessagesMatchTheQtClient()
+        public void OutcomeMessagesArePlainWordsWithTheReason()
         {
+            var closed = new CommandOutcome { CommandId = "c-6", TargetId = "incident-7", Status = "REJECTED", FailureCode = "INVALID_REFERENCE" };
+            StringAssert.Contains("no longer exists", TrainingPresenter.Outcome(closed));
+            StringAssert.DoesNotContain("Refresh", TrainingPresenter.Outcome(closed));
+            var stale = new CommandOutcome { CommandId = "c-7", TargetId = "incident-7", Status = "REJECTED", FailureCode = "STALE_REVISION" };
+            StringAssert.Contains("Refresh", TrainingPresenter.Outcome(stale));
+            var unknown = new CommandOutcome { CommandId = "c-8", TargetId = "incident-7", Status = "REJECTED", FailureCode = "SOMETHING_NEW" };
+            StringAssert.Contains("SOMETHING_NEW", TrainingPresenter.Outcome(unknown));
             var applied = new CommandOutcome { CommandId = "c-1", TargetId = "session-001", TargetType = "SESSION", Status = "APPLIED", AppliedTick = 210 };
-            Assert.AreEqual("Decision c-1 APPLIED for session-001 at tick 210.", TrainingPresenter.Outcome(applied));
+            Assert.IsNull(TrainingPresenter.Outcome(applied));
+            Assert.IsNull(TrainingPresenter.Outcome(new CommandOutcome { CommandId = "c-4", TargetId = "shuttle-01", Status = "QUEUED" }));
+            StringAssert.DoesNotContain("c-5", TrainingPresenter.Outcome(new CommandOutcome { CommandId = "c-5", TargetId = "shuttle-01", Status = "REJECTED", FailureCode = "STALE_REVISION" }));
             var blocked = new CommandOutcome { CommandId = "c-2", TargetId = "session-001", TargetType = "SESSION", Status = "REJECTED", FailureCode = "UNKNOWN_CONSTRAINT" };
             StringAssert.StartsWith("Can't start yet", TrainingPresenter.Outcome(blocked));
             var unconfirmed = new CommandOutcome { CommandId = "c-3", TargetId = "session-001", Status = "NEEDS_RECONFIRMATION" };
@@ -400,7 +414,7 @@ namespace Formula9.Tests
                 Scenario = new ScenarioRevision(),
                 Session = new TrainingSession { ScenarioRevisionId = SessionController.IntegratedScenario, Status = "RUNNING" },
             };
-            StringAssert.StartsWith("Singapore", TrainingPresenter.Title(snapshot));
+            Assert.AreEqual("Practice session", TrainingPresenter.Title(snapshot));
             Assert.IsFalse(TrainingPresenter.IsAssessment(snapshot));
             Assert.IsNull(TrainingPresenter.AssessmentClock(snapshot, true).Text);
             snapshot.Session.ScenarioRevisionId = "scored-toa-payoh-example";

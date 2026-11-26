@@ -284,6 +284,8 @@ namespace Formula9.Contracts
     /// <summary>CreateSessionRequest from the shared v2 contract.</summary>
     public sealed partial class CreateSessionRequest
     {
+        [JsonProperty("name", Required = Required.Default)]
+        public string Name { get; set; }
         [JsonProperty("scenario_revision_id", Required = Required.Always)]
         public string ScenarioRevisionId { get; set; }
         [JsonProperty("seed", Required = Required.Default)]
@@ -1276,6 +1278,8 @@ namespace Formula9.Contracts
         public bool? CanDelete { get; set; }
         [JsonProperty("is_assessment", Required = Required.Default)]
         public bool IsAssessment { get; set; } = false;
+        [JsonProperty("name", Required = Required.Default)]
+        public string Name { get; set; }
         [JsonProperty("occupies_capacity", Required = Required.Always)]
         public bool OccupiesCapacity { get; set; }
         [JsonProperty("scenario_revision_id", Required = Required.Always)]

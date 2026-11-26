@@ -153,7 +153,7 @@ namespace Formula9.Session
         private long trafficCursor = -1;
         private string trafficKey, noTrafficKey;
         private DateTime noTrafficUntil;
-        private string creationKey, creationOwner, creationScenario;
+        private string creationKey, creationOwner, creationScenario, creationName;
         private PendingCommand pending;
         // The joined session's stream, the join it belongs to, whether it has delivered a snapshot and
         // whether it was told to send traffic; when it was last heard from; when to try the next, and
@@ -177,6 +177,8 @@ namespace Formula9.Session
         internal string SignedInUsername => auth.IsLoggedIn ? auth.Username : null;
         // Scenario for the next creation; an unresolved creation keeps the one it started with.
         public string Scenario { get; set; } = IntegratedScenario;
+        // Name for the next creation, or null for none; an unresolved creation keeps the one it started with.
+        public string SessionName { get; set; }
         // Whether PumpStream keeps a stream of the joined session open. Off by default, so a caller
         // that never pumps polls exactly as before; the app turns it on.
         public bool UseStream { get; set; }
@@ -256,7 +258,8 @@ namespace Formula9.Session
         //     This function creates a training session and joins it. The creation key is kept until
         //     the backend confirms the attempt, so a retry after a lost reply returns the same
         //     session; only the account that started it can confirm it. A late success for another
-        //     login does not select its session or drop its retry key.
+        //     login does not select its session or drop its retry key. A request refused for good
+        //     (see Refused) drops its key, so the poll does not resend it every second.
         public async Task CreateAsync()
         {
             if (createRequest != null) return;
@@ -276,13 +279,27 @@ namespace Formula9.Session
                 creationKey = Guid.NewGuid().ToString();
                 creationOwner = owner;
                 creationScenario = Scenario;
+                creationName = string.IsNullOrWhiteSpace(SessionName) ? null : SessionName.Trim();
+            }
+            var request = new CreateSessionRequest { ScenarioRevisionId = creationScenario, Name = creationName };
+            try
+            {
+                // Checked here, before anything is sent. A reply that cannot be read also throws a
+                // ContractException, but by then the session may exist, so only this check counts
+                // as a request that was never sent.
+                ContractParser.Serialize(request);
+            }
+            catch (ContractException error)
+            {
+                DropCreation(error);
+                return;
             }
             var token = createRequest = new object();
             var started = generation;
             TrainingSession created;
             try
             {
-                created = await api.CreateSessionAsync(new CreateSessionRequest { ScenarioRevisionId = creationScenario }, creationKey, lifetime.Token);
+                created = await api.CreateSessionAsync(request, creationKey, lifetime.Token);
             }
             catch (NotLoggedInException)
             {
@@ -290,6 +307,14 @@ namespace Formula9.Session
                 // login by the same owner may have arrived while this request was in flight.
                 if (createRequest == token) createRequest = null;
                 if (started == generation && auth.IsLoggedIn && auth.Username == owner) _ = CreateAsync();
+                return;
+            }
+            catch (Exception error) when (Refused(error))
+            {
+                // Nothing was created and the same request would be refused again, so the attempt is
+                // dropped: the poll stops retrying it, and the next Create sends the name as it is then.
+                if (createRequest == token) createRequest = null;
+                if (started == generation && auth.Username == owner) DropCreation(error);
                 return;
             }
             catch (Exception error) when (!(error is OperationCanceledException))
@@ -302,8 +327,40 @@ namespace Formula9.Session
             if (createRequest == token) createRequest = null;
             // A late success for another login must not select its session or drop its retry key.
             if (started != generation || !auth.IsLoggedIn || auth.Username != owner) return;
-            creationKey = creationOwner = creationScenario = null;
+            creationKey = creationOwner = creationScenario = creationName = null;
             await JoinAsync(created.SessionId);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: Refused
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function tells whether the backend refused a creation for good: a complete 4xx
+        //     reply it does not mark retryable, so nothing was created. Any other failure, such as
+        //     a reply that cannot be read, may come after the session was made and keeps its key.
+        //
+        // Args:
+        //     error (Exception): The failure.
+        //
+        // Returns:
+        //     bool: True when retrying the same request cannot succeed.
+        private static bool Refused(Exception error) =>
+            error is BackendErrorException refused && refused.Error.Status >= 400 && refused.Error.Status < 500 && refused.Error.Status != 401 && !refused.Error.Retryable;
+
+        // -----------------------------------------------------------------------------------
+        // Function: DropCreation
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function forgets a creation that was refused for good, so the poll stops
+        //     retrying it and the next Create sends the name as it is then, and says why.
+        //
+        // Args:
+        //     error (Exception): Why it was refused.
+        private void DropCreation(Exception error)
+        {
+            var named = creationName != null;
+            creationKey = creationOwner = creationScenario = creationName = null;
+            Error(named ? $"Create failed: {error.Message}. Change the session name and create again." : $"Create failed: {error.Message}.");
         }
 
         // -----------------------------------------------------------------------------------
