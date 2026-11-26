@@ -14,7 +14,7 @@ namespace Formula9.World
 {
     // The real streets in 3D: extruded OSM buildings and asphalt roads on a ground of map tiles, with
     // the session's routes, stops and shuttles from the backend's snapshots.
-    public sealed class CityView : IDisposable
+    public sealed partial class CityView : IDisposable
     {
         // Sharp tiles around the buildings, over coarser ones out to the horizon
         private const int TileZoom = 17, FarTileZoom = 14;
@@ -372,10 +372,12 @@ namespace Formula9.World
                 renderer.sharedMaterials = materials;
                 renderer.shadowCastingMode = ShadowCastingMode.Off;
                 renderer.receiveShadows = false;
+                LtaCityDividers.Build(area, road.transform, geometry, surface,
+                    mesh => Own(mesh), material => Own(material));
                 if (!useAsphaltMaps && !useAtlas)
                     Debug.LogWarning("[CityView] No asphalt texture found. Using generated asphalt grain.");
                 Debug.Log($"[CityView] RoadMesh built {RoadCount} backend roads; " +
-                    $"textured={texturedRoads}; kerbsHidden=true; tint={AsphaltColor}");
+                    $"textured={useAsphaltMaps || useAtlas}; kerbsHidden=true; tint={AsphaltColor}");
 
                 // The raised sidewalks replace the hidden kerb strips. They load on their own, as the
                 // file is large and nothing waits on them: poles and shelters are lifted when they come.
