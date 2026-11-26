@@ -26,6 +26,8 @@ Shader "Formula9/BusStopGlass"
             #include "UnityCG.cginc"
 
             sampler2D _MainTex;
+            // DayCycle's night: 0 by day, nearer 1 as the unlit ground darkens
+            float4 _Formula9GroundDim;
             float4 _MainTex_ST;
             float4 _Tint;
             float _Opacity;
@@ -65,7 +67,7 @@ Shader "Formula9/BusStopGlass"
                 float reflection = saturate(edge * _EdgeReflect);
                 float3 rgb = lerp(_Tint.rgb * (0.94 + streak * 0.12), sky, reflection);
                 float alpha = saturate(_Opacity + reflection * 0.40);
-                return float4(rgb, alpha);
+                return float4(rgb * (1 - _Formula9GroundDim.rgb), alpha);
             }
             ENDCG
         }

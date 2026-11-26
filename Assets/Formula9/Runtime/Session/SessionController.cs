@@ -278,12 +278,25 @@ namespace Formula9.Session
                 creationScenario = Scenario;
                 creationName = string.IsNullOrWhiteSpace(SessionName) ? null : SessionName.Trim();
             }
+            var request = new CreateSessionRequest { ScenarioRevisionId = creationScenario, Name = creationName };
+            try
+            {
+                // Checked here, before anything is sent. A reply that cannot be read also throws a
+                // ContractException, but by then the session may exist, so only this check counts
+                // as a request that was never sent.
+                ContractParser.Serialize(request);
+            }
+            catch (ContractException error)
+            {
+                DropCreation(error);
+                return;
+            }
             var token = createRequest = new object();
             var started = generation;
             TrainingSession created;
             try
             {
-                created = await api.CreateSessionAsync(new CreateSessionRequest { ScenarioRevisionId = creationScenario, Name = creationName }, creationKey, lifetime.Token);
+                created = await api.CreateSessionAsync(request, creationKey, lifetime.Token);
             }
             catch (NotLoggedInException)
             {
@@ -298,10 +311,7 @@ namespace Formula9.Session
                 // Nothing was created and the same request would be refused again, so the attempt is
                 // dropped: the poll stops retrying it, and the next Create sends the name as it is then.
                 if (createRequest == token) createRequest = null;
-                if (started != generation || auth.Username != owner) return;
-                var named = creationName != null;
-                creationKey = creationOwner = creationScenario = creationName = null;
-                Error(named ? $"Create failed: {error.Message}. Change the session name and create again." : $"Create failed: {error.Message}.");
+                if (started == generation && auth.Username == owner) DropCreation(error);
                 return;
             }
             catch (Exception error) when (!(error is OperationCanceledException))
@@ -322,9 +332,9 @@ namespace Formula9.Session
         // Function: Refused
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function tells whether a creation failed for good: the client would not send it
-        //     (it breaks the contract, such as a name the schema rejects), or the backend gave a
-        //     complete 4xx reply it does not mark retryable. Either way nothing was created.
+        //     This function tells whether the backend refused a creation for good: a complete 4xx
+        //     reply it does not mark retryable, so nothing was created. Any other failure, such as
+        //     a reply that cannot be read, may come after the session was made and keeps its key.
         //
         // Args:
         //     error (Exception): The failure.
@@ -332,8 +342,23 @@ namespace Formula9.Session
         // Returns:
         //     bool: True when retrying the same request cannot succeed.
         private static bool Refused(Exception error) =>
-            error is ContractException
-            || error is BackendErrorException refused && refused.Error.Status >= 400 && refused.Error.Status < 500 && refused.Error.Status != 401 && !refused.Error.Retryable;
+            error is BackendErrorException refused && refused.Error.Status >= 400 && refused.Error.Status < 500 && refused.Error.Status != 401 && !refused.Error.Retryable;
+
+        // -----------------------------------------------------------------------------------
+        // Function: DropCreation
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function forgets a creation that was refused for good, so the poll stops
+        //     retrying it and the next Create sends the name as it is then, and says why.
+        //
+        // Args:
+        //     error (Exception): Why it was refused.
+        private void DropCreation(Exception error)
+        {
+            var named = creationName != null;
+            creationKey = creationOwner = creationScenario = creationName = null;
+            Error(named ? $"Create failed: {error.Message}. Change the session name and create again." : $"Create failed: {error.Message}.");
+        }
 
         // -----------------------------------------------------------------------------------
         // Function: JoinAsync

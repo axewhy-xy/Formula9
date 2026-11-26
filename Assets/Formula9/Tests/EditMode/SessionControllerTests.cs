@@ -880,6 +880,30 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
+        // Function: ACreationWhoseReplyCannotBeReadKeepsItsKey
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A reply that does not match the contract comes after the backend handled the
+        //     request, so the session may already exist: the key is kept and the retry sends the
+        //     same one, rather than making a second session.
+        [Test]
+        public async Task ACreationWhoseReplyCannotBeReadKeepsItsKey()
+        {
+            var keys = new List<string>();
+            backend.OnCreate = request =>
+            {
+                keys.Add(request.Headers["Idempotency-Key"]);
+                return Json(new JObject { ["unexpected"] = true }, 201);
+            };
+            await controller.CreateAsync();
+            Assert.IsTrue(controller.CreationPending);
+            StringAssert.Contains("Retry to confirm the same attempt", errors.Last());
+            await controller.RefreshAsync();
+            Assert.AreEqual(2, keys.Count);
+            Assert.AreEqual(keys[0], keys[1]);
+        }
+
+        // -----------------------------------------------------------------------------------
         // Function: CreationWaitsForItsOwnAccount
         // -----------------------------------------------------------------------------------
         // Description:

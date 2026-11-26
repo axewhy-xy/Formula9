@@ -821,7 +821,8 @@ namespace Formula9.World
         //     piece to piece and two shuttles in a corridor run side by side rather than braiding.
         //     Routes driving a piece one way are ordered by route ID, left to right, and centred on
         //     the road; where routes drive it both ways, each way keeps to its own left, as traffic
-        //     does in Singapore. A piece with a detour's edge on it spaces its lanes wider, so the
+        //     does in Singapore, still in route ID order, so a route does not change sides with the
+        //     routes beside it when one going the other way joins the piece. A piece with a detour's edge on it spaces its lanes wider, so the
         //     edge does not cover the lane beside it.
         //
         // Args:
@@ -846,7 +847,9 @@ namespace Formula9.World
                 {
                     var lanes = pieces[i].Reversed ? backward : forward;
                     var k = lanes.IndexOf(pieces[i].RouteId);
-                    shifts[i] = (bothWays ? -(k + 0.5f) : k - (lanes.Count - 1) / 2f) * spacing;
+                    // Both ways, counted from the centre line outwards, so the route ID order is the
+                    // same left to right as when the piece is driven one way only
+                    shifts[i] = (bothWays ? -(lanes.Count - k - 0.5f) : k - (lanes.Count - 1) / 2f) * spacing;
                 }
             }
             return shifts;

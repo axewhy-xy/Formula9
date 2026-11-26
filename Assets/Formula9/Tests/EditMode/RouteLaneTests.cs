@@ -45,7 +45,21 @@ namespace Formula9.Tests
             {
                 ("p", false, "route-a", false), ("p", true, "route-b", false), ("p", true, "route-c", false),
             });
-            CollectionAssert.AreEqual(new[] { -3f, -3f, -9f }, shifts);
+            CollectionAssert.AreEqual(new[] { -3f, -9f, -3f }, shifts);
+        }
+
+        [Test]
+        public void ARouteGoingTheOtherWayDoesNotSwapTheLanesBesideIt()
+        {
+            // route-a and route-b go one way; route-c joins on the next piece going the other way.
+            // route-b is right of route-a on both pieces, so their lanes do not cross at the join
+            var shifts = FleetMap.LaneShifts(new List<(string, bool, string, bool)>
+            {
+                ("p1", false, "route-a", false), ("p1", false, "route-b", false),
+                ("p2", false, "route-a", false), ("p2", false, "route-b", false), ("p2", true, "route-c", false),
+            });
+            CollectionAssert.AreEqual(new[] { -3f, 3f, -9f, -3f, -3f }, shifts);
+            Assert.Less(shifts[2], shifts[3]);
         }
 
         [Test]
