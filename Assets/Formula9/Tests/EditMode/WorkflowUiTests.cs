@@ -556,6 +556,14 @@ namespace Formula9.Tests
                     .Invoke(workspace, new object[] { new List<RouteWaypoint>() });
                 Assert.AreNotEqual(RoutePresenter.LeaveRerouteNote, root.Q<Label>("route-options-hint").text);
                 Assert.IsFalse((bool)typeof(TrainingWorkspace).GetField("leavingReroute", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).GetValue(workspace));
+                // So does the draft being cleared, as when a newer incident's detour replaces this one
+                drawn.SetValue(workspace, new List<RouteWaypoint> { new RouteWaypoint { EdgeId = "edge-1", Road = "Lorong 6 Toa Payoh" } });
+                typeof(TrainingWorkspace).GetMethod("ChooseOption", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    .Invoke(workspace, new object[] { "ROAD_DETOUR" });
+                Assert.AreEqual(RoutePresenter.LeaveRerouteNote, root.Q<Label>("route-options-hint").text);
+                typeof(TrainingWorkspace).GetMethod("ClearDraft", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(workspace, null);
+                Assert.AreNotEqual(RoutePresenter.LeaveRerouteNote, root.Q<Label>("route-options-hint").text);
+                Assert.IsFalse((bool)typeof(TrainingWorkspace).GetField("leavingReroute", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).GetValue(workspace));
                 Assert.IsTrue(Items().Single(b => b.Q<Label>(className: "route-pending-name").text == "Shuttle 05").ClassListContains("route-pending-item-selected"));
                 Assert.IsFalse(Items().Single(b => b.Q<Label>(className: "route-pending-name").text == "Shuttle 01").ClassListContains("route-pending-item-selected"));
 

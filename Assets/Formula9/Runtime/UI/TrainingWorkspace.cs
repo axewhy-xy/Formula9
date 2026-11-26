@@ -505,6 +505,7 @@ namespace Formula9.UI
             var detour = DecisionRules.DetourCandidate(s, selectedVehicle)?.IncidentId;
             var ended = false;
             if (detour != selectedDetour) { ended = detour == null && selectedDetour != null; selectedDetour = detour; ClearDraft(); }
+            // Its detour gone, the re-route ends; KeepReroute also covers it when the detour didn't just change
             if (detour == null) { rerouting = false; KeepReroute(); }
             FollowChoice(s);
 
@@ -658,6 +659,8 @@ namespace Formula9.UI
 
         private void ResetDraft()
         {
+            // No route is left to drop, so a first press of Re-route to leave is taken back too
+            KeepReroute();
             context = null; routeReason.value = ""; draft = new List<RouteWaypoint>();
             draftHistory.Clear(); draftHistory.Add(new List<RouteWaypoint>()); historyIndex = 0;
             outcome = null; outcomeSequence = -1;
