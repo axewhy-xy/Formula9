@@ -44,9 +44,11 @@ namespace Formula9.World
             new Mount { Name = "Left", Offset = new Vector3(-2.6f, -0.5f, 0), Yaw = -90, Pitch = 0 },
             new Mount { Name = "Right", Offset = new Vector3(2.6f, -0.5f, 0), Yaw = 90, Pitch = 0 }
         };
-        // The camera shown large draws into one image big enough to fill the 3D view; the
-        // thumbnails, shown at 160x90, draw into small ones.
-        private const int SmallWidth = 320, SmallHeight = 180, LargeWidth = 960, LargeHeight = 540;
+        // The camera shown large draws into one image the size of the view it fills (SetLargeSize),
+        // so it is never stretched and blurred and a wider view shows more to the sides; the
+        // thumbnails, shown at 160x90, draw into small ones. Edges are smoothed (MSAA).
+        private const int SmallWidth = 320, SmallHeight = 180, Antialiasing = 4;
+        private int largeWidth = 960, largeHeight = 540;
         // One camera and one small image per mount, in the same order as Mounts, and the large
         // image. The images exist only while the cameras are on.
         private readonly Camera[] cameras;
@@ -150,7 +152,49 @@ namespace Formula9.World
         {
             main = index;
             for (var i = 0; i < cameras.Length; i++)
-                cameras[i].targetTexture = i == main ? large : textures[i];
+            {
+                var target = i == main ? large : textures[i];
+                cameras[i].targetTexture = target;
+                // The picture's shape, so a wider view shows more rather than stretching
+                if (target != null) cameras[i].aspect = (float)target.width / target.height;
+            }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: SetLargeSize
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function sizes the large image to the view it fills, in physical pixels, so it
+        //     is drawn sharp rather than stretched. While the cameras are open it is remade at once.
+        //
+        // Returns:
+        //     bool: True if the large image was remade, so whoever shows it must show the new one.
+        public bool SetLargeSize(int width, int height)
+        {
+            width = Mathf.Clamp(width, 16, 4096);
+            height = Mathf.Clamp(height, 16, 4096);
+            if (width == largeWidth && height == largeHeight) return false;
+            largeWidth = width;
+            largeHeight = height;
+            if (large == null) return false;
+            var old = large;
+            if (cameras[main] != null) cameras[main].targetTexture = null;
+            large = MakeLarge();
+            SetMain(main);
+            Free(old);
+            return true;
+        }
+
+        private RenderTexture MakeLarge() =>
+            new RenderTexture(largeWidth, largeHeight, 24) { name = "Shuttle camera (large)", antiAliasing = Antialiasing };
+
+        // Free one image: Release it, then Destroy (playing) or DestroyImmediate (EditMode)
+        private static void Free(RenderTexture t)
+        {
+            if (t == null) return;
+            t.Release();
+            if (Application.isPlaying) Object.Destroy(t);
+            else Object.DestroyImmediate(t);
         }
 
         // -----------------------------------------------------------------------------------
@@ -168,9 +212,9 @@ namespace Formula9.World
             this.active = active;
             if (active && large == null)
             {
-                large = new RenderTexture(LargeWidth, LargeHeight, 24);
+                large = MakeLarge();
                 for (var i = 0; i < textures.Length; i++)
-                    textures[i] = new RenderTexture(SmallWidth, SmallHeight, 24);
+                    textures[i] = new RenderTexture(SmallWidth, SmallHeight, 24) { antiAliasing = Antialiasing };
                 // Points every camera at its image
                 SetMain(main);
             }
@@ -188,14 +232,6 @@ namespace Formula9.World
         //     Play mode, as in EditMode tests, they are destroyed at once.
         private void FreeTextures()
         {
-            // Free one image: Release it, then Destroy (playing) or DestroyImmediate (EditMode)
-            void Free(RenderTexture t)
-            {
-                if (t == null) return;
-                t.Release();
-                if (Application.isPlaying) Object.Destroy(t);
-                else Object.DestroyImmediate(t);
-            }
             // The cameras let go of their images first: Unity will not release one a camera
             // still draws into
             foreach (var camera in cameras)
