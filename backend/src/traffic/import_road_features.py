@@ -182,6 +182,26 @@ def numeric(value):
     return number if math.isfinite(number) else None
 
 
+
+def integer_numeric(value, field: str) -> int | None:
+    number = numeric(value)
+    if number is None:
+        return None
+    if not number.is_integer():
+        raise ValueError(f"{field} must be an integer, got {value!r}")
+    return int(number)
+
+
+def required_bearing(row: dict, feature: str) -> float:
+    try:
+        bearing = float(row["bearing_deg"])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError(f"{feature} feature has a missing or invalid BEARG_NUM bearing") from None
+    if not math.isfinite(bearing):
+        raise ValueError(f"{feature} feature has a missing or invalid BEARG_NUM bearing")
+    return bearing
+
+
 def source_attributes(fields: dict) -> dict:
     """Collect property values without forcing a common schema on all layers."""
     attributes = {}
@@ -284,7 +304,7 @@ def read_layer(path: Path, box: tuple[float, float, float, float], layer: str, r
                 "holes": [lat_lon(ring.coords) for ring in part.interiors] if kind == "Polygon" else [],
                 "type_code": text(fields.get("TYP_CD")), "road_code": text(fields.get("RD_CD")),
                 "word": text(fields.get("DESC_TXT")), "bearing_deg": numeric(fields.get("BEARG_NUM")),
-                "level": numeric(fields.get("LVL_NUM")),
+                "level": integer_numeric(fields.get("LVL_NUM"), "LVL_NUM"),
                 "infrastructure": infrastructure,
             })
     return rows
@@ -435,6 +455,7 @@ def build_signals(rows: list[dict], box: tuple[float, float, float, float], road
     west, south, east, north = area_box_m(box)
     heads = [row for row in sorted_rows(rows)
              if west <= project(*row["points"][0])[0] <= east and south <= project(*row["points"][0])[1] <= north]
+    bearings = [required_bearing(head, "TrafficLight") for head in heads]
     positions = [project(*head["points"][0]) for head in heads]
     groups = group_junctions(positions)
     groups.sort(key=lambda group: min(positions[index] for index in group))
@@ -447,10 +468,10 @@ def build_signals(rows: list[dict], box: tuple[float, float, float, float], road
         approaches = sorted(approaches_of([positions[index] for index in group], roads), key=lambda a: (a["road"], a["heading_deg"]))
         for count, (approach, phase) in enumerate(zip(approaches, phases_of([a["heading_deg"] for a in approaches])), 1):
             approach.update(id=f"{junction_id}-approach-{count}", phase=phase)
-        lta_phases = phases_of([float(heads[index]["bearing_deg"] or 0) for index in group])
+        lta_phases = phases_of([bearings[index] for index in group])
         for index, lta_phase in zip(group, lta_phases):
             head = heads[index]
-            bearing = float(head["bearing_deg"] or 0)
+            bearing = bearings[index]
             controlled = approach_for_head(positions[index], approaches)
             # Off the road map, as on an expressway, only LTA's own bearing says anything about direction
             traffic = controlled["heading_deg"] if controlled else heading_of_bearing(bearing)
@@ -531,7 +552,7 @@ def build_crossings(rows: list[dict], signal_rows: list[dict]) -> dict:
 def build_markings(lanes: list[dict], arrows: list[dict], words: list[dict], humps: list[dict]) -> dict:
     def point(row: dict, prefix: str, number: int, **fields) -> dict:
         x, y = project(*row["points"][0])
-        bearing = float(row["bearing_deg"] or 0)
+        bearing = required_bearing(row, prefix)
         return {"id": f"{prefix}-{number:05d}", **fields, "bearing_deg": round(bearing, 1), "heading_deg": heading_of_bearing(bearing),
                 "level": row["level"], "road_code": row["road_code"], "x_m": x, "y_m": y}
 
@@ -613,7 +634,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--release", default=DEFAULT_RELEASE, help="DataMall's release, in its file names (default %(default)s)")
     parser.add_argument("--source-dir", type=Path, help="folder of downloaded ZIPs, shapefiles or GeoJSON")
     parser.add_argument("--unity-resources-dir", type=Path,
-                        help="optional Unity Resources folder, for example ../Formula9/Assets/Resources")
+                        help="optional Unity Resources folder, for example ../Assets/Formula9/Resources")
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIRECTORY)
     arguments = parser.parse_args(argv)
     box = SERVICE_AREAS[arguments.area]["box"]

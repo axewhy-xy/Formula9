@@ -9,6 +9,7 @@ using Formula9.Contracts;
 using UnityEngine;
 using UnityEngine.Rendering;
 using HealthbarGames;
+using Newtonsoft.Json.Linq;
 
 namespace Formula9.World
 {
@@ -306,6 +307,12 @@ namespace Formula9.World
                     Debug.Log("[CityView] Textured asphalt unavailable. Trying the Ash centre-divider shader.");
                 var materials = new Material[RoadMesh.LayerCount];
                 materials[RoadMesh.KerbLayer] = Own(new Material(surface) { name = "City kerbs", color = KerbColor, mainTexture = grain });
+                materials[RoadMesh.MarkingLayer] = Own(new Material(surface)
+                {
+                     name = "Unused legacy paint submesh",
+                    color = Color.clear,
+                    renderQueue = (int)RenderQueue.Geometry + 3
+                });
                 materials[RoadMesh.AsphaltLayer] = Own(new Material(hasTextureShader ? textureShader : surface)
                 {
                     name = "Ash-grey asphalt",
@@ -343,8 +350,6 @@ namespace Formula9.World
                     }
                 }
 
-                materials[RoadMesh.MarkingLayer] = Own(new Material(surface)
-                    { name = "Unused legacy paint submesh", color = Color.clear });
                 materials[RoadMesh.ConcreteMedianLayer] = Own(new Material(surface)
                     { name = "Concrete road medians", color = new Color(0.52f, 0.51f, 0.48f), mainTexture = grain });
                 materials[RoadMesh.GreenMedianLayer] = Own(new Material(surface)
@@ -378,7 +383,7 @@ namespace Formula9.World
                 road.GetComponent<MeshFilter>().sharedMesh = geometry;
                 var renderer = road.GetComponent<MeshRenderer>();
                 renderer.sharedMaterials = materials;
-                LoadCentreDividerMask(area, materials[RoadMesh.AsphaltLayer]);
+        
                 renderer.shadowCastingMode = ShadowCastingMode.Off;
                 renderer.receiveShadows = false;
                 LtaCityDividers.Build(area, road.transform, geometry, surface,
@@ -392,7 +397,7 @@ namespace Formula9.World
                 // file is large and nothing waits on them: poles and shelters are lifted when they come.
                 sidewalksLoading = LoadSidewalksAsync(client, area, surface, grain, geometry, cancellation);
 
-                await LoadRoadMarkingsAsync(area, renderer, surface, cancellation);
+                _ = LoadRoadMarkingsAsync(area, renderer, surface, materials[RoadMesh.AsphaltLayer], cancellation);
 
             }
             catch (Exception error) when (!(error is OperationCanceledException))
@@ -433,37 +438,45 @@ namespace Formula9.World
 
         // Sidewalks from the backend's walkways file, or from the copy in Resources when the backend has none
         // (an older backend, or offline). Without either, the roads stand as they did before sidewalks.
-        private void LoadCentreDividerMask(string area, Material asphalt)
+        // The per-area city map supplies the world extent used to sample its divider mask.
+        private void LoadCentreDividerMask(string area, Material asphalt, JToken boundsToken)
         {
             if (!asphalt.HasProperty("_SurveyPaintMask"))
             {
                 Debug.LogWarning($"[CityView] Centre-divider shader inactive. Active shader: {asphalt.shader.name}.");
                 return;
             }
-            if (asphalt.HasProperty("_SurveyPaintMask"))
+
+            var maskAsset = Resources.Load<TextAsset>($"Formula9/RoadData/{area}-centre-divider-mask");
+            if (maskAsset == null)
             {
-                var maskAsset = Resources.Load<TextAsset>($"Formula9/RoadData/{area}-centre-divider-mask");
-                if (maskAsset == null) Debug.LogWarning($"[CityView] Centre-divider mask missing for {area}.");
-                if (maskAsset != null)
-                {
-                    var mask = Own(new Texture2D(2, 2, TextureFormat.RGBA32, false, true)
-                    {
-                        name = "LTA surveyed paint coverage",
-                        wrapMode = TextureWrapMode.Clamp,
-                        filterMode = FilterMode.Bilinear
-                    });
-                    if (!mask.LoadImage(maskAsset.bytes, true))
-                    {
-                        Debug.LogWarning("[CityView] Centre-divider mask could not be decoded.");
-                        return;
-                    }
-                    asphalt.SetTexture("_SurveyPaintMask", mask);
-                    asphalt.SetVector("_SurveyMaskBounds",
-                        new Vector4(2025.160000f, -2886.280000f, 0.0004081966f, 0.0005020080f));
-                    Debug.Log("[CityView] Centre-divider mask active for two-way roads.");
-                }
+                Debug.LogWarning($"[CityView] Centre-divider mask missing for {area}.");
+                return;
             }
+
+            if (!TryCreateSurveyMaskBounds(boundsToken, out var maskBounds))
+            {
+                Debug.LogWarning($"[CityView] Centre-divider mask bounds missing or invalid for {area}.");
+                return;
+            }
+
+            var mask = Own(new Texture2D(2, 2, TextureFormat.RGBA32, false, true)
+            {
+                name = "LTA surveyed paint coverage",
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear
+            });
+            if (!mask.LoadImage(maskAsset.bytes, true))
+            {
+                Debug.LogWarning("[CityView] Centre-divider mask could not be decoded.");
+                return;
+            }
+
+            asphalt.SetTexture("_SurveyPaintMask", mask);
+            asphalt.SetVector("_SurveyMaskBounds", maskBounds);
+            Debug.Log("[CityView] Centre-divider mask active for two-way roads.");
         }
+
 
         private async Task LoadSidewalksAsync(CityClient client, string area, Shader shader, Texture2D grain, Mesh roads, CancellationToken cancellation)
         {

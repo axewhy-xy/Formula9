@@ -10,7 +10,7 @@ namespace Formula9.World
     public sealed partial class CityView
     {
         // The legacy road mesh is the only pavement. The LTA export supplies paint records.
-        private async Task<bool> LoadRoadMarkingsAsync(string area, MeshRenderer roadRenderer, Shader shader, CancellationToken cancellation)
+        private async Task<bool> LoadRoadMarkingsAsync(string area, MeshRenderer roadRenderer, Shader shader, Material asphaltMaterial, CancellationToken cancellation)
         {
             var asset = Resources.Load<TextAsset>($"Formula9/RoadData/{area}-city-map");
             if (asset == null)
@@ -51,10 +51,12 @@ namespace Formula9.World
                                 foreach (var line in additions) mapped.Add(line.DeepClone());
                         }
                     }
-                    return (Tiles: tiles, Size: size);
+                    return (Tiles: tiles, Size: size, Bounds: map["bounds_m"]);
                 }, cancellation);
-                cancellation.ThrowIfCancellationRequested();
+               cancellation.ThrowIfCancellationRequested();
                 if (disposed) throw new OperationCanceledException();
+
+                LoadCentreDividerMask(area, asphaltMaterial, indexed.Bounds);
 
                 const string materialFolder = "Formula9/LtaRoads/Materials/";
                 var coverageShader = Resources.Load<Shader>("Formula9/Shaders/LtaRoadPaintCoverage");
@@ -84,7 +86,7 @@ namespace Formula9.World
                 holder.transform.SetParent(root, false);
                 var roadMesh = roadRenderer.GetComponent<MeshFilter>().sharedMesh;
                 var roadVertices = roadMesh.vertices;
-                var asphalt = roadMesh.GetTriangles(RoadMesh.AsphaltLayer);
+                var asphaltTriangles = roadMesh.GetTriangles(RoadMesh.AsphaltLayer);
                 int built = 0;
                 var clock = System.Diagnostics.Stopwatch.StartNew();
                 foreach (var record in indexed.Tiles)
@@ -102,11 +104,11 @@ namespace Formula9.World
                     float half = indexed.Size * .5f;
                     var points = new List<Vector3>();
                     var triangles = new List<int>();
-                    for (int i = 0; i < asphalt.Length; i += 3)
+                    for (int i = 0; i < asphaltTriangles.Length; i += 3)
                     {
-                        var a = roadVertices[asphalt[i]];
-                        var b = roadVertices[asphalt[i + 1]];
-                        var c = roadVertices[asphalt[i + 2]];
+                        var a = roadVertices[asphaltTriangles[i]];
+                        var b = roadVertices[asphaltTriangles[i + 1]];
+                        var c = roadVertices[asphaltTriangles[i + 2]];
                         if (Mathf.Min(a.x, Mathf.Min(b.x, c.x)) > center.x + half ||
                             Mathf.Max(a.x, Mathf.Max(b.x, c.x)) < center.x - half ||
                             Mathf.Min(a.z, Mathf.Min(b.z, c.z)) > center.y + half ||
@@ -153,6 +155,10 @@ namespace Formula9.World
                 Debug.LogWarning($"[CityView] LTA paint overlay failed: {error}");
                 return false;
             }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
             finally
             {
                 if (!committed)
@@ -174,6 +180,42 @@ namespace Formula9.World
                     }
                 }
             }
+        }
+
+       internal static bool TryCreateSurveyMaskBounds(JToken source, out Vector4 bounds)
+        {
+            bounds = default;
+            if (!(source is JArray)) return false;
+
+            var values = (JArray)source;
+            if (values.Count != 4) return false;
+
+            for (int i = 0; i < values.Count; i++)
+            {
+                if (values[i].Type != JTokenType.Float &&
+                    values[i].Type != JTokenType.Integer)
+                    return false;
+            }
+
+            float minX = (float)values[0];
+            float minZ = (float)values[1];
+            float maxX = (float)values[2];
+            float maxZ = (float)values[3];
+            float width = maxX - minX;
+            float height = maxZ - minZ;
+            if (float.IsNaN(minX) || float.IsInfinity(minX) ||
+                float.IsNaN(minZ) || float.IsInfinity(minZ) ||
+                float.IsNaN(width) || float.IsInfinity(width) || width <= 0 ||
+                float.IsNaN(height) || float.IsInfinity(height) || height <= 0)
+                return false;
+
+            float inverseWidth = 1f / width;
+            float inverseHeight = 1f / height;
+            if (float.IsInfinity(inverseWidth) || float.IsInfinity(inverseHeight))
+                return false;
+
+            bounds = new Vector4(minX, minZ, inverseWidth, inverseHeight);
+            return true;
         }
     }
 }

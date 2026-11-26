@@ -204,7 +204,7 @@ namespace Formula9.World
                     if (i == sections.Count - 1) SetEdges(path.Finish, point, edge);
                     int first = AddVertex(point + outer);
                     float width = 2f * edge.magnitude;
-                    float along = path.PaintOrigin + path.PaintDirection * path.PaintDistances[i];
+                    float along = (path.PaintOrigin + path.PaintDirection * path.PaintDistances[i]) / TextureRepeatLengthM;
                     AddVertex(point + edge, new Vector4(0f, along, path.Road.Oneway ? lanes : -lanes, width), bounds, BarDistances(point + edge));
                     AddVertex(point - edge, new Vector4(width, along, path.Road.Oneway ? lanes : -lanes, width), bounds, BarDistances(point - edge));
                     AddVertex(point - outer);
@@ -272,6 +272,7 @@ namespace Formula9.World
         }
 
         private const float DashPeriodM = 6f; // Match CityRoadTexture.shader.
+        private const float TextureRepeatLengthM = 24f;
 
         private static void SetDashPhases(List<RoadPath> paths)
         {
