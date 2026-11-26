@@ -32,7 +32,6 @@ namespace Formula9.World
         private readonly Material[] nearMaterials, farMaterials;
         private readonly Dictionary<Color, Material> materialsByColor = new();
         private readonly RenderParams drawParameters;
-        private readonly bool supportsInstancing;
         private readonly List<(Bounds Bounds, float TreeSize, Matrix4x4[] Transforms)> batches = new();
         private readonly Plane[] frustum = new Plane[6];
         private readonly Matrix4x4[] distantTransforms = new Matrix4x4[BatchSize];
@@ -41,58 +40,106 @@ namespace Formula9.World
         internal int BatchCount => batches.Count;
         internal int MaterialCount => materialsByColor.Count;
 
-        private CityVegetation(MeshFilter near, MeshFilter far, Material instancingMaterial,
+        private CityVegetation((Mesh Mesh, Material[] Materials) near, (Mesh Mesh, Material[] Materials) far, Material instancingMaterial,
             TextAsset placements, Matrix4x4 cityToWorld)
         {
-            nearMesh = near.sharedMesh;
-            farMesh = far.sharedMesh;
+            nearMesh = near.Mesh;
+            farMesh = far.Mesh;
             // RenderParams reads Unity's default rendering layer; do that once, not per submesh.
             drawParameters = new RenderParams(instancingMaterial) { receiveShadows = true, lightProbeUsage = LightProbeUsage.Off };
-            supportsInstancing = SystemInfo.supportsInstancing;
-            nearMaterials = CreateMaterials(near, instancingMaterial);
-            farMaterials = CreateMaterials(far, instancingMaterial);
-            var meshBounds = nearMesh.bounds;
-
-            // Both OBJ assets use the same ground-level origin and local axes.
-            foreach (var cell in ReadPlacements(placements).GroupBy(tree => new Vector2Int(
-                Mathf.FloorToInt(tree.Position.x / CellSizeM), Mathf.FloorToInt(tree.Position.z / CellSizeM))))
+            try
             {
-                var trees = cell.ToArray();
-                TreeCount += trees.Length;
-                for (var start = 0; start < trees.Length; start += BatchSize)
+                nearMaterials = CreateMaterials(near.Materials, nearMesh.subMeshCount, instancingMaterial);
+                farMaterials = CreateMaterials(far.Materials, farMesh.subMeshCount, instancingMaterial);
+                var meshBounds = nearMesh.bounds;
+                meshBounds.Encapsulate(farMesh.bounds);
+
+                // Both OBJ assets use the same ground-level origin and local axes.
+                foreach (var cell in ReadPlacements(placements).GroupBy(tree => new Vector2Int(
+                    Mathf.FloorToInt(tree.Position.x / CellSizeM), Mathf.FloorToInt(tree.Position.z / CellSizeM))))
                 {
-                    var matrices = new Matrix4x4[Math.Min(BatchSize, trees.Length - start)];
-                    var bounds = new Bounds();
-                    var treeSize = 0f;
-                    for (var i = 0; i < matrices.Length; i++)
+                    var trees = cell.ToArray();
+                    TreeCount += trees.Length;
+                    for (var start = 0; start < trees.Length; start += BatchSize)
                     {
-                        var tree = trees[start + i];
-                        matrices[i] = cityToWorld * Matrix4x4.TRS(tree.Position,
-                            Quaternion.Euler(0, tree.Yaw, 0), Vector3.one * tree.Scale);
-                        var treeBounds = TransformBounds(meshBounds, matrices[i]);
-                        if (i == 0) bounds = treeBounds;
-                        else bounds.Encapsulate(treeBounds);
-                        var size = treeBounds.size;
-                        treeSize = Mathf.Max(treeSize, Mathf.Max(size.y, Mathf.Max(size.x, size.z)));
+                        var matrices = new Matrix4x4[Math.Min(BatchSize, trees.Length - start)];
+                        var bounds = new Bounds();
+                        var treeSize = 0f;
+                        for (var i = 0; i < matrices.Length; i++)
+                        {
+                            var tree = trees[start + i];
+                            matrices[i] = cityToWorld * Matrix4x4.TRS(tree.Position,
+                                Quaternion.Euler(0, tree.Yaw, 0), Vector3.one * tree.Scale);
+                            var treeBounds = TransformBounds(meshBounds, matrices[i]);
+                            if (i == 0) bounds = treeBounds;
+                            else bounds.Encapsulate(treeBounds);
+                            var size = treeBounds.size;
+                            treeSize = Mathf.Max(treeSize, Mathf.Max(size.y, Mathf.Max(size.x, size.z)));
+                        }
+                        batches.Add((bounds, treeSize, matrices));
                     }
-                    batches.Add((bounds, treeSize, matrices));
                 }
+            }
+            catch
+            {
+                Dispose();
+                throw;
             }
         }
 
-        internal static CityVegetation Load(Matrix4x4 cityToWorld)
+        internal static CityVegetation Load(Matrix4x4 cityToWorld) => Load(cityToWorld, SystemInfo.supportsInstancing);
+
+        /// <summary>Check the reported device capability before loading optional tree resources.</summary>
+        internal static CityVegetation Load(Matrix4x4 cityToWorld, bool instancingSupported)
         {
+            // Trees are optional scenery. Avoid thousands of individual draws on older hardware.
+            if (!instancingSupported)
+            {
+                Debug.LogWarning("[CityView] GPU instancing is unavailable; roadside trees are disabled.");
+                return null;
+            }
             var near = Resources.Load<GameObject>(ResourceFolder + "RoadsideTree")?.GetComponentInChildren<MeshFilter>();
             var far = Resources.Load<GameObject>(ResourceFolder + "RoadsideTreeLow")?.GetComponentInChildren<MeshFilter>();
             var placements = Resources.Load<TextAsset>(ResourceFolder + "ToaPayohTrees");
             // Use the instancing shader already shipped for traffic and pedestrians.
             var instancingMaterial = Resources.Load<Material>("Formula9/TrafficVehicle");
-            if (near == null || far == null || placements == null || instancingMaterial == null)
+            return Create(near, far, placements, instancingMaterial, cityToWorld);
+        }
+
+        /// <summary>Validate both detail levels before creating any owned materials.</summary>
+        internal static CityVegetation Create(MeshFilter near, MeshFilter far, TextAsset placements,
+            Material instancingMaterial, Matrix4x4 cityToWorld)
+        {
+            if (placements == null || instancingMaterial == null || near == null || far == null)
             {
                 Debug.LogWarning("[CityView] Roadside tree assets are missing.");
                 return null;
             }
-            return new CityVegetation(near, far, instancingMaterial, placements, cityToWorld);
+            if (!TryReadModel(near, out var nearModel) || !TryReadModel(far, out var farModel) ||
+                !instancingMaterial.enableInstancing || instancingMaterial.shader == null || !instancingMaterial.shader.isSupported)
+            {
+                Debug.LogWarning("[CityView] Roadside tree mesh, renderer or materials are invalid; skipping vegetation.");
+                return null;
+            }
+            try { return new CityVegetation(nearModel, farModel, instancingMaterial, placements, cityToWorld); }
+            catch (Exception error)
+            {
+                Debug.LogWarning("[CityView] Roadside trees unavailable: " + error.Message);
+                return null;
+            }
+        }
+
+        private static bool TryReadModel(MeshFilter filter, out (Mesh Mesh, Material[] Materials) model)
+        {
+            model = default;
+            var mesh = filter.sharedMesh;
+            if (mesh == null || mesh.subMeshCount == 0 || !filter.TryGetComponent<MeshRenderer>(out var renderer)) return false;
+            var sources = renderer.sharedMaterials;
+            if (sources.Length < mesh.subMeshCount) return false;
+            for (var i = 0; i < mesh.subMeshCount; i++)
+                if (sources[i] == null) return false;
+            model = (mesh, sources);
+            return true;
         }
 
         /// <summary>Keep the model's proportions while fitting each placement's height and canopy limits.</summary>
@@ -120,11 +167,10 @@ namespace Formula9.World
         private static bool TryRead(string text, out float value) =>
             float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) && float.IsFinite(value);
 
-        private Material[] CreateMaterials(MeshFilter model, Material template)
+        private Material[] CreateMaterials(Material[] sources, int submeshCount, Material template)
         {
-            var sources = model.GetComponent<MeshRenderer>().sharedMaterials;
-            var result = new Material[sources.Length];
-            for (var i = 0; i < sources.Length; i++)
+            var result = new Material[submeshCount];
+            for (var i = 0; i < result.Length; i++)
             {
                 // The tree shader uses the source colour only. Both detail levels can share bark.
                 var color = sources[i].color;
@@ -168,7 +214,13 @@ namespace Formula9.World
                 var distantBounds = new Bounds();
                 foreach (var batch in batches)
                 {
-                    if (!GeometryUtility.TestPlanesAABB(frustum, batch.Bounds)) continue;
+                    if (!GeometryUtility.TestPlanesAABB(frustum, batch.Bounds))
+                    {
+                        // Nearby trees can cast into the view even when their crowns are off-screen.
+                        if (batch.Bounds.SqrDistance(eye) < ShadowDistanceM * ShadowDistanceM)
+                            Submit(nearMesh, nearMaterials, batch.Bounds, batch.Transforms, batch.Transforms.Length, camera, ShadowCastingMode.ShadowsOnly);
+                        continue;
+                    }
                     // The nearest edge keeps the full silhouette on close trees at cell boundaries.
                     var depth = Vector3.Dot(batch.Bounds.center - eye, forward)
                         - Vector3.Dot(batch.Bounds.extents, absoluteForward);
@@ -177,14 +229,15 @@ namespace Formula9.World
                     if (size >= DetailSizePx)
                     {
                         var castsShadows = batch.Bounds.SqrDistance(eye) < ShadowDistanceM * ShadowDistanceM;
-                        Submit(nearMesh, nearMaterials, batch.Bounds, batch.Transforms, batch.Transforms.Length, camera, castsShadows);
+                        Submit(nearMesh, nearMaterials, batch.Bounds, batch.Transforms, batch.Transforms.Length, camera,
+                            castsShadows ? ShadowCastingMode.On : ShadowCastingMode.Off);
                         continue;
                     }
 
                     // Distant cells already passed camera culling. Combine them to keep the overview's draw count low.
                     if (distantCount + batch.Transforms.Length > BatchSize)
                     {
-                        Submit(farMesh, farMaterials, distantBounds, distantTransforms, distantCount, camera, false);
+                        Submit(farMesh, farMaterials, distantBounds, distantTransforms, distantCount, camera, ShadowCastingMode.Off);
                         distantCount = 0;
                     }
                     Array.Copy(batch.Transforms, 0, distantTransforms, distantCount, batch.Transforms.Length);
@@ -193,25 +246,21 @@ namespace Formula9.World
                     distantCount += batch.Transforms.Length;
                 }
                 if (distantCount > 0)
-                    Submit(farMesh, farMaterials, distantBounds, distantTransforms, distantCount, camera, false);
+                    Submit(farMesh, farMaterials, distantBounds, distantTransforms, distantCount, camera, ShadowCastingMode.Off);
             }
         }
 
         private void Submit(Mesh mesh, Material[] materials, Bounds bounds, Matrix4x4[] transforms,
-            int count, Camera camera, bool castsShadows)
+            int count, Camera camera, ShadowCastingMode shadows)
         {
             var parameters = drawParameters;
             parameters.camera = camera;
             parameters.worldBounds = bounds;
-            parameters.shadowCastingMode = castsShadows ? ShadowCastingMode.On : ShadowCastingMode.Off;
-            var submeshCount = mesh.subMeshCount;
-            for (var submesh = 0; submesh < submeshCount; submesh++)
+            parameters.shadowCastingMode = shadows;
+            for (var submesh = 0; submesh < materials.Length; submesh++)
             {
                 parameters.material = materials[submesh];
-                if (supportsInstancing)
-                    Graphics.RenderMeshInstanced(parameters, mesh, submesh, transforms, count);
-                else
-                    for (var i = 0; i < count; i++) Graphics.RenderMesh(parameters, mesh, submesh, transforms[i]);
+                Graphics.RenderMeshInstanced(parameters, mesh, submesh, transforms, count);
             }
         }
 

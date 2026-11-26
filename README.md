@@ -175,11 +175,18 @@ roadside setbacks and green spaces using the bundled geometry, [OpenStreetMap co
 and the [National Parks Board's Parks and Nature Reserves dataset](https://data.gov.sg/datasets/d_77d7ec97be83d44f61b85454f844382f/view).
 Trees use spatially culled GPU batches and reuse matching materials between detail levels. Rendering
 settings are prepared once per city, and disposing a city releases only its own material copies.
+Nearby off-screen batches contribute shadows within 45 metres. Missing or malformed models disable
+optional trees without stopping the city load. Trees are also disabled when GPU instancing is unavailable,
+avoiding individual draws for every tree on older hardware.
 
 Grass is a shared, compressed 512-pixel texture on the existing ground tiles and roadside verges.
 It adds no grass objects, triangles, colliders, materials or draw calls. Ground detail repeats in world
 coordinates, so it stays aligned between tiles, and mipmaps soften it in distant views. When map imagery
 has loaded, grass is restricted to green map areas; roads, paving and water keep their map colours.
+The colour mask favours pale vegetation fills and rejects dark labels, saturated greens and blue-green
+sports surfaces, using the [OSM Carto landcover palette](https://github.com/gravitystorm/openstreetmap-carto/blob/master/style/landcover.mss)
+and cached Toa Payoh tiles as references. This remains an approximate colour mask: features sharing a
+vegetation fill colour cannot be distinguished without landcover polygons.
 Without imagery, the existing road, sidewalk and building geometry sits above the textured ground.
 The `grass` settings in `Resources/Formula9/world_look.json` control `enabled`, `repeatM` and `strength`.
 Set `enabled` to `false` to keep the previous ground and verge appearance without loading the grass asset.

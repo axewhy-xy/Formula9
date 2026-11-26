@@ -45,12 +45,31 @@ Shader "Formula9/CityGround"
             fixed4 frag(v2f i) : SV_Target
             {
                 fixed4 color = tex2D(_MainTex, i.uv);
-                // Green dominance excludes map roads, roofs and water. Missing map tiles use grass
+                // A conservative colour mask favours pale vegetation fills over courts and dark labels.
+                // Missing map tiles use grass
                 // beneath the existing road, sidewalk and building geometry instead of plain grey.
                 UNITY_BRANCH if (_GrassStrength > 0)
                 {
-                    half greenery = smoothstep(0.015, 0.08, color.g - max(color.r, color.b));
-                    half coverage = lerp(1, greenery, _HasMapTile) * _GrassStrength;
+                    half coverage = _GrassStrength;
+                    // This is uniform per tile, so offline ground skips all map-colour checks.
+                    UNITY_BRANCH if (_HasMapTile > 0)
+                    {
+                        half dominance = color.g - max(color.r, color.b);
+                        half lowChannel = min(color.r, color.b);
+                        // Thresholds account for the map texture's sRGB decoding in linear projects.
+                        #ifdef UNITY_COLORSPACE_GAMMA
+                            half greenery = smoothstep(0.035, 0.10, dominance)
+                                * smoothstep(0.65, 0.78, color.g)
+                                * smoothstep(0, 0.05, lowChannel - 0.5 * color.g)
+                                * smoothstep(-0.05, -0.02, color.r - color.b);
+                        #else
+                            half greenery = smoothstep(0.04, 0.12, dominance)
+                                * smoothstep(0.40, 0.55, color.g)
+                                * smoothstep(0, 0.06, lowChannel - 0.3 * color.g)
+                                * smoothstep(-0.07, -0.03, color.r - color.b);
+                        #endif
+                        coverage *= greenery;
+                    }
                     color.rgb = lerp(color.rgb, tex2D(_GrassTex, i.grassUV).rgb, coverage);
                 }
                 color.rgb *= 1 - _Formula9ShadowDarkness * (1 - SHADOW_ATTENUATION(i));

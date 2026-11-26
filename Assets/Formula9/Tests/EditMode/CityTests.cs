@@ -767,6 +767,7 @@ namespace Formula9.Tests
         [Test]
         public void TreeMaterialsAreSharedBetweenDetailLevelsAndDisposedWithoutChangingAssets()
         {
+            if (!SystemInfo.supportsInstancing) Assert.Ignore("Trees require GPU instancing.");
             var models = new[] { "RoadsideTree", "RoadsideTreeLow" }
                 .Select(name => Resources.Load<GameObject>("Formula9/Vegetation/" + name)).ToArray();
             var sources = models.SelectMany(model => model.GetComponentInChildren<MeshRenderer>().sharedMaterials).ToArray();
@@ -800,6 +801,7 @@ namespace Formula9.Tests
         [Test]
         public async Task ToaPayohTreesLoadWithTheCityAndFollowItsVisibility()
         {
+            if (!SystemInfo.supportsInstancing) Assert.Ignore("Trees require GPU instancing.");
             var rig = new GameObject("City vegetation rig");
             var view = new CityView(rig.transform, null);
             try

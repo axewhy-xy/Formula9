@@ -237,8 +237,10 @@ namespace Formula9.World
 
         public async Task LoadAsync(CityClient client, string area, CancellationToken cancellation)
         {
+            if (disposed) return;
             buildings = await client.GetBuildingsAsync(area, cancellation);
             cancellation.ThrowIfCancellationRequested();
+            if (disposed) return;
             buildingMesh = Own(CityMesh.Build(buildings, details: true, cache: buildingCache));
             BuildingCount = buildings.Count;
             Bounds = buildingMesh.bounds;
@@ -249,6 +251,7 @@ namespace Formula9.World
             BuildGround();
             await LoadRoadsAsync(client, area, cancellation);
             cancellation.ThrowIfCancellationRequested();
+            if (disposed) return;
             Vegetation?.Dispose();
             Vegetation = area == "toa-payoh" ? CityVegetation.Load(root.localToWorldMatrix) : null;
             // Buildings and roads load first. LTA shelters are fetched independently.
@@ -283,12 +286,14 @@ namespace Formula9.World
             try { roads = await client.GetRoadsAsync(area, cancellation); }
             catch (Exception error) when (!(error is OperationCanceledException))
             {
+                if (disposed) return;
                 Debug.LogWarning("No road surfaces, so the map's roads show instead: " + error.Message);
                 traffic?.Rebuild(Array.Empty<CityRoad>(), null);
                 pedestrians?.Clear();
                 return;
             }
             cancellation.ThrowIfCancellationRequested();
+            if (disposed) return;
             RoadCount = roads.Count;
             loadedRoads = roads;
             roadSegments.Clear();
@@ -461,6 +466,7 @@ namespace Formula9.World
                 Debug.LogWarning("No traffic sample; roads still render: " + error.Message);
             }
             cancellation.ThrowIfCancellationRequested();
+            if (disposed) return;
             CitySignalData signals = null;
             if (trafficData != null)
             {
@@ -472,6 +478,7 @@ namespace Formula9.World
                 }
                 cancellation.ThrowIfCancellationRequested();
             }
+            if (disposed) return;
             traffic?.Rebuild(roads, trafficData, signals);
             pedestrianSignals = signals;
             pedestrianSignalsKnown = true;
@@ -839,7 +846,7 @@ namespace Formula9.World
             }
 
             cancellation.ThrowIfCancellationRequested();
-
+            if (disposed) return;
             var filteredSignals = TrafficLightPlacement.OnePerPole(signals);
 
             TrafficLightCount = filteredSignals.Count;
