@@ -255,7 +255,8 @@ namespace Formula9.Session
         //     This function creates a training session and joins it. The creation key is kept until
         //     the backend confirms the attempt, so a retry after a lost reply returns the same
         //     session; only the account that started it can confirm it. A late success for another
-        //     login does not select its session or drop its retry key.
+        //     login does not select its session or drop its retry key. A request refused for good
+        //     (see Refused) drops its key, so the poll does not resend it every second.
         public async Task CreateAsync()
         {
             if (createRequest != null) return;
@@ -292,6 +293,17 @@ namespace Formula9.Session
                 if (started == generation && auth.IsLoggedIn && auth.Username == owner) _ = CreateAsync();
                 return;
             }
+            catch (Exception error) when (Refused(error))
+            {
+                // Nothing was created and the same request would be refused again, so the attempt is
+                // dropped: the poll stops retrying it, and the next Create sends the name as it is then.
+                if (createRequest == token) createRequest = null;
+                if (started != generation || auth.Username != owner) return;
+                var named = creationName != null;
+                creationKey = creationOwner = creationScenario = creationName = null;
+                Error(named ? $"Create failed: {error.Message}. Change the session name and create again." : $"Create failed: {error.Message}.");
+                return;
+            }
             catch (Exception error) when (!(error is OperationCanceledException))
             {
                 if (createRequest == token) createRequest = null;
@@ -305,6 +317,23 @@ namespace Formula9.Session
             creationKey = creationOwner = creationScenario = creationName = null;
             await JoinAsync(created.SessionId);
         }
+
+        // -----------------------------------------------------------------------------------
+        // Function: Refused
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function tells whether a creation failed for good: the client would not send it
+        //     (it breaks the contract, such as a name the schema rejects), or the backend gave a
+        //     complete 4xx reply it does not mark retryable. Either way nothing was created.
+        //
+        // Args:
+        //     error (Exception): The failure.
+        //
+        // Returns:
+        //     bool: True when retrying the same request cannot succeed.
+        private static bool Refused(Exception error) =>
+            error is ContractException
+            || error is BackendErrorException refused && refused.Error.Status >= 400 && refused.Error.Status < 500 && refused.Error.Status != 401 && !refused.Error.Retryable;
 
         // -----------------------------------------------------------------------------------
         // Function: JoinAsync

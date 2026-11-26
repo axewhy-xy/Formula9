@@ -32,7 +32,7 @@ namespace Formula9.UI
         private readonly VisualElement navPanel;
         private readonly TextField routeReason;
         private readonly Label routeProblem, routeOptionsExpiry, routeVerdict, routeAssumptions, routeApplyNote, routeOutcomeHeadline, routeOutcomeNotes;
-        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowProblem, routeCameras, viewCameras, approve, routeStart, routeWatch;
+        private readonly Button routeUndo, routeRedo, routeClear, routeSuggest, routeShowProblem, routeReload, routeCameras, viewCameras, approve, routeStart, routeWatch;
         private readonly VisualElement routeStages, routeWaypoints, routeIssues, routeMetrics, routeDecide, routeFeedback, routeApply, routeOutcomePanel, routeOutcomeRows, fleetTable;
         private readonly List<VisualElement> operationalViews;
         private readonly ChargingPage charging;
@@ -52,6 +52,8 @@ namespace Formula9.UI
         // answer, and the shuttles that were waiting for a decision at the last snapshot.
         private string selectedVehicle, route, selectedDetour, pendingSeen, pendingStrip;
         private bool routeBusy, reloadContext, previewQueued, suggesting, outcomeBusy;
+        // The last load of the route's road graph failed in a way another try may fix
+        private bool contextFailed;
         private float acceptedAt, outcomeAt;
         private long outcomeSequence = -1;
         private RouteEditorContext context;
@@ -182,6 +184,8 @@ namespace Formula9.UI
             routeClear = Bind(root, "route-cancel", () => { if (!session.HasPendingCommand) { routeReason.value = ""; SetDraft(new List<RouteWaypoint>()); } });
             routeSuggest = Bind(root, "route-suggest", SuggestDetour);
             routeShowProblem = Bind(root, "route-show-problem", ShowProblem);
+            // Shown only while there is no road graph, so it never drops a loaded route or its checked preview
+            routeReload = Bind(root, "route-reload", () => { if (context == null && !routeBusy) RequestContext(); });
             routeOptions = root.Q("route-options");
             routeOptionsTitle = root.Q<Label>("route-options-title");
             routeOptionsHint = root.Q<Label>("route-options-hint");
@@ -216,7 +220,13 @@ namespace Formula9.UI
             root.Q<Button>("reports-tab-assessment").clicked += Render;
             session.SnapshotAccepted += (_, __) => { acceptedAt = Time.realtimeSinceStartup; Render(); };
             session.EventsAccepted += _ => RenderReports();
-            session.AvailabilityChanged += _ => { if (!session.Available) InvalidateRoute(); Render(); };
+            session.AvailabilityChanged += _ =>
+            {
+                if (!session.Available) InvalidateRoute();
+                // Back online after the road graph failed to load (often because the backend was down): load it again
+                else if (contextFailed && context == null && !routeBusy) RequestContext();
+                Render();
+            };
             session.CommandLedgerChanged += outcome =>
             {
                 ledger.RemoveAll(o => o.CommandId == outcome.CommandId); ledger.Add(outcome);
@@ -300,7 +310,7 @@ namespace Formula9.UI
                 // to look at or delete, and the session list's trash icons are in that panel
                 var keepTools = sessionToolsOpen == true && TrainingPresenter.IsTerminalSession(s?.Session?.Status);
                 sessionToolsOpen = keepTools ? true : (bool?)null;
-                boundary = currentBoundary; dependencies = null; context = null; requestGeneration++; approvedDraft = null;
+                boundary = currentBoundary; dependencies = null; context = null; requestGeneration++; approvedDraft = null; contextFailed = false;
                 selectedVehicle = route = selectedDetour = pendingSeen = pendingStrip = null;
                 choice = null; choiceCandidate = confirmCommand = optionsNote = null; rerouting = awaitingError = false;
                 // Incident IDs repeat across sessions, so another session's selection would mark the wrong one
@@ -599,9 +609,18 @@ namespace Formula9.UI
 
         private void RequestContext()
         {
-            requestGeneration++; reloadContext = true;
-            context = null; InvalidateRoute();
+            requestGeneration++; reloadContext = true; contextFailed = false;
+            context = null; InvalidateRoute(); ShowRouteReload();
             if (!routeBusy) run(LoadContext());
+        }
+
+        // Reload the route is offered only after a failed load, while no road graph is loaded
+        private void ShowRouteReload()
+        {
+            if (routeReload == null) return;
+            var shown = contextFailed && context == null && !string.IsNullOrEmpty(route);
+            routeReload.style.display = shown ? DisplayStyle.Flex : DisplayStyle.None;
+            routeReload.SetEnabled(!routeBusy);
         }
 
         private async Task LoadContext()
@@ -613,13 +632,15 @@ namespace Formula9.UI
             var asked = route;
             var stamp = DecisionRules.RouteDependencies(s, asked);
             context = null; InvalidateRoute(); routeBusy = true; UpdateActions();
+            // Stays true unless the graph loads or the route has none to load
+            var failed = true;
             try
             {
                 var result = await api.GetRouteEditorAsync(s.SessionId, asked);
                 if (generation != requestGeneration || stamp != DecisionRules.RouteDependencies(session.Store.Snapshot, route)) return;
                 if (result.SessionEpoch != s.SessionEpoch || result.SceneRevision != s.SceneRevision || result.RouteRevision != s.Routes.Single(r => r.RouteId == asked).Revision)
-                    throw new ContractException("Route graph is stale; refresh it.");
-                context = result; dependencies = stamp;
+                    throw new ContractException("Route graph is stale; press Reload the route on Route Planning.");
+                context = result; dependencies = stamp; failed = false;
                 routeAssumptions.text = string.Join("\n", result.Assumptions);
                 ShowDraftInViews();
                 RenderExercise(session.Store.Snapshot);
@@ -630,9 +651,16 @@ namespace Formula9.UI
             // as the Qt editor does, rather than raising it.
             catch (BackendErrorException error) when (error.Error.Code == "INVALID_REFERENCE")
             {
+                failed = false;
                 if (generation == requestGeneration) routeProblem.text = $"{asked} can't be edited in this scenario: {error.Error.Message}.";
             }
-            finally { routeBusy = false; UpdateActions(); if (reloadContext) run(LoadContext()); }
+            finally
+            {
+                routeBusy = false;
+                if (generation == requestGeneration) contextFailed = failed;
+                UpdateActions(); ShowRouteReload();
+                if (reloadContext) run(LoadContext());
+            }
         }
 
         private void SchedulePreview()
@@ -819,6 +847,7 @@ namespace Formula9.UI
             routeProblem.text = RoutePresenter.Problem(context, s, selectedVehicle);
             var incident = RoutePresenter.ProblemIncidents(s, selectedVehicle).Count > 0;
             routeShowProblem.style.display = incident || (context != null && context.Edges.Any(e => e.Closed)) ? DisplayStyle.Flex : DisplayStyle.None;
+            ShowRouteReload();
             var expiry = RoutePresenter.OptionsExpiry(s, selectedVehicle);
             routeOptionsExpiry.text = expiry ?? "";
             routeOptionsExpiry.style.display = expiry == null ? DisplayStyle.None : DisplayStyle.Flex;

@@ -326,9 +326,13 @@ namespace Formula9.UI
             {
                 var edge = incident?.Location?.EdgeId;
                 var closure = edge == null ? null : s.Disruptions?.FirstOrDefault(d => d.AffectedEdgeIds.Contains(edge) && d.ActiveFromTick >= incident.DetectedTick);
-                if ((closure?.ActiveUntilTick ?? incident?.ClearsAtTick ?? n.ActiveUntilTick) is long until)
+                // Once the clearing tick has passed the line says nothing about it, rather than
+                // "clears in 0 s" until the backend marks the incident ended
+                if ((closure?.ActiveUntilTick ?? incident?.ClearsAtTick ?? n.ActiveUntilTick) is long until && until > s.Tick)
                 {
-                    var seconds = Math.Ceiling(Math.Max(0, until - s.Tick) * World.IncidentSimulation.SecondsPerTick(s));
+                    // Rounded to the millisecond first: the tick length is a float, so 500 ticks of 0.05 s
+                    // come to 25.0000004 s, which would otherwise round up to 26 s
+                    var seconds = Math.Ceiling(Math.Round((until - s.Tick) * (double)World.IncidentSimulation.SecondsPerTick(s), 3));
                     parts.Add("clears in " + RoutePresenter.Rough(seconds));
                 }
             }

@@ -41,6 +41,9 @@ namespace Formula9.World
         // Where routes share a road, the distance in points between their lanes: the 6 point width of a
         // route line, so the lanes sit edge to edge
         private const float RouteLaneSpacing = 6;
+        // On a piece with a detour, whose 12 point line has a 3 point edge each side: wide enough that
+        // the edge does not cover the lane beside it
+        private const float OutlinedLaneSpacing = 9;
         private static readonly Color DotOutline = new Color(0.118f, 0.157f, 0.176f);
         private static readonly Color Frozen = new Color(0.627f, 0.627f, 0.627f);
         public static Color FrozenColor => Frozen;
@@ -695,16 +698,10 @@ namespace Formula9.World
                 }
                 // Only routes a shuttle drives get lanes. The rest stay in the middle of the road, drawn first, so
                 // the shuttles' lanes cover them as before rather than being pushed aside by them.
-                var sharing = pieces.Where(p => p.Driven).GroupBy(p => p.Key).ToDictionary(g => g.Key, g => g.Select(p => p.RouteId).Distinct().ToList());
                 foreach (var piece in pieces.Where(p => !p.Driven)) open.Add((piece.Path, piece.Outline, piece.Middle));
-                foreach (var piece in pieces.Where(p => p.Driven))
-                {
-                    var routes = sharing[piece.Key];
-                    // Lanes centred on the road; a piece driven the other way is shifted the other way, so
-                    // each route keeps the same side of the road whichever way it runs
-                    var shift = (routes.IndexOf(piece.RouteId) - (routes.Count - 1) / 2f) * RouteLaneSpacing;
-                    open.Add((Offset(piece.Path, piece.Reversed ? -shift : shift), piece.Outline, piece.Middle));
-                }
+                var drivenPieces = pieces.Where(p => p.Driven).ToList();
+                var shifts = LaneShifts(drivenPieces.Select(p => (p.Key, p.Reversed, p.RouteId, realMap && p.Outline.a > 0)).ToList());
+                for (var i = 0; i < drivenPieces.Count; i++) open.Add((Offset(drivenPieces[i].Path, shifts[i]), drivenPieces[i].Outline, drivenPieces[i].Middle));
                 // Round a detour, the shuttle's colour as a 3 px edge each side, saying whose it is (a planned
                 // route has none, being in that colour already); then the route's colour down the middle
                 if (realMap) foreach (var piece in open.Where(p => p.Outline.a > 0)) Line(painter, piece.Path, piece.Outline, 12);
@@ -803,15 +800,56 @@ namespace Formula9.World
         //     path (List<Contracts.Position>): The piece's points, in metres.
         //
         // Returns:
-        //     (string, bool): The name, and whether this path runs from the higher end to the lower.
-        private static (string Key, bool Reversed) PieceKey(List<Contracts.Position> path)
+        //     (string, bool): The name, and whether this path runs from the higher end to the lower
+        //         (by x, then y): routes on the piece with the same flag drive it the same way.
+        internal static (string Key, bool Reversed) PieceKey(List<Contracts.Position> path)
         {
             if (path.Count == 0) return ("", false);
-            string End(Contracts.Position p) => $"{Math.Round(p.XM, 1).ToString(CultureInfo.InvariantCulture)},{Math.Round(p.YM, 1).ToString(CultureInfo.InvariantCulture)}";
-            var first = End(path[0]);
-            var last = End(path[path.Count - 1]);
-            var reversed = string.CompareOrdinal(first, last) > 0;
-            return (reversed ? last + "|" + first : first + "|" + last, reversed);
+            var first = (X: Math.Round(path[0].XM, 1), Y: Math.Round(path[0].YM, 1));
+            var last = (X: Math.Round(path[path.Count - 1].XM, 1), Y: Math.Round(path[path.Count - 1].YM, 1));
+            string End((double X, double Y) p) => $"{p.X.ToString(CultureInfo.InvariantCulture)},{p.Y.ToString(CultureInfo.InvariantCulture)}";
+            var reversed = first.X > last.X || (first.X == last.X && first.Y > last.Y);
+            return (reversed ? End(last) + "|" + End(first) : End(first) + "|" + End(last), reversed);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: LaneShifts
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function places the lanes of routes that share a road piece. Every shift is
+        //     measured from the route's own direction of travel, so a route keeps its side from
+        //     piece to piece and two shuttles in a corridor run side by side rather than braiding.
+        //     Routes driving a piece one way are ordered by route ID, left to right, and centred on
+        //     the road; where routes drive it both ways, each way keeps to its own left, as traffic
+        //     does in Singapore. A piece with a detour's edge on it spaces its lanes wider, so the
+        //     edge does not cover the lane beside it.
+        //
+        // Args:
+        //     pieces (IReadOnlyList<(string, bool, string, bool)>): Each piece's key and direction
+        //         from PieceKey, its route, and whether it is drawn with an edge.
+        //
+        // Returns:
+        //     float[]: Each piece's shift in panel points for Offset: negative to the left of travel,
+        //         positive to the right, 0 for a piece no other route shares.
+        internal static float[] LaneShifts(IReadOnlyList<(string Key, bool Reversed, string RouteId, bool Outlined)> pieces)
+        {
+            var shifts = new float[pieces.Count];
+            foreach (var piece in Enumerable.Range(0, pieces.Count).GroupBy(i => pieces[i].Key))
+            {
+                var spacing = piece.Any(i => pieces[i].Outlined) ? OutlinedLaneSpacing : RouteLaneSpacing;
+                // One lane for each route and way it drives the piece, in route ID order
+                var ways = piece.Select(i => (pieces[i].RouteId, pieces[i].Reversed)).Distinct().ToList();
+                var forward = ways.Where(w => !w.Reversed).Select(w => w.RouteId).OrderBy(id => id, StringComparer.Ordinal).ToList();
+                var backward = ways.Where(w => w.Reversed).Select(w => w.RouteId).OrderBy(id => id, StringComparer.Ordinal).ToList();
+                var bothWays = forward.Count > 0 && backward.Count > 0;
+                foreach (var i in piece)
+                {
+                    var lanes = pieces[i].Reversed ? backward : forward;
+                    var k = lanes.IndexOf(pieces[i].RouteId);
+                    shifts[i] = (bothWays ? -(k + 0.5f) : k - (lanes.Count - 1) / 2f) * spacing;
+                }
+            }
+            return shifts;
         }
 
         // -----------------------------------------------------------------------------------
@@ -826,8 +864,9 @@ namespace Formula9.World
         //     distance (float): How far to move it; the sign picks the side.
         //
         // Returns:
-        //     Vector2[]: The moved line, or the same line for no distance.
-        private static Vector2[] Offset(Vector2[] points, float distance)
+        //     Vector2[]: The moved line, or the same line for no distance. With y pointing down, as
+        //         panel points do, a positive distance is to the right of the line's direction.
+        internal static Vector2[] Offset(Vector2[] points, float distance)
         {
             if (Mathf.Approximately(distance, 0) || points.Length < 2) return points;
             Vector2 Normal(Vector2 a, Vector2 b)

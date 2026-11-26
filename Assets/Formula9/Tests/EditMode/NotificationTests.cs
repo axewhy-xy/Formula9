@@ -136,6 +136,17 @@ namespace Formula9.Tests
         }
 
         [Test]
+        public void OnceTheClearingTickHasPassedTheLineNoLongerSaysWhenItClears()
+        {
+            var s = Snapshot();
+            s.Tick = 700; s.SimulationTimeS = 35; // 0.05 s a tick
+            var n = new IncidentNotification { Impact = "Lane blocked", ActiveUntilTick = 700 };
+            Assert.AreEqual("Lane blocked", NotificationQueue.Detail(n, null, s, null), "not \"clears in 0 s\"");
+            s.Tick = 699;
+            Assert.AreEqual("Lane blocked · clears in 1 s", NotificationQueue.Detail(n, null, s, null));
+        }
+
+        [Test]
         public void BeforeAnySnapshotTheTextComesFromTheEvent()
         {
             var queue = new NotificationQueue();
