@@ -765,6 +765,39 @@ namespace Formula9.Tests
         }
 
         [Test]
+        public void TreeMaterialsAreSharedBetweenDetailLevelsAndDisposedWithoutChangingAssets()
+        {
+            var models = new[] { "RoadsideTree", "RoadsideTreeLow" }
+                .Select(name => Resources.Load<GameObject>("Formula9/Vegetation/" + name)).ToArray();
+            var sources = models.SelectMany(model => model.GetComponentInChildren<MeshRenderer>().sharedMaterials).ToArray();
+            var colors = sources.Select(material => material.color).ToArray();
+            var template = Resources.Load<Material>("Formula9/TrafficVehicle");
+            var templateColor = template.color;
+            var expectedCount = colors.Distinct().Count();
+            var first = CityVegetation.Load(Matrix4x4.identity);
+            using var second = CityVegetation.Load(Matrix4x4.identity);
+            Assert.IsNotNull(first);
+            Assert.IsNotNull(second);
+            try
+            {
+                Assert.AreEqual(expectedCount, first.MaterialCount);
+                Assert.Less(first.MaterialCount, sources.Length, "The shared bark needs only one material.");
+                first.Dispose();
+                first.Dispose();
+                Assert.AreEqual(0, first.MaterialCount);
+                Assert.AreEqual(0, first.BatchCount);
+                Assert.AreEqual(expectedCount, second.MaterialCount, "Each city owns its material copies.");
+                for (var i = 0; i < sources.Length; i++)
+                {
+                    Assert.IsTrue(sources[i] != null);
+                    Assert.AreEqual(colors[i], sources[i].color);
+                }
+                Assert.AreEqual(templateColor, template.color);
+            }
+            finally { first.Dispose(); }
+        }
+
+        [Test]
         public async Task ToaPayohTreesLoadWithTheCityAndFollowItsVisibility()
         {
             var rig = new GameObject("City vegetation rig");
@@ -785,6 +818,8 @@ namespace Formula9.Tests
                 view.SetVisible(true);
                 Assert.IsTrue(city.gameObject.activeInHierarchy);
                 Assert.AreSame(vegetation, view.Vegetation);
+                view.Dispose();
+                Assert.DoesNotThrow(() => view.DrawVegetation(Array.Empty<Camera>()));
             }
             finally
             {

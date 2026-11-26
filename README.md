@@ -173,6 +173,8 @@ of `height_scale` and `width_scale` sets its size, so correcting a stretched tre
 beyond the placement's existing clearance. Both detail levels use the same scale. Planting follows
 roadside setbacks and green spaces using the bundled geometry, [OpenStreetMap contributors](https://www.openstreetmap.org/copyright),
 and the [National Parks Board's Parks and Nature Reserves dataset](https://data.gov.sg/datasets/d_77d7ec97be83d44f61b85454f844382f/view).
+Trees use spatially culled GPU batches and reuse matching materials between detail levels. Rendering
+settings are prepared once per city, and disposing a city releases only its own material copies.
 
 Grass is a shared, compressed 512-pixel texture on the existing ground tiles and roadside verges.
 It adds no grass objects, triangles, colliders, materials or draw calls. Ground detail repeats in world

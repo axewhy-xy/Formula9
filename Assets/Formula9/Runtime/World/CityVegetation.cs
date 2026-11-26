@@ -1,3 +1,14 @@
+/*
+ * Instanced roadside trees for the 3D city.
+ *
+ * Author: Nur Syazliyarni Binte Zazali
+ * Date Created: 26/11/2026
+ * Last Modified: 26/11/2026
+ *
+ * Description:
+ *     Loads tree placements with proportional size variation, groups them into spatial
+ *     batches, and selects detail and shadows by camera distance and screen size.
+ */
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -19,18 +30,25 @@ namespace Formula9.World
 
         private readonly Mesh nearMesh, farMesh;
         private readonly Material[] nearMaterials, farMaterials;
+        private readonly Dictionary<Color, Material> materialsByColor = new();
+        private readonly RenderParams drawParameters;
+        private readonly bool supportsInstancing;
         private readonly List<(Bounds Bounds, float TreeSize, Matrix4x4[] Transforms)> batches = new();
         private readonly Plane[] frustum = new Plane[6];
         private readonly Matrix4x4[] distantTransforms = new Matrix4x4[BatchSize];
 
         internal int TreeCount { get; }
         internal int BatchCount => batches.Count;
+        internal int MaterialCount => materialsByColor.Count;
 
         private CityVegetation(MeshFilter near, MeshFilter far, Material instancingMaterial,
             TextAsset placements, Matrix4x4 cityToWorld)
         {
             nearMesh = near.sharedMesh;
             farMesh = far.sharedMesh;
+            // RenderParams reads Unity's default rendering layer; do that once, not per submesh.
+            drawParameters = new RenderParams(instancingMaterial) { receiveShadows = true, lightProbeUsage = LightProbeUsage.Off };
+            supportsInstancing = SystemInfo.supportsInstancing;
             nearMaterials = CreateMaterials(near, instancingMaterial);
             farMaterials = CreateMaterials(far, instancingMaterial);
             var meshBounds = nearMesh.bounds;
@@ -102,8 +120,23 @@ namespace Formula9.World
         private static bool TryRead(string text, out float value) =>
             float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) && float.IsFinite(value);
 
-        private static Material[] CreateMaterials(MeshFilter model, Material template) => model.GetComponent<MeshRenderer>()
-            .sharedMaterials.Select(source => new Material(template) { name = source.name, color = source.color }).ToArray();
+        private Material[] CreateMaterials(MeshFilter model, Material template)
+        {
+            var sources = model.GetComponent<MeshRenderer>().sharedMaterials;
+            var result = new Material[sources.Length];
+            for (var i = 0; i < sources.Length; i++)
+            {
+                // The tree shader uses the source colour only. Both detail levels can share bark.
+                var color = sources[i].color;
+                if (!materialsByColor.TryGetValue(color, out var material))
+                {
+                    material = new Material(template) { name = sources[i].name, color = color };
+                    materialsByColor.Add(color, material);
+                }
+                result[i] = material;
+            }
+            return result;
+        }
 
         private static Vector3 Absolute(Vector3 value) => new Vector3(Mathf.Abs(value.x), Mathf.Abs(value.y), Mathf.Abs(value.z));
 
@@ -118,10 +151,11 @@ namespace Formula9.World
 
         internal void Draw(IReadOnlyList<Camera> cameras)
         {
+            if (batches.Count == 0) return;
             for (var i = 0; i < cameras.Count; i++)
             {
                 var camera = cameras[i];
-                if (camera == null || !camera.enabled || (camera.cullingMask & 1) == 0) continue;
+                if (camera == null || !camera.isActiveAndEnabled || (camera.cullingMask & 1) == 0) continue;
                 GeometryUtility.CalculateFrustumPlanes(camera, frustum);
                 var eye = camera.transform.position;
                 var forward = camera.transform.forward;
@@ -163,20 +197,18 @@ namespace Formula9.World
             }
         }
 
-        private static void Submit(Mesh mesh, Material[] materials, Bounds bounds, Matrix4x4[] transforms,
+        private void Submit(Mesh mesh, Material[] materials, Bounds bounds, Matrix4x4[] transforms,
             int count, Camera camera, bool castsShadows)
         {
-            for (var submesh = 0; submesh < mesh.subMeshCount; submesh++)
+            var parameters = drawParameters;
+            parameters.camera = camera;
+            parameters.worldBounds = bounds;
+            parameters.shadowCastingMode = castsShadows ? ShadowCastingMode.On : ShadowCastingMode.Off;
+            var submeshCount = mesh.subMeshCount;
+            for (var submesh = 0; submesh < submeshCount; submesh++)
             {
-                var parameters = new RenderParams(materials[submesh])
-                {
-                    camera = camera,
-                    worldBounds = bounds,
-                    shadowCastingMode = castsShadows ? ShadowCastingMode.On : ShadowCastingMode.Off,
-                    receiveShadows = true,
-                    lightProbeUsage = LightProbeUsage.Off,
-                };
-                if (SystemInfo.supportsInstancing)
+                parameters.material = materials[submesh];
+                if (supportsInstancing)
                     Graphics.RenderMeshInstanced(parameters, mesh, submesh, transforms, count);
                 else
                     for (var i = 0; i < count; i++) Graphics.RenderMesh(parameters, mesh, submesh, transforms[i]);
@@ -185,11 +217,12 @@ namespace Formula9.World
 
         public void Dispose()
         {
-            foreach (var material in nearMaterials.Concat(farMaterials))
+            foreach (var material in materialsByColor.Values)
             {
                 if (Application.isPlaying) Object.Destroy(material);
                 else Object.DestroyImmediate(material);
             }
+            materialsByColor.Clear();
             batches.Clear();
         }
     }

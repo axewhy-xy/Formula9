@@ -51,7 +51,8 @@ namespace Formula9.World
         private readonly Transform root;
         private readonly MapTiles tiles;
         private readonly Texture2D grassTexture;
-        private static readonly int GrassTextureId = Shader.PropertyToID("_GrassTex"), GrassScaleId = Shader.PropertyToID("_GrassScale"),
+        private static readonly int GroundTextureId = Shader.PropertyToID("_MainTex"),
+            GrassTextureId = Shader.PropertyToID("_GrassTex"), GrassScaleId = Shader.PropertyToID("_GrassScale"),
             GrassStrengthId = Shader.PropertyToID("_GrassStrength"), HasMapTileId = Shader.PropertyToID("_HasMapTile");
         private readonly List<UnityEngine.Object> owned = new List<UnityEngine.Object>();
         private readonly Dictionary<string, Transform> shuttles = new Dictionary<string, Transform>();
@@ -272,7 +273,7 @@ namespace Formula9.World
 
         internal void DrawVegetation(IReadOnlyList<Camera> cameras)
         {
-            if (root.gameObject.activeInHierarchy) Vegetation?.Draw(cameras);
+            if (!disposed && root != null && root.gameObject.activeInHierarchy) Vegetation?.Draw(cameras);
         }
 
         // Roads only dress the ground, which already shows them: without their data the city still stands
@@ -959,9 +960,9 @@ namespace Formula9.World
             foreach (var (zoom, x, y, material) in groundTiles)
             {
                 var texture = tiles.Tile(zoom, x, y);
-                if (texture != null && material.mainTexture != texture)
+                if (texture != null && material.GetTexture(GroundTextureId) != texture)
                 {
-                    material.mainTexture = texture;
+                    material.SetTexture(GroundTextureId, texture);
                     material.SetFloat(HasMapTileId, 1);
                 }
             }
