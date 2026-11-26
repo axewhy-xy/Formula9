@@ -1,16 +1,18 @@
 <!--
 Author: Nur Syazliyarni Binte Zazali
 Date Created: 15/11/2026
-Last Modified: 23/11/2026
+Last Modified: 26/11/2026
 -->
 
 # Toa Payoh trainee assessment
 
 Click **Assessment mode** in the session header to create and join a scored Toa Payoh session. The header shows **Assessment mode** throughout the attempt. In Route Planning, approve a detour for Shuttle 01 around the pre-trip closure, then click **Start assessment**.
 
+The route editor stays available while a Ready session's stream sends heartbeats without changing its snapshot. Idle heartbeats arrive every two seconds, and each confirmation is usable for at most five seconds. A stale stream triggers a snapshot check before the separate 15-second transport timeout; without a recent heartbeat or snapshot, route, charging and emergency actions wait for a fresh update. After **Suggest a detour**, enter a reason before approving. The note under **Approve route** explains any connection, loading, validation or revision check that blocks approval. Paused sessions ask you to resume; a shuttle with no reroute offer is described as having no offer.
+
 The countdown appears in the header when the exercise starts and follows the **two-minute simulation clock**. It highlights the last 30 seconds and holds its reading when paused. If the client loses its connection, the header labels the remaining time from the last snapshot it received. Handle the charging decision for Shuttle 05 and the road block that affects Shuttle 01 shortly after it serves the Toa Payoh Police Centre stop. When the session completes, open **Reports → Assessment** for the result, deductions and evidence. The account that created the scored session can submit its commands and read its grade.
 
-The timer reads the duration carried by the session snapshot. If it shows **Timer unavailable**, refresh the current session and check that the backend is running the matching version.
+The timer reads the duration carried by the session snapshot. The **Time’s up** notice appears when the assessment being viewed completes and disappears after five seconds. Reopening a saved completed attempt does not show it again, and leaving or disabling the screen cancels its scheduled dismissal. The completed result remains available in Reports. If the timer shows **Timer unavailable**, refresh the current session and check that the backend is running the matching version.
 
 Use **Quit assessment mode** to end an attempt early. Confirming archives the session, releases its runtime slot and returns the header to normal mode. Archiving through session maintenance has the same effect. The archived attempt stays selected so its report remains available. Reports shows **Assessment disrupted**, with earned points and any confirmed safety failure retained. An archive only exits assessment mode once the backend confirms it; a rejected command leaves the attempt active.
 

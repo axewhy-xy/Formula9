@@ -74,6 +74,8 @@ namespace Formula9.UI
         private TextField username, password, confirm, sessionId, sessionName;
         private Label signUpHint, loginError, title, user, capacity, status, message, sessionBadge, worldNotice;
         private Label assessmentBadge, assessmentTimer;
+        private readonly AssessmentEndNoticePresenter assessmentEndNotice = new AssessmentEndNoticePresenter();
+        private IVisualElementScheduledItem assessmentEndNoticeExpiry;
         // The note that pops up at the top and fades by itself (ShowToast), and its timers
         private Label toast;
         private IVisualElementScheduledItem toastFade, toastRemove;
@@ -252,6 +254,8 @@ namespace Formula9.UI
         //     UIDocument again, which may already be switched off with no root.
         private void OnDisable()
         {
+            CancelAssessmentEndNotice();
+            assessmentEndNotice.Reset();
             session?.Shutdown();
             StopAllCoroutines();
             uiSounds?.Unlisten(listenedRoot);
@@ -678,6 +682,8 @@ namespace Formula9.UI
         //     clean login screen; an expired login explains that the work is kept.
         private void OnLoginEnded()
         {
+            CancelAssessmentEndNotice();
+            assessmentEndNotice.Reset();
             ShowLogin(loggingOut ? null : LoginMessages.Expired);
             loggingOut = false;
         }
@@ -1117,9 +1123,32 @@ namespace Formula9.UI
             start.text = active ? "Start assessment" : "Start scenario";
 
             var clock = TrainingPresenter.AssessmentClock(snapshot, session.Available);
+            var completed = TrainingPresenter.IsAssessment(snapshot) && snapshot.Session?.Status == "COMPLETED";
+            var notice = assessmentEndNotice.Present(snapshot, Time.realtimeSinceStartupAsDouble);
+            if (!notice.Visible) CancelAssessmentEndNotice();
+            else if (assessmentEndNoticeExpiry == null)
+            {
+                var completedSessionId = snapshot.SessionId;
+                // Refresh once at expiry, even when the completed session sends no new snapshots.
+                assessmentEndNoticeExpiry = assessmentTimer.schedule.Execute(() =>
+                {
+                    if (this == null || !isActiveAndEnabled || session.Store.Snapshot?.SessionId != completedSessionId) return;
+                    assessmentEndNoticeExpiry = null;
+                    RenderAssessment(session.Store.Snapshot);
+                });
+                assessmentEndNoticeExpiry.ExecuteLater(Math.Max(1L, (long)Math.Ceiling(notice.RemainingSeconds * 1000)));
+            }
             if (assessmentTimer.text != clock.Text) assessmentTimer.text = clock.Text;
-            assessmentTimer.style.display = clock.Text == null ? DisplayStyle.None : DisplayStyle.Flex;
+            var showClock = clock.Text != null && (!completed || notice.Visible);
+            assessmentTimer.style.display = showClock ? DisplayStyle.Flex : DisplayStyle.None;
             assessmentTimer.EnableInClassList("assessment-timer-urgent", clock.Urgent);
+        }
+
+        /// <summary>Stop callbacks when the notice is hidden or its owning screen is disabled.</summary>
+        private void CancelAssessmentEndNotice()
+        {
+            assessmentEndNoticeExpiry?.Pause();
+            assessmentEndNoticeExpiry = null;
         }
 
         // Keep the operator's state readable: badge, tooltip and one-line summary.
