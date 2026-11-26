@@ -4,7 +4,7 @@
  * Author: Choo Jian Wei
  * Contributors: Lau Xiang Yang (3D route drafting), Rishika (real Singapore map)
  * Date Created: 30/10/2026
- * Last Modified: 01/11/2026
+ * Last Modified: 26/11/2026
  *
  * Description:
  *     Part of the Unity client's 3D world. It renders the selected session's verified scene into a
@@ -63,8 +63,6 @@ namespace Formula9.World
         private FullSnapshot latest;
         // The sun and sky, run on the session's clock
         private DayCycle dayCycle;
-        private Label clock;
-        private int clockMinute = -1;
         private CancellationTokenSource loading;
         private Vector3 target;
         private float yaw, pitch = 0.6f, distance = 90;
@@ -162,33 +160,35 @@ namespace Formula9.World
             cameraPanel.AddToClassList("camera-panel");
             mainCameraView = new VisualElement();
             mainCameraView.AddToClassList("camera-main");
-            mainCameraLabel = new Label();
-            mainCameraLabel.AddToClassList("camera-label");
-            mainCameraView.Add(mainCameraLabel);
+            // The large camera's name, top left; a click on it drops the other cameras' thumbnails down
+            // under it or folds them away, and its arrow points up while they show
+            var mainCameraHead = new VisualElement { tooltip = "Show or hide the other cameras" };
+            mainCameraHead.AddToClassList("camera-main-head");
+            mainCameraLabel = new Label { pickingMode = PickingMode.Ignore };
+            mainCameraLabel.AddToClassList("camera-main-name");
+            mainCameraHead.Add(mainCameraLabel);
+            var caret = new Label("▾") { pickingMode = PickingMode.Ignore };
+            caret.AddToClassList("camera-main-caret");
+            mainCameraHead.Add(caret);
+            mainCameraView.Add(mainCameraHead);
             cameraPanel.Add(mainCameraView);
             // The large camera image follows the view's size, so it stays sharp at any layout; remade once
             // the size settles (Update), not on every step of a window being dragged
             mainCameraView.RegisterCallback<GeometryChangedEvent>(_ => cameraResizedAt = Time.unscaledTime);
-            // The thumbnails sit in a rail over the large view's left edge, which the operator can fold
-            // away. Left, because incident notifications stack in the top-right corner.
+            // The thumbnails sit in a rail over the large view's left edge, under its name, which folds
+            // them away. Left, because incident notifications stack in the top-right corner. No Close
+            // here: 3D View, or the Cameras segment pressed again, on the map's bar closes them.
             var rail = new VisualElement { pickingMode = PickingMode.Ignore };
             rail.AddToClassList("camera-rail");
             cameraRail = rail;
-            var railToggle = new Button { text = "‹ Cameras", tooltip = "Show or hide the camera thumbnails" };
-            railToggle.AddToClassList("camera-rail-toggle");
-            railToggle.clicked += () =>
+            mainCameraHead.RegisterCallback<ClickEvent>(_ =>
             {
                 rail.ToggleInClassList("camera-rail-collapsed");
                 var folded = rail.ClassListContains("camera-rail-collapsed");
-                railToggle.text = folded ? "Cameras ›" : "‹ Cameras";
+                mainCameraHead.EnableInClassList("camera-main-head-folded", folded);
                 // Folded thumbnails are not seen, so only the large camera keeps drawing
                 shuttleCameras.Thumbnails = !folded;
-            };
-            // No Close here: 3D View, or the Cameras segment pressed again, on the map's bar closes them
-            var railBar = new VisualElement();
-            railBar.AddToClassList("camera-rail-bar");
-            railBar.Add(railToggle);
-            rail.Add(railBar);
+            });
             // It scrolls, so on a short view (or above the Fleet List) every thumbnail stays reachable
             var strip = new ScrollView(ScrollViewMode.Vertical);
             strip.AddToClassList("camera-strip");
@@ -209,12 +209,6 @@ namespace Formula9.World
             cameraPanel.Add(rail);
             cameraPanel.style.display = DisplayStyle.None;    // hidden until the button is pressed
             surface.Add(cameraPanel);
-            // The world's time of day, bottom left over the 3D view and the cameras; added last, so it shows over both
-            clock = new Label { name = "world-clock", pickingMode = PickingMode.Ignore };
-            clock.AddToClassList("world-clock");
-            clock.style.display = DisplayStyle.None;
-            surface.Add(clock);
-            cameraRail.style.bottom = RailBottomGap + ClockRoom;
             SelectCamera(0);
             trafficCameras.Add(viewCamera); 
             viewCamera.clearFlags = CameraClearFlags.SolidColor;
@@ -429,7 +423,6 @@ namespace Formula9.World
         //     moves the shuttles of the city or scene each frame and keeps a followed one in view.
         private void Update()
         {
-            ShowClock();
             if (cameraResizedAt >= 0 && Time.unscaledTime - cameraResizedAt > CameraResizeSettleSeconds)
             {
                 cameraResizedAt = -1;
@@ -453,19 +446,24 @@ namespace Formula9.World
             if (following && !camerasShown) FocusSelected(false);
         }
 
-        // The time of day, bottom left: under the camera thumbnails, or above the Draft in 3D row in the
-        // 3D view; hidden with the 2D map
-        private void ShowClock()
+        // -----------------------------------------------------------------------------------
+        // Function: TryGetDayAndWeather
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function gives the training world's time of day and air temperature, which the
+        //     header shows beside the alert bell, whichever view is open.
+        //
+        // Args:
+        //     hour (float): The time of day, 0 to 24.
+        //     temperatureC (float): The temperature in °C (DayCycle.TemperatureAt).
+        //
+        // Returns:
+        //     bool: False before the world's light is set up, when there is neither.
+        public bool TryGetDayAndWeather(out float hour, out float temperatureC)
         {
-            if (clock == null) return;
-            var shown = dayCycle != null && (camerasShown || (viewCamera != null && viewCamera.enabled));
-            clock.style.display = shown ? DisplayStyle.Flex : DisplayStyle.None;
-            if (!shown) return;
-            // Only when the minute turns, not a new string every frame
-            var minute = Mathf.FloorToInt(dayCycle.Hour * 60);
-            if (minute != clockMinute) { clockMinute = minute; clock.text = DayCycle.Clock(dayCycle.Hour); }
-            var actions = !camerasShown && worldActions != null && worldActions.resolvedStyle.display == DisplayStyle.Flex ? worldActions.layout.height + 6 : 0;
-            clock.style.bottom = RailBottomGap + bottomInset + (float.IsNaN(actions) ? 0 : actions);
+            hour = dayCycle != null ? dayCycle.Hour : 0;
+            temperatureC = dayCycle != null ? dayCycle.TemperatureC : 0;
+            return dayCycle != null;
         }
 
         // -----------------------------------------------------------------------------------
@@ -1027,15 +1025,11 @@ namespace Formula9.World
             points = Mathf.Max(0, points);
             map?.SetBottomInset(points);
             if (worldActions != null) worldActions.style.translate = new StyleTranslate(new Translate(0, -points));
-            if (cameraRail != null) cameraRail.style.bottom = RailBottomGap + ClockRoom + points;
-            bottomInset = points;
+            if (cameraRail != null) cameraRail.style.bottom = RailBottomGap + points;
         }
 
         // The gap below the camera thumbnails' column, as in .camera-rail
         private const float RailBottomGap = 10;
-        // Room kept under the camera thumbnails for the clock
-        private const float ClockRoom = 34;
-        private float bottomInset;
 
         // -----------------------------------------------------------------------------------
         // Function: SelectCamera
