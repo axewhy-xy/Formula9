@@ -50,6 +50,9 @@ namespace Formula9.World
 
         private readonly Transform root;
         private readonly MapTiles tiles;
+        private readonly Texture2D grassTexture;
+        private static readonly int GrassTextureId = Shader.PropertyToID("_GrassTex"), GrassScaleId = Shader.PropertyToID("_GrassScale"),
+            GrassStrengthId = Shader.PropertyToID("_GrassStrength"), HasMapTileId = Shader.PropertyToID("_HasMapTile");
         private readonly List<UnityEngine.Object> owned = new List<UnityEngine.Object>();
         private readonly Dictionary<string, Transform> shuttles = new Dictionary<string, Transform>();
         private readonly List<(int Zoom, int X, int Y, Material Material)> groundTiles = new List<(int, int, int, Material)>();
@@ -99,6 +102,7 @@ namespace Formula9.World
         public bool SidewalksLoaded => sidewalkSurface != null;
         private List<CityBuilding> buildings;
         private Mesh buildingMesh;
+        internal CityVegetation Vegetation { get; private set; }
         private CityTrafficRenderer traffic;
         // People walking the sidewalks, drawn as a crowd: where the backend's traffic frames put them while
         // they carry any (the backend walks them, and its traffic gives way to them), otherwise walking the
@@ -151,6 +155,11 @@ namespace Formula9.World
             this.tiles = tiles;
             this.transit = transit;
             this.trafficLightPrefab = trafficLightPrefab;
+
+            // Resources shares this imported, compressed texture across every ground and verge material.
+            var grass = WorldLook.Default.Grass;
+            if (grass.Enabled && grass.Strength > 0)
+                grassTexture = Resources.Load<Texture2D>("Formula9/Textures/grass_albedo");
 
             // load the shuttle prefab once.
             shuttlePrefab = Resources.Load<GameObject>("Formula9/ShuttleBus");
@@ -238,6 +247,9 @@ namespace Formula9.World
             city.GetComponent<MeshRenderer>().sharedMaterial = buildingMaterial;
             BuildGround();
             await LoadRoadsAsync(client, area, cancellation);
+            cancellation.ThrowIfCancellationRequested();
+            Vegetation?.Dispose();
+            Vegetation = area == "toa-payoh" ? CityVegetation.Load(root.localToWorldMatrix) : null;
             // Buildings and roads load first. LTA shelters are fetched independently.
             if (transit != null)
             {
@@ -257,6 +269,11 @@ namespace Formula9.World
         }
 
         public void SetVisible(bool visible) { if (root != null) root.gameObject.SetActive(visible); }
+
+        internal void DrawVegetation(IReadOnlyList<Camera> cameras)
+        {
+            if (root.gameObject.activeInHierarchy) Vegetation?.Draw(cameras);
+        }
 
         // Roads only dress the ground, which already shows them: without their data the city still stands
         private async Task LoadRoadsAsync(CityClient client, string area, CancellationToken cancellation)
@@ -582,7 +599,9 @@ namespace Formula9.World
                 ? Make("Sidewalk paving", PavingTint, paver, PaverRepeatM)
                 : Make("Sidewalk paving (plain)", new Color(0.78f, 0.71f, 0.68f), grain, 1);
             materials[SidewalkMesh.KerbStoneLayer] = Make("Kerb stone", KerbColor, grain, 1);
-            materials[SidewalkMesh.VergeLayer] = Make("Verge", VergeColor, grain, 1);
+            materials[SidewalkMesh.VergeLayer] = grassTexture != null
+                ? Make("Verge", Color.white, grassTexture, WorldLook.Default.Grass.RepeatM)
+                : Make("Verge", VergeColor, grain, 1);
             materials[SidewalkMesh.KerbFaceLayer] = Make("Kerb face", Shade(KerbColor, KerbFaceShade), grain, 1);
             materials[SidewalkMesh.OuterFaceLayer] = Make("Sidewalk edge", Shade(KerbColor, OuterFaceShade), grain, 1);
             return materials;
@@ -908,6 +927,7 @@ namespace Formula9.World
             var northWest = MapGeo.TileAt(MapGeo.ToLatLon(min.x, max.y), zoom);
             var southEast = MapGeo.TileAt(MapGeo.ToLatLon(max.x, min.y), zoom);
             var shader = Shader.Find("Formula9/CityGround");
+            var grass = WorldLook.Default.Grass;
             for (var y = (int)Math.Floor(northWest.Y); y <= (int)Math.Floor(southEast.Y); y++)
                 for (var x = (int)Math.Floor(northWest.X); x <= (int)Math.Floor(southEast.X); x++)
                 {
@@ -922,6 +942,12 @@ namespace Formula9.World
                     tile.transform.SetParent(root, false);
                     tile.GetComponent<MeshFilter>().sharedMesh = mesh;
                     var material = Own(new Material(shader));
+                    if (grassTexture != null)
+                    {
+                        material.SetTexture(GrassTextureId, grassTexture);
+                        material.SetFloat(GrassScaleId, 1 / grass.RepeatM);
+                        material.SetFloat(GrassStrengthId, grass.Strength);
+                    }
                     tile.GetComponent<MeshRenderer>().sharedMaterial = material;
                     groundTiles.Add((zoom, x, y, material));
                 }
@@ -933,7 +959,11 @@ namespace Formula9.World
             foreach (var (zoom, x, y, material) in groundTiles)
             {
                 var texture = tiles.Tile(zoom, x, y);
-                if (texture != null) material.mainTexture = texture;
+                if (texture != null && material.mainTexture != texture)
+                {
+                    material.mainTexture = texture;
+                    material.SetFloat(HasMapTileId, 1);
+                }
             }
         }
 
@@ -1301,6 +1331,8 @@ namespace Formula9.World
             if (tiles != null) tiles.TileLoaded -= RefreshTiles;
             incidents.Dispose();
             busStopShelters.Dispose();
+            Vegetation?.Dispose();
+            Vegetation = null;
             traffic?.Dispose();
             traffic = null;
             pedestrians?.Clear();

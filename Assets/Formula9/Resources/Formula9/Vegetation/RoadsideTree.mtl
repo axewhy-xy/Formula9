@@ -1,0 +1,24 @@
+newmtl Bark
+Kd 0.32 0.25 0.18
+Ks 0.03 0.03 0.03
+Ns 4
+
+newmtl Foliage_Shade
+Kd 0.25 0.38 0.19
+Ks 0.03 0.03 0.03
+Ns 4
+
+newmtl Foliage
+Kd 0.33 0.47 0.22
+Ks 0.03 0.03 0.03
+Ns 4
+
+newmtl Foliage_Tips
+Kd 0.42 0.54 0.27
+Ks 0.03 0.03 0.03
+Ns 4
+
+newmtl Foliage_Distance
+Kd 0.54 0.68 0.39
+Ks 0.03 0.03 0.03
+Ns 4
