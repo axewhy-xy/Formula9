@@ -42,9 +42,9 @@ namespace Formula9.Tests
         {
             var s = Snapshot();
             Assert.AreEqual(
-                "COLLISION on Lorong 6 Toa Payoh.\nShuttle 04 reaches it in about 1 min 50 s (1.10 km).\nKeeping its route costs about 25 s.",
+                "COLLISION on Lorong 6 Toa Payoh.\nShuttle 04 reaches it in about 1 min 50 s (1.10 km).",
                 RoutePresenter.Problem(null, s, "shuttle-04"), "an incident needs no road graph to be described");
-            Assert.AreEqual("Options for 1 min", RoutePresenter.OptionsExpiry(s, "shuttle-04"), "1200 ticks at 0.05 s");
+            Assert.AreEqual("Refreshes in 1 min", RoutePresenter.OptionsExpiry(s, "shuttle-04"), "1200 ticks at 0.05 s");
             CollectionAssert.AreEqual(new[] { Collision }, RoutePresenter.ProblemIncidents(s, "shuttle-04").Select(i => i.IncidentId));
         }
 
@@ -54,7 +54,7 @@ namespace Formula9.Tests
             var s = Snapshot();
             Assert.AreEqual("ROAD CLOSURE on Lorong 6 Toa Payoh.\nShuttle 01 reaches it in about 8 s (40 m).",
                 RoutePresenter.Problem(Roads(true), s, "shuttle-01"));
-            Assert.AreEqual("Options for 5 s", RoutePresenter.OptionsExpiry(s, "shuttle-01"));
+            Assert.AreEqual("Refreshes in 5 s", RoutePresenter.OptionsExpiry(s, "shuttle-01"));
         }
 
         [Test]
@@ -76,7 +76,7 @@ namespace Formula9.Tests
             var text = RoutePresenter.Problem(Roads(false), s, "shuttle-04");
             StringAssert.StartsWith("SIGNAL FAULT on Lorong 6 Toa Payoh.", text);
             StringAssert.DoesNotContain("closure", text);
-            StringAssert.Contains("Keeping its route costs about 25 s.", text);
+            StringAssert.DoesNotContain("Keeping its route", text, "the cost of keeping the route is on the Keep route option");
         }
 
         [Test]
@@ -96,10 +96,10 @@ namespace Formula9.Tests
             CollectionAssert.AreEqual(new[] { Closure, Collision }, RoutePresenter.ProblemIncidents(s, "shuttle-04").Select(i => i.IncidentId));
             Assert.AreEqual(
                 "Shuttle 04 has 2 incidents ahead, soonest first.\n\n" +
-                "ROAD CLOSURE on Lorong 6 Toa Payoh.\nShuttle 04 reaches it in about 30 s (300 m).\nKeeping its route costs about 2 min 10 s.\n\n" +
-                "COLLISION on Lorong 6 Toa Payoh.\nShuttle 04 reaches it in about 1 min 50 s (1.10 km).\nKeeping its route costs about 25 s.",
+                "ROAD CLOSURE on Lorong 6 Toa Payoh.\nShuttle 04 reaches it in about 30 s (300 m).\n\n" +
+                "COLLISION on Lorong 6 Toa Payoh.\nShuttle 04 reaches it in about 1 min 50 s (1.10 km).",
                 RoutePresenter.Problem(null, s, "shuttle-04"));
-            Assert.AreEqual("Options for 3 s", RoutePresenter.OptionsExpiry(s, "shuttle-04"), "the first incident's options, 60 ticks");
+            Assert.AreEqual("Refreshes in 3 s", RoutePresenter.OptionsExpiry(s, "shuttle-04"), "the first incident's options, 60 ticks");
         }
 
         [Test]

@@ -162,15 +162,15 @@ namespace Formula9.Tests
             // A shuttle given a detour drives that route now, and the picker says so
             StringAssert.StartsWith("Shuttle 01 · closure-detour-shuttle-01", RoutePresenter.ShuttleChoice(new FleetVehicle { VehicleId = "shuttle-01", RouteId = "closure-detour-shuttle-01" }, true));
             StringAssert.EndsWith("● needs a decision", RoutePresenter.ShuttleChoice(new FleetVehicle { VehicleId = "shuttle-01", RouteId = "route-a" }, true));
-            Assert.AreEqual("Needs a decision (2)", RoutePresenter.PendingTitle(2));
 
+            // The strip shows the shuttle's name in a red box, then this
             PendingDecision Pending(double? eta) => new PendingDecision("shuttle-03", new Incident { IncidentId = "collision" },
                 eta == null ? null : new IncidentExposure { VehicleId = "shuttle-03", EtaS = eta.Value, DistanceM = 320 },
                 new Dictionary<string, Candidate>());
-            Assert.AreEqual("● Shuttle 03 · ~40 s", RoutePresenter.PendingChip(Pending(40)));
-            Assert.AreEqual("● Shuttle 03 · ~2 min 0 s", RoutePresenter.PendingChip(Pending(120)));
-            Assert.AreEqual("● Shuttle 03 · now", RoutePresenter.PendingChip(Pending(0.2)));
-            Assert.AreEqual("● Shuttle 03", RoutePresenter.PendingChip(Pending(null)), "no figure without an exposure");
+            Assert.AreEqual("needs a decision (1) · ~40 s", RoutePresenter.PendingChip(Pending(40), 1));
+            Assert.AreEqual("needs a decision (2) · ~2 min 0 s", RoutePresenter.PendingChip(Pending(120), 2));
+            Assert.AreEqual("needs a decision (1) · now", RoutePresenter.PendingChip(Pending(0.2), 1));
+            Assert.AreEqual("needs a decision (1)", RoutePresenter.PendingChip(Pending(null), 1), "no figure without an exposure");
         }
 
         [Test]

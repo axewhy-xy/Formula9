@@ -53,7 +53,7 @@ Each step lists the features it shows.
    session**. (*Scenario picker, session list*)
 3. **Route planning before the start.** Open **Route Planning**. The map shows the closure on
    shuttle-01's route over the OpenStreetMap basemap, with real bus stops when zoomed in. Click roads
-   round the closure (map point sound), use **Undo**, **Redo** and **Clear**, or **Suggest a detour**.
+   round the closure (map point sound), use **Undo**, **Redo** and **Clear**, or **Suggest detour**.
    Each change is checked straight away; read the time, energy, distance and stop coverage.
    Enter a reason and **Approve route**. (*Routing, route editor, live checks, 2D map, map point and
    confirmation sounds*)
@@ -69,9 +69,9 @@ Each step lists the features it shows.
 7. **Pedestrian (8 s).** Select shuttle-05 or shuttle-03 in the fleet list and **Follow selected** to
    see the walker and the traffic stopping. (*Pedestrian event, 3D follow*)
 8. **Road closure (20 s).** A notification appears over the map with the incident sound. Click
-   **Decide**: Route Planning opens on that shuttle, and *Needs a decision* lists every shuttle
-   waiting. Choose **Keep route**, **Hold at a stop**, **Request assistance** or **Re-route on the
-   map**, give a reason and confirm. Options the backend doesn't offer are greyed out with the reason.
+   **Decide**: Route Planning opens on that shuttle, and the *Needs a decision* strip at the top lists
+   every shuttle waiting, soonest first. Choose **Keep route**, **Hold at a stop**, **Request
+   assistance** or **Re-route on the map**, give a reason and confirm. Options the backend doesn't offer are greyed out with the reason.
    (*Incident decisions, incident alert and confirmation sounds, notifications*)
 9. **Signal fault (25 s).** Follow shuttle-04: its lights stay red and the traffic queues.
    (*Signal fault in 3D*)

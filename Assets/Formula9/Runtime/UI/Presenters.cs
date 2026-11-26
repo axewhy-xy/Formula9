@@ -223,7 +223,7 @@ namespace Formula9.UI
     //     and the card.
     public sealed class FleetRow
     {
-        public string ShuttleId, State, Status, Route, RouteLine, Battery, Provenance, NextStop, Eta;
+        public string ShuttleId, State, Status, Route, Battery, Provenance, NextStop, Eta;
         // What Eta is the time to (the next depot), for its tooltip.
         public string EtaTarget;
         // The last stop of the shuttle's route before the loop starts again, by name.
@@ -427,8 +427,7 @@ namespace Formula9.UI
                     ShuttleId = v.VehicleId,
                     State = v.ServiceState,
                     Status = StatusText(v.ServiceState),
-                    Route = v.RouteId == null ? "—" : $"{v.RouteId} / {v.RouteRevision}",
-                    RouteLine = v.RouteId == null ? "No route assigned" : $"Route {v.RouteId} · rev {v.RouteRevision}",
+                    Route = RouteState(v, snapshot.Incidents),
                     Battery = $"{Number(v.BatteryKwh)} / {Number(v.BatteryCapacityKwh)} kWh",
                     BatteryPercent = BatteryWatch.Percent(v),
                     Provenance = v.Provenance.Kind,
@@ -441,6 +440,39 @@ namespace Formula9.UI
                 };
             })
             .ToList();
+
+        // -----------------------------------------------------------------------------------
+        // Function: RouteState
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function names a shuttle's route and says whether it is still as the scenario
+        //     set it or has been edited. The backend starts every route at revision 1 and adds one
+        //     for each approved edit; a shuttle sent round an incident drives a route of its own,
+        //     named exactly "<incident>-detour-<shuttle>" (detour_route_id in the backend), which
+        //     is called a detour round that incident instead, or just an incident detour once the
+        //     incident has gone. Any other route keeps its ID, even one whose ID happens to
+        //     contain "detour".
+        //
+        // Args:
+        //     vehicle (FleetVehicle): The shuttle.
+        //     incidents (IEnumerable<Incident>): The session's incidents, to find the one a detour
+        //         goes round; null when unknown.
+        //
+        // Returns:
+        //     string: As "route-a · original", "route-a · edited twice" or "Detour round the
+        //         collision on Lorong 6 Toa Payoh"; "—" without a route.
+        public static string RouteState(FleetVehicle vehicle, IEnumerable<Incident> incidents = null)
+        {
+            if (vehicle.RouteId == null) return "—";
+            var edits = (vehicle.RouteRevision ?? 1) - 1;
+            var changes = edits <= 0 ? null : edits == 1 ? "edited once" : edits == 2 ? "edited twice" : $"edited {edits} times";
+            var detoured = incidents?.FirstOrDefault(i => vehicle.RouteId == $"{i.IncidentId}-detour-{vehicle.VehicleId}");
+            var suffix = changes == null ? "" : " · " + changes;
+            if (detoured != null) return "Detour round " + RoutePresenter.IncidentPhrase(detoured) + suffix;
+            // Its incident gone from the snapshot, the shuttle may still be driving the detour
+            if (vehicle.RouteId.EndsWith("-detour-" + vehicle.VehicleId, StringComparison.Ordinal)) return "Incident detour" + suffix;
+            return $"{vehicle.RouteId} · {changes ?? "original"}";
+        }
 
         // -----------------------------------------------------------------------------------
         // Function: StatusText

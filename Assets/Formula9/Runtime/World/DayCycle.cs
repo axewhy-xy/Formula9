@@ -307,6 +307,42 @@ namespace Formula9.World
             return $"{(h + 11) % 12 + 1}:{minutes % 60:00} {(h < 12 ? "am" : "pm")}";
         }
 
+        // A typical Singapore day, in °C: coolest just before dawn, warmest in the early afternoon
+        private const float CoolestC = 25, WarmestC = 32, CoolestHour = 6, WarmestHour = 14;
+        // How much of the day's warming a fully grey or rainy sky holds back
+        private const float GloomCooling = 0.6f;
+
+        // -----------------------------------------------------------------------------------
+        // Function: TemperatureAt
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function gives the air temperature the training world shows at an hour. It warms
+        //     from dawn to the early afternoon and cools through the evening and night, as a typical
+        //     Singapore day does, and cloud and rain hold back some of the day's warming. It is the
+        //     world's own weather, made up like its sky, not a reading or a forecast.
+        //
+        // Args:
+        //     hour (float): The time of day, 0 to 24.
+        //     weather (WeatherState): The weather; null for a clear sky.
+        //
+        // Returns:
+        //     float: The temperature in °C.
+        public static float TemperatureAt(float hour, WeatherState weather)
+        {
+            hour = Mathf.Repeat(hour, 24);
+            // How warm the hour is, 0 (coolest) to 1 (warmest), easing in and out at both ends
+            float warmth;
+            if (hour >= CoolestHour && hour < WarmestHour)
+                warmth = (1 - Mathf.Cos(Mathf.PI * (hour - CoolestHour) / (WarmestHour - CoolestHour))) / 2;
+            else
+                warmth = (1 + Mathf.Cos(Mathf.PI * Mathf.Repeat(hour - WarmestHour, 24) / (24 - WarmestHour + CoolestHour))) / 2;
+            if (weather != null) warmth *= 1 - GloomCooling * weather.Gloom;
+            return CoolestC + (WarmestC - CoolestC) * warmth;
+        }
+
+        // The temperature now, under the weather shown
+        public float TemperatureC => TemperatureAt(Hour, shown);
+
         private void Update()
         {
             if (look == null) return;
