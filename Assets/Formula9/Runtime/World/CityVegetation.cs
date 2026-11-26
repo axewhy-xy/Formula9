@@ -50,7 +50,7 @@ namespace Formula9.World
                     {
                         var tree = trees[start + i];
                         matrices[i] = cityToWorld * Matrix4x4.TRS(tree.Position,
-                            Quaternion.Euler(0, tree.Yaw, 0), tree.Scale);
+                            Quaternion.Euler(0, tree.Yaw, 0), Vector3.one * tree.Scale);
                         var treeBounds = TransformBounds(meshBounds, matrices[i]);
                         if (i == 0) bounds = treeBounds;
                         else bounds.Encapsulate(treeBounds);
@@ -77,7 +77,8 @@ namespace Formula9.World
             return new CityVegetation(near, far, instancingMaterial, placements, cityToWorld);
         }
 
-        private static IEnumerable<(Vector3 Position, Vector3 Scale, float Yaw)> ReadPlacements(TextAsset asset)
+        /// <summary>Keep the model's proportions while fitting each placement's height and canopy limits.</summary>
+        internal static IEnumerable<(Vector3 Position, float Scale, float Yaw)> ReadPlacements(TextAsset asset)
         {
             using var reader = new StringReader(asset.text);
             reader.ReadLine(); // Header: east_m,north_m,height_scale,width_scale,yaw_deg.
@@ -92,7 +93,9 @@ namespace Formula9.World
 
                 var width = height; // The original four-column file uses a uniform scale.
                 if (columns.Length == 5 && (!TryRead(columns[3], out width) || width <= 0)) continue;
-                yield return (new Vector3(east, 0, north), new Vector3(width, height, width), yaw);
+                // Scaling all axes together preserves the trunk and crown. Taking the smaller limit
+                // also keeps the canopy inside its existing footprint beside roads and buildings.
+                yield return (new Vector3(east, 0, north), Mathf.Min(height, width), yaw);
             }
         }
 

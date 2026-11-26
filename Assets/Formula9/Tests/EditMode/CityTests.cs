@@ -731,6 +731,39 @@ namespace Formula9.Tests
             }
         }
 
+        [TestCase("1,2,1.5,0.75,40", 0.75f)]
+        [TestCase("1,2,0.6,1.2,40", 0.6f)]
+        [TestCase("1,2,1.1,1.1,40", 1.1f)]
+        [TestCase("1,2,0.8,40", 0.8f)]
+        public void TreesKeepTheirProportionsWithinThePlacementLimits(string row, float expectedScale)
+        {
+            var asset = new TextAsset("east_m,north_m,height_scale,width_scale,yaw_deg\n" + row);
+            try
+            {
+                var tree = CityVegetation.ReadPlacements(asset).Single();
+                Assert.AreEqual(new Vector3(1, 0, 2), tree.Position);
+                Assert.AreEqual(40, tree.Yaw);
+                Assert.AreEqual(expectedScale, tree.Scale, 1e-6f);
+            }
+            finally { UnityEngine.Object.DestroyImmediate(asset); }
+        }
+
+        [Test]
+        public void TreePlacementsKeepTheirSizeVariationAndRejectInvalidScales()
+        {
+            var placements = Resources.Load<TextAsset>("Formula9/Vegetation/ToaPayohTrees");
+            var trees = CityVegetation.ReadPlacements(placements).ToList();
+            Assert.Greater(trees.Count, 1000);
+            Assert.Greater(trees.Select(tree => tree.Scale).Distinct().Count(), 20);
+            Assert.Greater(trees.Max(tree => tree.Scale), trees.Min(tree => tree.Scale) * 2);
+
+            var invalid = new TextAsset("east_m,north_m,height_scale,width_scale,yaw_deg\n" +
+                "1,2,0,1,40\n1,2,-1,1,40\n1,2,1,0,40\n1,2,1,-1,40\n" +
+                "1,2,NaN,1,40\n1,2,1,Infinity,40\n1,2,1,1,NaN\n");
+            try { Assert.IsEmpty(CityVegetation.ReadPlacements(invalid)); }
+            finally { UnityEngine.Object.DestroyImmediate(invalid); }
+        }
+
         [Test]
         public async Task ToaPayohTreesLoadWithTheCityAndFollowItsVisibility()
         {

@@ -166,8 +166,11 @@ need a free [DataMall key](https://datamall.lta.gov.sg) in `backend/.env` as `LT
 `python -m src.routing.build_singapore_fleet_fixture` rebuilds the scenario from the committed
 extract in `backend/fixtures/osm`.
 
-The 3D city uses illustrative tree placements with independently adjustable heights and widths in
-[`ToaPayohTrees.csv`](Assets/Formula9/Resources/Formula9/Vegetation/ToaPayohTrees.csv). Planting follows
+The 3D city uses illustrative tree placements in
+[`ToaPayohTrees.csv`](Assets/Formula9/Resources/Formula9/Vegetation/ToaPayohTrees.csv). Each tree uses one
+uniform scale, keeping the original trunk and canopy proportions while still varying in size. The smaller
+of `height_scale` and `width_scale` sets its size, so correcting a stretched tree never expands its canopy
+beyond the placement's existing clearance. Both detail levels use the same scale. Planting follows
 roadside setbacks and green spaces using the bundled geometry, [OpenStreetMap contributors](https://www.openstreetmap.org/copyright),
 and the [National Parks Board's Parks and Nature Reserves dataset](https://data.gov.sg/datasets/d_77d7ec97be83d44f61b85454f844382f/view).
 
