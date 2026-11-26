@@ -1,14 +1,15 @@
 /*
- * Plays the battery low sound when a shuttle's battery runs low.
+ * Plays the battery critical sound when a shuttle's battery gauge turns red.
  *
  * Author: Choo Jian Wei
  * Date Created: 03/11/2026
- * Last Modified: 03/11/2026
+ * Last Modified: 24/11/2026
  *
  * Description:
  *     The backend sends no event when a battery runs low, only BATTERY_EXHAUSTED once it is empty,
- *     so the client watches each snapshot instead. A shuttle sounds once when its gauge first
- *     reads LowPercent, and again only after it has charged back above it. Like the training alerts,
+ *     so the client watches each snapshot instead. The audio professor asked for one battery sound,
+ *     for the critical warning only, so a shuttle sounds once when its gauge turns red, and again
+ *     only after it has charged back out of the red. Like the training alerts,
  *     what was already true when the session was joined stays silent, and Mute alerts silences it.
  */
 
@@ -25,12 +26,12 @@ namespace Formula9.Audio
     //     This class decides when the battery low sound plays. The player and the mute check are
     //     injected, so the rules are tested without audio.
     //
-    //     Attributes: LowPercent, the Fleet Overview gauge's red threshold, kept above the
-    //     energy model's 15% reserve because the safety return turns a shuttle back before it;
-    //     Cue, the cue name AlertPlayer plays.
+    //     Attributes: RedPercent, where both battery gauges turn red, kept above the energy
+    //     model's 15% reserve because the safety return turns a shuttle back before it; Cue, the
+    //     cue name AlertPlayer plays.
     public sealed class BatteryWatch
     {
-        public const double LowPercent = 20;
+        public const double RedPercent = 20;
         public const string Cue = "battery_low";
 
         private readonly Action<string> play;
@@ -55,20 +56,48 @@ namespace Formula9.Audio
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: IsLow
+        // Function: IsRed (percent)
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function tells whether a shuttle's battery reads LowPercent or less on screen.
-        //     Both gauges format with "0", which rounds halves up, so a battery below LowPercent + 0.5
-        //     already shows LowPercent, and the sound plays when the operator first sees that number.
+        //     This function tells whether a battery gauge shows red. Fleet Overview and the
+        //     Charging page both colour their gauges with it, so the sound plays exactly when the
+        //     operator sees the bar turn red.
+        //
+        // Args:
+        //     percent (double): The battery, in percent of capacity.
+        //
+        // Returns:
+        //     bool: True below RedPercent.
+        public static bool IsRed(double percent) => percent < RedPercent;
+
+        // -----------------------------------------------------------------------------------
+        // Function: Percent
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function gives the percent both battery gauges show: the charge over the
+        //     capacity, kept within 0 to 100. A shuttle with no battery capacity reads 0%.
         //
         // Args:
         //     vehicle (FleetVehicle): The shuttle.
         //
         // Returns:
-        //     bool: True when its battery is low.
-        public static bool IsLow(FleetVehicle vehicle) =>
-            vehicle.BatteryCapacityKwh > 0 && 100 * vehicle.BatteryKwh / vehicle.BatteryCapacityKwh < LowPercent + 0.5;
+        //     double: Its battery, 0 to 100.
+        public static double Percent(FleetVehicle vehicle) =>
+            vehicle.BatteryCapacityKwh > 0 ? Math.Max(0, Math.Min(100, 100 * vehicle.BatteryKwh / vehicle.BatteryCapacityKwh)) : 0;
+
+        // -----------------------------------------------------------------------------------
+        // Function: IsRed (vehicle)
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function tells whether a shuttle's battery gauge shows red, from the same
+        //     percent the gauges draw, so a shuttle with no battery capacity is red too.
+        //
+        // Args:
+        //     vehicle (FleetVehicle): The shuttle.
+        //
+        // Returns:
+        //     bool: True when its gauge is red.
+        public static bool IsRed(FleetVehicle vehicle) => IsRed(Percent(vehicle));
 
         // -----------------------------------------------------------------------------------
         // Function: HoldNextCue
@@ -84,8 +113,8 @@ namespace Formula9.Audio
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function checks every shuttle in a snapshot and plays the sound once if any
-        //     shuttle has just dropped to LowPercent on screen. The first snapshot of a session only
-        //     records which shuttles are already low.
+        //     shuttle's gauge has just turned red. The first snapshot of a session only records
+        //     which shuttles are already red.
         //
         // Args:
         //     snapshot (FullSnapshot): The snapshot the session accepted; ignored when null.
@@ -97,7 +126,7 @@ namespace Formula9.Audio
             var dropped = false;
             foreach (var vehicle in snapshot.Vehicles)
             {
-                if (!IsLow(vehicle)) low.Remove(vehicle.VehicleId);
+                if (!IsRed(vehicle)) low.Remove(vehicle.VehicleId);
                 else if (low.Add(vehicle.VehicleId)) dropped = true;
             }
             var sound = (dropped && !joined) || held;

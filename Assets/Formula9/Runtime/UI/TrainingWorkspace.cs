@@ -34,6 +34,7 @@ namespace Formula9.UI
         private readonly ChargingPage charging;
         private readonly ReportsPage reports;
         private readonly IncidentReportsTab incidentReports;
+        private readonly EmergencyDispatchPanel emergency; //added panel for emergency dispatch
         private readonly AssessmentReportsTab assessmentReports;
         private readonly Button sessionToggle;
         private readonly VisualElement sessionCard;
@@ -83,6 +84,9 @@ namespace Formula9.UI
         // The incident last picked on the map; the Fleet List marks the shuttles it concerns
         public string SelectedIncident { get; private set; }
         public event Action IncidentSelected;
+        // A decision (a re-route, an approved route, a confirmed route choice or a charging decision)
+        // passed every check and is on its way. A click that sends nothing does not raise it.
+        public event Action DecisionSent;
         // Selecting, or clearing, the incident tells the Fleet List to mark its shuttles again
         private void SelectIncident(string incidentId)
         {
@@ -187,12 +191,14 @@ namespace Formula9.UI
             previewTimer.Pause();
 
             charging = new ChargingPage(root, api, session, run, notify, () => Current);
+            charging.DecisionSent += () => DecisionSent?.Invoke();
             sessionCard = root.Q("content-card");
             sessionToggle = root.Q<Button>("session-toggle");
             sessionToggle.clicked += ToggleSessionTools;
 
             reports = new ReportsPage(root);
             incidentReports = new IncidentReportsTab(root, api, session, world, run);
+            emergency = new EmergencyDispatchPanel(root, session, run, notify, () => Current);
             assessmentReports = new AssessmentReportsTab(root, api, run);
             root.Q<Button>("reports-tab-assessment").clicked += Render;
             session.SnapshotAccepted += (_, __) => { acceptedAt = Time.realtimeSinceStartup; Render(); };
@@ -285,6 +291,7 @@ namespace Formula9.UI
                 SelectIncident(null);
                 if (ledgerSession != s?.SessionId) { ledger.Clear(); ledgerSession = s?.SessionId; }
                 charging.Reset();
+                emergency?.Reset();
                 routeReason.value = confirmReason.value = "";
                 draft = new List<RouteWaypoint>(); draftHistory.Clear(); draftHistory.Add(new List<RouteWaypoint>()); historyIndex = 0;
                 preview = null; draftView = null; outcome = null; outcomeSequence = -1; suggesting = false;
@@ -298,6 +305,7 @@ namespace Formula9.UI
             }
             FitSessionControls();
             incidentReports.Render(s);
+            emergency?.Render(s);
             assessmentReports.Render(s, session.SignedInUsername, shownPage == ReportsPageIndex);
             if (s == null) { RenderBadge(0); RenderReports(); UpdateActions(); return; }
             // An applied approval moves its route to a new revision, which finishes the draft. A queued
@@ -370,6 +378,8 @@ namespace Formula9.UI
             fleetCameras.text = world.CamerasShown ? "Hide cameras" : "Cameras";
             fleetCameras.EnableInClassList("segment-selected", world.CamerasShown);
             charging.UpdateActions();
+            // UpdateActions can run before the constructor has created the panel, so emergency may still be null
+            emergency?.UpdateActions();
             // The decision card: usable while the session runs, is connected and is up to date
             var free = Current && confirmCommand == null;
             foreach (var option in options)
@@ -630,12 +640,12 @@ namespace Formula9.UI
             if (s.Session.Status != "READY")
             {
                 // FollowPending clears the draft once a snapshot shows the shuttle decided for; a refusal keeps it.
-                if (await session.SubmitAsync(DecisionRules.RerouteCommand(s, selectedVehicle, preview, routeReason.value))) await session.RefreshAsync();
+                if (await session.SubmitAsync(DecisionRules.RerouteCommand(s, selectedVehicle, preview, routeReason.value), () => DecisionSent?.Invoke())) await session.RefreshAsync();
                 InvalidateRoute(); Render();
                 return;
             }
             var approved = (preview.RouteId, preview.RouteRevision);
-            if (!await session.ApproveRouteAsync(preview, routeReason.value)) return;
+            if (!await session.ApproveRouteAsync(preview, routeReason.value, () => DecisionSent?.Invoke())) return;
             // Render clears the draft once a snapshot shows the route's new revision; a refresh may
             // return before that snapshot arrives, so it cannot be checked here.
             approvedDraft = approved;
@@ -893,7 +903,7 @@ namespace Formula9.UI
             confirmCommand = command.CommandId; awaitingError = false;
             SetConfirmNote("Sending…", false);
             UpdateActions();
-            var sent = await session.SubmitAsync(command);
+            var sent = await session.SubmitAsync(command, () => DecisionSent?.Invoke());
             if (!sent && confirmCommand == command.CommandId)
             {
                 confirmCommand = null;

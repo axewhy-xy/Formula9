@@ -1,0 +1,10 @@
+{
+  "_about": "Sun, sky and shadows of the 3D world. Colours are #RRGGBB, angles degrees. Changes show the next time the 3D view opens.",
+  "sun": { "color": "#FFF6EA", "intensity": 1.0, "pitchDeg": 42, "yawDeg": -35, "shadowStrength": 0.85 },
+  "ambient": { "sky": "#A9C6E6", "horizon": "#CBCFCC", "ground": "#8E8A80", "intensity": 0.48 },
+  "shadows": { "distanceM": 450, "cascades": 4, "resolution": "VeryHigh" },
+  "haze": { "enabled": false, "color": "#D6E2EA", "density": 0.00022 },
+  "sky": { "top": "#3F7FC6", "horizon": "#D6E6F2", "below": "#BFC7CA", "cloudCover": 0.45, "cloudColor": "#FFFFFF" },
+  "buildingSelfLight": 0.05,
+  "groundShadowDarkness": 0.55
+}

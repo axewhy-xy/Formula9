@@ -179,14 +179,20 @@ namespace Formula9.UI
             // No event says a battery is low, so the snapshots are watched for it.
             var battery = new BatteryWatch(player.Play, () => alerts.Muted);
             session.SnapshotAccepted += (snapshot, _) => battery.OnSnapshot(snapshot);
+
+            // Warns when a shuttle's charge nears what it needs to reach a depot (it stays alive through the session's events)
+            new ShuttleBatteryService(session, api, new CityClient(transport), _ => WorldView.CityArea, ShowMessage);
             session.ConnectionChanged += connected =>
             {
-                // The reconnect cue plays on the same snapshot; a battery that ran low meanwhile waits a poll.
+                // The reconnect cue plays on the same snapshot; a battery that turned red meanwhile waits a
+                // poll. A session the backend recovered after a crash says so with its session recovered
+                // alert instead, so it gets no reconnect cue on top.
                 if (connected) battery.HoldNextCue();
-                if (!alerts.Muted) player.Play(connected ? AlertPlayer.ReconnectCue : AlertPlayer.DisconnectCue);
+                if (alerts.Muted || (connected && session.ReconnectRecovered)) return;
+                player.Play(connected ? AlertPlayer.ReconnectCue : AlertPlayer.DisconnectCue);
             };
 
-            // Interface sounds from amee's consultation with Vuk: only the major buttons click.
+            // Interface sounds: only starting, resuming and sending a decision make a sound.
             var root = GetComponent<UIDocument>().rootVisualElement;
             var uiPlayer = new GameObject("Interface sounds").AddComponent<UiSoundPlayer>();
             uiPlayer.transform.SetParent(transform, false);
@@ -195,7 +201,10 @@ namespace Formula9.UI
             // on its way, even a button greyed out for a real reason stays silent. No sound is safer than a
             // "no" for something that worked, and a queued command can keep this silent for a few seconds.
             uiSounds = new UiSounds(uiPlayer.Play, () => busy || cleanupBusy || session?.HasPendingCommand == true || workspace?.Busy == true);
-            foreach (var name in UiSounds.MajorButtons) root.Q<Button>(name).clicked += uiSounds.MajorPressed;
+            foreach (var name in UiSounds.StartButtons) root.Q<Button>(name).clicked += uiSounds.StartPressed;
+            // The confirmation chimes when a decision is actually sent, not on the click: a click the
+            // checks stop (options withdrawn or refreshed, an invalid reason, a busy session) sends nothing.
+            workspace.DecisionSent += uiSounds.ConfirmPressed;
             uiSounds.Listen(root);
             listenedRoot = root;
             world.RouteNodeSelected += _ => uiSounds.PointPicked();
@@ -213,13 +222,20 @@ namespace Formula9.UI
         // -----------------------------------------------------------------------------------
         // Description:
         //     This function stops the session controller and polling, then stops catching presses
-        //     for the greyed-out button sound. It uses the root it listened on rather than asking the
+        //     for the greyed-out button sound and unhooks the start click, so enabling the app again
+        //     doesn't hook it twice. It uses the root it listened on rather than asking the
         //     UIDocument again, which may already be switched off with no root.
         private void OnDisable()
         {
             session?.Shutdown();
             StopAllCoroutines();
             uiSounds?.Unlisten(listenedRoot);
+            if (uiSounds != null && listenedRoot != null)
+                foreach (var name in UiSounds.StartButtons)
+                {
+                    var button = listenedRoot.Q<Button>(name);
+                    if (button != null) button.clicked -= uiSounds.StartPressed;
+                }
             listenedRoot = null;
         }
 
@@ -1056,7 +1072,7 @@ namespace Formula9.UI
                 var fill = new VisualElement();
                 fill.AddToClassList("battery-fill");
                 fill.style.width = Length.Percent((float)row.BatteryPercent);
-                fill.style.backgroundColor = row.BatteryPercent < 20 ? new Color(0.839f, 0.188f, 0.192f)
+                fill.style.backgroundColor = BatteryWatch.IsRed(row.BatteryPercent) ? new Color(0.839f, 0.188f, 0.192f)
                     : row.BatteryPercent < 50 ? new Color(0.949f, 0.6f, 0.29f) : new Color(0.153f, 0.682f, 0.376f);
                 gauge.Add(fill);
                 battCol.Add(gauge);

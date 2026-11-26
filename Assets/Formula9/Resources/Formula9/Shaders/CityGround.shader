@@ -1,4 +1,5 @@
-// The map tiles laid on the ground: unlit, so the map keeps its colours.
+// The map tiles laid on the ground: unlit, so the map keeps its colours, but darkened where the sun's
+// shadow falls (by _Formula9ShadowDarkness, which WorldLighting sets from world_look.json).
 Shader "Formula9/CityGround"
 {
     Properties { _MainTex ("Tile", 2D) = "gray" {} }
@@ -7,15 +8,28 @@ Shader "Formula9/CityGround"
         Tags { "RenderType" = "Opaque" }
         Pass
         {
+            Tags { "LightMode" = "ForwardBase" }
             CGPROGRAM
             #pragma vertex vert
             #pragma fragment frag
+            #pragma multi_compile_fwdbase
+            #pragma multi_compile_fog
             #include "UnityCG.cginc"
+            #include "AutoLight.cginc"
             sampler2D _MainTex;
-            struct v2f { float4 position : SV_POSITION; float2 uv : TEXCOORD0; };
-            v2f vert(appdata_base input) { v2f output; output.position = UnityObjectToClipPos(input.vertex); output.uv = input.texcoord.xy; return output; }
-            fixed4 frag(v2f input) : SV_Target { return tex2D(_MainTex, input.uv); }
+            float _Formula9ShadowDarkness;
+            struct v2f { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; SHADOW_COORDS(1) UNITY_FOG_COORDS(2) };
+            v2f vert(appdata_base v) { v2f o; o.pos = UnityObjectToClipPos(v.vertex); o.uv = v.texcoord.xy; TRANSFER_SHADOW(o); UNITY_TRANSFER_FOG(o, o.pos); return o; }
+            fixed4 frag(v2f i) : SV_Target
+            {
+                fixed4 color = tex2D(_MainTex, i.uv);
+                color.rgb *= 1 - _Formula9ShadowDarkness * (1 - SHADOW_ATTENUATION(i));
+                UNITY_APPLY_FOG(i.fogCoord, color);
+                return color;
+            }
             ENDCG
         }
+        // So the ground is in the depth the sun's shadows are worked out against
+        UsePass "Legacy Shaders/VertexLit/SHADOWCASTER"
     }
 }
