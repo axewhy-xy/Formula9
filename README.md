@@ -270,29 +270,41 @@ All seven remaining Qt client workflows are available in Unity. The workspace ta
 the world view are **Fleet**, **Route planning**, **Charging** and **Reports**. Incidents are
 decided on Route planning, and reviewed in Reports.
 
-- **Route planning:** before the start, the exercise runs Problem, Detour, Check, Approve, Outcome. The map shows
+- **Route planning:** the page has two tabs, **Exercise** and **Fleet table**. Without a joined session it
+  asks you to join one, and a session without shuttles asks you to add one. The exercise's cards are numbered
+  steps down a line: the current step's circle is filled in and finished steps are ticked. Before the start,
+  the exercise runs Problem, Detour, Check, Approve, Outcome. The map shows
   the closure and every road of the operating network. Click roads to send the shuttle along
   them; the backend plans the loop through them and the stops, and each change is checked
   straight away. A failed check says why in plain words and highlights the road (**Show** brings
   it into view). A road with no recorded width or headroom can't be cleared, so it blocks
   approval. Time, energy, distance, stop coverage and loops on charge are shown against the closed
-  route. Click a pin or use ×, Undo, Redo or Clear to change the proposal; **Suggest a detour**
+  route. Click a pin or use ×, Undo, Redo or Clear to change the proposal; **Suggest detour**
   asks for the scenario's own way round. Give a reason and approve for every assigned shuttle.
   **Start and watch in 3D** then follows the shuttle as it drives that exact geometry, and
   **What happened** reports the stops served, each loop's measured time and energy, and whether
-  service was preserved. A revision, closure, epoch or draft change requires a fresh check.
-  The map data has no turn restrictions, so U-turns are the only turns refused.
+  service was preserved. With no problem and nothing to report yet, that card keeps only its
+  **Start and watch in 3D**, **Watch in 3D** and **Cameras** buttons. A revision, closure, epoch or
+  draft change requires a fresh check. The map data has no turn restrictions, so U-turns are the
+  only turns refused.
+  The **Fleet table** lists each shuttle's state, route and battery. The route reads as its ID followed by
+  **original**, or by how many times it has been edited. A shuttle sent round an incident shows
+  **Detour round** and the incident, or **Incident detour** once that incident has gone.
 - **Charging:** review battery state, reserve forecasts, charger occupancy and offered
   consequences. Select a passing, unexpired option, enter a reason, then use
   **Reserve / Continue service**. The backend applies the decision and determines all motion
   and energy consequences.
 - **Incidents:** an incident a shuttle will reach shows a notification over the map. **Decide**
-  opens Route planning on that shuttle, where **Needs a decision** lists every shuttle waiting,
-  soonest first. The Problem card says what and where the incident is, when the shuttle reaches it
-  and what keeping its route costs. Choose **Keep route**, **Hold at a stop**, **Request
-  assistance** or **Re-route on the map**, give a reason and confirm; Re-route opens the route
-  editor for that shuttle. An option the backend doesn't offer is greyed out with the reason, and
-  all of them wait while the session is paused.
+  opens Route planning on that shuttle. A strip at the top lists every shuttle waiting, soonest first,
+  as "Shuttle 05 needs a decision (1) · ~2 s". The Problem card says what and where the incident
+  is and when the shuttle reaches it. The question under it shows when the backend next refreshes
+  the options. Choose **Keep route** (with what keeping the route costs), **Hold at a stop**,
+  **Request assistance** or **Re-route on the map**. Any option but Re-route opens a confirm card:
+  give a reason and confirm. Re-route opens the route editor for that shuttle. An option the backend
+  doesn't offer is greyed out with the reason, and all of them wait while the session is paused.
+  There is no Back button: press the chosen option again to close its confirm card, even while the
+  others are greyed out. Pressing **Re-route on the map** again leaves the editor. If a route has
+  been drawn or suggested, the first press shows a note and a second press drops the route.
 - **Reports:** inspect the latest 1,000 events and 200 commands observed in the selected
   session by this running client, including pending confirmation, refusal and final status.
   Search each tab by IDs, event type, target, status or failure code; every search word must
