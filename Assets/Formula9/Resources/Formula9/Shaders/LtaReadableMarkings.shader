@@ -5,7 +5,7 @@ Shader "Formula9/LtaReadableMarkings"
         Tags { "Queue"="Transparent-50" "RenderType"="Transparent" }
         Pass
         {
-            Cull Off ZWrite Off ZTest LEqual Offset -2,-2
+            Cull Off ZWrite Off ZTest LEqual Offset -2,-4
             Blend SrcAlpha OneMinusSrcAlpha
             CGPROGRAM
             #pragma vertex vert
@@ -13,7 +13,7 @@ Shader "Formula9/LtaReadableMarkings"
             #pragma target 3.0
             #include "UnityCG.cginc"
             struct Input { float4 vertex:POSITION; float4 shape:TEXCOORD0; float4 placement:TEXCOORD1; };
-            struct Output { float4 pos:SV_POSITION; float2 uv:TEXCOORD0; float2 halfSize:TEXCOORD1; float kind:TEXCOORD2; };
+            struct Output { float4 pos:SV_POSITION; float2 uv:TEXCOORD0; float2 halfSize:TEXCOORD1; float kind:TEXCOORD2; float2 metres:TEXCOORD3; };
             Output vert(Input v)
             {
                 Output o;
@@ -27,19 +27,25 @@ Shader "Formula9/LtaReadableMarkings"
                 float3 dr = side.xyz/max(side.w,.0001)-ndc;
                 float2 fp = df.xy*_ScreenParams.xy*.5;
                 float2 rp = dr.xy*_ScreenParams.xy*.5;
-                float2 along = fp/max(.00001,length(fp));
+                // Preserve an arrow's width when its heading points into the camera.
+                float2 along = length(fp) > .05
+                    ? normalize(fp)
+                    : (length(rp) > .05 ? normalize(float2(-rp.y,rp.x)) : float2(0,1));
                 float2 across = float2(along.y,-along.x);
                 across *= dot(across,rp)<0 ? -1 : 1;
                 o.kind = v.shape.z;
                 float2 minimum = float2(14,18);
                 o.halfSize = .5*max(minimum,v.placement.zw*float2(length(rp),length(fp)));
                 o.uv = v.shape.xy;
+                float2 local = v.vertex.xz + r * o.uv.x * v.placement.z * .5
+                    + f * o.uv.y * v.placement.w * .5;
+                o.metres = mul(unity_ObjectToWorld, float4(local.x, v.vertex.y, local.y, 1)).xz;
                 float2 delta = across*o.uv.x*o.halfSize.x + along*o.uv.y*o.halfSize.y;
                 o.pos = anchor;
                 o.pos.xy += delta*2/_ScreenParams.xy*anchor.w;
                 // Interpolate the pavement plane's depth across the enlarged screen quad.
                 float det = rp.x*fp.y-rp.y*fp.x;
-                if (abs(det) > .000001)
+                if (abs(det) > .05 * max(.001, length(fp) * length(rp)))
                     o.pos.z += ((delta.x*fp.y-delta.y*fp.x)*dr.z +
                         (rp.x*delta.y-rp.y*delta.x)*df.z)*anchor.w/det;
                 if (anchor.w <= 0) o.pos = float4(2,2,2,1);
@@ -82,13 +88,24 @@ Shader "Formula9/LtaReadableMarkings"
                 if (k==0 || k==2 || k==5 || k==8) d=min(d,branch(p,s,1));
                 return d;
             }
+            // World-space variation fades out as the grain becomes smaller than a pixel.
+            float PaintWear(float2 metres)
+            {
+                float footprint = max(length(ddx(metres)), length(ddy(metres)));
+                float2 patch = metres * 9.0;
+                float grain = sin(dot(patch, float2(1.37, 2.11))) *
+                    sin(dot(patch, float2(-2.43, 1.19)));
+                return (1.0 - smoothstep(.025, .16, footprint)) *
+                    smoothstep(.15, .85, grain);
+            }
+
             fixed4 frag(Output i):SV_Target
             {
                 float d=symbolDistance(i.uv,i.halfSize,(int)(i.kind+.5));
                 float ink=1-smoothstep(.55,1.22,d);
-                float halo=1-smoothstep(1.15,1.85,d);
-                float3 colour=float3(.98,.98,.95);
-                return fixed4(lerp(float3(.14,.14,.14),colour,ink),max(ink,.58*halo));
+                float wear = PaintWear(i.metres);
+                float3 colour = float3(.91,.91,.87) * (1.0 - .12 * wear);
+                return fixed4(colour, ink * (.98 - .18 * wear));
             }
             ENDCG
         }

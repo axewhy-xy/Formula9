@@ -21,7 +21,7 @@ namespace Formula9.World
                 int start = Positions.Count;
                 for (int i = 0; i < 4; i++)
                 {
-                    Positions.Add(new Vector3(at.x, RoadMesh.SurfaceY + .03f, at.y));
+                    Positions.Add(new Vector3(at.x, RoadMesh.SurfaceY + .05f, at.y));
                     Shape.Add(new Vector4(i == 0 || i == 3 ? -1 : 1, i < 2 ? -1 : 1, kind, 0));
                     Placement.Add(new Vector4(heading.x, heading.y, width, length));
                 }

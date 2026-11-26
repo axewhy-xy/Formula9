@@ -36,6 +36,9 @@ namespace Formula9.World
                         if (!drawMarking)
                             continue;
 
+                        if (group.Key == "S")
+                            builder.AlignBusBay(path);
+
                         if (group.Key == "N")
                         {
                             builder.DrawPath(path, 0.20f, PaintColour.Yellow);

@@ -296,7 +296,7 @@ namespace Formula9.World
                 const string roadTextureFolder = "Formula9/Textures/";
                 var asphaltColorMap = LoadRoadTexture(roadTextureFolder + "asphalt_02", TextureWrapMode.Mirror);
                 if (asphaltColorMap != null) asphaltColorMap.anisoLevel = 16;
-                var textureShader = Shader.Find("Formula9/CityRoadTexture");
+                var textureShader = Resources.Load<Shader>("Formula9/CityRoadTextureStencil");
                 bool hasTextureShader = textureShader != null && textureShader.isSupported;
                 bool useAsphaltMaps = asphaltColorMap != null;
                 var atlas = !useAsphaltMaps ? LoadRoadTexture(roadTextureFolder + "road_lane_texture") : null;
@@ -350,6 +350,14 @@ namespace Formula9.World
                 materials[RoadMesh.GreenMedianLayer] = Own(new Material(surface)
                     { name = "Planted road medians", color = new Color(0.31f, 0.36f, 0.25f), mainTexture = grain });
                 materials[RoadMesh.KerbLayer].renderQueue = (int)RenderQueue.Geometry + 1;
+                // The original special paint tests the asphalt stencil bit.
+                if (!hasTextureShader)
+                {
+                    var asphalt = materials[RoadMesh.AsphaltLayer];
+                    asphalt.SetInt("_StencilRef", 1);
+                    asphalt.SetInt("_StencilPass", (int)StencilOp.Replace);
+                    asphalt.SetInt("_StencilWriteMask", 1);
+                }
                 materials[RoadMesh.AsphaltLayer].renderQueue = (int)RenderQueue.Geometry + 2;
 
                 var road = new GameObject("Roads", typeof(MeshFilter), typeof(MeshRenderer));
@@ -383,67 +391,7 @@ namespace Formula9.World
                 // file is large and nothing waits on them: poles and shelters are lifted when they come.
                 sidewalksLoading = LoadSidewalksAsync(client, area, surface, grain, cancellation);
 
-                // The LTA dataset contributes special paint ONLY. Standard lane
-                // separators and edges are sampled from the user-supplied road texture.
-                LtaMappedRoadPaint.Result mappedPaint = null;
-                if (string.Equals(area, "toa-payoh", StringComparison.OrdinalIgnoreCase))
-                {
-                    try
-                    {
-                        mappedPaint = LtaMappedRoadPaint.Build(roads);
-                        var paintRoot = new GameObject("LTA special crossings, arrows, yellow boxes (3D)").transform;
-                        paintRoot.SetParent(root, false);
-                        var paintMaterials = new Dictionary<LtaMappedRoadPaint.PaintColour, Material>();
-                        foreach (var (kind, color) in new[]
-                        {
-                            (LtaMappedRoadPaint.PaintColour.White, new Color(1f, 1f, .97f)),
-                            (LtaMappedRoadPaint.PaintColour.Yellow, new Color(1f, .88f, .03f)),
-                            (LtaMappedRoadPaint.PaintColour.Red, new Color(.80f, .16f, .18f)),
-                        })
-                        {
-                            var mat = Own(new Material(surface)
-                            {
-                                name = "LTA special paint " + kind,
-                                color = color,
-                                mainTexture = Texture2D.whiteTexture,
-                                renderQueue = (int)RenderQueue.Geometry + 10
-                            });
-                            mat.SetInt("_StencilRef", 1);
-                            mat.SetInt("_StencilComp", (int)CompareFunction.Equal);
-                            mat.SetInt("_StencilPass", (int)StencilOp.Keep);
-                            mat.SetInt("_StencilWriteMask", 0);
-                            mat.SetInt("_ZWrite", 0);
-                            paintMaterials.Add(kind, mat);
-                        }
-                        foreach (var piece in mappedPaint.Meshes)
-                        {
-                            Own(piece.Mesh);
-                            var obj = new GameObject(piece.Mesh.name, typeof(MeshFilter), typeof(MeshRenderer));
-                            obj.transform.SetParent(paintRoot, false);
-                            obj.GetComponent<MeshFilter>().sharedMesh = piece.Mesh;
-                            var visual = obj.GetComponent<MeshRenderer>();
-                            visual.sharedMaterial = paintMaterials[piece.Colour];
-                            visual.shadowCastingMode = ShadowCastingMode.Off;
-                            visual.receiveShadows = false;
-                        }
-                        Debug.Log($"[CityView] LTA special paint: " +
-                            $"{mappedPaint.YellowBoxLineFeatures} yellow box paths, " +
-                            $"{mappedPaint.GroundStopLineFeatures} transverse stop/edge features, " +
-                            $"{mappedPaint.GroundArrowFeatures} mapped arrows, " +
-                            $"{mappedPaint.ZebraCrossings} zebra crossings and " +
-                            $"{mappedPaint.SignalCrossings} signal crossings.");
-                    }
-                    catch (Exception error)
-                    {
-                        Debug.LogWarning("[CityView] LTA special paint unavailable: " + error.Message +
-                            ". Textured standard lane markings will still render.");
-                    }
-                }
-
-                // No secondary generated lane-line mesh. Ordinary solid edges and
-                // dashed boundaries are now sampled directly from road_lane_texture.
-                // LTA paint above remains separate for crossings, arrows and boxes.
-                Debug.Log("[CityView] Textured lane markings enabled using Resources/Formula9/Textures/road_lane_texture.");
+                await LoadRoadMarkingsAsync(area, renderer, surface, cancellation);
 
             }
             catch (Exception error) when (!(error is OperationCanceledException))

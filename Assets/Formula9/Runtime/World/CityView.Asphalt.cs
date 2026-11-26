@@ -13,7 +13,11 @@ namespace Formula9.World
         private async Task<bool> LoadRoadMarkingsAsync(string area, MeshRenderer roadRenderer, Shader shader, CancellationToken cancellation)
         {
             var asset = Resources.Load<TextAsset>($"Formula9/RoadData/{area}-city-map");
-            if (asset == null) return false;
+            if (asset == null)
+            {
+                Debug.LogWarning($"[CityView] LTA paint overlay missing Resources/Formula9/RoadData/{area}-city-map.json.");
+                return false;
+            }
 
             var meshes = new List<Mesh>();
             GameObject holder = null;
@@ -81,6 +85,9 @@ namespace Formula9.World
                 holder = new GameObject("LTA paint over original roads");
                 holder.transform.SetParent(root, false);
                 var originalAsphalt = roadRenderer.sharedMaterials[RoadMesh.AsphaltLayer];
+                var roadMesh = roadRenderer.GetComponent<MeshFilter>().sharedMesh;
+                var roadVertices = roadMesh.vertices;
+                var asphalt = roadMesh.GetTriangles(RoadMesh.AsphaltLayer);
                 int built = 0;
                 var clock = System.Diagnostics.Stopwatch.StartNew();
                 foreach (var record in indexed.Tiles)
@@ -92,31 +99,36 @@ namespace Formula9.World
                     var center = new Vector2((float)origin[0], (float)origin[1]);
                     var key = new Vector2Int(Mathf.FloorToInt(center.x / indexed.Size),
                         Mathf.FloorToInt(center.y / indexed.Size));
-                    if (!(tile["vertices_m"] is JArray footprint) || !(tile["triangles"] is JArray indices) ||
-                        indices.Count % 3 != 0)
-                        throw new FormatException("Invalid preview road footprint.");
-                    bool hasRoad = indices.Count > 0;
-                    if (!hasRoad) continue;
                     var child = new GameObject($"Road details {key.x}, {key.y}");
                     child.transform.SetParent(holder.transform, false);
                     child.transform.localPosition = new Vector3(center.x, 0f, center.y);
-                    bool painted = false;
-                    if (hasRoad)
+                    float half = indexed.Size * .5f;
+                    var points = new List<Vector3>();
+                    var triangles = new List<int>();
+                    for (int i = 0; i < asphalt.Length; i += 3)
                     {
-                        var half = indexed.Size * .5f;
-                        // The preview offsets the surveyed vertices before converting them to floats.
-                        var points = new Vector3[footprint.Count];
-                        for (int i = 0; i < points.Length; i++)
-                        {
-                            if (!(footprint[i] is JArray xy) || xy.Count != 2)
-                                throw new FormatException("Invalid road vertex.");
-                            points[i] = new Vector3((float)((double)xy[0] - center.x), RoadMesh.SurfaceY,
-                                (float)((double)xy[1] - center.y));
-                        }
-                        var triangles = indices.ToObject<List<int>>();
-                        foreach (int index in triangles)
-                            if (index < 0 || index >= points.Length) throw new FormatException("Invalid road triangle.");
-                        var builder = new LtaCityRoadPaint.PaintMeshBuilder(points, triangles, Vector2.zero, half, useCoverage)
+                        var a = roadVertices[asphalt[i]];
+                        var b = roadVertices[asphalt[i + 1]];
+                        var c = roadVertices[asphalt[i + 2]];
+                        if (Mathf.Min(a.x, Mathf.Min(b.x, c.x)) > center.x + half ||
+                            Mathf.Max(a.x, Mathf.Max(b.x, c.x)) < center.x - half ||
+                            Mathf.Min(a.z, Mathf.Min(b.z, c.z)) > center.y + half ||
+                            Mathf.Max(a.z, Mathf.Max(b.z, c.z)) < center.y - half)
+                            continue;
+                        var offset = new Vector3(center.x, 0, center.y);
+                        triangles.Add(points.Count);
+                        triangles.Add(points.Count + 1);
+                        triangles.Add(points.Count + 2);
+                        points.Add(a - offset);
+                        points.Add(b - offset);
+                        points.Add(c - offset);
+                    }
+                    bool painted = false;
+                    // The mesh is placement context. Survey paint can cross gaps in it.
+                    if (tile["markings"] != null)
+                    {
+                        var builder = new LtaCityRoadPaint.PaintMeshBuilder(
+                            points.ToArray(), triangles, Vector2.zero, half, useCoverage)
                             { DrawArrowsAsSymbols = symbols != null };
                         painted = child.AddComponent<LtaCityRoadPaint>().Build(tile, white, yellow, half, builder, meshes.Add);
                         if (painted) built++;
@@ -130,21 +142,41 @@ namespace Formula9.World
                 }
                 cancellation.ThrowIfCancellationRequested();
                 if (disposed) throw new OperationCanceledException();
-                if (built == 0) return false;
+                if (built == 0)
+                {
+                    Debug.LogWarning($"[CityView] LTA paint overlay generated zero meshes from {indexed.Tiles.Count} tiles.");
+                    return false;
+                }
                 if (symbols != null)
                 {
                     LtaOverviewSymbols.Build(indexed.Tiles, holder.transform, symbols, meshes.Add);
                 }
-                if (originalAsphalt.HasProperty("_MappedPaintReady"))
-                    originalAsphalt.SetFloat("_MappedPaintReady", 1f);
+                if (originalAsphalt.HasProperty("_SurveyPaintMask"))
+                {
+                    var maskAsset = Resources.Load<TextAsset>($"Formula9/RoadData/{area}-centre-divider-mask");
+                    if (maskAsset != null)
+                    {
+                        var mask = Own(new Texture2D(2, 2, TextureFormat.RGBA32, false, true)
+                        {
+                            name = "LTA surveyed paint coverage",
+                            wrapMode = TextureWrapMode.Clamp,
+                            filterMode = FilterMode.Bilinear
+                        });
+                        if (!mask.LoadImage(maskAsset.bytes, true))
+                            throw new FormatException("Invalid LTA paint coverage image.");
+                        originalAsphalt.SetTexture("_SurveyPaintMask", mask);
+                        originalAsphalt.SetVector("_SurveyMaskBounds",
+                            new Vector4(2025.160000f, -2886.280000f, 0.0004081966f, 0.0005020080f));
+                    }
+                }
                 owned.AddRange(meshes);
                 committed = true;
-                Debug.Log($"[CityView] LTA paint over original asphalt on {built} tiles.");
+                Debug.Log($"[CityView] LTA paint overlay loaded on {built} tiles.");
                 return true;
             }
             catch (Exception error) when (!(error is OperationCanceledException))
             {
-                Debug.LogWarning($"[CityView] Using the original road markings: {error.Message}");
+                Debug.LogWarning($"[CityView] LTA paint overlay failed: {error}");
                 return false;
             }
             finally

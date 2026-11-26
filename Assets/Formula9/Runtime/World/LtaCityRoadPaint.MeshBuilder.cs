@@ -25,6 +25,8 @@ namespace Formula9.World
             private readonly float height;
             public Rect Bounds { get; }
 
+            private readonly List<(Vector2 A, Vector2 B)> pavementEdges = new List<(Vector2, Vector2)>();
+
             internal bool DrawArrowsAsSymbols { get; set; }
             internal bool CompactPaintEnvelope { get; set; }
             internal bool HasPaint => indices[0].Count > 0 || indices[1].Count > 0;
@@ -32,9 +34,9 @@ namespace Formula9.World
             internal PaintMeshBuilder(Vector3[] points, List<int> triangles, Vector2 origin, float halfTile, bool useCoverage)
             {
                 this.useCoverage = useCoverage;
-                height = RoadMesh.SurfaceY + 0.015f;
+                height = RoadMesh.SurfaceY + 0.045f;
                 Bounds = Rect.MinMaxRect(-halfTile, -halfTile, halfTile, halfTile);
-                var edgeCounts = new Dictionary<(int A, int B), int>();
+                var edgeCounts = new Dictionary<(Vector2 A, Vector2 B), int>();
                 for (int i = 0; i < triangles.Count; i += 3)
                 {
                     Vector2 a = (Xz(points[triangles[i]]) - origin), b = (Xz(points[triangles[i + 1]]) - origin);
@@ -53,17 +55,18 @@ namespace Formula9.World
                         indices.Add(road.Count);
                     }
                     road.Add(cover);
-                    CountEdge(triangles[i], triangles[i + 1]);
-                    CountEdge(triangles[i + 1], triangles[i + 2]);
-                    CountEdge(triangles[i + 2], triangles[i]);
+                    CountEdge(a, b);
+                    CountEdge(b, c);
+                    CountEdge(c, a);
                 }
                 foreach (var edge in edgeCounts)
                     if (edge.Value == 1)
-                        laneEdges.Add((Xz(points[edge.Key.A]) - origin, Xz(points[edge.Key.B]) - origin));
+                        pavementEdges.Add(edge.Key);
+                laneEdges.AddRange(pavementEdges);
 
-                void CountEdge(int a, int b)
+                void CountEdge(Vector2 a, Vector2 b)
                 {
-                    var key = a < b ? (a, b) : (b, a);
+                    var key = (a.x < b.x || (a.x == b.x && a.y < b.y)) ? (a, b) : (b, a);
                     edgeCounts.TryGetValue(key, out int count);
                     edgeCounts[key] = count + 1;
                 }
@@ -88,6 +91,50 @@ namespace Formula9.World
                         foreach (int index in indices)
                             if (visited.Add(index))
                                 yield return road[index];
+            }
+
+            internal void AlignBusBay(Vector2[] path)
+            {
+                // The first and last points are where the surveyed bay returns meet the curb.
+                // Align that opening to the road edge as a unit, keeping the surveyed bay shape.
+                if (path.Length < 4) return;
+                Vector2 start = path[0];
+                Vector2 end = path[path.Length - 1];
+                Vector2 opening = end - start;
+                if (opening.sqrMagnitude < 36f) return;
+                Vector2 direction = opening.normalized;
+                Vector2 midpoint = (start + end) * .5f;
+                float bestDistance = .75f;
+                Vector2 bestDirection = direction;
+                Vector2 correction = Vector2.zero;
+
+                foreach (var edge in pavementEdges)
+                {
+                    Vector2 delta = edge.B - edge.A;
+                    if (delta.sqrMagnitude < .25f) continue;
+                    Vector2 tangent = delta.normalized;
+                    float alignment = Vector2.Dot(tangent, direction);
+                    if (Mathf.Abs(alignment) < .978f) continue;
+                    float fraction = Vector2.Dot(midpoint - edge.A, delta) / delta.sqrMagnitude;
+                    if (fraction < 0f || fraction > 1f) continue;
+                    Vector2 shift = edge.A + fraction * delta - midpoint;
+                    float distance = shift.magnitude;
+                    if (distance >= bestDistance) continue;
+                    bestDistance = distance;
+                    correction = shift;
+                    bestDirection = alignment < 0f ? -tangent : tangent;
+                }
+
+                if (bestDistance >= .75f) return;
+                float cosine = Vector2.Dot(direction, bestDirection);
+                float sine = Cross(direction, bestDirection);
+                for (int i = 0; i < path.Length; i++)
+                {
+                    Vector2 point = path[i] - midpoint;
+                    path[i] = midpoint + correction + new Vector2(
+                        cosine * point.x - sine * point.y,
+                        sine * point.x + cosine * point.y);
+                }
             }
 
             public void AddLaneBoundary(IReadOnlyList<Vector2> path)
@@ -182,52 +229,46 @@ namespace Formula9.World
                 }
                 if (avoidCrossings)
                     DrawOutsideCrossings(shape, colour, 0, edges);
-                else EmitOnRoad(shape, colour, edges);
+                else EmitSurveyPaint(shape, colour, edges);
             }
 
-            private void EmitOnRoad(IReadOnlyList<Vector2> shape, PaintColour colour, PaintEdges edges)
+            private void EmitSurveyPaint(IReadOnlyList<Vector2> shape, PaintColour colour, PaintEdges edges)
             {
                 Rect bounds = BoundsOf(shape);
                 if (!bounds.Overlaps(Bounds)) return;
-                var first = new List<Vector2>(8);
-                var second = new List<Vector2>(8);
-                foreach (RoadTriangle cover in NearbyTriangles(bounds))
+                // Clip only at tile seams so each tile draws its own part of a surveyed path.
+                IReadOnlyList<Vector2> clipped = shape;
+                if (!Bounds.Contains(bounds.min) || !Bounds.Contains(bounds.max))
                 {
-                    if (!bounds.Overlaps(cover.Bounds))
-                        continue;
-                    ClipToRoadTriangle(shape, cover, first, second);
-                    // An asphalt triangle can straddle tiles. Each tile owns just its
-                    // rectangle even when both tiles receive the same marking record.
-                    if (!Bounds.Contains(bounds.min) || !Bounds.Contains(bounds.max))
-                    {
-                        var sw = Bounds.min;
-                        var ne = Bounds.max;
-                        var se = new Vector2(ne.x, sw.y);
-                        var nw = new Vector2(sw.x, ne.y);
-                        Clip(second, first, sw, se);
-                        Clip(first, second, se, ne);
-                        Clip(second, first, ne, nw);
-                        Clip(first, second, nw, sw);
-                    }
-                    if (second.Count < 3)
-                        continue;
+                    var first = new List<Vector2>(8);
+                    var second = new List<Vector2>(8);
+                    var sw = Bounds.min;
+                    var ne = Bounds.max;
+                    var se = new Vector2(ne.x, sw.y);
+                    var nw = new Vector2(sw.x, ne.y);
+                    Clip(shape, first, sw, se);
+                    Clip(first, second, se, ne);
+                    Clip(second, first, ne, nw);
+                    Clip(first, second, nw, sw);
+                    clipped = second;
+                }
+                if (clipped.Count < 3) return;
 
-                    int vertex = vertices.Count;
-                    foreach (Vector2 p in second)
-                    {
-                        vertices.Add(new Vector3(p.x, height, p.y));
-                        if (useCoverage) edgeDistances.Add(edges.At(p));
-                    }
-                    List<int> material = indices[(int)colour];
-                    for (int i = 1; i + 1 < second.Count; i++)
-                    {
-                        float turn = Cross(second[i] - second[0], second[i + 1] - second[0]);
-                        if (Mathf.Abs(turn) <= MinArea)
-                            continue;
-                        material.Add(vertex);
-                        material.Add(vertex + (turn < 0 ? i : i + 1));
-                        material.Add(vertex + (turn < 0 ? i + 1 : i));
-                    }
+                int vertex = vertices.Count;
+                foreach (Vector2 p in clipped)
+                {
+                    vertices.Add(new Vector3(p.x, height, p.y));
+                    if (useCoverage) edgeDistances.Add(edges.At(p));
+                }
+                List<int> material = indices[(int)colour];
+                for (int i = 1; i + 1 < clipped.Count; i++)
+                {
+                    float turn = Cross(clipped[i] - clipped[0], clipped[i + 1] - clipped[0]);
+                    if (Mathf.Abs(turn) <= MinArea)
+                        continue;
+                    material.Add(vertex);
+                    material.Add(vertex + (turn < 0 ? i : i + 1));
+                    material.Add(vertex + (turn < 0 ? i + 1 : i));
                 }
             }
 
@@ -261,7 +302,7 @@ namespace Formula9.World
                     }
                     return;
                 }
-                EmitOnRoad(shape, colour, edges);
+                EmitSurveyPaint(shape, colour, edges);
             }
 
             private bool FitsAsphalt(List<Vector2[]> shapes, Vector2 offset)
@@ -321,7 +362,7 @@ namespace Formula9.World
                 return mesh;
             }
 
-            private static void Clip(List<Vector2> input, List<Vector2> output, Vector2 a, Vector2 b)
+            private static void Clip(IReadOnlyList<Vector2> input, List<Vector2> output, Vector2 a, Vector2 b)
             {
                 output.Clear();
                 if (input.Count == 0)
