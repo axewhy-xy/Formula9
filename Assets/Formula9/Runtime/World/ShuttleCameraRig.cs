@@ -3,7 +3,7 @@
  *
  * Author: Choo Jian Wei
  * Date Created: 10/11/2026
- * Last Modified: 10/11/2026
+ * Last Modified: 26/11/2026
  *
  * Description:
  *     Mounts four cameras on the selected shuttle, the way real AV shuttles
@@ -46,7 +46,7 @@ namespace Formula9.World
         };
         // The camera shown large draws into one image the size of the view it fills (SetLargeSize),
         // so it is never stretched and blurred and a wider view shows more to the sides; the
-        // thumbnails, shown at 160x90, draw into small ones. Edges are smoothed (MSAA).
+        // thumbnails, shown at 192x108, draw into small ones. Edges are smoothed (MSAA).
         private const int SmallWidth = 320, SmallHeight = 180, Antialiasing = 4, MaxLargeWidth = 1920;
         private int largeWidth = 960, largeHeight = 540;
         // One camera and one small image per mount, in the same order as Mounts, and the large
@@ -137,6 +137,9 @@ namespace Formula9.World
         public RenderTexture Thumbnail(int i) => i == main ? large : textures[i];
         // The name of camera i, for its label in the panel.
         public string NameOf(int i) => Mounts[i].Name;
+        // Whether the thumbnails draw. While the panel's thumbnails are folded away nobody sees
+        // them, so only the camera shown large draws.
+        public bool Thumbnails { get; set; } = true;
 
         // -----------------------------------------------------------------------------------
         // Function: SetMain
@@ -255,14 +258,15 @@ namespace Formula9.World
         //     This function picks which cameras draw this frame. The one shown large draws every
         //     frame, so it moves smoothly; the thumbnails take turns, one a frame, so the view
         //     costs two cameras instead of four. At 60 frames a second each thumbnail still
-        //     refreshes twenty times a second. It does nothing while the cameras are off.
+        //     refreshes twenty times a second. With the thumbnails folded away (Thumbnails false)
+        //     only the large one draws. It does nothing while the cameras are off.
         public void Tick()
         {
             if (!active) return;
             // The large camera draws anyway, so its turn as a thumbnail goes to the next one
             if (next == main) next = (next + 1) % cameras.Length;
             for (var i = 0; i < cameras.Length; i++)
-                cameras[i].enabled = i == main || i == next;
+                cameras[i].enabled = i == main || (Thumbnails && i == next);
             next = (next + 1) % cameras.Length;
         }
 

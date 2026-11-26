@@ -552,7 +552,7 @@ class TrainingStore:
                       *, actor_id: str | None = None) -> list[dict]:
         visible, parameters = self._visible_sessions(actor_id)
         rows = connection.execute(
-            "SELECT s.session_id, s.scenario_revision_id, s.status, a.trainee_id,"
+            "SELECT s.session_id, s.name, s.scenario_revision_id, s.status, a.trainee_id,"
             f" {_OCCUPIES_CAPACITY} AS occupies_capacity FROM sessions s LEFT JOIN session_assessments a USING(session_id)"
             + visible +
             " ORDER BY occupies_capacity DESC, s.rowid DESC LIMIT ? OFFSET ?",
@@ -668,7 +668,7 @@ class TrainingStore:
 
     def create_session(self, snapshot: FullSnapshot, *, runtime_state: dict | None = None,
                        creation: tuple[str, str, str] | None = None,
-                       assessment_plan: AssessmentPlan | None = None) -> FullSnapshot:
+                       assessment_plan: AssessmentPlan | None = None, name: str | None = None) -> FullSnapshot:
         if assessment_plan is not None and creation is None:
             raise ValueError("Scored attempts require an authenticated creator")
         snapshot = FullSnapshot.model_validate(snapshot.model_dump(mode="json"))
@@ -676,6 +676,8 @@ class TrainingStore:
         def write(connection: sqlite3.Connection) -> FullSnapshot:
             connection.execute("BEGIN IMMEDIATE")
             encoded = self._write_snapshot(connection, snapshot, initial=True)
+            if name is not None:
+                connection.execute("UPDATE sessions SET name=? WHERE session_id=?", (name, snapshot.session_id))
             self._write_runtime(connection, snapshot.session_id, runtime)
             if creation is not None:
                 connection.execute("INSERT INTO session_creations VALUES (?, ?, ?, ?)", (*creation, snapshot.session_id))

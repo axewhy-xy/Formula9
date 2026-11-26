@@ -5,7 +5,7 @@
  * Contributors: Rishika (page layout, fleet cards, map/3D switch),
  *     Lau Xiang Yang (training workspace, session list and cleanup, exit)
  * Date Created: 30/10/2026
- * Last Modified: 23/11/2026
+ * Last Modified: 26/11/2026
  *
  * Description:
  *     Part of the Unity client's UI. Wires the UI Toolkit screens to the login and session layers,
@@ -55,7 +55,7 @@ namespace Formula9.UI
         private UiSounds uiSounds;
         // The root the greyed-out button sound listens on; the UIDocument may have dropped it by OnDisable
         private VisualElement listenedRoot;
-        private Button moreSessions, archiveAll, deleteSession, purgeSessions, reclaimDisk, dialogCancel, dialogConfirm;
+        private Button moreSessions, archiveAll, purgeSessions, reclaimDisk, dialogCancel, dialogConfirm;
         private VisualElement dialogOverlay;
         private Label dialogText;
         private Func<Task> dialogAction;
@@ -67,15 +67,20 @@ namespace Formula9.UI
         private Label fleetTitle;
         private Toggle remember;
         private Button viewMap, viewWorld;
+        private Button muteToggle;
         private const string RememberedUserKey = "login.rememberedUser";
-        private TextField username, password, confirm, sessionId;
+        private TextField username, password, confirm, sessionId, sessionName;
         private Label signUpHint, loginError, title, user, capacity, status, message, sessionBadge, worldNotice;
         private Label assessmentBadge, assessmentTimer;
+        // The note that pops up at the top and fades by itself (ShowToast), and its timers
+        private Label toast;
+        private IVisualElementScheduledItem toastFade, toastRemove;
+        private const long ToastShownMs = 2500;
         private string sessionBadgeClass;
         private readonly SessionStatusPresenter sessionStatusPresenter = new SessionStatusPresenter();
         private Button forgot, submit, modeSwitch, start, pause, resume, archive, refreshSessions;
-        private DropdownField sessions;
-        private Button createPractice, assessmentMode, quitAssessment;
+        private SessionPicker sessions;
+        private Button createPractice, assessmentMode, quitAssessment, joinById;
         private bool creatingSession;
 
         private string incidentHistorySessionId;
@@ -117,6 +122,8 @@ namespace Formula9.UI
             session.AvailabilityChanged += _ => Render(renderWorkspace: false);
             session.CommandFinished += outcome =>
             {
+                // The full outcome goes to the console; the screen only says what the operator needs
+                Debug.Log($"Command {outcome.CommandId} {outcome.Status} for {outcome.TargetId} at tick {outcome.AppliedTick?.ToString() ?? "unknown"}: {outcome.FailureCode ?? "no failure code"}");
                 ShowMessage(TrainingPresenter.Outcome(outcome));
                 if (outcome.Status == "APPLIED") Run(session.RefreshAsync());
                 // The closed road has to be routed around first, which happens on that page
@@ -141,6 +148,9 @@ namespace Formula9.UI
             world.transform.SetParent(transform, false);
             world.Attach(GetComponent<UIDocument>().rootVisualElement.Q("world"), new SceneLoader(transport),
                 MapTiles.FromEnvironment(transport), new TransitClient(transport), new CityClient(transport));
+            // The 2D Map / 3D View switch lives inside the map; Attach added the map's layers after
+            // it, so bring it back in front of them
+            GetComponent<UIDocument>().rootVisualElement.Q("view-bar")?.BringToFront();
             world.ReadinessChanged += (ready, diagnostic) => Render();
             world.EntitySelected += _ => { if (session.Store.Snapshot != null) RenderFleet(session.Store.Snapshot); };
             workspace = new TrainingWorkspace(GetComponent<UIDocument>().rootVisualElement, api, session, world, Run, text => ShowMessage(text));
@@ -156,7 +166,8 @@ namespace Formula9.UI
             // Incident alerts become notifications, one per shuttle and incident, each with a Decide
             // button. They pass the same gate as the sounds, so muting and replays behave alike. An
             // incident event the notifications don't take still says its headline on the message line.
-            var notifications = new NotificationQueue();
+            // A card says which shuttle its incident is slowing; only the 3D city knows the slowed roads
+            var notifications = new NotificationQueue { SlowedBy = id => world.IncidentSlowing(id) };
             var stack = new NotificationStack(rootElement.Q("notifications"), notifications,
                 (vehicle, incident) => workspace.DecideFor(vehicle, incident), () => workspace.ShowRoutePlanning());
             stack.Anchor(rootElement.Q("world"));
@@ -169,9 +180,19 @@ namespace Formula9.UI
                 if (headline != null) ShowMessage(headline);
             };
             var mute = new MuteSetting(new PlayerPreferences(), alerts);
-            var muteToggle = GetComponent<UIDocument>().rootVisualElement.Q<Toggle>("mute");
-            muteToggle.SetValueWithoutNotify(mute.Muted);
-            muteToggle.RegisterValueChangedCallback(change => mute.Muted = change.newValue);
+            // A bell while alert sounds are on, a bell with a slash while muted; a click switches
+            muteToggle = GetComponent<UIDocument>().rootVisualElement.Q<Button>("mute");
+            var muteIcon = muteToggle.Q<Glyph>();
+            void ShowMute()
+            {
+                muteIcon.Kind = mute.Muted ? GlyphKind.BellOff : GlyphKind.Bell;
+                muteToggle.tooltip = mute.Muted
+                    ? "Alert sounds are muted. Click to turn them back on."
+                    : "Alert sounds are on. Click to mute the sounds for incidents, low batteries and lost connections; the incident notifications over the map still appear.";
+            }
+            ShowMute();
+            muteToggle.clicked += () => { mute.Muted = !mute.Muted; ShowMute(); };
+            HoverTip.Attach(muteToggle);
             session.EventsAccepted += events => alerts.OnEvents(events, true);
             session.EventsAccepted += _ => { if (session.Store.Snapshot != null) world.SetIncidentEvents(session.Store.Events); };
             session.RecoveryEventsReceived += _ => { if (session.Store.Snapshot != null) world.SetIncidentEvents(session.Store.Events); };
@@ -210,6 +231,8 @@ namespace Formula9.UI
             world.RouteNodeSelected += _ => uiSounds.PointPicked();
             world.RoadClicked += (_, __) => uiSounds.PointPicked();
             world.ViewChanged += Render;
+            // Opening the cameras raises ViewChanged before they show, so the view bar is drawn again once they have
+            world.CamerasToggled += _ => Render();
 
             ShowLogin(null);
             StartCoroutine(Poll());
@@ -431,7 +454,8 @@ namespace Formula9.UI
             worldNotice = root.Q<Label>("world-notice");
             fleet = root.Q("fleet");
             sessionId = root.Q<TextField>("session-id");
-            sessions = root.Q<DropdownField>("sessions");
+            sessionName = root.Q<TextField>("session-name");
+            sessions = root.Q<SessionPicker>("sessions");
             createPractice = root.Q<Button>("create");
             assessmentMode = root.Q<Button>("assessment-mode");
             quitAssessment = root.Q<Button>("quit-assessment");
@@ -453,23 +477,30 @@ namespace Formula9.UI
             fleetSearch = root.Q<TextField>("fleet-search");
             fleetSearch.textEdition.placeholder = "Search shuttle…";
             fleetSearch.RegisterValueChangedCallback(_ => { if (session.Store.Snapshot != null) RenderFleet(session.Store.Snapshot); });
-            sessionId.textEdition.placeholder = "Session ID";
+            sessionId.textEdition.placeholder = "Paste a session ID";
             viewMap = root.Q<Button>("view-map");
             viewWorld = root.Q<Button>("view-world");
             viewMap.clicked += () => { world.ShowMap(true); Render(); };
             viewWorld.clicked += () =>
             {
+                var fromMap = world.ShowingMap;
                 world.ShowMap(false);
                 // Still on the map: this session has no 3D view, so say why instead of doing nothing
                 if (world.ShowingMap) ShowMessage(world.Diagnostic);
+                // Already in 3D, or watching cameras: back to the whole city, as Overview and the
+                // cameras' Close did before 3D View took their place
+                else if (!fromMap) world.Overview();
                 Render();
             };
 
-            sessions.RegisterValueChangedCallback(_ =>
+            sessions.Picked += _ =>
             {
                 RenderCleanup();
-                if (SelectedEntry != null) Run(Join(SelectedEntry.SessionId));
-            });
+                // Picking the session already joined changes nothing: rejoining it would drop its requests in flight
+                if (SelectedEntry != null && SelectedEntry.SessionId != session.SessionId) Run(Join(SelectedEntry.SessionId));
+            };
+            // Each session's trash icon in the list deletes that session, picked or not
+            sessions.DeleteRequested += index => { if (index >= 0 && index < listedSessions.Count) ConfirmDeleteSession(listedSessions[index]); };
             moreSessions = root.Q<Button>("more-sessions");
             moreSessions.clicked += () =>
             {
@@ -477,11 +508,11 @@ namespace Formula9.UI
                 Run(RefreshSessionList());
             };
             archiveAll = root.Q<Button>("archive-all");
-            deleteSession = root.Q<Button>("delete-session");
             purgeSessions = root.Q<Button>("purge-sessions");
             reclaimDisk = root.Q<Button>("reclaim-disk");
             archiveAll.clicked += ConfirmArchiveAll;
-            deleteSession.clicked += ConfirmDeleteSession;
+            // The session icons say what they do only in their tooltips, which the running app shows through HoverTip
+            foreach (var icon in new[] { refreshSessions, archiveAll, purgeSessions, reclaimDisk }) HoverTip.Attach(icon);
             purgeSessions.clicked += () => Run(ConfirmPurgeSessions());
             reclaimDisk.clicked += () => Run(Cleanup("Reclaiming disk space…", async () => TrainingPresenter.Reclaimed(await api.CompactSessionsAsync())));
             RenderCleanup();
@@ -492,11 +523,37 @@ namespace Formula9.UI
                 Run(authClient.LogOutAsync());
             };
             root.Q<Button>("exit-app").clicked += ConfirmExit;
-            createPractice.clicked += () => Run(Create(SessionController.IntegratedScenario));
-            assessmentMode.clicked += () => Run(Create(SessionController.ScoredScenario));
-            root.Q<Button>("join").clicked += () => Run(Join(sessionId.value.Trim()));
-            root.Q<Button>("refresh").clicked += () => Run(session.RefreshAsync());
-            refreshSessions.clicked += () => Run(RefreshSessionList());
+            // The name typed beside Create names the practice session; an assessment is listed by its ID
+            createPractice.clicked += () => Run(Create(SessionController.IntegratedScenario, sessionName.value));
+            assessmentMode.clicked += () => Run(Create(SessionController.ScoredScenario, null));
+            sessionName.RegisterCallback<KeyDownEvent>(e =>
+            {
+                if (e.keyCode != KeyCode.Return && e.keyCode != KeyCode.KeypadEnter) return;
+                e.StopPropagation();
+                Run(Create(SessionController.IntegratedScenario, sessionName.value));
+            }, TrickleDown.TrickleDown);
+            // Join by ID swaps the session list for the ID field; pressed again, or Enter in the field,
+            // joins. Leaving the field any other way brings the list back.
+            joinById = root.Q<Button>("join");
+            joinById.clicked += () =>
+            {
+                if (sessionId.style.display.value == DisplayStyle.None) { ShowSessionIdField(true); return; }
+                JoinTypedId();
+            };
+            sessionId.RegisterCallback<KeyDownEvent>(e =>
+            {
+                if (e.keyCode != KeyCode.Return && e.keyCode != KeyCode.KeypadEnter) return;
+                e.StopPropagation();
+                JoinTypedId();
+            }, TrickleDown.TrickleDown);
+            // Focus moving to Join by ID is a press of it, which joins: keep the field until then
+            sessionId.RegisterCallback<FocusOutEvent>(e => { if (e.relatedTarget != joinById) ShowSessionIdField(false); });
+            // One Refresh for the setup panel: the list, and the joined session if there is one
+            refreshSessions.clicked += () =>
+            {
+                Run(session.RefreshAsync());
+                Run(RefreshSessionList());
+            };
             start.clicked += () => Run(session.SendControlAsync("START"));
             pause.clicked += () => Run(session.SendControlAsync("PAUSE"));
             resume.clicked += () => Run(session.SendControlAsync("RESUME"));
@@ -509,10 +566,12 @@ namespace Formula9.UI
             clock.text = DateTime.Now.ToString("d MMM yyyy · HH:mm", CultureInfo.InvariantCulture);
             Render();
 
-            // Toggle the sidebar between full width and icons only
+            // Toggle the sidebar between full width and icons only. It starts as icons only, so the
+            // map gets the width; each icon's tooltip names its page.
             var toggleBtn = root.Q<Button>("nav-toggle-btn");
             var navPanel = root.Q("nav-panel");
-            bool isCollapsed = false;
+            bool isCollapsed = true;
+            navPanel?.EnableInClassList("collapsed", isCollapsed);
             toggleBtn.clicked += () =>
             {
                 isCollapsed = !isCollapsed;
@@ -643,11 +702,16 @@ namespace Formula9.UI
         // Description:
         //     This function creates a training session, showing progress meanwhile. The progress
         //     note goes once the attempt finishes; a failure has already replaced it with its own
-        //     message, which stays.
-        private async Task Create(string scenario)
+        //     message, which stays. The name box is emptied once the session is created.
+        //
+        // Args:
+        //     scenario (string): The scenario to create.
+        //     name (string): The session's name, or empty or null for none.
+        private async Task Create(string scenario, string name)
         {
             if (creatingSession || (session.CreationPending && session.PendingCreationScenario != scenario)) return;
             session.Scenario = scenario;
+            session.SessionName = name;
             var creating = scenario == SessionController.ScoredScenario ? "Creating an assessment…" : "Creating a training session…";
             creatingSession = true;
             RenderAssessment(session.Store.Snapshot);
@@ -656,6 +720,7 @@ namespace Formula9.UI
             {
                 await session.CreateAsync();
                 if (message.text == creating) ShowMessage("");
+                if (!session.CreationPending && !string.IsNullOrEmpty(name)) sessionName.SetValueWithoutNotify("");
             }
             finally
             {
@@ -681,19 +746,53 @@ namespace Formula9.UI
             return session.JoinAsync(id);
         }
 
+        // -----------------------------------------------------------------------------------
+        // Function: ShowSessionIdField
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function shows the session ID field in place of the session list, empty and
+        //     focused for a paste, or puts the list back.
+        //
+        // Args:
+        //     show (bool): True for the ID field, false for the list.
+        private void ShowSessionIdField(bool show)
+        {
+            sessions.style.display = show ? DisplayStyle.None : DisplayStyle.Flex;
+            sessionId.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
+            // Pressed in while the ID field is showing, as Create/join training session is while its panel is open
+            joinById.EnableInClassList("session-toggle-open", show);
+            if (!show) return;
+            sessionId.SetValueWithoutNotify("");
+            // Focused on the next frame: until the styles are applied the field still counts as hidden and refuses focus
+            sessionId.schedule.Execute(() => { if (sessionId.style.display.value == DisplayStyle.Flex) sessionId.Focus(); });
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: JoinTypedId
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function joins the session whose ID was pasted, then puts the list back. An
+        //     empty field just puts the list back.
+        private void JoinTypedId()
+        {
+            var id = sessionId.value.Trim();
+            ShowSessionIdField(false);
+            if (id.Length > 0) Run(Join(id));
+        }
+
         private SessionListEntry SelectedEntry =>
-            sessions.index >= 0 && sessions.index < listedSessions.Count ? listedSessions[sessions.index] : null;
+            sessions.Index >= 0 && sessions.Index < listedSessions.Count ? listedSessions[sessions.Index] : null;
 
         // -----------------------------------------------------------------------------------
         // Function: RenderCleanup
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function enables the cleanup buttons that apply: delete for a finished session,
-        //     purge, and reclaim disk space only when no session is live.
+        //     This function enables the cleanup buttons that apply: archive all while a session is
+        //     live, purge, and reclaim disk space only when no session is live. Each session's
+        //     trash icon is enabled when its list opens (see RefreshSessionList).
         private void RenderCleanup()
         {
             archiveAll.SetEnabled(!cleanupBusy && liveSessions > 0);
-            deleteSession.SetEnabled(!cleanupBusy && TrainingPresenter.CanDelete(SelectedEntry));
             purgeSessions.SetEnabled(!cleanupBusy);
             reclaimDisk.SetEnabled(!cleanupBusy && liveSessions == 0);
         }
@@ -718,12 +817,15 @@ namespace Formula9.UI
         // Function: ConfirmDeleteSession
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function asks before permanently deleting the selected session, and leaves it if
-        //     it is the joined one.
-        private void ConfirmDeleteSession()
+        //     This function asks before permanently deleting a session, and leaves it if it is the
+        //     joined one.
+        //
+        // Args:
+        //     entry (SessionListEntry): The session whose trash icon was clicked in the list.
+        private void ConfirmDeleteSession(SessionListEntry entry)
         {
-            var id = SelectedEntry?.SessionId;
-            if (id == null) return;
+            var id = entry?.SessionId;
+            if (id == null || cleanupBusy || !TrainingPresenter.CanDelete(entry)) return;
             Confirm($"Permanently delete session {id}? Its history is removed for everyone. This cannot be undone.", "Delete permanently", () => Cleanup(
                 $"Deleting session {id}…",
                 async () =>
@@ -857,7 +959,13 @@ namespace Formula9.UI
             cleanupBusy = true;
             RenderCleanup();
             ShowMessage(progress);
-            try { ShowMessage(await work()); }
+            // Done says so briefly at the top and goes; a failure stays in the message line to be read
+            try
+            {
+                var done = await work();
+                ShowMessage("");
+                ShowToast(done);
+            }
             catch (Exception error) when (!(error is NotLoggedInException))
             {
                 ShowMessage($"Cleanup did not finish: {error.Message} If no reply arrived it may still complete; refresh the list to check.");
@@ -878,17 +986,19 @@ namespace Formula9.UI
         //     selected, and updates the capacity line.
         private async Task RefreshSessionList()
         {
-            refreshSessions.text = "Loading…";
+            refreshSessions.AddToClassList("session-refresh-loading");
             try
             {
                 var list = await api.ListSessionsAsync(sessionListLimit);
                 listedSessions = list.Sessions;
                 liveSessions = list.LiveCount;
                 moreSessions.style.display = list.Sessions.Count < list.Total && sessionListLimit < MaxSessionListLimit ? DisplayStyle.Flex : DisplayStyle.None;
-                sessions.SetValueWithoutNotify(listedSessions.Count == 0 ? "No training sessions found" : "Select a session to join");
-                sessions.choices = listedSessions.Select(TrainingPresenter.SessionLabel).ToList();
-                var selected = listedSessions.FindIndex(s => s.SessionId == session.SessionId);
-                if (selected >= 0) sessions.SetValueWithoutNotify(sessions.choices[selected]);
+                // The list read when the picker opens, so a trash icon reflects the list and cleanup of that moment
+                var shownList = listedSessions;
+                sessions.SetChoices(shownList.Select(TrainingPresenter.SessionLabel),
+                    i => !cleanupBusy && i < shownList.Count && TrainingPresenter.CanDelete(shownList[i]));
+                sessions.Select(shownList.FindIndex(s => s.SessionId == session.SessionId),
+                    shownList.Count == 0 ? "No training sessions found" : "Select a session to join");
                 capacity.text = TrainingPresenter.Capacity(list);
             }
             catch (Exception error) when (!(error is NotLoggedInException))
@@ -898,7 +1008,7 @@ namespace Formula9.UI
             }
             finally
             {
-                refreshSessions.text = "Refresh list";
+                refreshSessions.RemoveFromClassList("session-refresh-loading");
                 RenderCleanup();
             }
         }
@@ -937,14 +1047,18 @@ namespace Formula9.UI
             pause.style.display = controls.PauseVisible ? DisplayStyle.Flex : DisplayStyle.None;
             resume.style.display = controls.ResumeVisible ? DisplayStyle.Flex : DisplayStyle.None;
             sessionPlayback.style.display = controls.PlaybackVisible ? DisplayStyle.Flex : DisplayStyle.None;
+            // Alerts only sound in a joined session, so the mute is offered only then
+            if (muteToggle != null) muteToggle.style.display = snapshot != null ? DisplayStyle.Flex : DisplayStyle.None;
             if (world != null)
             {
                 viewMap.EnableInClassList("segment-selected", world.ShowingMap);
-                viewWorld.EnableInClassList("segment-selected", !world.ShowingMap);
+                // While the cameras show, the Cameras segment is the one lit, not 3D View
+                viewWorld.EnableInClassList("segment-selected", !world.ShowingMap && !world.CamerasShown);
                 viewWorld.tooltip = world.Diagnostic;
                 // Only loading and failures are shown; the routine 3D summary stays in the tooltip
                 var notice = world.Notice ? world.Diagnostic : "";
                 if (worldNotice.text != notice) worldNotice.text = notice;
+                worldNotice.style.display = string.IsNullOrEmpty(notice) ? DisplayStyle.None : DisplayStyle.Flex;
             }
             start.SetEnabled(controls.Start);
             start.tooltip = controls.StartHint ?? "";
@@ -1075,19 +1189,27 @@ namespace Formula9.UI
                 fill.style.backgroundColor = BatteryWatch.IsRed(row.BatteryPercent) ? new Color(0.839f, 0.188f, 0.192f)
                     : row.BatteryPercent < 50 ? new Color(0.949f, 0.6f, 0.29f) : new Color(0.153f, 0.682f, 0.376f);
                 gauge.Add(fill);
-                battCol.Add(gauge);
+                // The percentage first, so it starts under the "Battery" heading; the gauge follows it
                 battCol.Add(new Label($"{row.BatteryPercent:0}%") { style = { fontSize = 11 } });
+                battCol.Add(gauge);
                 contentRow.Add(battCol);
 
-                // Route and next stop
+                // Next stop: just where the shuttle is heading; its route is on the map
                 var routeCol = Column("fleet-col-route");
-                routeCol.Add(CardLabel(row.RouteLine, "fleet-card-line"));
                 routeCol.Add(CardLabel(row.NextStop, "fleet-card-line"));
                 contentRow.Add(routeCol);
 
+                // Final stop: the last stop of the shuttle's route loop
+                var finalCol = Column("fleet-col-final");
+                finalCol.Add(CardLabel(row.FinalStop, "fleet-card-line"));
+                contentRow.Add(finalCol);
+
                 // ETA
                 var etaCol = Column("fleet-col-eta");
-                etaCol.Add(CardLabel(row.Eta, "fleet-card-line"));
+                // The duration alone; hovering it says it is the time to the next depot
+                var eta = CardLabel(row.Eta, "fleet-card-line");
+                eta.tooltip = row.EtaTarget;
+                etaCol.Add(eta);
                 contentRow.Add(etaCol);
 
                 // Incident
@@ -1194,8 +1316,45 @@ namespace Formula9.UI
         //     text (string): The message, or empty to hide it.
         private void ShowMessage(string text)
         {
-            message.text = text;
+            message.text = text ?? "";
             message.style.display = string.IsNullOrEmpty(text) ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: ShowToast
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function shows a short note at the top centre of the app that fades out by
+        //     itself after a few seconds, for news that needs no answer, such as a finished
+        //     deletion. A new note replaces one still showing. Without the app element (class
+        //     "app") it falls back to the message line.
+        //
+        // Args:
+        //     text (string): The note, or empty for none.
+        private void ShowToast(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            var host = message.parent;
+            while (host != null && !host.ClassListContains("app")) host = host.parent;
+            if (host == null)
+            {
+                ShowMessage(text);
+                return;
+            }
+            if (toast == null)
+            {
+                toast = new Label { pickingMode = PickingMode.Ignore };
+                toast.AddToClassList("toast");
+            }
+            toastFade?.Pause();
+            toastRemove?.Pause();
+            toast.text = text;
+            toast.RemoveFromClassList("toast-hidden");
+            host.Add(toast);
+            toast.BringToFront();
+            // Fades for the stylesheet's 0.3 s, then leaves the hierarchy
+            toastFade = toast.schedule.Execute(() => toast.AddToClassList("toast-hidden")).StartingIn(ToastShownMs);
+            toastRemove = toast.schedule.Execute(() => toast.RemoveFromHierarchy()).StartingIn(ToastShownMs + 300);
         }
 
         // Replays only for map placement, without altering the SessionController's

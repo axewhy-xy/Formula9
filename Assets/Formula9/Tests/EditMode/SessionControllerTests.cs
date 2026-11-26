@@ -821,6 +821,89 @@ namespace Formula9.Tests
         }
 
         // -----------------------------------------------------------------------------------
+        // Function: ACreationRefusedForGoodIsDroppedAndTheNextOneSendsTheNewName
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A creation the backend refuses outright, or that breaks the contract, is not resent by
+        //     the poll; the next Create starts a new attempt with the name as it is then. An
+        //     unnamed creation sends no name field at all.
+        [Test]
+        public async Task ACreationRefusedForGoodIsDroppedAndTheNextOneSendsTheNewName()
+        {
+            var created = Fixture("snapshot")["session"];
+            var refuse = true;
+            backend.OnCreate = _ => refuse ? Error(400, "INVALID_PAYLOAD") : Json(created, 201);
+            controller.SessionName = "Morning drill";
+            await controller.CreateAsync();
+            Assert.IsFalse(controller.CreationPending, "a refused attempt is dropped");
+            StringAssert.Contains("Change the session name", errors.Last());
+            await controller.RefreshAsync();
+            Assert.AreEqual(1, backend.To("/api/v2/sessions", "POST").Count(), "the poll does not resend it");
+
+            // A name the schema rejects is never sent, and is dropped the same way
+            controller.SessionName = new string('x', 65);
+            await controller.CreateAsync();
+            Assert.IsFalse(controller.CreationPending);
+            Assert.AreEqual(1, backend.To("/api/v2/sessions", "POST").Count());
+
+            refuse = false;
+            controller.SessionName = "Evening drill";
+            await controller.CreateAsync();
+            var sent = backend.To("/api/v2/sessions", "POST").Select(r => JObject.Parse(r.Body)).ToList();
+            Assert.AreEqual("Evening drill", (string)sent.Last()["name"]);
+            Assert.AreEqual(SessionId, controller.SessionId);
+
+            controller.SessionName = null;
+            await controller.CreateAsync();
+            Assert.IsNull(backend.To("/api/v2/sessions", "POST").Select(r => JObject.Parse(r.Body)).Last()["name"], "an unnamed creation sends no name");
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: ACreationTheBackendMayStillAcceptKeepsItsKey
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A retryable refusal or a server error may still be followed by success, so the
+        //     attempt and its key are kept for the poll.
+        [Test]
+        public async Task ACreationTheBackendMayStillAcceptKeepsItsKey()
+        {
+            backend.OnCreate = _ => Json(new JObject
+            {
+                ["error"] = new JObject { ["code"] = "SESSION_RECOVERING", ["message"] = "recovering", ["retryable"] = true },
+            }, 409);
+            await controller.CreateAsync();
+            Assert.IsTrue(controller.CreationPending);
+            backend.OnCreate = _ => Error(500, "INTERNAL");
+            await controller.RefreshAsync();
+            Assert.IsTrue(controller.CreationPending);
+            StringAssert.Contains("Retry to confirm the same attempt", errors.Last());
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: ACreationWhoseReplyCannotBeReadKeepsItsKey
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     A reply that does not match the contract comes after the backend handled the
+        //     request, so the session may already exist: the key is kept and the retry sends the
+        //     same one, rather than making a second session.
+        [Test]
+        public async Task ACreationWhoseReplyCannotBeReadKeepsItsKey()
+        {
+            var keys = new List<string>();
+            backend.OnCreate = request =>
+            {
+                keys.Add(request.Headers["Idempotency-Key"]);
+                return Json(new JObject { ["unexpected"] = true }, 201);
+            };
+            await controller.CreateAsync();
+            Assert.IsTrue(controller.CreationPending);
+            StringAssert.Contains("Retry to confirm the same attempt", errors.Last());
+            await controller.RefreshAsync();
+            Assert.AreEqual(2, keys.Count);
+            Assert.AreEqual(keys[0], keys[1]);
+        }
+
+        // -----------------------------------------------------------------------------------
         // Function: CreationWaitsForItsOwnAccount
         // -----------------------------------------------------------------------------------
         // Description:

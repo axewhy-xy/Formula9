@@ -3,7 +3,7 @@
  *
  * Author: Lau Xiang Yang
  * Date Created: 15/11/2026
- * Last Modified: 15/11/2026
+ * Last Modified: 26/11/2026
  *
  * Description:
  *     Part of the incident handling reform (phase 5). NotificationQueue is the logic: it takes the
@@ -51,6 +51,9 @@ namespace Formula9.UI
         public string Title { get; internal set; }
         // "Shuttle 03 reaches it in about 40 s. Shuttle 05 in about 2 min."
         public string Body { get; internal set; }
+        // What it does to the road, when it clears and who it is slowing, or null when nothing is known:
+        // "Lane blocked · clears in 42 s · Shuttle 02 slowed to 3.1 m/s"
+        public string Detail { get; internal set; }
         // "Decide for Shuttle 03"
         public string Decide { get; internal set; }
         // How soon the shuttle reaches the incident, in seconds, or null when no figure is known
@@ -58,8 +61,10 @@ namespace Formula9.UI
 
         public string Key => NotificationQueue.KeyOf(IncidentId, VehicleId);
 
-        // What the opening event said, for while the snapshot does not have the incident yet
-        internal string EventType, IncidentType, RoadName;
+        // What the opening event said, for while the snapshot does not have the incident yet; its
+        // impact and when it said the incident ends are only ever in the event
+        internal string EventType, IncidentType, RoadName, Impact;
+        internal long? ActiveUntilTick;
         internal List<IncidentExposure> Exposures = new List<IncidentExposure>();
     }
 
@@ -86,6 +91,10 @@ namespace Formula9.UI
 
         // Raised whenever the open notifications or their text change.
         public event Action Changed;
+
+        // The shuttle an incident is slowing right now, or null. Only the 3D city knows which roads an
+        // incident slows, so Formula9App points this at it; without it no card says a shuttle is slowed.
+        public Func<string, FleetVehicle> SlowedBy { get; set; }
 
         public static string KeyOf(string incidentId, string vehicleId) => incidentId + "|" + vehicleId;
 
@@ -234,6 +243,8 @@ namespace Formula9.UI
             notification.EventType = template.EventType ?? notification.EventType;
             notification.IncidentType = template.IncidentType ?? notification.IncidentType;
             notification.RoadName = template.RoadName ?? notification.RoadName;
+            notification.Impact = template.Impact ?? notification.Impact;
+            notification.ActiveUntilTick = template.ActiveUntilTick ?? notification.ActiveUntilTick;
             if (template.Exposures.Count > 0) notification.Exposures = template.Exposures;
         }
 
@@ -282,7 +293,51 @@ namespace Formula9.UI
         // Works out every open notification's text from the latest snapshot.
         private void Describe()
         {
-            foreach (var n in open.Values) Describe(n, IncidentOf(snapshot, n.IncidentId));
+            foreach (var n in open.Values)
+            {
+                Describe(n, IncidentOf(snapshot, n.IncidentId));
+                n.Detail = Detail(n, IncidentOf(snapshot, n.IncidentId), snapshot, SlowedBy?.Invoke(n.IncidentId));
+            }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: Detail
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function words the card's last line, what the 3D view's status box used to say:
+        //     what the incident does to the road, how long until it clears, and which shuttle it is
+        //     slowing. A road closure clears when its closure ends; otherwise the incident's own
+        //     clearing tick, else the end the opening event gave. Figures are the backend's.
+        //
+        // Args:
+        //     n (IncidentNotification): The notification.
+        //     incident (Incident): The snapshot's incident, or null.
+        //     s (FullSnapshot): The snapshot, or null.
+        //     slowed (FleetVehicle): The shuttle the incident is slowing, or null.
+        //
+        // Returns:
+        //     string: The line, or null when there is nothing to say.
+        internal static string Detail(IncidentNotification n, Incident incident, FullSnapshot s, FleetVehicle slowed)
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrEmpty(n.Impact)) parts.Add(n.Impact);
+            // The snapshot gives the current tick; until it lists the incident, the opening event's end is used
+            if (s != null)
+            {
+                var edge = incident?.Location?.EdgeId;
+                var closure = edge == null ? null : s.Disruptions?.FirstOrDefault(d => d.AffectedEdgeIds.Contains(edge) && d.ActiveFromTick >= incident.DetectedTick);
+                // Once the clearing tick has passed the line says nothing about it, rather than
+                // "clears in 0 s" until the backend marks the incident ended
+                if ((closure?.ActiveUntilTick ?? incident?.ClearsAtTick ?? n.ActiveUntilTick) is long until && until > s.Tick)
+                {
+                    // Rounded to the millisecond first: the tick length is a float, so 500 ticks of 0.05 s
+                    // come to 25.0000004 s, which would otherwise round up to 26 s
+                    var seconds = Math.Ceiling(Math.Round((until - s.Tick) * (double)World.IncidentSimulation.SecondsPerTick(s), 3));
+                    parts.Add("clears in " + RoutePresenter.Rough(seconds));
+                }
+            }
+            if (slowed != null) parts.Add($"{RoutePresenter.ShuttleName(slowed.VehicleId)} slowed to {slowed.SpeedMps:0.#} m/s");
+            return parts.Count == 0 ? null : string.Join(" · ", parts);
         }
 
         // -----------------------------------------------------------------------------------
@@ -345,6 +400,8 @@ namespace Formula9.UI
             EventType = e.Data.Value<string>("event_type"),
             IncidentType = e.Data.Value<string>("incident_type"),
             RoadName = (e.Data["location"] as JObject)?.Value<string>("road_name"),
+            Impact = e.Data.Value<string>("operational_impact"),
+            ActiveUntilTick = e.Data.Value<long?>("active_until_tick"),
             Exposures = ReadExposures(e.Data["exposures"]),
         };
 
@@ -381,7 +438,7 @@ namespace Formula9.UI
         private sealed class Card
         {
             public VisualElement Root;
-            public Label Tag, Title, Body;
+            public Label Tag, Title, Body, Detail;
             public Button Decide;
         }
 
@@ -470,6 +527,8 @@ namespace Formula9.UI
                 Set(card.Tag, n.Tag);
                 Set(card.Title, n.Title);
                 Set(card.Body, n.Body);
+                Set(card.Detail, n.Detail);
+                card.Detail.style.display = string.IsNullOrEmpty(n.Detail) ? DisplayStyle.None : DisplayStyle.Flex;
                 if (card.Decide.text != n.Decide) card.Decide.text = n.Decide;
                 card.Root.EnableInClassList("notification-options", n.Kind == NotificationKind.OptionsReady);
             }
@@ -479,7 +538,8 @@ namespace Formula9.UI
             host.style.display = items.Count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
         }
 
-        // One card: what it is, the incident, the shuttle's part in it, and its two buttons.
+        // One card: what it is, the incident, the shuttle's part in it, what it does to the road, and
+        // its two buttons.
         private Card Build(string incidentId, string vehicleId)
         {
             var card = new Card { Root = new VisualElement() };
@@ -487,6 +547,7 @@ namespace Formula9.UI
             card.Tag = Text(card.Root, "notification-tag");
             card.Title = Text(card.Root, "notification-title");
             card.Body = Text(card.Root, "notification-body");
+            card.Detail = Text(card.Root, "notification-detail");
             var actions = new VisualElement();
             actions.AddToClassList("notification-actions");
             card.Decide = new Button(() => decide?.Invoke(vehicleId, incidentId)) { tooltip = "Open Route Planning for this shuttle and show the incident." };

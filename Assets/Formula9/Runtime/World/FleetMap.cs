@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -30,23 +31,30 @@ namespace Formula9.World
         private const int ParentTileLevels = 4;
 
         private static readonly Color BasemapBackground = new Color(0.925f, 0.945f, 0.941f);
-        private static readonly Color PlannedRoute = new Color(0.153f, 0.682f, 0.376f);
+        // The outline drawn under every route on the street map
+        private static readonly Color RouteCasing = new Color(0.06f, 0.18f, 0.22f, 0.85f);
         private static readonly Color RoadClosed = new Color(0.839f, 0.188f, 0.192f);
         private static readonly Color StopColor = new Color(0.09f, 0.412f, 0.667f);
-        // Gold: no shuttle in the palette uses it. Its names need a darker shade to read on white.
-        private static readonly Color BusStopColor = new Color(0.96f, 0.76f, 0.05f);
-        private static readonly Color BusStopText = new Color(0.45f, 0.33f, 0);
+        // Bus stop names in a darker shade of the bus stop icon's blue, to read on white
+        private static readonly Color BusStopText = new Color(0.067f, 0.302f, 0.635f);
+        private const float BusStopIconSize = 14;
+        // Where routes share a road, the distance in points between their lanes: the 6 point width of a
+        // route line, so the lanes sit edge to edge
+        private const float RouteLaneSpacing = 6;
+        // On a piece with a detour, whose 12 point line has a 3 point edge each side: wide enough that
+        // the edge does not cover the lane beside it
+        private const float OutlinedLaneSpacing = 9;
         private static readonly Color DotOutline = new Color(0.118f, 0.157f, 0.176f);
         private static readonly Color Frozen = new Color(0.627f, 0.627f, 0.627f);
         public static Color FrozenColor => Frozen;
         private static readonly Color ApprovedDetour = new Color(0.949f, 0.6f, 0.29f);
-        private static readonly Color OtherRoads = new Color(0.588f, 0.745f, 0.902f);
         private static readonly Color DepotColor = new Color(0.122f, 0.306f, 0.349f);
         private static readonly Color ChargingTrip = new Color(0.925f, 0.102f, 0.6f);
         private static readonly Color[] ShuttlePalette =
         {
-            // No green: planned routes are green, so a green shuttle would vanish on one.
-            new Color(0.184f, 0.502f, 0.929f), new Color(0.91f, 0.365f, 0.627f), new Color(0.949f, 0.6f, 0.29f), new Color(0.608f, 0.318f, 0.878f),
+            // No orange: approved detours are orange, so a shuttle in it would vanish on its own detour's
+            // outline. The third is a wine red for that reason.
+            new Color(0.184f, 0.502f, 0.929f), new Color(0.91f, 0.365f, 0.627f), new Color(0.6f, 0.106f, 0.31f), new Color(0.608f, 0.318f, 0.878f),
             new Color(0, 0.639f, 0.639f), new Color(0.51f, 0.392f, 0.235f), new Color(0.353f, 0.431f, 0.549f),
         };
         // The same colour for a shuttle on the map and on its fleet card.
@@ -72,7 +80,7 @@ namespace Formula9.World
         private string selectedId;
         private bool offline;
         private readonly VisualElement legend = new VisualElement { pickingMode = PickingMode.Ignore };
-        private readonly VisualElement busStopLegend, proposedLegend, notClearedLegend;
+        private readonly VisualElement busStopLegend, proposedLegend, notClearedLegend, frozenLegend, depotLegend;
         private readonly Action<bool> showLegend;
         private readonly Label scale = new Label { pickingMode = PickingMode.Ignore };
         // The compass, fit and zoom buttons in the bottom-right corner
@@ -154,30 +162,38 @@ namespace Formula9.World
             // A wheel or touchpad scroll over the legend scrolls the legend only: stopped here, after
             // the rows have used it, it never reaches the map's zoom below
             legend.RegisterCallback<WheelEvent>(e => e.StopPropagation());
-            var legendToggle = new Button { text = "Legend  -", tooltip = "Show or hide the legend" };
+            // The title and a chevron that points down while the list is folded (open it) and up
+            // while it is shown (fold it), as a dropdown does
+            var legendToggle = new Button { tooltip = "Show or hide the legend" };
+            legendToggle.Add(new Label("Legend") { pickingMode = PickingMode.Ignore });
+            var legendChevron = new Label("‹") { pickingMode = PickingMode.Ignore };
+            legendChevron.AddToClassList("map-legend-chevron");
+            legendToggle.Add(legendChevron);
             showLegend = show =>
             {
                 legendRows.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
-                legendToggle.text = show ? "Legend  -" : "Legend  +";
+                legend.EnableInClassList("map-legend-folded", !show);
             };
             legendToggle.clicked += () => showLegend(legendRows.resolvedStyle.display == DisplayStyle.None);
             legendToggle.AddToClassList("map-legend-title");
             legend.Add(legendToggle);
             legend.Add(legendRows);
-            LegendRow(legendRows, "Planned route", PlannedRoute, "swatch-line");
+            // A route and the shuttle that drives it share a colour, so their rows sit together
+            LegendRow(legendRows, "Planned route (its shuttle's colour)", ShuttlePalette[0], "swatch-line");
+            LegendRow(legendRows, "Shuttle (its colour)", LegendIcon(18, (painter, at) => Glyph.DrawBus(painter, at, 16, ShuttlePalette[0])));
             LegendRow(legendRows, "Approved detour", ApprovedDetour, "swatch-line");
             LegendRow(legendRows, "Trip to or from a charger", ChargingTrip, "swatch-line");
             LegendRow(legendRows, "Charger", Glyph.ChargerColor, "swatch-square");
             LegendRow(legendRows, "Road closed", RoadClosed, "swatch-band");
             proposedLegend = LegendRow(legendRows, "Proposed route", Proposed, "swatch-line");
             notClearedLegend = LegendRow(legendRows, "Not cleared for the shuttle", RoadNotCleared, "swatch-thin");
-            LegendRow(legendRows, "Other roads", OtherRoads, "swatch-thin");
-            LegendRow(legendRows, "Shuttle", ShuttlePalette[0], "swatch-square");
             LegendRow(legendRows, "Incident", RoadClosed, "swatch-dot");
-            LegendRow(legendRows, "No recent update", Frozen, "swatch-square");
+            // Only while the map shows them: grey shuttles while the backend is offline, depots when the session has one
+            frozenLegend = LegendRow(legendRows, "No recent update", Frozen, "swatch-square");
             LegendRow(legendRows, "Shuttle's stop (its colour)", StopColor, "swatch-ring");
-            LegendRow(legendRows, "Depot", DepotColor, "swatch-dot");
-            busStopLegend = LegendRow(legendRows, "Other bus stop", BusStopColor, "swatch-dot");
+            depotLegend = LegendRow(legendRows, "Depot", DepotColor, "swatch-dot");
+            // The same bus stop icon the map draws, not a colour swatch
+            busStopLegend = LegendRow(legendRows, "Bus stop", LegendIcon(BusStopIconSize + 2, (painter, at) => Glyph.DrawBusStop(painter, at, BusStopIconSize)));
             controls = new VisualElement { pickingMode = PickingMode.Ignore }; controls.AddToClassList("map-controls");
             var compass = new VisualElement { pickingMode = PickingMode.Ignore, tooltip = "The map is always north-up" }; compass.AddToClassList("map-compass");
             compass.Add(new Glyph(GlyphKind.Compass, RoadClosed, 14)); compass.Add(new Label("N") { pickingMode = PickingMode.Ignore }); controls.Add(compass);
@@ -316,7 +332,7 @@ namespace Formula9.World
             var gliding = !offline && motion.IsGliding(Time.realtimeSinceStartup);
             if (gliding) MoveVehicleLabels();
             // An incident's ring pulses around its shuttle
-            if (gliding || (!offline && snapshot.Incidents.Any(i => i.State != "RESOLVED"))) vehicleLayer.MarkDirtyRepaint();
+            if (gliding || (!offline && snapshot.Incidents.Any(i => !IncidentEnded(i)))) vehicleLayer.MarkDirtyRepaint();
             if (draft?.Highlighted.Count > 0) drawing.MarkDirtyRepaint();
         }
 
@@ -338,6 +354,23 @@ namespace Formula9.World
             var swatch = new VisualElement { pickingMode = PickingMode.Ignore }; swatch.AddToClassList(swatchClass);
             if (swatchClass == "swatch-ring") swatch.style.borderTopColor = swatch.style.borderBottomColor = swatch.style.borderLeftColor = swatch.style.borderRightColor = color;
             else swatch.style.backgroundColor = color;
+            return LegendRow(legend, text, swatch);
+        }
+
+        // A legend key drawn in code, centred in a square of the given size, as the map draws the same thing.
+        private static VisualElement LegendIcon(float size, Action<Painter2D, Vector2> draw)
+        {
+            var icon = new VisualElement { pickingMode = PickingMode.Ignore };
+            icon.style.width = icon.style.height = size;
+            icon.generateVisualContent += mesh => draw(mesh.painter2D, icon.contentRect.center);
+            return icon;
+        }
+
+        // A legend row whose key is any element, such as an icon drawn in code.
+        private static VisualElement LegendRow(VisualElement legend, string text, VisualElement swatch)
+        {
+            var row = new VisualElement { pickingMode = PickingMode.Ignore }; row.AddToClassList("map-legend-row");
+            var key = new VisualElement { pickingMode = PickingMode.Ignore }; key.AddToClassList("map-legend-key");
             key.Add(swatch); row.Add(key);
             row.Add(new Label(text) { pickingMode = PickingMode.Ignore });
             legend.Add(row);
@@ -371,6 +404,8 @@ namespace Formula9.World
             legend.style.display = islandWhenEmpty ? DisplayStyle.Flex : DisplayStyle.None;
             busStopLegend.style.display = BusStopsShown && busStops.Count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
             proposedLegend.style.display = notClearedLegend.style.display = draft != null ? DisplayStyle.Flex : DisplayStyle.None;
+            frozenLegend.style.display = offline ? DisplayStyle.Flex : DisplayStyle.None;
+            depotLegend.style.display = snapshot != null && snapshot.Depots.Count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
             var metres = NiceLength(110 * MetresPerPoint);
             scale.text = metres >= 1000 ? $"{metres / 1000:0.#} km" : $"{metres:0.#} m";
             scale.style.width = (float)(metres / MetresPerPoint);
@@ -435,8 +470,15 @@ namespace Formula9.World
                 foreach (var vehicle in snapshot.Vehicles.OrderBy(v => v.VehicleId == SelectedId ? 0 : 1).ThenBy(v => v.VehicleId, StringComparer.Ordinal))
                 {
                     var at = ShownAt(vehicle);
-                    var label = PlaceLabel(vehicle.VehicleId + (snapshot.Incidents.Any(i => i.Involves(vehicle.VehicleId) && i.State != "RESOLVED") ? " !" : ""), at, LabelStyle.Below, DotOutline);
-                    if (label != null) vehicleLabels[vehicle.VehicleId] = (label, at);
+                    var label = PlaceLabel(vehicle.VehicleId, at, LabelStyle.Below, DotOutline);
+                    if (label == null) continue;
+                    vehicleLabels[vehicle.VehicleId] = (label, at);
+                    // A shuttle caught in an open incident has its name box turned red, in place of a "!"
+                    if (snapshot.Incidents.Any(i => i.Involves(vehicle.VehicleId) && !IncidentEnded(i)))
+                    {
+                        label.style.backgroundColor = RoadClosed;
+                        label.style.color = Color.white;
+                    }
                 }
                 foreach (var depot in snapshot.Depots) PlaceLabel(DepotName(depot.DepotId), Project(depot.Position.XM, depot.Position.YM), LabelStyle.Below, DepotColor);
                 foreach (var charger in snapshot.Chargers.Where(c => c.Position != null)) PlaceLabel(charger.ChargerId, Project(charger.Position.XM, charger.Position.YM), LabelStyle.Below, DepotColor);
@@ -618,21 +660,55 @@ namespace Formula9.World
                 var closures = new HashSet<string>(snapshot.Disruptions.Where(d => d.ActiveFromTick <= snapshot.Tick && (d.ActiveUntilTick == null || snapshot.Tick < d.ActiveUntilTick)).SelectMany(d => d.AffectedEdgeIds));
                 // A route is an approved detour when it was revised, or a shuttle on it is detouring
                 var detouring = new HashSet<string>(snapshot.Vehicles.Where(v => v.ServiceState == "DETOURING").Select(v => v.RouteId));
+                // Each route is outlined in the colour of the shuttle driving it, the same colour as its bus
+                // icon (ordered as DrawVehicles orders them); a route several share takes the first one's
+                var ordered = snapshot.Vehicles.OrderBy(v => v.VehicleId, StringComparer.Ordinal).ToList();
+                var outlines = new Dictionary<string, Color>();
+                for (var i = 0; i < ordered.Count; i++)
+                    if (ordered[i].RouteId != null && !outlines.ContainsKey(ordered[i].RouteId))
+                        outlines[ordered[i].RouteId] = offline ? Frozen : ShuttleColor(i);
+                // Every road piece of every route, sorted into open and closed. They are drawn in layers below,
+                // every outline before any middle, so no piece's outline covers the end of the piece before it
+                // (which left a notch at each join).
+                var open = new List<(Vector2[] Path, Color Outline, Color Middle)>();
+                var closed = new List<Vector2[]>();
+                // Open pieces before they are placed: where routes share a road piece, each gets its own lane
+                // beside the others, so every colour shows rather than the last one drawn
+                var pieces = new List<(Vector2[] Path, string Key, bool Reversed, string RouteId, bool Driven, Color Outline, Color Middle)>();
                 // While editing, only the route being edited: the rest of the fleet would hide the roads
                 foreach (var route in snapshot.Routes.Where(r => draft == null || r.RouteId == draft.Context.RouteId))
                 {
-                    var routeColor = draft != null ? CommittedInEdit : !realMap ? new Color(0.4f, 0.6f, 0.7f) : route.Revision > 1 || detouring.Contains(route.RouteId) ? ApprovedDetour : PlannedRoute;
+                    // A route no shuttle drives keeps the dark outline
+                    var driven = outlines.TryGetValue(route.RouteId, out var shuttleColor);
+                    var outline = driven ? shuttleColor : RouteCasing;
+                    var detour = route.Revision > 1 || detouring.Contains(route.RouteId);
+                    var routeColor = draft != null ? CommittedInEdit : !realMap ? new Color(0.4f, 0.6f, 0.7f) : detour ? ApprovedDetour : outline;
+                    // A planned route is drawn all in its shuttle's colour, with no edge
+                    if (draft == null && realMap && !detour) outline = Color.clear;
                     for (var i = 0; i < route.EdgePathsM.Count; i++)
                     {
                         var path = route.EdgePathsM[i].Select(p => Project(p.XM, p.YM)).ToArray();
-                        if (i < route.DirectedEdgeIds.Count && closures.Contains(route.DirectedEdgeIds[i]))
+                        if (i < route.DirectedEdgeIds.Count && closures.Contains(route.DirectedEdgeIds[i])) closed.Add(path);
+                        else
                         {
-                            Line(painter, path, new Color(RoadClosed.r, RoadClosed.g, RoadClosed.b, 0.40f), 28);
-                            Line(painter, path, RoadClosed, 10);
+                            var (key, reversed) = PieceKey(route.EdgePathsM[i]);
+                            pieces.Add((path, key, reversed, route.RouteId, driven, outline, routeColor));
                         }
-                        else Line(painter, path, routeColor, 6);
                     }
                 }
+                // Only routes a shuttle drives get lanes. The rest stay in the middle of the road, drawn first, so
+                // the shuttles' lanes cover them as before rather than being pushed aside by them.
+                foreach (var piece in pieces.Where(p => !p.Driven)) open.Add((piece.Path, piece.Outline, piece.Middle));
+                var drivenPieces = pieces.Where(p => p.Driven).ToList();
+                var shifts = LaneShifts(drivenPieces.Select(p => (p.Key, p.Reversed, p.RouteId, realMap && p.Outline.a > 0)).ToList());
+                for (var i = 0; i < drivenPieces.Count; i++) open.Add((Offset(drivenPieces[i].Path, shifts[i]), drivenPieces[i].Outline, drivenPieces[i].Middle));
+                // Round a detour, the shuttle's colour as a 3 px edge each side, saying whose it is (a planned
+                // route has none, being in that colour already); then the route's colour down the middle
+                if (realMap) foreach (var piece in open.Where(p => p.Outline.a > 0)) Line(painter, piece.Path, piece.Outline, 12);
+                foreach (var piece in open) Line(painter, piece.Path, piece.Middle, 6);
+                // Closed sections over the routes, their glow first for the same reason
+                foreach (var path in closed) Line(painter, path, new Color(RoadClosed.r, RoadClosed.g, RoadClosed.b, 0.40f), 28);
+                foreach (var path in closed) Line(painter, path, RoadClosed, 10);
                 // Where a shuttle is driving for a charge: its path is not a route, so it would otherwise be invisible
                 foreach (var booking in snapshot.ChargeBookings.Where(b => b.Status == "ACTIVE" && b.TripPathM.Count > 1))
                 {
@@ -693,7 +769,7 @@ namespace Formula9.World
             for (var i = 0; i < ordered.Count; i++)
             {
                 var vehicle = ordered[i]; var at = ShownAt(vehicle);
-                if (!offline && snapshot.Incidents.Any(n => n.Involves(vehicle.VehicleId) && n.State != "RESOLVED"))
+                if (!offline && snapshot.Incidents.Any(n => n.Involves(vehicle.VehicleId) && !IncidentEnded(n)))
                 {
                     painter.strokeColor = new Color(RoadClosed.r, RoadClosed.g, RoadClosed.b, 1 - 0.6f * pulse); painter.lineWidth = 3;
                     painter.BeginPath(); painter.Arc(at, 10 + 8 * pulse, 0, 360); painter.Stroke();
@@ -709,13 +785,120 @@ namespace Formula9.World
             for (var i = 0; i < busStopPositions.Count; i++)
             {
                 var at = Project(busStopPositions[i].X, busStopPositions[i].Y);
-                if (contentRect.Contains(at) && !ServedByARoute(busStops[i].Code)) Dot(painter, at, BusStopColor, 5);
+                if (contentRect.Contains(at) && !ServedByARoute(busStops[i].Code)) Glyph.DrawBusStop(painter, at, BusStopIconSize);
             }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: PieceKey
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function names a road piece by its two ends, the same whichever way a route
+        //     drives it, so routes sharing the piece can be found.
+        //
+        // Args:
+        //     path (List<Contracts.Position>): The piece's points, in metres.
+        //
+        // Returns:
+        //     (string, bool): The name, and whether this path runs from the higher end to the lower
+        //         (by x, then y): routes on the piece with the same flag drive it the same way.
+        internal static (string Key, bool Reversed) PieceKey(List<Contracts.Position> path)
+        {
+            if (path.Count == 0) return ("", false);
+            var first = (X: Math.Round(path[0].XM, 1), Y: Math.Round(path[0].YM, 1));
+            var last = (X: Math.Round(path[path.Count - 1].XM, 1), Y: Math.Round(path[path.Count - 1].YM, 1));
+            string End((double X, double Y) p) => $"{p.X.ToString(CultureInfo.InvariantCulture)},{p.Y.ToString(CultureInfo.InvariantCulture)}";
+            var reversed = first.X > last.X || (first.X == last.X && first.Y > last.Y);
+            return (reversed ? End(last) + "|" + End(first) : End(first) + "|" + End(last), reversed);
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: LaneShifts
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function places the lanes of routes that share a road piece. Every shift is
+        //     measured from the route's own direction of travel, so a route keeps its side from
+        //     piece to piece and two shuttles in a corridor run side by side rather than braiding.
+        //     Routes driving a piece one way are ordered by route ID, left to right, and centred on
+        //     the road; where routes drive it both ways, each way keeps to its own left, as traffic
+        //     does in Singapore, still in route ID order, so a route does not change sides with the
+        //     routes beside it when one going the other way joins the piece. A piece with a detour's edge on it spaces its lanes wider, so the
+        //     edge does not cover the lane beside it.
+        //
+        // Args:
+        //     pieces (IReadOnlyList<(string, bool, string, bool)>): Each piece's key and direction
+        //         from PieceKey, its route, and whether it is drawn with an edge.
+        //
+        // Returns:
+        //     float[]: Each piece's shift in panel points for Offset: negative to the left of travel,
+        //         positive to the right, 0 for a piece no other route shares.
+        internal static float[] LaneShifts(IReadOnlyList<(string Key, bool Reversed, string RouteId, bool Outlined)> pieces)
+        {
+            var shifts = new float[pieces.Count];
+            foreach (var piece in Enumerable.Range(0, pieces.Count).GroupBy(i => pieces[i].Key))
+            {
+                var spacing = piece.Any(i => pieces[i].Outlined) ? OutlinedLaneSpacing : RouteLaneSpacing;
+                // One lane for each route and way it drives the piece, in route ID order
+                var ways = piece.Select(i => (pieces[i].RouteId, pieces[i].Reversed)).Distinct().ToList();
+                var forward = ways.Where(w => !w.Reversed).Select(w => w.RouteId).OrderBy(id => id, StringComparer.Ordinal).ToList();
+                var backward = ways.Where(w => w.Reversed).Select(w => w.RouteId).OrderBy(id => id, StringComparer.Ordinal).ToList();
+                var bothWays = forward.Count > 0 && backward.Count > 0;
+                foreach (var i in piece)
+                {
+                    var lanes = pieces[i].Reversed ? backward : forward;
+                    var k = lanes.IndexOf(pieces[i].RouteId);
+                    // Both ways, counted from the centre line outwards, so the route ID order is the
+                    // same left to right as when the piece is driven one way only
+                    shifts[i] = (bothWays ? -(lanes.Count - k - 0.5f) : k - (lanes.Count - 1) / 2f) * spacing;
+                }
+            }
+            return shifts;
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Function: Offset
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function moves a line sideways by a distance, keeping its shape: each point moves
+        //     along the line's normal there, lengthened at a bend so the lane keeps its width.
+        //
+        // Args:
+        //     points (Vector2[]): The line, in panel points.
+        //     distance (float): How far to move it; the sign picks the side.
+        //
+        // Returns:
+        //     Vector2[]: The moved line, or the same line for no distance. With y pointing down, as
+        //         panel points do, a positive distance is to the right of the line's direction.
+        internal static Vector2[] Offset(Vector2[] points, float distance)
+        {
+            if (Mathf.Approximately(distance, 0) || points.Length < 2) return points;
+            Vector2 Normal(Vector2 a, Vector2 b)
+            {
+                var d = b - a;
+                return d.sqrMagnitude < 1e-6f ? Vector2.zero : new Vector2(-d.y, d.x).normalized;
+            }
+            var moved = new Vector2[points.Length];
+            for (var i = 0; i < points.Length; i++)
+            {
+                var before = i > 0 ? Normal(points[i - 1], points[i]) : Vector2.zero;
+                var after = i < points.Length - 1 ? Normal(points[i], points[i + 1]) : Vector2.zero;
+                var normal = before + after;
+                if (normal.sqrMagnitude < 1e-6f) normal = before.sqrMagnitude > 0 ? before : after;
+                normal = normal.normalized;
+                // At a bend the normal is between the two segments': lengthened to keep the lane's width,
+                // but not past twice the distance at a sharp turn
+                var reference = before.sqrMagnitude > 0 ? before : after;
+                var cos = Vector2.Dot(normal, reference);
+                moved[i] = points[i] + normal * distance * (cos > 0.5f ? 1 / cos : 2);
+            }
+            return moved;
         }
 
         private static void Line(Painter2D painter, Vector2[] points, Color color, float width)
         {
             if (points.Length < 2) return;
+            // Round joins and ends, so a route made of many road pieces reads as one line
+            painter.lineJoin = LineJoin.Round; painter.lineCap = LineCap.Round;
             painter.strokeColor = color; painter.lineWidth = width; painter.BeginPath(); painter.MoveTo(points[0]);
             foreach (var point in points.Skip(1)) painter.LineTo(point);
             painter.Stroke();

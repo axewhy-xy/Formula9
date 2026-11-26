@@ -94,12 +94,10 @@ namespace Formula9.World
         private bool following;
         private RouteDraftView draft;
         private IReadOnlyCollection<string> servedStops = Array.Empty<string>();
-        private Label hud;
         private string selectedId, sessionBoundary;
         private readonly Dictionary<string, IncidentRecord> incidentRecords = new Dictionary<string, IncidentRecord>();
         // The road network, kept while the route editor reloads its own copy: closures make it do so
         private IReadOnlyList<DraftRoad> roadNetwork;
-        private string executionLine;
         private const float IncidentFocusDistance = 200, IncidentFocusPitch = 0.85f;
         public bool RouteEditing { get; set; }
         public event Action<string> EntitySelected;
@@ -146,10 +144,6 @@ namespace Formula9.World
             map.VehicleSelected += SelectEntity;
             map.RoadClicked += (road, at) => RoadClicked?.Invoke(road, at);
             map.WaypointClicked += index => WaypointClicked?.Invoke(index);
-            hud = new Label { name = "world-hud", pickingMode = PickingMode.Ignore };
-            hud.AddToClassList("world-hud");
-            hud.style.display = DisplayStyle.None;
-            surface.Add(hud);
             worldActions = new VisualElement(); worldActions.AddToClassList("world-actions");
             worldActions.style.position = UnityEngine.UIElements.Position.Absolute; worldActions.style.left = 8; worldActions.style.bottom = 8;
             drafting = new Toggle("Draft in 3D"); worldActions.Add(drafting);
@@ -185,9 +179,16 @@ namespace Formula9.World
             railToggle.clicked += () =>
             {
                 rail.ToggleInClassList("camera-rail-collapsed");
-                railToggle.text = rail.ClassListContains("camera-rail-collapsed") ? "Cameras ›" : "‹ Cameras";
+                var folded = rail.ClassListContains("camera-rail-collapsed");
+                railToggle.text = folded ? "Cameras ›" : "‹ Cameras";
+                // Folded thumbnails are not seen, so only the large camera keeps drawing
+                shuttleCameras.Thumbnails = !folded;
             };
-            rail.Add(railToggle);
+            // No Close here: 3D View, or the Cameras segment pressed again, on the map's bar closes them
+            var railBar = new VisualElement();
+            railBar.AddToClassList("camera-rail-bar");
+            railBar.Add(railToggle);
+            rail.Add(railBar);
             // It scrolls, so on a short view (or above the Fleet List) every thumbnail stays reachable
             var strip = new ScrollView(ScrollViewMode.Vertical);
             strip.AddToClassList("camera-strip");
@@ -361,7 +362,6 @@ namespace Formula9.World
                 city.Show(snapshot, motion, Time.unscaledTime);
                 city.ShowDraft(draft, servedStops);
                 city.ShowIncidents(incidentRecords.Values, snapshot, roadNetwork, Time.unscaledTime);
-                RefreshHud();
                 SetReady(true, CityHint());
             }
         }
@@ -788,7 +788,6 @@ namespace Formula9.World
             city?.ResetShuttles();
             if (latest != null) Show(latest);
             if (!value) FrameDraft();
-            RefreshHud();
             ViewChanged?.Invoke();
         }
 
@@ -813,32 +812,23 @@ namespace Formula9.World
         }
 
         // -----------------------------------------------------------------------------------
-        // Function: SetExecutionStatus
+        // Function: IncidentSlowing
         // -----------------------------------------------------------------------------------
         // Description:
-        //     This function shows a line over the 3D view saying what the watched shuttle is doing.
+        //     This function names the shuttle a live incident is slowing, for its notification.
+        //     Only the 3D city works out the roads an incident slows, and it only keeps them up to
+        //     date while it is shown, so on the 2D map nothing is said.
         //
         // Args:
-        //     text (string): The line, or null to hide it.
-        public void SetExecutionStatus(string text)
-        {
-            executionLine = text;
-            RefreshHud();
-        }
+        //     incidentId (string): The incident.
+        //
+        // Returns:
+        //     FleetVehicle: The shuttle, or null.
+        public FleetVehicle IncidentSlowing(string incidentId) => CityShown ? city?.IncidentSlowing(incidentId) : null;
 
-        // -----------------------------------------------------------------------------------
-        // Function: RefreshHud
-        // -----------------------------------------------------------------------------------
-        // Description:
-        //     This function shows the watched shuttle's line and a line for each live incident
-        //     over the 3D view, and hides them everywhere else.
-        private void RefreshHud()
-        {
-            if (hud == null) return;
-            var text = string.Join("\n", new[] { executionLine, CityShown ? city?.IncidentStatus : null }.Where(line => !string.IsNullOrEmpty(line)));
-            hud.text = text;
-            hud.style.display = text.Length > 0 && CityShown ? DisplayStyle.Flex : DisplayStyle.None;
-        }
+        // One line per live incident in the 3D city (IncidentSimulation.Line), or null on the 2D map.
+        // Nothing shows it any more; the walkthroughs read it.
+        public string IncidentSummary => CityShown ? city?.IncidentStatus : null;
 
         // -----------------------------------------------------------------------------------
         // Function: FocusIncident
@@ -1062,7 +1052,14 @@ namespace Formula9.World
                 ? shuttleCameras.NameOf(index)
                 : $"{watchedId} · {shuttleCameras.NameOf(index)}";
             for (var i = 0; i < cameraTiles.Count; i++)
-                cameraTiles[i].EnableInClassList("camera-tile-selected", i == index);
+            {
+                // The one shown large is greyed out and says so; the others offer to take its place
+                var shown = i == index;
+                cameraTiles[i].EnableInClassList("camera-tile-selected", shown);
+                cameraTiles[i].tooltip = shown ? "Shown large now" : $"Click to show the {shuttleCameras.NameOf(i)} camera large";
+                var label = cameraTiles[i].Q<Label>();
+                if (label != null) label.text = shown ? $"{shuttleCameras.NameOf(i)} · showing" : shuttleCameras.NameOf(i);
+            }
             ShowTextures();
             RefreshHint();
         }

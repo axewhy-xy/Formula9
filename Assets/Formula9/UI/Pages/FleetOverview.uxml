@@ -10,9 +10,8 @@
             </ui:VisualElement>
             <ui:VisualElement class="fleet-header-tools">
                 <ui:TextField name="fleet-search" class="fleet-search" />
-                <ui:Button name="follow-selected" text="Follow selected" style="height: 30px; font-size: 11px; margin-right: 4px;" />
-                <ui:Button name="fleet-cameras" text="Cameras" tooltip="Watch the selected shuttle through its blind-spot cameras: front, rear and sides." style="height: 30px; font-size: 11px; margin-right: 4px;" />
-                <ui:Button name="camera-overview" text="Overview" style="height: 30px; font-size: 11px; margin-right: 0;" />
+                <!-- Cameras moved to the map's 2D Map / 3D View bar; Overview is 3D View -->
+                <ui:Button name="follow-selected" text="Follow selected" style="height: 30px; font-size: 11px; margin-right: 0;" />
             </ui:VisualElement>
         </ui:VisualElement>
         <!-- Everything under the header; collapsing hides this wrapper, since the code sets its children's display itself -->
@@ -22,7 +21,8 @@
                 <ui:Label text="Shuttle" class="fleet-th fleet-col fleet-col-id" />
                 <ui:Label text="Status" class="fleet-th fleet-col fleet-col-status" />
                 <ui:Label text="Battery" class="fleet-th fleet-col fleet-col-battery" />
-                <ui:Label text="Route / next stop" class="fleet-th fleet-col fleet-col-route" />
+                <ui:Label text="Next stop" class="fleet-th fleet-col fleet-col-route" />
+                <ui:Label text="Final stop" class="fleet-th fleet-col fleet-col-final" />
                 <ui:Label text="ETA" class="fleet-th fleet-col fleet-col-eta" />
                 <ui:Label text="Incident" class="fleet-th fleet-col fleet-col-incident" />
             </ui:VisualElement>
