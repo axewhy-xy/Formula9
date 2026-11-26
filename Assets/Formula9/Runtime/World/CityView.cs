@@ -296,14 +296,13 @@ namespace Formula9.World
                 const string roadTextureFolder = "Formula9/Textures/";
                 var asphaltColorMap = LoadRoadTexture(roadTextureFolder + "asphalt_02", TextureWrapMode.Mirror);
                 if (asphaltColorMap != null) asphaltColorMap.anisoLevel = 16;
-                var textureShader = Resources.Load<Shader>("Formula9/CityRoadTextureStencil");
+                var textureShader = Resources.Load<Shader>("Formula9/CityRoadWithCentreDividers");
                 bool hasTextureShader = textureShader != null && textureShader.isSupported;
                 bool useAsphaltMaps = asphaltColorMap != null;
                 var atlas = !useAsphaltMaps ? LoadRoadTexture(roadTextureFolder + "road_lane_texture") : null;
                 bool useAtlas = hasTextureShader && atlas != null;
                 if (!hasTextureShader)
-                    Debug.LogWarning("[CityView] CityRoadTexture shader unavailable. " +
-                        "Using the fallback road surface material.");
+                    Debug.Log("[CityView] Textured asphalt unavailable. Trying the Ash centre-divider shader.");
                 var materials = new Material[RoadMesh.LayerCount];
                 materials[RoadMesh.KerbLayer] = Own(new Material(surface) { name = "City kerbs", color = KerbColor, mainTexture = grain });
                 materials[RoadMesh.AsphaltLayer] = Own(new Material(hasTextureShader ? textureShader : surface)
@@ -378,6 +377,7 @@ namespace Formula9.World
                 road.GetComponent<MeshFilter>().sharedMesh = geometry;
                 var renderer = road.GetComponent<MeshRenderer>();
                 renderer.sharedMaterials = materials;
+                LoadCentreDividerMask(area, materials[RoadMesh.AsphaltLayer]);
                 renderer.shadowCastingMode = ShadowCastingMode.Off;
                 renderer.receiveShadows = false;
                 LtaCityDividers.Build(area, road.transform, geometry, surface,
@@ -389,7 +389,7 @@ namespace Formula9.World
 
                 // The raised sidewalks replace the hidden kerb strips. They load on their own, as the
                 // file is large and nothing waits on them: poles and shelters are lifted when they come.
-                sidewalksLoading = LoadSidewalksAsync(client, area, surface, grain, cancellation);
+                sidewalksLoading = LoadSidewalksAsync(client, area, surface, grain, geometry, cancellation);
 
                 await LoadRoadMarkingsAsync(area, renderer, surface, cancellation);
 
@@ -432,7 +432,39 @@ namespace Formula9.World
 
         // Sidewalks from the backend's walkways file, or from the copy in Resources when the backend has none
         // (an older backend, or offline). Without either, the roads stand as they did before sidewalks.
-        private async Task LoadSidewalksAsync(CityClient client, string area, Shader shader, Texture2D grain, CancellationToken cancellation)
+        private void LoadCentreDividerMask(string area, Material asphalt)
+        {
+            if (!asphalt.HasProperty("_SurveyPaintMask"))
+            {
+                Debug.LogWarning($"[CityView] Centre-divider shader inactive. Active shader: {asphalt.shader.name}.");
+                return;
+            }
+            if (asphalt.HasProperty("_SurveyPaintMask"))
+            {
+                var maskAsset = Resources.Load<TextAsset>($"Formula9/RoadData/{area}-centre-divider-mask");
+                if (maskAsset == null) Debug.LogWarning($"[CityView] Centre-divider mask missing for {area}.");
+                if (maskAsset != null)
+                {
+                    var mask = Own(new Texture2D(2, 2, TextureFormat.RGBA32, false, true)
+                    {
+                        name = "LTA surveyed paint coverage",
+                        wrapMode = TextureWrapMode.Clamp,
+                        filterMode = FilterMode.Bilinear
+                    });
+                    if (!mask.LoadImage(maskAsset.bytes, true))
+                    {
+                        Debug.LogWarning("[CityView] Centre-divider mask could not be decoded.");
+                        return;
+                    }
+                    asphalt.SetTexture("_SurveyPaintMask", mask);
+                    asphalt.SetVector("_SurveyMaskBounds",
+                        new Vector4(2025.160000f, -2886.280000f, 0.0004081966f, 0.0005020080f));
+                    Debug.Log("[CityView] Centre-divider mask active for two-way roads.");
+                }
+            }
+        }
+
+        private async Task LoadSidewalksAsync(CityClient client, string area, Shader shader, Texture2D grain, Mesh roads, CancellationToken cancellation)
         {
             try
             {
@@ -454,7 +486,13 @@ namespace Formula9.World
                 }
                 cancellation.ThrowIfCancellationRequested();
                 if (disposed) return;
-                var surfaceBuild = Task.Run(() => SidewalkSurface.Build(data), cancellation);
+                var roadVertices = roads.vertices;
+                var roadTriangles = roads.GetTriangles(RoadMesh.AsphaltLayer);
+                var seam = await Task.Run(() => SidewalkRoadSeam.Build(data, roadVertices, roadTriangles, cancellation), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+                if (disposed) return;
+                var align = seam.Align;
+                var surfaceBuild = Task.Run(() => SidewalkSurface.Build(data, align), cancellation);
                 // Observed even when this returns before awaiting it (disposed, cancelled, a tile failing),
                 // so a failed build is never reported as an unobserved task exception
                 _ = surfaceBuild.ContinueWith(t => _ = t.Exception, CancellationToken.None,
@@ -467,10 +505,29 @@ namespace Formula9.World
                 var materials = SidewalkMaterials(shader, grain);
                 var holder = new GameObject("Sidewalks").transform;
                 holder.SetParent(root, false);
+                if (seam.Green.Length > 0)
+                {
+                    var infill = Own(new Mesh { name = "Green roadside infill", indexFormat = IndexFormat.UInt32 });
+                    infill.vertices = seam.Green;
+                    var indices = new int[seam.Green.Length];
+                    var uv = new Vector2[seam.Green.Length];
+                    for (int i = 0; i < indices.Length; i++)
+                    {
+                        indices[i] = i;
+                        uv[i] = new Vector2(seam.Green[i].x, seam.Green[i].z);
+                    }
+                    infill.uv = uv;
+                    infill.triangles = indices;
+                    infill.RecalculateNormals();
+                    var strip = new GameObject(infill.name, typeof(MeshFilter), typeof(MeshRenderer));
+                    strip.transform.SetParent(holder, false);
+                    strip.GetComponent<MeshFilter>().sharedMesh = infill;
+                    strip.GetComponent<MeshRenderer>().sharedMaterial = materials[SidewalkMesh.VergeLayer];
+                }
                 var clock = System.Diagnostics.Stopwatch.StartNew();
                 foreach (var tile in data.Tiles)
                 {
-                    var mesh = Own(SidewalkMesh.Build(tile));
+                    var mesh = Own(SidewalkMesh.Build(tile, align));
                     var piece = new GameObject(mesh.name, typeof(MeshFilter), typeof(MeshRenderer));
                     piece.transform.SetParent(holder, false);
                     piece.GetComponent<MeshFilter>().sharedMesh = mesh;

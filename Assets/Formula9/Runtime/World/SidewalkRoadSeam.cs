@@ -10,8 +10,9 @@ namespace Formula9.World
     {
         private const float CellSize = 4f;
         private const float MaxShift = .65f;
+        private const float MaxGreenGap = 2f;
 
-        internal static Func<Vector2, Vector2> Build(CityWalkwayData data, Vector3[] vertices,
+        internal static (Func<Vector2, Vector2> Align, Vector3[] Green) Build(CityWalkwayData data, Vector3[] vertices,
             int[] triangles, CancellationToken cancellation)
         {
             var counts = new Dictionary<(Vector2 A, Vector2 B), int>();
@@ -33,7 +34,7 @@ namespace Formula9.World
             {
                 if (entry.Value != 1) continue;
                 var edge = entry.Key;
-                Vector2 pad = Vector2.one * MaxShift;
+                Vector2 pad = Vector2.one * MaxGreenGap;
                 var low = Cell(Vector2.Min(edge.A, edge.B) - pad);
                 var high = Cell(Vector2.Max(edge.A, edge.B) + pad);
                 for (int x = low.x; x <= high.x; x++)
@@ -59,7 +60,59 @@ namespace Formula9.World
                     Snap(b, direction);
                 }
             }
-            return at => adjusted.TryGetValue(at, out var target) ? target : at;
+            Vector2 Align(Vector2 at) => adjusted.TryGetValue(at, out var target) ? target : at;
+
+            var green = new List<Vector3>();
+            foreach (var tile in data.Tiles)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                for (int i = 0; i < tile.KerbEdges.Length; i += 3)
+                {
+                    var a = Align(SidewalkMesh.Corner(tile, tile.KerbEdges[i]));
+                    var b = Align(SidewalkMesh.Corner(tile, tile.KerbEdges[i + 1]));
+                    var direction = (b - a).normalized;
+                    var towardRoad = new Vector2(direction.y, -direction.x);
+                    if (!FindRoadSide(a, towardRoad, direction, out var roadA) ||
+                        !FindRoadSide(b, towardRoad, direction, out var roadB)) continue;
+                    if (Vector2.Dot(roadB - roadA, direction) < 0f) continue;
+                    AddGreenTriangle(a, b, roadB);
+                    AddGreenTriangle(a, roadB, roadA);
+                }
+            }
+            return (Align, green.ToArray());
+
+            bool FindRoadSide(Vector2 at, Vector2 towardRoad, Vector2 direction, out Vector2 target)
+            {
+                target = at;
+                if (!grid.TryGetValue(Cell(at), out var candidates)) return false;
+                float best = MaxGreenGap * MaxGreenGap;
+                bool found = false;
+                foreach (var edge in candidates)
+                {
+                    var delta = edge.B - edge.A;
+                    if (Mathf.Abs(Vector2.Dot(delta.normalized, direction)) < .94f) continue;
+                    float t = Vector2.Dot(at - edge.A, delta) / delta.sqrMagnitude;
+                    var point = edge.A + Mathf.Clamp01(t) * delta;
+                    var offset = point - at;
+                    float distance = offset.sqrMagnitude;
+                    if (distance >= best || Vector2.Dot(offset, towardRoad) < -.02f) continue;
+                    if (Mathf.Abs(Vector2.Dot(offset, direction)) > .35f) continue;
+                    best = distance;
+                    target = point;
+                    found = true;
+                }
+                return found;
+            }
+
+            void AddGreenTriangle(Vector2 a, Vector2 b, Vector2 c)
+            {
+                float cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+                if (Mathf.Abs(cross) < .0001f) return;
+                const float height = RoadMesh.SurfaceY - .025f;
+                green.Add(new Vector3(a.x, height, a.y));
+                green.Add(cross < 0f ? new Vector3(b.x, height, b.y) : new Vector3(c.x, height, c.y));
+                green.Add(cross < 0f ? new Vector3(c.x, height, c.y) : new Vector3(b.x, height, b.y));
+            }
 
             void Count(Vector2 a, Vector2 b)
             {

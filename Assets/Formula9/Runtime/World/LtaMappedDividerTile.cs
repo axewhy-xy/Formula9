@@ -64,6 +64,7 @@ namespace Formula9.World
                 ? Array.Empty<int>() : ReadSurface(kerbs["median_fill"], top, vertices);
             var barrierTriangles = new List<int>();
 
+            var paintUv = new List<Vector2>(new Vector2[vertices.Count]);
             foreach (JToken edge in walls)
             {
                 if (!(edge is JArray pair) || pair.Count != 2)
@@ -74,6 +75,18 @@ namespace Formula9.World
                 vertices.Add(ReadPoint(pair[1], top));
                 vertices.Add(ReadPoint(pair[1], SurfaceHeightM));
                 vertices.Add(ReadPoint(pair[0], SurfaceHeightM));
+                var a = vertices[first];
+                var b = vertices[first + 1];
+                var direction = b - a;
+                if (direction.x < 0f || (direction.x == 0f && direction.z < 0f))
+                    direction = -direction;
+                direction.Normalize();
+                float u0 = Vector3.Dot(a + parent.localPosition, direction);
+                float u1 = Vector3.Dot(b + parent.localPosition, direction);
+                paintUv.Add(new Vector2(u0, 1));
+                paintUv.Add(new Vector2(u1, 1));
+                paintUv.Add(new Vector2(u1, 1));
+                paintUv.Add(new Vector2(u0, 1));
                 kerbTriangles.Add(first);
                 kerbTriangles.Add(first + 1);
                 kerbTriangles.Add(first + 2);
@@ -89,7 +102,9 @@ namespace Formula9.World
             ownMesh(generatedKerbs);
             if (vertices.Count > 65535)
                 generatedKerbs.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+            while (paintUv.Count < vertices.Count) paintUv.Add(Vector2.zero);
             generatedKerbs.SetVertices(vertices);
+            generatedKerbs.SetUVs(0, paintUv);
             generatedKerbs.subMeshCount = 4;
             generatedKerbs.SetTriangles(kerbTriangles, 0);
             generatedKerbs.SetTriangles(fillTriangles, 1);

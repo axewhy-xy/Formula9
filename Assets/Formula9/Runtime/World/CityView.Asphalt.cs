@@ -151,24 +151,6 @@ namespace Formula9.World
                 {
                     LtaOverviewSymbols.Build(indexed.Tiles, holder.transform, symbols, meshes.Add);
                 }
-                if (originalAsphalt.HasProperty("_SurveyPaintMask"))
-                {
-                    var maskAsset = Resources.Load<TextAsset>($"Formula9/RoadData/{area}-centre-divider-mask");
-                    if (maskAsset != null)
-                    {
-                        var mask = Own(new Texture2D(2, 2, TextureFormat.RGBA32, false, true)
-                        {
-                            name = "LTA surveyed paint coverage",
-                            wrapMode = TextureWrapMode.Clamp,
-                            filterMode = FilterMode.Bilinear
-                        });
-                        if (!mask.LoadImage(maskAsset.bytes, true))
-                            throw new FormatException("Invalid LTA paint coverage image.");
-                        originalAsphalt.SetTexture("_SurveyPaintMask", mask);
-                        originalAsphalt.SetVector("_SurveyMaskBounds",
-                            new Vector4(2025.160000f, -2886.280000f, 0.0004081966f, 0.0005020080f));
-                    }
-                }
                 owned.AddRange(meshes);
                 committed = true;
                 Debug.Log($"[CityView] LTA paint overlay loaded on {built} tiles.");

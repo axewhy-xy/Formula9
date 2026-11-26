@@ -39,7 +39,11 @@ namespace Formula9.World
                     return mat;
                 }
 
-                var concrete = Make("Mapped concrete kerbs", new Color(.66f, .66f, .64f));
+                var concreteShader = Resources.Load<Shader>("Formula9/LtaDividerConcrete");
+                var concrete = concreteShader != null && concreteShader.isSupported
+                    ? new Material(concreteShader) { name = "Mapped black and white concrete kerbs" }
+                    : Make("Mapped concrete kerbs", new Color(.66f, .66f, .64f));
+                if (concrete.shader == concreteShader) ownMaterial(concrete);
                 var islands = Make("Mapped concrete islands", new Color(.57f, .56f, .53f));
                 var medians = Make("Mapped planted medians", new Color(.32f, .40f, .26f));
                 var metal = Make("Mapped guard rails and railings", new Color(.56f, .57f, .58f));
