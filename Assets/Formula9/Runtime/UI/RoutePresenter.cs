@@ -268,6 +268,8 @@ namespace Formula9.UI
 
         public const string OptionsRefreshed = "Options were refreshed; choose again.";
         public const string OptionsWithdrawn = "That option is no longer offered; choose again.";
+        // The re-route button's tooltip while a route is drawn: pressing it again leaves the re-route
+        public const string LeaveRerouteHint = "Press again to leave the re-route. The route drawn for it is dropped.";
 
         // What the confirm row says when a decision was not applied: it stays open for another try.
         public static string Refusal(CommandOutcome outcome)

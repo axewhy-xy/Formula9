@@ -109,6 +109,9 @@ namespace Formula9.Tests
                 Assert.AreEqual(polled + (streaming ? 0 : 1), snapshotRequests);
                 Assert.IsTrue(suggest.enabledSelf, string.Join("; ", errors.Select(e => e.Message)));
                 Assert.IsTrue(root.Q<Button>("route-start").enabledSelf);
+                // Start lives in the outcome card, which stays even with no problem to report
+                Assert.AreEqual(DisplayStyle.Flex, root.Q("route-outcome").style.display.value, "Start is on the page");
+                Assert.AreEqual(DisplayStyle.Flex, root.Q<Button>("route-start").style.display.value);
                 typeof(TrainingWorkspace).GetMethod("SuggestDetour", flags).Invoke(workspace, null);
                 root.Q<TextField>("route-reason").value = "Use the checked detour";
                 Update();
@@ -619,6 +622,10 @@ namespace Formula9.Tests
                 Task Confirm() => (Task)typeof(TrainingWorkspace).GetMethod("ConfirmChoice", flags).Invoke(workspace, null);
                 bool Shown(string name) => root.Q(name).style.display.value == DisplayStyle.Flex;
                 Button Option(string name) => root.Q<Button>(name);
+                // Before joining, the page says to join a session: a shuttle can't be added yet
+                workspace.Render();
+                Assert.AreEqual("Join a session to see its routes.", root.Q<Label>("route-empty").text);
+                Assert.IsTrue(Shown("route-empty"));
                 await session.JoinAsync((string)raw["session_id"]);
                 // The options' figures are in the backend's OPTIONS_READY event
                 var ready = ContractParser.Parse<EventReplay>(Fixture("event_replay").ToString()).Events.Single();
@@ -646,6 +653,9 @@ namespace Formula9.Tests
                 Assert.IsFalse(Shown("route-outcome"));
                 Assert.IsFalse(Shown("route-decide"));
                 Assert.AreEqual("1", root.Q("route-problem-card").Q<Label>("route-step-number").text, "the problem is step 1");
+                // Nothing chosen yet: the exercise is still at the problem, not past it
+                Assert.IsTrue(root.Q("route-problem-card").Q<Label>("route-step-number").ClassListContains("route-step-current"));
+                Assert.IsFalse(root.Q("route-problem-card").Q("route-step-mark").ClassListContains("route-step-done"));
 
                 // One confirm step, with a reason to start from
                 Choose("HOLD_AT_STOP");
@@ -710,6 +720,20 @@ namespace Formula9.Tests
                 Choose("KEEP_ROUTE");
                 Assert.IsFalse(Shown("route-confirm"));
                 Assert.IsFalse(Option("option-keep").ClassListContains("segment-selected"));
+                Assert.AreEqual(2, commands.Count);
+
+                // Paused with an option chosen: the others grey out, but the chosen one can still be
+                // pressed to close its confirm card, as there is no Back
+                Choose("KEEP_ROUTE");
+                session.Store.Snapshot.Session.Status = "PAUSED";
+                workspace.Render();
+                Assert.IsTrue(Shown("route-confirm"));
+                Assert.IsFalse(Option("option-hold").enabledSelf);
+                Assert.IsTrue(Option("option-keep").enabledSelf, "the way back from the confirm card");
+                Assert.IsFalse(root.Q<Button>("route-confirm-send").enabledSelf);
+                Choose("KEEP_ROUTE");
+                Assert.IsFalse(Shown("route-confirm"));
+                Assert.IsFalse(Option("option-keep").enabledSelf, "closed, it is greyed out like the rest");
                 Assert.AreEqual(2, commands.Count);
             }
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }

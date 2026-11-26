@@ -573,15 +573,15 @@ namespace Formula9.UI
 
             // The training world's time and temperature, as "12:44 pm · 31°C", whichever view is open.
             // Checked twice a second, so it turns with the world's minute; Render shows it only while a
-            // session is joined.
+            // session is joined and the world's day has been set up.
             worldWeather = root.Q<Label>("world-weather");
             worldWeather.tooltip = "Time and temperature in the training world. They follow the session's clock and the sky in the 3D view, not the real time or weather.";
             HoverTip.Attach(worldWeather);
             worldWeather.schedule.Execute(() =>
             {
-                if (world == null || !world.TryGetDayAndWeather(out var hour, out var temperature)) return;
-                var text = $"{DayCycle.Clock(hour)} · {Mathf.RoundToInt(temperature)}°C";
+                var text = world != null && world.TryGetDayAndWeather(out var hour, out var temperature) ? $"{DayCycle.Clock(hour)} · {Mathf.RoundToInt(temperature)}°C" : "";
                 if (worldWeather.text != text) worldWeather.text = text;
+                ShowWorldWeather();
             }).Every(500);
             Render();
 
@@ -1052,6 +1052,20 @@ namespace Formula9.UI
         }
 
         // -----------------------------------------------------------------------------------
+        // Function: ShowWorldWeather
+        // -----------------------------------------------------------------------------------
+        // Description:
+        //     This function shows the time and temperature beside the alert bell only while a
+        //     session is joined and the world's day has been set up, so an empty label never shows.
+        //     Before a session the world's clock stands still at its start hour.
+        private void ShowWorldWeather()
+        {
+            if (worldWeather == null) return;
+            var shown = session.Store.Snapshot != null && !string.IsNullOrEmpty(worldWeather.text);
+            worldWeather.style.display = shown ? DisplayStyle.Flex : DisplayStyle.None;
+        }
+
+        // -----------------------------------------------------------------------------------
         // Function: Render
         // -----------------------------------------------------------------------------------
         // Description:
@@ -1070,8 +1084,7 @@ namespace Formula9.UI
             sessionPlayback.style.display = controls.PlaybackVisible ? DisplayStyle.Flex : DisplayStyle.None;
             // Alerts only sound in a joined session, so the mute is offered only then
             if (muteToggle != null) muteToggle.style.display = snapshot != null ? DisplayStyle.Flex : DisplayStyle.None;
-            // Before a session the world's clock stands still at its start hour, so there is no time to show
-            if (worldWeather != null) worldWeather.style.display = snapshot != null ? DisplayStyle.Flex : DisplayStyle.None;
+            ShowWorldWeather();
             if (world != null)
             {
                 viewMap.EnableInClassList("segment-selected", world.ShowingMap);

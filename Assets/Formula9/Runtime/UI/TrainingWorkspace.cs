@@ -28,7 +28,8 @@ namespace Formula9.UI
         private readonly Label routeName;
         // The line shown in place of Route Planning while there is no shuttle to plan for, the page, and
         // its Exercise / Fleet table switch beside the title
-        private readonly VisualElement routeEmpty, routeBody, routeTabs;
+        private readonly Label routeEmpty;
+        private readonly VisualElement routeBody, routeTabs;
         // A TextElement, not a Label: the sidebar's rules for its names (.nav-item Label) hide and fade
         // every Label in a nav item as it collapses and opens, and must never reach the badge
         private readonly TextElement routeBadge;
@@ -149,7 +150,7 @@ namespace Formula9.UI
             shuttles.RegisterValueChangedCallback(change => { if (shuttleByChoice.TryGetValue(change.newValue ?? "", out var id)) ChooseShuttle(id); });
             routePending = root.Q("route-pending");
             routePendingItems = root.Q("route-pending-items");
-            routeEmpty = root.Q("route-empty");
+            routeEmpty = root.Q<Label>("route-empty");
             routeBody = root.Q("route-body");
             routeTabs = root.Q("route-tabs");
             routeBadge = root.Q<TextElement>("nav-route-badge");
@@ -335,9 +336,14 @@ namespace Formula9.UI
             incidentReports.Render(s);
             emergency?.Render(s);
             assessmentReports.Render(s, session.SignedInUsername, shownPage == ReportsPageIndex);
-            // With no shuttle to plan for, Route Planning shows only the line saying how to get one
+            // With no shuttle to plan for, Route Planning shows only the line saying how to get one:
+            // join a session first, then add a shuttle to it
             var noShuttles = s == null || s.Vehicles.Count == 0;
-            if (routeEmpty != null) routeEmpty.style.display = noShuttles ? DisplayStyle.Flex : DisplayStyle.None;
+            if (routeEmpty != null)
+            {
+                routeEmpty.text = s == null ? "Join a session to see its routes." : "Add shuttle to enable route planning.";
+                routeEmpty.style.display = noShuttles ? DisplayStyle.Flex : DisplayStyle.None;
+            }
             if (routeBody != null) routeBody.style.display = noShuttles ? DisplayStyle.None : DisplayStyle.Flex;
             if (routeTabs != null) routeTabs.style.display = noShuttles ? DisplayStyle.None : DisplayStyle.Flex;
             if (s == null) { RenderBadge(0); RenderReports(); UpdateActions(); return; }
@@ -420,7 +426,15 @@ namespace Formula9.UI
             // The decision card: usable while the session runs, is connected and is up to date
             var free = Current && confirmCommand == null;
             foreach (var option in options)
-                if (optionButtons.TryGetValue(option.Action, out var button)) button.SetEnabled(free && option.Enabled);
+            {
+                if (!optionButtons.TryGetValue(option.Action, out var button)) continue;
+                // Pressing the option already chosen only closes it again (ChooseOption), so that stays
+                // possible while the others are greyed out: it is the only way back from it
+                var closes = option.Action == "ROAD_DETOUR" ? rerouting && !session.HasPendingCommand : option.Action == choice?.Action && confirmCommand == null;
+                button.SetEnabled(closes || (free && option.Enabled));
+                // Leaving a re-route drops the route drawn for it and its undo history
+                button.tooltip = option.Action == "ROAD_DETOUR" && rerouting && draft.Count > 0 ? RoutePresenter.LeaveRerouteHint : option.Tooltip;
+            }
             routeConfirmSend.SetEnabled(free && choice != null && s?.Session.Status == "RUNNING" && !string.IsNullOrWhiteSpace(confirmReason.value));
             confirmReason.SetEnabled(confirmCommand == null);
             var hint = optionsNote ?? RoutePresenter.OptionsHint(s, session.Available, session.HasPendingCommand, Fresh);
@@ -896,8 +910,8 @@ namespace Formula9.UI
             routeOptionsExpiry.style.display = expiry == null ? DisplayStyle.None : DisplayStyle.Flex;
             // Before the start: the problem, the editor while a route is closed, else the outcome. Running
             // with a decision to make: the problem and the options, and the editor while re-routing.
-            // Otherwise: the problem and the outcome. With no problem there is nothing to follow it, so
-            // the problem card stands alone (Start and the cameras are on the header and the map's bar).
+            // Otherwise: the problem and the outcome. With no problem and nothing to report, the outcome
+            // card keeps only its Start, Watch and Cameras buttons.
             var ready = s?.Session.Status == "READY";
             var pending = s != null && DecisionRules.OptionsFor(s, selectedVehicle).Count > 0;
             var editing = ready ? s != null && TrainingPresenter.AssignedRouteIsClosed(s) : Drafting(s);
@@ -905,7 +919,11 @@ namespace Formula9.UI
             routeDecide.style.display = editing ? DisplayStyle.Flex : DisplayStyle.None;
             routeFeedback.style.display = editing ? DisplayStyle.Flex : DisplayStyle.None;
             routeApply.style.display = editing ? DisplayStyle.Flex : DisplayStyle.None;
-            routeOutcomePanel.style.display = editing || (!ready && pending) || !problem ? DisplayStyle.None : DisplayStyle.Flex;
+            routeOutcomePanel.style.display = editing || (!ready && pending) ? DisplayStyle.None : DisplayStyle.Flex;
+            var report = problem || (outcome != null && outcome.State != "NOT_APPROVED") ? DisplayStyle.Flex : DisplayStyle.None;
+            routeOutcomeHeadline.style.display = report;
+            routeOutcomeRows.style.display = report;
+            routeOutcomeNotes.style.display = report;
             RenderOptions(s);
             RenderOutcome(s);
         }
@@ -921,7 +939,6 @@ namespace Formula9.UI
             {
                 if (!optionButtons.TryGetValue(option.Action, out var button)) continue;
                 button.text = option.Label;
-                button.tooltip = option.Tooltip;
                 button.style.display = option.Shown ? DisplayStyle.Flex : DisplayStyle.None;
                 button.EnableInClassList("segment-selected", option.Action == "ROAD_DETOUR" ? rerouting : option.Action == choice?.Action);
             }
@@ -1071,11 +1088,13 @@ namespace Formula9.UI
 
         // Numbers the step cards shown, 1 upwards in page order, and marks each one done, or the one the
         // exercise is at (RoutePresenter.Stage), whose circle is filled in. With an option other than the
-        // re-route chosen, the exercise is at its confirm card, step 1 in the detour's place. The line
-        // starts at the first card's circle and ends at the last one's.
+        // re-route chosen, the exercise is at its confirm card, step 1 in the detour's place. While the
+        // options wait with neither chosen, it is still at the problem. The line starts at the first
+        // card's circle and ends at the last one's.
         private void RenderSteps(FullSnapshot s)
         {
-            var stage = choice != null ? 1 : RoutePresenter.Stage(s, selectedVehicle, s != null && TrainingPresenter.AssignedRouteIsClosed(s), draft.Count > 0 || suggesting, preview);
+            var deciding = routeOptions.style.display.value == DisplayStyle.Flex && !rerouting;
+            var stage = choice != null ? 1 : deciding ? 0 : RoutePresenter.Stage(s, selectedVehicle, s != null && TrainingPresenter.AssignedRouteIsClosed(s), draft.Count > 0 || suggesting, preview);
             var shown = routeSteps.Where(c => c.Card.style.display.value != DisplayStyle.None).ToList();
             for (var i = 0; i < shown.Count; i++)
             {
