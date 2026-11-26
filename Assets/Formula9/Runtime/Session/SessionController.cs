@@ -115,6 +115,7 @@ namespace Formula9.Session
         // A stream heard nothing from for this long (the backend sends a heartbeat every 5 s) is taken
         // as lost, so a connection that died silently does not stop the updates
         public static readonly TimeSpan StreamSilenceLimit = TimeSpan.FromSeconds(15);
+        public static readonly TimeSpan ActionFreshnessLimit = TimeSpan.FromSeconds(5);
 
         // -----------------------------------------------------------------------------------
         // Class: PendingCommand
@@ -184,6 +185,8 @@ namespace Formula9.Session
         // True while the joined session's stream delivers its snapshots (and traffic, if asked for):
         // RefreshAsync then fetches no snapshot and the traffic is not polled.
         public bool Streaming => stream != null && streamDelivered && !stream.Closed && stream.SessionId == SessionId;
+        /// <summary>Action freshness expires before the stream's transport retry timeout.</summary>
+        public bool StreamIsFresh => Available && UseStream && Streaming && now() - streamHeard <= ActionFreshnessLimit;
 
         public event Action<FullSnapshot, bool> SnapshotAccepted;
         // The joined session's real-time factor, from the snapshots received while it runs.
@@ -423,13 +426,13 @@ namespace Formula9.Session
         // Description:
         //     This function is one poll: it confirms a pending creation, refreshes the snapshot
         //     (which catches up events) and reconciles a pending command. While the session's
-        //     stream delivers its snapshots, none is fetched; only events the stream's snapshots
-        //     announced and that are still missing are.
+        //     stream keeps state fresh, no snapshot is fetched; a silent stream is probed without
+        //     waiting for its transport timeout. Missing events are fetched as before.
         public async Task RefreshAsync()
         {
             if (!auth.IsLoggedIn) return;
             if (creationKey != null && creationOwner == auth.Username) await CreateAsync();
-            if (SessionId != null && !Streaming) await RequestSnapshotAsync(SessionId);
+            if (SessionId != null && (!Streaming || !StreamIsFresh)) await RequestSnapshotAsync(SessionId);
             else if (SessionId != null && eventCursor >= 0 && Store.Snapshot != null && Store.Snapshot.EventSequence > eventCursor) await RequestEventsAsync();
             if (pending != null && pending.Command.SessionId == SessionId) await RunPendingAsync(0);
         }

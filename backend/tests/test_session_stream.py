@@ -145,7 +145,7 @@ def test_a_quiet_session_sends_heartbeats(http, monkeypatch):
         # A READY session commits nothing: the stream says it is there, and sends nothing it sent already
         quiet = collect(socket, lambda m: len(m) >= 2, timeout_s=5)
         assert [m["type"] for m, _ in quiet] == ["heartbeat", "heartbeat"]
-    assert HEARTBEAT_S >= 1  # The real interval is not one a test can wait out cheaply
+    assert 1 <= HEARTBEAT_S < 5  # Idle heartbeats arrive before the client's action freshness expires.
 
 
 @pytest.mark.traffic

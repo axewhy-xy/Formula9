@@ -21,10 +21,19 @@ namespace Formula9.World
         [JsonProperty("buildingSelfLight")] public float BuildingSelfLight = 0.06f;
         // How much darker the unlit ground is in shadow, 0 to 1
         [JsonProperty("groundShadowDarkness")] public float GroundShadowDarkness = 0.45f;
+        [JsonProperty("grass")] public GrassSpec Grass = new GrassSpec();
         // The sky through the day; with no keys the sun, ambient, sky and haze above hold all day
         [JsonProperty("dayCycle")] public DayCycleSpec DayCycle = new DayCycleSpec();
         // The weather the world opens with; DayCycle.Weather changes it at run time
         [JsonProperty("weather")] public WeatherSpec Weather = new WeatherSpec();
+
+        /// <summary>Shared ground detail; disabling it also avoids loading the grass texture.</summary>
+        public sealed class GrassSpec
+        {
+            [JsonProperty("enabled")] public bool Enabled = true;
+            [JsonProperty("repeatM")] public float RepeatM = 2;
+            [JsonProperty("strength")] public float Strength = 0.9f;
+        }
 
         public sealed class DayCycleSpec
         {
@@ -137,6 +146,10 @@ namespace Formula9.World
                 Color(hex);
             look.DayCycle ??= new DayCycleSpec();
             look.Weather ??= new WeatherSpec();
+            look.Grass ??= new GrassSpec();
+            if (!float.IsFinite(look.Grass.RepeatM) || look.Grass.RepeatM <= 0 ||
+                !float.IsFinite(look.Grass.Strength) || look.Grass.Strength < 0 || look.Grass.Strength > 1)
+                throw new FormatException("Grass repeatM must be positive and strength must be between 0 and 1.");
             look.DayCycle.Keys ??= new List<SkyKey>();
             look.DayCycle.Keys.RemoveAll(k => k == null);
             foreach (var key in look.DayCycle.Keys)
