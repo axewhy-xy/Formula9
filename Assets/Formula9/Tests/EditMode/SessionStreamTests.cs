@@ -3,7 +3,7 @@
  *
  * Author: Lau Xiang Yang
  * Date Created: 18/11/2026
- * Last Modified: 18/11/2026
+ * Last Modified: 26/11/2026
  *
  * Description:
  *     Part of SessionControllerTests, over the same scripted backend, with a fake WebSocket the
@@ -45,7 +45,7 @@ namespace Formula9.Tests
         //     to fail the connection; Hold to keep it connecting until FinishConnecting;
         //     FailSends to fail every send; Disposed once the client closed it. As a real
         //     WebSocket, it refuses a send before it has connected.
-        private sealed class FakeStreamSocket : IStreamSocket
+        internal sealed class FakeStreamSocket : IStreamSocket
         {
             public Uri Url;
             public IReadOnlyDictionary<string, string> Headers;

@@ -5,7 +5,7 @@
  * Contributors: Rishika (page layout, fleet cards, map/3D switch),
  *     Lau Xiang Yang (training workspace, session list and cleanup, exit)
  * Date Created: 30/10/2026
- * Last Modified: 23/11/2026
+ * Last Modified: 26/11/2026
  *
  * Description:
  *     Part of the Unity client's UI. Wires the UI Toolkit screens to the login and session layers,
@@ -71,6 +71,8 @@ namespace Formula9.UI
         private TextField username, password, confirm, sessionId;
         private Label signUpHint, loginError, title, user, capacity, status, message, sessionBadge, worldNotice;
         private Label assessmentBadge, assessmentTimer;
+        private const long AssessmentEndNoticeMs = 5000;
+        private (string SessionId, double ExpiresAt) assessmentEndNotice;
         private string sessionBadgeClass;
         private readonly SessionStatusPresenter sessionStatusPresenter = new SessionStatusPresenter();
         private Button forgot, submit, modeSwitch, start, pause, resume, archive, refreshSessions;
@@ -986,8 +988,25 @@ namespace Formula9.UI
             start.text = active ? "Start assessment" : "Start scenario";
 
             var clock = TrainingPresenter.AssessmentClock(snapshot, session.Available);
+            var completed = TrainingPresenter.IsAssessment(snapshot) && snapshot.Session?.Status == "COMPLETED";
+            if (!completed) assessmentEndNotice = default;
+            else if (assessmentEndNotice.SessionId != snapshot.SessionId)
+            {
+                assessmentEndNotice = (snapshot.SessionId, Time.realtimeSinceStartupAsDouble + AssessmentEndNoticeMs / 1000d);
+                var notice = assessmentEndNotice;
+                // Refresh once at expiry, even when the completed session sends no new snapshots.
+                assessmentTimer.schedule.Execute(() =>
+                {
+                    if (isActiveAndEnabled && assessmentEndNotice == notice && session.Store.Snapshot?.SessionId == notice.SessionId)
+                    {
+                        assessmentEndNotice.ExpiresAt = 0;
+                        RenderAssessment(session.Store.Snapshot);
+                    }
+                }).ExecuteLater(AssessmentEndNoticeMs);
+            }
             if (assessmentTimer.text != clock.Text) assessmentTimer.text = clock.Text;
-            assessmentTimer.style.display = clock.Text == null ? DisplayStyle.None : DisplayStyle.Flex;
+            var showClock = clock.Text != null && (!completed || Time.realtimeSinceStartupAsDouble < assessmentEndNotice.ExpiresAt);
+            assessmentTimer.style.display = showClock ? DisplayStyle.Flex : DisplayStyle.None;
             assessmentTimer.EnableInClassList("assessment-timer-urgent", clock.Urgent);
         }
 

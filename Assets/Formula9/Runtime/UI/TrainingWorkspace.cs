@@ -352,7 +352,10 @@ namespace Formula9.UI
             Select(tabs[0].Button);
         }
 
-        private bool Current => session.Available && !session.HasPendingCommand && Time.realtimeSinceStartup - acceptedAt <= 5;
+        // A live stream keeps unchanged snapshots current through heartbeats. Silent streams
+        // expire in SessionController, which resumes the snapshot poll.
+        private bool Fresh => session.Streaming || Time.realtimeSinceStartup - acceptedAt <= 5;
+        private bool Current => session.Available && !session.HasPendingCommand && Fresh;
 
         private void UpdateActions()
         {
@@ -363,8 +366,9 @@ namespace Formula9.UI
             routeUndo.SetEnabled(edit && historyIndex > 0);
             routeRedo.SetEnabled(edit && historyIndex + 1 < draftHistory.Count);
             routeClear.SetEnabled(edit && (draft.Count > 0 || preview != null));
-            approve.SetEnabled(edit && !routeBusy && preview != null && preview.Approvable && DecisionRules.RoutePreviewMatches(s, selectedVehicle, preview) && !string.IsNullOrWhiteSpace(routeReason.value));
-            routeApplyNote.text = RoutePresenter.ApprovalNote(s, preview, routeReason.value);
+            var matches = DecisionRules.RoutePreviewMatches(s, selectedVehicle, preview);
+            approve.SetEnabled(edit && !routeBusy && preview != null && preview.Approvable && matches && !string.IsNullOrWhiteSpace(routeReason.value));
+            routeApplyNote.text = ApprovalBlocker(s, edit, matches) ?? RoutePresenter.ApprovalNote(s, preview, routeReason.value);
             // Any shuttle can be picked, even with others waiting: the operator decides in which order
             shuttles.SetEnabled(!session.HasPendingCommand && !routeBusy);
             var routeClosed = s != null && TrainingPresenter.AssignedRouteIsClosed(s);
@@ -388,13 +392,28 @@ namespace Formula9.UI
             routeConfirmBack.SetEnabled(confirmCommand == null);
             confirmReason.SetEnabled(confirmCommand == null);
             routeRerouteBack.SetEnabled(!session.HasPendingCommand);
-            var hint = optionsNote ?? RoutePresenter.OptionsHint(s, session.Available, session.HasPendingCommand, Time.realtimeSinceStartup - acceptedAt <= 5);
+            var hint = optionsNote ?? RoutePresenter.OptionsHint(s, session.Available, session.HasPendingCommand, Fresh);
             routeOptionsHint.text = hint ?? "";
             routeOptionsHint.style.display = string.IsNullOrEmpty(hint) ? DisplayStyle.None : DisplayStyle.Flex;
             world.RouteEditing = edit;
             // A decision or a lost connection withdraws the verdict but leaves the draft: ask once more.
             if (edit && draft.Count > 0 && preview == null && !routeBusy && approvedDraft == null && checkedRevision != draftRevision && !previewTimer.isActive) SchedulePreview();
             if (draftView != null && draftView.Editable != (edit && shownPage == RoutePage)) ShowDraftInViews();
+        }
+
+        /// <summary>Explain connection, loading and revision checks that prevent route approval.</summary>
+        private string ApprovalBlocker(FullSnapshot snapshot, bool editable, bool matches)
+        {
+            if (snapshot == null) return "Create or join a session before approving a route.";
+            if (!session.Available) return "Waiting for the backend to reconnect before approving.";
+            if (session.HasPendingCommand) return "Waiting for the last command to finish before approving.";
+            if (!Fresh) return "Waiting for a fresh session update. Refresh the current session to try again.";
+            if (TrainingPresenter.IsTerminalSession(snapshot.Session.Status)) return "This session has ended. Create or join a live session to edit a route.";
+            if (routeBusy) return context == null ? "Loading the roads for this route…" : "Checking the route…";
+            if (context == null) return "The road network is unavailable. Refresh the current session to reload it.";
+            if (!editable) return "This shuttle's route is no longer available for editing. Select a current reroute option.";
+            if (preview?.Approvable == true && !matches) return "The session changed after this route was checked. Suggest a detour or check the draft again.";
+            return null;
         }
 
         private bool Editable(FullSnapshot s) => Current && context != null &&
