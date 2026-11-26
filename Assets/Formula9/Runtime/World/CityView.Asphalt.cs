@@ -84,7 +84,6 @@ namespace Formula9.World
                 var yellow = Paint("YellowPaint", new Color(.94f, .73f, .13f));
                 holder = new GameObject("LTA paint over original roads");
                 holder.transform.SetParent(root, false);
-                var originalAsphalt = roadRenderer.sharedMaterials[RoadMesh.AsphaltLayer];
                 var roadMesh = roadRenderer.GetComponent<MeshFilter>().sharedMesh;
                 var roadVertices = roadMesh.vertices;
                 var asphalt = roadMesh.GetTriangles(RoadMesh.AsphaltLayer);
