@@ -34,6 +34,7 @@ namespace Formula9.UI
         private readonly ChargingPage charging;
         private readonly ReportsPage reports;
         private readonly IncidentReportsTab incidentReports;
+        private readonly EmergencyDispatchPanel emergency; //added panel for emergency dispatch
         private readonly AssessmentReportsTab assessmentReports;
         private readonly Button sessionToggle;
         private readonly VisualElement sessionCard;
@@ -197,6 +198,7 @@ namespace Formula9.UI
 
             reports = new ReportsPage(root);
             incidentReports = new IncidentReportsTab(root, api, session, world, run);
+            emergency = new EmergencyDispatchPanel(root, session, run, notify, () => Current);
             assessmentReports = new AssessmentReportsTab(root, api, run);
             root.Q<Button>("reports-tab-assessment").clicked += Render;
             session.SnapshotAccepted += (_, __) => { acceptedAt = Time.realtimeSinceStartup; Render(); };
@@ -289,6 +291,7 @@ namespace Formula9.UI
                 SelectIncident(null);
                 if (ledgerSession != s?.SessionId) { ledger.Clear(); ledgerSession = s?.SessionId; }
                 charging.Reset();
+                emergency?.Reset();
                 routeReason.value = confirmReason.value = "";
                 draft = new List<RouteWaypoint>(); draftHistory.Clear(); draftHistory.Add(new List<RouteWaypoint>()); historyIndex = 0;
                 preview = null; draftView = null; outcome = null; outcomeSequence = -1; suggesting = false;
@@ -302,6 +305,7 @@ namespace Formula9.UI
             }
             FitSessionControls();
             incidentReports.Render(s);
+            emergency?.Render(s);
             assessmentReports.Render(s, session.SignedInUsername, shownPage == ReportsPageIndex);
             if (s == null) { RenderBadge(0); RenderReports(); UpdateActions(); return; }
             // An applied approval moves its route to a new revision, which finishes the draft. A queued
@@ -374,6 +378,8 @@ namespace Formula9.UI
             fleetCameras.text = world.CamerasShown ? "Hide cameras" : "Cameras";
             fleetCameras.EnableInClassList("segment-selected", world.CamerasShown);
             charging.UpdateActions();
+            // UpdateActions can run before the constructor has created the panel, so emergency may still be null
+            emergency?.UpdateActions();
             // The decision card: usable while the session runs, is connected and is up to date
             var free = Current && confirmCommand == null;
             foreach (var option in options)

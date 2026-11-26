@@ -179,6 +179,9 @@ namespace Formula9.UI
             // No event says a battery is low, so the snapshots are watched for it.
             var battery = new BatteryWatch(player.Play, () => alerts.Muted);
             session.SnapshotAccepted += (snapshot, _) => battery.OnSnapshot(snapshot);
+
+            // Warns when a shuttle's charge nears what it needs to reach a depot (it stays alive through the session's events)
+            new ShuttleBatteryService(session, api, new CityClient(transport), _ => WorldView.CityArea, ShowMessage);
             session.ConnectionChanged += connected =>
             {
                 // The reconnect cue plays on the same snapshot; a battery that turned red meanwhile waits a
