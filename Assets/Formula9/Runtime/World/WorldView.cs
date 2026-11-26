@@ -61,6 +61,10 @@ namespace Formula9.World
         private WorldScene world;
         private SpatialReference shownPins;
         private FullSnapshot latest;
+        // The sun and sky, run on the session's clock
+        private DayCycle dayCycle;
+        private Label clock;
+        private int clockMinute = -1;
         private CancellationTokenSource loading;
         private Vector3 target;
         private float yaw, pitch = 0.6f, distance = 90;
@@ -168,6 +172,9 @@ namespace Formula9.World
             mainCameraLabel.AddToClassList("camera-label");
             mainCameraView.Add(mainCameraLabel);
             cameraPanel.Add(mainCameraView);
+            // The large camera image follows the view's size, so it stays sharp at any layout; remade once
+            // the size settles (Update), not on every step of a window being dragged
+            mainCameraView.RegisterCallback<GeometryChangedEvent>(_ => cameraResizedAt = Time.unscaledTime);
             // The thumbnails sit in a rail over the large view's left edge, which the operator can fold
             // away. Left, because incident notifications stack in the top-right corner.
             var rail = new VisualElement { pickingMode = PickingMode.Ignore };
@@ -201,6 +208,12 @@ namespace Formula9.World
             cameraPanel.Add(rail);
             cameraPanel.style.display = DisplayStyle.None;    // hidden until the button is pressed
             surface.Add(cameraPanel);
+            // The world's time of day, bottom left over the 3D view and the cameras; added last, so it shows over both
+            clock = new Label { name = "world-clock", pickingMode = PickingMode.Ignore };
+            clock.AddToClassList("world-clock");
+            clock.style.display = DisplayStyle.None;
+            surface.Add(clock);
+            cameraRail.style.bottom = RailBottomGap + ClockRoom;
             SelectCamera(0);
             trafficCameras.Add(viewCamera); 
             viewCamera.clearFlags = CameraClearFlags.SolidColor;
@@ -209,7 +222,7 @@ namespace Formula9.World
             viewCamera.farClipPlane = 1200;
             viewCamera.fieldOfView = 50;
             viewCamera.enabled = false;
-            WorldLighting.Apply(transform);
+            dayCycle = WorldLighting.Apply(transform).GetComponent<DayCycle>();
 
             surface.RegisterCallback<GeometryChangedEvent>(_ => Resize());
             surface.RegisterCallback<PointerDownEvent>(OnPointerDown);
@@ -256,6 +269,7 @@ namespace Formula9.World
             var boundary = snapshot == null ? null : $"{snapshot.SessionId}/{snapshot.SessionEpoch}";
             if (boundary != sessionBoundary) { sessionBoundary = boundary; preferMap = snapshot?.Spatial == null; following = false; LeaveCameras(); selectedId = null; routeContext = null; roadNetwork = null; incidentRecords.Clear(); motion.Clear(); city?.ResetShuttles(); city?.ForgetTraffic(); DrawDraft(); }
             latest = snapshot;
+            if (dayCycle != null) { if (snapshot != null) dayCycle.SetSessionTick(snapshot.Tick); else dayCycle.ClearSession(); }
             if (snapshot != null) motion.BeginSnapshot(snapshot.Tick, Time.unscaledTime);
             if (snapshot?.Spatial == null)
             {
@@ -415,6 +429,12 @@ namespace Formula9.World
         //     moves the shuttles of the city or scene each frame and keeps a followed one in view.
         private void Update()
         {
+            ShowClock();
+            if (cameraResizedAt >= 0 && Time.unscaledTime - cameraResizedAt > CameraResizeSettleSeconds)
+            {
+                cameraResizedAt = -1;
+                SizeCameraView();
+            }
             if (CityShown && city != null)
             {
                 // The traffic first: the backend's traffic frames carry the shuttles' bodies too, so the
@@ -431,6 +451,21 @@ namespace Formula9.World
             else return;
             // Following waits behind the camera view and carries on when it closes
             if (following && !camerasShown) FocusSelected(false);
+        }
+
+        // The time of day, bottom left: under the camera thumbnails, or above the Draft in 3D row in the
+        // 3D view; hidden with the 2D map
+        private void ShowClock()
+        {
+            if (clock == null) return;
+            var shown = dayCycle != null && (camerasShown || (viewCamera != null && viewCamera.enabled));
+            clock.style.display = shown ? DisplayStyle.Flex : DisplayStyle.None;
+            if (!shown) return;
+            // Only when the minute turns, not a new string every frame
+            var minute = Mathf.FloorToInt(dayCycle.Hour * 60);
+            if (minute != clockMinute) { clockMinute = minute; clock.text = DayCycle.Clock(dayCycle.Hour); }
+            var actions = !camerasShown && worldActions != null && worldActions.resolvedStyle.display == DisplayStyle.Flex ? worldActions.layout.height + 6 : 0;
+            clock.style.bottom = RailBottomGap + bottomInset + (float.IsNaN(actions) ? 0 : actions);
         }
 
         // -----------------------------------------------------------------------------------
@@ -968,7 +1003,7 @@ namespace Formula9.World
             camerasShown = show;
             if (show) watchedId = selectedId;
             cameraPanel.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
-            if (show) shuttleCameras.Match(viewCamera);
+            if (show) { shuttleCameras.Match(viewCamera); SizeCameraView(); }
             if (show && city != null && city.TryGetShuttlePose(watchedId, out var position, out var rotation))
                 shuttleCameras.Place(position, rotation);
             shuttleCameras.SetActive(show);
@@ -1000,11 +1035,15 @@ namespace Formula9.World
             points = Mathf.Max(0, points);
             map?.SetBottomInset(points);
             if (worldActions != null) worldActions.style.translate = new StyleTranslate(new Translate(0, -points));
-            if (cameraRail != null) cameraRail.style.bottom = RailBottomGap + points;
+            if (cameraRail != null) cameraRail.style.bottom = RailBottomGap + ClockRoom + points;
+            bottomInset = points;
         }
 
         // The gap below the camera thumbnails' column, as in .camera-rail
         private const float RailBottomGap = 10;
+        // Room kept under the camera thumbnails for the clock
+        private const float ClockRoom = 34;
+        private float bottomInset;
 
         // -----------------------------------------------------------------------------------
         // Function: SelectCamera
@@ -1035,6 +1074,21 @@ namespace Formula9.World
         //     This function puts the large image on the large view and each camera's thumbnail
         //     image on its tile. While the cameras are closed there are no images, so it does
         //     nothing.
+        // When the large camera view last changed size (-1: settled), and how long it must hold still first
+        private float cameraResizedAt = -1;
+        private const float CameraResizeSettleSeconds = 0.25f;
+
+        // Sizes the large camera image to the large view in physical pixels, as Resize does for the 3D view
+        private void SizeCameraView()
+        {
+            var rect = mainCameraView.contentRect;
+            if (mainCameraView.panel == null || rect.width < 1 || rect.height < 1) return;
+            var root = mainCameraView.panel.visualTree.layout;
+            var scale = root.width > 0 ? Screen.width / root.width : 1;
+            if (shuttleCameras.SetLargeSize(Mathf.RoundToInt(rect.width * scale), Mathf.RoundToInt(rect.height * scale)))
+                ShowTextures();
+        }
+
         private void ShowTextures()
         {
             if (shuttleCameras.Large == null) return;
