@@ -119,7 +119,7 @@
 
                 <ui:VisualElement class="body">
                     <ui:VisualElement name="world" class="world">
-                        <!-- Floats translucent over the top centre of the map, so the map gets the whole height.
+                        <!-- Floats over the top centre of the map, so the map gets the whole height.
                              Formula9App brings it in front of the layers WorldView adds. -->
                         <ui:VisualElement name="view-bar" class="view-bar">
                             <ui:Button name="view-map" text="2D Map" class="segment" />
