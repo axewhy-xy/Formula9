@@ -64,6 +64,7 @@ namespace Formula9.World
         // The sun and sky, run on the session's clock
         private DayCycle dayCycle;
         private Label clock;
+        private int clockMinute = -1;
         private CancellationTokenSource loading;
         private Vector3 target;
         private float yaw, pitch = 0.6f, distance = 90;
@@ -171,8 +172,9 @@ namespace Formula9.World
             mainCameraLabel.AddToClassList("camera-label");
             mainCameraView.Add(mainCameraLabel);
             cameraPanel.Add(mainCameraView);
-            // The large camera image follows the view's size, so it stays sharp at any layout
-            mainCameraView.RegisterCallback<GeometryChangedEvent>(_ => SizeCameraView());
+            // The large camera image follows the view's size, so it stays sharp at any layout; remade once
+            // the size settles (Update), not on every step of a window being dragged
+            mainCameraView.RegisterCallback<GeometryChangedEvent>(_ => cameraResizedAt = Time.unscaledTime);
             // The thumbnails sit in a rail over the large view's left edge, which the operator can fold
             // away. Left, because incident notifications stack in the top-right corner.
             var rail = new VisualElement { pickingMode = PickingMode.Ignore };
@@ -428,6 +430,11 @@ namespace Formula9.World
         private void Update()
         {
             ShowClock();
+            if (cameraResizedAt >= 0 && Time.unscaledTime - cameraResizedAt > CameraResizeSettleSeconds)
+            {
+                cameraResizedAt = -1;
+                SizeCameraView();
+            }
             if (CityShown && city != null)
             {
                 // The traffic first: the backend's traffic frames carry the shuttles' bodies too, so the
@@ -454,7 +461,9 @@ namespace Formula9.World
             var shown = dayCycle != null && (camerasShown || (viewCamera != null && viewCamera.enabled));
             clock.style.display = shown ? DisplayStyle.Flex : DisplayStyle.None;
             if (!shown) return;
-            clock.text = DayCycle.Clock(dayCycle.Hour);
+            // Only when the minute turns, not a new string every frame
+            var minute = Mathf.FloorToInt(dayCycle.Hour * 60);
+            if (minute != clockMinute) { clockMinute = minute; clock.text = DayCycle.Clock(dayCycle.Hour); }
             var actions = !camerasShown && worldActions != null && worldActions.resolvedStyle.display == DisplayStyle.Flex ? worldActions.layout.height + 6 : 0;
             clock.style.bottom = RailBottomGap + bottomInset + (float.IsNaN(actions) ? 0 : actions);
         }
@@ -1065,6 +1074,10 @@ namespace Formula9.World
         //     This function puts the large image on the large view and each camera's thumbnail
         //     image on its tile. While the cameras are closed there are no images, so it does
         //     nothing.
+        // When the large camera view last changed size (-1: settled), and how long it must hold still first
+        private float cameraResizedAt = -1;
+        private const float CameraResizeSettleSeconds = 0.25f;
+
         // Sizes the large camera image to the large view in physical pixels, as Resize does for the 3D view
         private void SizeCameraView()
         {

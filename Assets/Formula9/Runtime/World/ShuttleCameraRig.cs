@@ -47,7 +47,7 @@ namespace Formula9.World
         // The camera shown large draws into one image the size of the view it fills (SetLargeSize),
         // so it is never stretched and blurred and a wider view shows more to the sides; the
         // thumbnails, shown at 160x90, draw into small ones. Edges are smoothed (MSAA).
-        private const int SmallWidth = 320, SmallHeight = 180, Antialiasing = 4;
+        private const int SmallWidth = 320, SmallHeight = 180, Antialiasing = 4, MaxLargeWidth = 1920;
         private int largeWidth = 960, largeHeight = 540;
         // One camera and one small image per mount, in the same order as Mounts, and the large
         // image. The images exist only while the cameras are on.
@@ -171,6 +171,13 @@ namespace Formula9.World
         //     bool: True if the large image was remade, so whoever shows it must show the new one.
         public bool SetLargeSize(int width, int height)
         {
+            // No wider than MaxLargeWidth, keeping the shape: on a 1440p or 4K screen a full-size image
+            // with MSAA would take a few hundred MB of graphics memory for little visible gain
+            if (width > MaxLargeWidth && width > 0)
+            {
+                height = Mathf.RoundToInt(height * (float)MaxLargeWidth / width);
+                width = MaxLargeWidth;
+            }
             width = Mathf.Clamp(width, 16, 4096);
             height = Mathf.Clamp(height, 16, 4096);
             if (width == largeWidth && height == largeHeight) return false;
