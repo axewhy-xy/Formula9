@@ -328,14 +328,7 @@ namespace Formula9.World
                         asphalt.SetFloat("_UseAsphaltMaps", useAsphaltMaps ? 1f : 0f);
                         if (useAsphaltMaps)
                         {
-                            var sun = RenderSettings.sun;
-                            if (sun != null && sun.isActiveAndEnabled && sun.type == LightType.Directional &&
-                                asphalt.HasProperty("_AsphaltLightDirection"))
-                            {
-                                var directionToSun = -sun.transform.forward;
-                                asphalt.SetVector("_AsphaltLightDirection",
-                                    new Vector4(directionToSun.x, directionToSun.y, directionToSun.z, 0f));
-                            }
+                            
                             var normalMap = LoadRoadTexture(roadTextureFolder + "asphalt_02_normal", TextureWrapMode.Mirror);
                             var heightMap = LoadRoadTexture(roadTextureFolder + "asphalt_02_height", TextureWrapMode.Mirror);
                             if (normalMap != null) asphalt.SetTexture("_BumpMap", normalMap);

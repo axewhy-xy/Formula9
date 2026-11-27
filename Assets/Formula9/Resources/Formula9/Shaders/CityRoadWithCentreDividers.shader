@@ -17,7 +17,7 @@ Shader "Formula9/CityRoadWithCentreDividers"
         _AsphaltTileMetres ("Asphalt tile size (metres)", Float) = 2.5
         _AsphaltGrainContrast ("Asphalt grain contrast", Range(0, 1)) = 0.65
         _AsphaltWearStrength ("Asphalt wear variation", Range(0, 0.3)) = 0.17
-        [HideInInspector] _AsphaltLightDirection ("Asphalt light direction", Vector) = (-0.44, 0.822, 0.36, 0)
+       
         [HideInInspector] _UseAsphaltMaps ("Use standalone asphalt maps", Float) = 0
         [HideInInspector] _UseRoadAtlas ("Use asphalt strip from atlas", Float) = 1
     }
@@ -45,7 +45,7 @@ Shader "Formula9/CityRoadWithCentreDividers"
             float _AsphaltTileMetres;
             float _AsphaltGrainContrast;
             float _AsphaltWearStrength;
-            float4 _AsphaltLightDirection;
+            float4 _Formula9AsphaltLightDirection;
             float _UseAsphaltMaps;
             float _VaryAsphaltTiling;
             float4 _Color;
@@ -186,7 +186,7 @@ Shader "Formula9/CityRoadWithCentreDividers"
                     float2 slope = normal.xy * mirrorSign * edgeFade * _NormalStrength;
                     normal = float3(slope, sqrt(saturate(1.0 - dot(slope, slope))));
                     // The planar map uses world X and Z as its tangent axes.
-                    float3 reliefLight = normalize(_AsphaltLightDirection.xzy);
+                    float3 reliefLight = normalize(_Formula9AsphaltLightDirection.xzy);
                     float relief = saturate(dot(normal, reliefLight)) - reliefLight.z;
                     asphalt *= 1.0 + 0.45 * relief;
                 }
