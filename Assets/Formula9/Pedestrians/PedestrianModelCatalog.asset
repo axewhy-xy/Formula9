@@ -13,27 +13,35 @@ MonoBehaviour:
   m_Name: PedestrianModelCatalog
   m_EditorClassIdentifier: Formula9.Runtime::Formula9.World.PedestrianModelCatalog
   entries:
-  - prefab: {fileID: 100100000, guid: b94dc8dc1ef1b244facd45d3929d3667, type: 3}
-    walkClip: {fileID: 0}
-    walkClipName: Walk
-  - prefab: {fileID: 100100000, guid: 1eafc20674086d0419ec13557a0b9044, type: 3}
-    walkClip: {fileID: 0}
-    walkClipName: Walk
-  - prefab: {fileID: 100100000, guid: e1d6adac7afcfe94ea924721e8141616, type: 3}
-    walkClip: {fileID: 0}
-    walkClipName: Walk
-  - prefab: {fileID: 100100000, guid: 5fcb390934ca73942b67ecf9f82b8157, type: 3}
-    walkClip: {fileID: 0}
-    walkClipName: Walk
-  - prefab: {fileID: 100100000, guid: 426996f28fcf5ea49b03716050dfa90c, type: 3}
-    walkClip: {fileID: 0}
-    walkClipName: Walk
-  - prefab: {fileID: 100100000, guid: 647b07bf81f6d944c86602710262cac6, type: 3}
-    walkClip: {fileID: 0}
-    walkClipName: Walk
-  - prefab: {fileID: 100100000, guid: 36885dad2ae2faa45b14525f74d19ddf, type: 3}
-    walkClip: {fileID: 0}
-    walkClipName: Walk
-  - prefab: {fileID: 100100000, guid: 674b45daa1206644b8ea96380f1fb989, type: 3}
-    walkClip: {fileID: 0}
-    walkClipName: Walk
+  - prefab: {fileID: 6809608571555607419, guid: d9a7d746b864664459275c6557df1821, type: 3}
+    walkClip: {fileID: 1555546630585696353, guid: b94dc8dc1ef1b244facd45d3929d3667, type: 3}
+    idleClip: {fileID: 8106746524365628829, guid: b94dc8dc1ef1b244facd45d3929d3667, type: 3}
+    walkClipName: walk
+  - prefab: {fileID: 7842493517581213535, guid: b692e37aabec3e54a96a88cdc6b4a222, type: 3}
+    walkClip: {fileID: 1555546630585696353, guid: 5fcb390934ca73942b67ecf9f82b8157, type: 3}
+    idleClip: {fileID: 8106746524365628829, guid: 5fcb390934ca73942b67ecf9f82b8157, type: 3}
+    walkClipName: walk
+  - prefab: {fileID: 7055876875239964763, guid: b8bc8e6d6f490494eb44c244f79b5f21, type: 3}
+    walkClip: {fileID: 1555546630585696353, guid: 1eafc20674086d0419ec13557a0b9044, type: 3}
+    idleClip: {fileID: 8106746524365628829, guid: 1eafc20674086d0419ec13557a0b9044, type: 3}
+    walkClipName: walk
+  - prefab: {fileID: 9046055756335065503, guid: 3a269c298660db14bb6a21360aa96aef, type: 3}
+    walkClip: {fileID: 1555546630585696353, guid: e1d6adac7afcfe94ea924721e8141616, type: 3}
+    idleClip: {fileID: 8106746524365628829, guid: e1d6adac7afcfe94ea924721e8141616, type: 3}
+    walkClipName: walk
+  - prefab: {fileID: 2727442403853108893, guid: 842eca733b3f70a4ea99e7cf32f7882a, type: 3}
+    walkClip: {fileID: -4572000871502500860, guid: 903088250201e5540989e803091ede9c, type: 3}
+    idleClip: {fileID: 7003038282533826427, guid: 903088250201e5540989e803091ede9c, type: 3}
+    walkClipName: walk
+  - prefab: {fileID: 1153790726312173289, guid: 907f64b31c7055348ad1077682300839, type: 3}
+    walkClip: {fileID: -4572000871502500860, guid: c1c4e92810e7e224aaad1caf3400ff7d, type: 3}
+    idleClip: {fileID: 7003038282533826427, guid: c1c4e92810e7e224aaad1caf3400ff7d, type: 3}
+    walkClipName: walk
+  - prefab: {fileID: 1966827521322851357, guid: 93edf1efe70de664385424a002d3c9e4, type: 3}
+    walkClip: {fileID: -4572000871502500860, guid: 27c75015d5a9ff24b98faafc13ae793f, type: 3}
+    idleClip: {fileID: 7003038282533826427, guid: 27c75015d5a9ff24b98faafc13ae793f, type: 3}
+    walkClipName: walk
+  - prefab: {fileID: 1966827521322851357, guid: 93edf1efe70de664385424a002d3c9e4, type: 3}
+    walkClip: {fileID: 1555546630585696353, guid: e1d6adac7afcfe94ea924721e8141616, type: 3}
+    idleClip: {fileID: 8106746524365628829, guid: e1d6adac7afcfe94ea924721e8141616, type: 3}
+    walkClipName: walk

@@ -14,6 +14,7 @@ namespace Formula9.World
         {
             public GameObject prefab;
             public AnimationClip walkClip;
+            public AnimationClip idleClip;
             public string walkClipName = "Walk";
         }
     }

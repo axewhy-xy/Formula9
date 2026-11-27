@@ -7,7 +7,7 @@ using UnityEngine.Rendering;
 namespace Formula9.World
 {
     // Raised sidewalks from the walkways file (backend src.traffic.import_walkways), one mesh per 250 m tile.
-    // The importer did all the geometry: the paving never overlaps the asphalt RoadMesh draws, so this only
+    // The importer supplies the paving layout. Runtime kerb alignment matches it to the active roads and this class
     // lifts its triangles to the kerb's height, slopes the ramps where crossings meet them, and stands
     // vertical faces on its edges: kerb faces down to the road, outer faces down to the ground, and the
     // sides of each ramp.
@@ -23,8 +23,9 @@ namespace Formula9.World
 
         public static Mesh Build(CityWalkwayData data, int tile) => Build(data.Tiles[tile]);
 
-        public static Mesh Build(CityWalkwayTile tile)
+        public static Mesh Build(CityWalkwayTile tile, Func<Vector2, Vector2> align = null)
         {
+            Vector2 At(int corner) => AlignedCorner(tile, corner, align);
             var vertices = new List<Vector3>();
             var layers = new List<int>[LayerCount];
             for (var i = 0; i < LayerCount; i++) layers[i] = new List<int>();
@@ -38,7 +39,7 @@ namespace Formula9.World
                     if (!made.TryGetValue(corner, out var index))
                     {
                         index = made[corner] = vertices.Count;
-                        vertices.Add(Ground(Corner(tile, corner), TopY));
+                        vertices.Add(Ground(At(corner), TopY));
                     }
                     into.Add(index);
                 }
@@ -57,18 +58,18 @@ namespace Formula9.World
                     var corner = tile.RampTriangles[i + k];
                     if (!sloped.TryGetValue((corner, ramp), out var index))
                     {
-                        var at = Corner(tile, corner);
+                        var at = At(corner);
                         index = sloped[(corner, ramp)] = vertices.Count;
-                        vertices.Add(Ground(at, RampHeight(tile.Ramps, ramp, at)));
+                        vertices.Add(Ground(at, RampHeight(tile.Ramps, ramp, Corner(tile, corner))));
                     }
                     layers[FootpathLayer].Add(index);
                 }
             }
 
             float Top(Vector2 at, int ramp) => ramp < 0 ? TopY : RampHeight(tile.Ramps, ramp, at);
-            Faces(tile, tile.KerbEdges, vertices, layers[KerbFaceLayer], (at, ramp) => RoadMesh.SurfaceY, Top);
-            Faces(tile, tile.OuterEdges, vertices, layers[OuterFaceLayer], (at, ramp) => 0f, Top);
-            Faces(tile, tile.CheekEdges, vertices, layers[KerbFaceLayer], Top, (at, ramp) => TopY);
+            Faces(tile, tile.KerbEdges, vertices, layers[KerbFaceLayer], (at, ramp) => RoadMesh.SurfaceY, Top, align);
+            Faces(tile, tile.OuterEdges, vertices, layers[OuterFaceLayer], (at, ramp) => 0f, Top, align);
+            Faces(tile, tile.CheekEdges, vertices, layers[KerbFaceLayer], Top, (at, ramp) => TopY, align);
 
             // World x and z in metres, so paving and grain are the same size everywhere
             var uvs = new List<Vector2>(vertices.Count);
@@ -95,15 +96,23 @@ namespace Formula9.World
         public static Vector2 Corner(CityWalkwayTile tile, int corner) =>
             new Vector2(tile.VerticesCm[corner * 2], tile.VerticesCm[corner * 2 + 1]) / 100f;
 
+        internal static Vector2 AlignedCorner(CityWalkwayTile tile, int corner, Func<Vector2, Vector2> align)
+        {
+            var point = Corner(tile, corner);
+            return align != null ? align(point) : point;
+        }
+
         // A vertical quad on each edge from its bottom to its top, facing out to the right of from->to
         private static void Faces(CityWalkwayTile tile, int[] edges, List<Vector3> vertices, List<int> triangles,
-            Func<Vector2, int, float> bottom, Func<Vector2, int, float> top)
+            Func<Vector2, int, float> bottom, Func<Vector2, int, float> top, Func<Vector2, Vector2> align)
         {
             for (var i = 0; i < edges.Length; i += 3)
             {
                 var a = Corner(tile, edges[i]); var b = Corner(tile, edges[i + 1]); var ramp = edges[i + 2];
                 float aLow = bottom(a, ramp), aHigh = top(a, ramp), bLow = bottom(b, ramp), bHigh = top(b, ramp);
                 if (aHigh - aLow < MinFaceM && bHigh - bLow < MinFaceM) continue;
+                a = align != null ? align(a) : a;
+                b = align != null ? align(b) : b;
                 var along = b - a;
                 var outward = new Vector3(along.y, 0, -along.x);
                 var start = vertices.Count;
@@ -137,27 +146,27 @@ namespace Formula9.World
         public int TriangleCount => corners.Count / 3;
 
         // Pure C# over the parsed data, so it can be built off the main thread
-        public static SidewalkSurface Build(CityWalkwayData data)
+        public static SidewalkSurface Build(CityWalkwayData data, Func<Vector2, Vector2> align = null)
         {
             var surface = new SidewalkSurface();
             foreach (var tile in data.Tiles)
             {
                 foreach (var zone in new[] { tile.Footpath, tile.KerbStone, tile.Verge })
                     for (var i = 0; i < zone.Length; i += 3)
-                        surface.Add(tile, zone[i], zone[i + 1], zone[i + 2], -1);
+                        surface.Add(tile, zone[i], zone[i + 1], zone[i + 2], -1, align);
                 for (var i = 0; i < tile.RampTriangles.Length; i += 4)
-                    surface.Add(tile, tile.RampTriangles[i], tile.RampTriangles[i + 1], tile.RampTriangles[i + 2], tile.RampTriangles[i + 3]);
+                    surface.Add(tile, tile.RampTriangles[i], tile.RampTriangles[i + 1], tile.RampTriangles[i + 2], tile.RampTriangles[i + 3], align);
             }
             return surface;
         }
 
-        private void Add(CityWalkwayTile tile, int a, int b, int c, int ramp)
+        private void Add(CityWalkwayTile tile, int a, int b, int c, int ramp, Func<Vector2, Vector2> align)
         {
             var index = corners.Count / 3;
             foreach (var corner in new[] { a, b, c })
             {
                 var at = SidewalkMesh.Corner(tile, corner);
-                corners.Add(at);
+                corners.Add(align != null ? align(at) : at);
                 heights.Add(ramp < 0 ? SidewalkMesh.TopY : SidewalkMesh.RampHeight(tile.Ramps, ramp, at));
             }
             var p0 = corners[index * 3]; var p1 = corners[index * 3 + 1]; var p2 = corners[index * 3 + 2];

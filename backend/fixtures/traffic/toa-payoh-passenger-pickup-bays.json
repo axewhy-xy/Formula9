@@ -1,0 +1,13 @@
+{
+ "attribution": ["Contains information from LTA DataMall static datasets (Sep2026) accessed on 2026-11-15, which is made available under the terms of the Singapore Open Data Licence version 1.0: https://datamall.lta.gov.sg/content/datamall/en/SingaporeOpenDataLicence.html"],
+ "source": {"name":"LTA DataMall static datasets","release":"Sep2026","retrieved":"2026-11-15"},
+ "area": {"key":"toa-payoh","name":"Toa Payoh","box_latlon":[1.326,103.838,1.344,103.86],"box_m":[2025.46,-2885.98,4473.82,-895.65]},
+ "coordinate_space": "city-local-xz-metres",
+ "layer": "PassengerPickupBay",
+ "passenger_pickup_bays": [
+  {"id":"passenger_pickup_bays-00001","geometry_type":"LineString","source_attributes":{"OBJECTID":5},"points_m":[[2220.49,-1675.4],[2219.28,-1664.71]]},
+  {"id":"passenger_pickup_bays-00002","geometry_type":"LineString","source_attributes":{"OBJECTID":7},"points_m":[[2196.64,-1658.16],[2195.97,-1647.38]]},
+  {"id":"passenger_pickup_bays-00003","geometry_type":"LineString","source_attributes":{"OBJECTID":6},"points_m":[[2273.61,-1566.24],[2289.77,-1565.18]]},
+  {"id":"passenger_pickup_bays-00004","geometry_type":"LineString","source_attributes":{"OBJECTID":4},"points_m":[[2328.72,-1540.39],[2317.96,-1541.32]]}
+ ]
+}
