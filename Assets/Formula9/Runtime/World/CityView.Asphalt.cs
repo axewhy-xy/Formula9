@@ -111,9 +111,22 @@ namespace Formula9.World
                     {
                         var supplemental = JObject.Parse(supplementalJson);
                         var byOrigin = new Dictionary<(float, float), JArray>();
-                        foreach (JObject tile in (JArray)supplemental["tiles"])
-                            byOrigin.Add(((float)tile["origin_m"][0], (float)tile["origin_m"][1]),
-                                (JArray)tile["lines"]);
+                       foreach (JObject tile in (JArray)supplemental["tiles"])
+                        {
+                            var xy = tile["origin_m"];
+                            var key = ((float)xy[0], (float)xy[1]);
+                            var lines = (JArray)tile["lines"];
+
+                            if (byOrigin.TryGetValue(key, out var existing))
+                            {
+                                foreach (var line in lines)
+                                    existing.Add(line.DeepClone());
+                            }
+                            else
+                            {
+                                byOrigin.Add(key, lines);
+                            }
+                        }
                         foreach (JObject tile in tiles)
                         {
                             var xy = tile["origin_m"];
@@ -149,7 +162,6 @@ namespace Formula9.World
                     return mat;
                 }
 
-                var symbolShader = Resources.Load<Shader>("Formula9/Shaders/LtaReadableMarkings");
                 var white = Paint("WhitePaint", MarkingColor);
                 var yellow = Paint("YellowPaint", new Color(.94f, .73f, .13f));
                 holder = new GameObject("LTA paint over original roads");

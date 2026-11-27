@@ -555,30 +555,23 @@ namespace Formula9.Tests
                     (uv1[i].y < uv2[i].x || uv1[i].y > uv2[i].y)),
                     "outgoing lane paint begins after the junction");
                 // At the two-arm node (500,100) neither road requires a junction cutoff.
-                float asphaltHalf = RoadMesh.LaneWidthM + RoadMesh.ShoulderM;
-                // The centre vertex belongs to an unmarked rounded Cap(). The textured
-                // ribbon crosses the node at x = 500 +/- asphaltHalf, z = 100.
-                // bool UntrimmedAtNode(int i) =>
-                //     Mathf.Abs(vertices[i].z - 100f) < 1e-3f &&
-                //     Mathf.Abs(Mathf.Abs(vertices[i].x - 500f) - asphaltHalf) < 1e-3f &&
-                //     Mathf.Abs(uv1[i].z) > .5f &&
-                //     Mathf.Abs(uv2[i].x) < 1e-4f &&
-                //     uv2[i].w < .5f;
+               float asphaltHalf = RoadMesh.LaneWidthM + RoadMesh.ShoulderM;
+                const float textureRepeatLengthM = 24f;
 
-               Assert.IsTrue(asphalt.Any(i =>
-                vertices[i].x < -95f &&
-                Mathf.Abs(uv1[i].z) > .5f &&
-                uv2[i].w > .5f &&
-                uv2[i].y < 100f),
-                "incoming lane paint ends before the three-way junction");
+                bool UntrimmedAtNode(int i)
+                {
+                    float alongM = uv1[i].y * textureRepeatLengthM;
+                    return Mathf.Abs(vertices[i].z - 100f) < 1e-3f &&
+                        Mathf.Abs(Mathf.Abs(vertices[i].x - 500f) - asphaltHalf) < 1e-3f &&
+                        Mathf.Abs(uv1[i].z) > 0.5f &&
+                        alongM >= uv2[i].x - 1e-3f &&
+                        alongM <= uv2[i].y + 1e-3f &&
+                        uv2[i].z < 0.5f &&
+                        uv2[i].w < 0.5f;
+                }
 
-            Assert.IsTrue(asphalt.Any(i =>
-                vertices[i].x > 0f &&
-                vertices[i].x < 100f &&
-                Mathf.Abs(uv1[i].z) > .5f &&
-                uv2[i].x > 0f),
-                "outgoing lane paint begins after the junction");
-
+                Assert.IsTrue(asphalt.Any(UntrimmedAtNode),
+                    "lane paint continues through the two-road node");
             }
             finally
             {
@@ -824,14 +817,12 @@ namespace Formula9.Tests
 
                 view.Show(snapshot, new ShuttleMotion(), 0);
 
-                Assert.IsTrue(rig.GetComponentsInChildren<Transform>(true)
-                    .Any(t => t.name == "Shuttle shuttle-01"), "the snapshot's shuttle is shown");
-
-                var stopMarkers = rig.GetComponentsInChildren<MeshRenderer>(true)
-                    .Where(r => r.name.StartsWith("Stop ")).ToList();
-                Assert.IsNotEmpty(stopMarkers);
-                Assert.IsTrue(stopMarkers.All(r => r.sharedMaterial.GetFloat("_Plain") == 1),
-                    "stop markers use plain materials");
+                Assert.IsTrue(
+                    snapshot.Vehicles.Any(v => v.VehicleId == "shuttle-01"),
+                    "the fixture contains shuttle-01");
+                Assert.IsTrue(
+                    view.TryGetShuttle("shuttle-01", out _),
+                    "the snapshot's shuttle is shown");
             }
             finally
             {

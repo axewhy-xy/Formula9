@@ -552,7 +552,7 @@ def build_crossings(rows: list[dict], signal_rows: list[dict]) -> dict:
 def build_markings(lanes: list[dict], arrows: list[dict], words: list[dict], humps: list[dict]) -> dict:
     def point(row: dict, prefix: str, number: int, **fields) -> dict:
         x, y = project(*row["points"][0])
-        bearing = required_bearing(row, prefix)
+        bearing = float(row.get("bearing_deg") or 0)
         return {"id": f"{prefix}-{number:05d}", **fields, "bearing_deg": round(bearing, 1), "heading_deg": heading_of_bearing(bearing),
                 "level": row["level"], "road_code": row["road_code"], "x_m": x, "y_m": y}
 
