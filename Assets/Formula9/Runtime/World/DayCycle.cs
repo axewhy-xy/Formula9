@@ -395,6 +395,7 @@ namespace Formula9.World
                 toLight = toSun = -(Quaternion.Euler(look.Sun.PitchDeg, look.Sun.YawDeg, 0) * Vector3.forward);
                 fade = 1;
             }
+            Shader.SetGlobalVector("_Formula9AsphaltLightDirection", new Vector4(toLight.x, toLight.y, toLight.z, 0f));
 
             if (sun != null)
             {

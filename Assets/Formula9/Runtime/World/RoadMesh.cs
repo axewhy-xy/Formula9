@@ -6,21 +6,1074 @@ using UnityEngine.Rendering;
 
 namespace Formula9.World
 {
-    // Original OSM ribbon, kerb-strip and rounded cap geometry.
-    // Ordinary lane paint is texture-based; legacy marking submesh stays empty.
-    public static class RoadMesh
+    public static partial class RoadMesh
     {
-        public const int KerbLayer = 0, AsphaltLayer = 1, MarkingLayer = 2, LayerCount = 3;
-        // The backend places vehicles in lanes of this width.
+        public const int KerbLayer = 0, AsphaltLayer = 1, MarkingLayer = 2, ConcreteMedianLayer = 3, GreenMedianLayer = 4, LayerCount = 5;
         public const float LaneWidthM = 3.2f;
         public const float ShoulderM = 0.6f, KerbM = 0.55f;
-        // Just above the ground, under the routes
-        public const float SurfaceY = 0.1f;
-        // Keep all mesh layers flat at the tested SurfaceY.
-        public const float KerbSurfaceY = SurfaceY;
-                // Lines stop this far short of the widest road at a junction, leaving it plain asphalt
-        private const float JunctionClearanceM = 1;
-        // Car parks and driveways between blocks are not lined
+        public const float SurfaceY = 0.1f, KerbSurfaceY = SurfaceY;
+
+        private const float MinSegmentM = 0.001f;
+        private const float MaxMitre = 2f;
+        private const float ContinuationDot = -0.8f;
+        private const float JoinToleranceM = 0.15f;
+        private const float CapEdgeErrorM = 0.035f;
+        private const float TaperMetresPerMetre = 40f;
+        private const float MinimumTaperLengthM = 56f;
+        private const float MaxCurveDeviationM = 0.9f;
+        private const float MaxCornerSpanM = 16f;
+
+        private struct Corner
+        {
+            public float Span, Turn, Radius;
+            public Vector2 Incoming, Outgoing;
+            public bool CanFitRoad;
+        }
+
+        private sealed class RoadPath
+        {
+            public CityRoad Road;
+            public List<Vector2> Points;
+            public float[] Stations;
+            public Vector2[] Offsets;
+            public float Width;
+            public int Lanes;
+            public List<Section> Sections;
+            public float[] PaintDistances;
+            public float PaintOrigin, PaintDirection;
+            public float PaintLength => PaintDistances[PaintDistances.Length - 1];
+            public readonly List<WidthBlend> WidthBlends = new List<WidthBlend>();
+            public readonly End Start = new End();
+            public readonly End Finish = new End();
+            public float Length => Stations[Stations.Length - 1];
+        }
+
+        private sealed class End
+        {
+            public bool Joined;
+            public int JunctionIndex = -1;
+            public bool JunctionPaintBreak;
+            public float IntersectionClearance;
+            public int SignalJunction = -1;
+            public Vector2 LeftEdge, RightEdge;
+            public (RoadPath Path, bool AtStart) Across;
+            public Vector2 TangentCorrection;
+        }
+
+        private struct WidthBlend
+        {
+            public bool AtStart;
+            public float DistanceToJoin, Reach, TargetWidth;
+
+            public float Weight(float distance)
+            {
+                return Mathf.SmoothStep(0f, 1f,
+                    Mathf.Clamp01((Reach - DistanceToJoin - distance) / Reach));
+            }
+        }
+
+        private struct Section
+        {
+            public Vector2 Point, Offset;
+            public float HalfWidth;
+        }
+
+        public static float HalfWidth(CityRoad road) => LaneCount(road) * LaneWidthM * 0.5f + ShoulderM;
+
+        private static int LaneCount(CityRoad road) => Mathf.Max(1, road.Oneway ? road.Lanes : road.Lanes * 2);
+
+        public static Mesh Build(IEnumerable<CityRoad> roads) => Build(roads, out _);
+
+        internal static Mesh Build(IEnumerable<CityRoad> roads, out int clippedTriangles,
+            LtaMappedRoadPaint.Result mapped = null)
+        {
+            var paths = roads.Select(CreatePath).Where(path => path != null).ToList();
+            var junctions = ConnectEnds(paths, mapped?.SignalJunctionCenters);
+            BuildWidthProfiles(paths);
+            // Earlier roads keep the shared area when the asphalt triangles are clipped.
+            paths = paths.OrderBy(path => IsUnmarkedClass(path.Road.Class))
+                .ThenByDescending(path => path.Lanes)
+                .ThenBy(path => path.Road.FromNode)
+                .ThenBy(path => path.Road.ToNode)
+                .ThenBy(path => path.Points[0].x)
+                .ThenBy(path => path.Points[0].y)
+                .ThenBy(path => path.Points[path.Points.Count - 1].x)
+                .ThenBy(path => path.Points[path.Points.Count - 1].y)
+                .ToList();
+
+            foreach (var path in paths)
+            {
+                path.Sections = Sample(path);
+                path.PaintDistances = new float[path.Sections.Count];
+                for (int i = 1; i < path.Sections.Count; i++)
+                    path.PaintDistances[i] = path.PaintDistances[i - 1] +
+                        Vector2.Distance(path.Sections[i - 1].Point, path.Sections[i].Point);
+            }
+            SetDashPhases(paths);
+
+            var vertices = new List<Vector3>();
+            var laneUV = new List<Vector4>();
+            var paintBounds = new List<Vector4>();
+            var barDistances = new List<Vector2>();
+            var layers = Enumerable.Range(0, LayerCount).Select(_ => new List<int>()).ToArray();
+
+            int AddVertex(Vector2 point, Vector4 lane = default, Vector4 bounds = default, Vector2 bars = default,
+                float height = SurfaceY)
+            {
+                int index = vertices.Count;
+                vertices.Add(new Vector3(point.x, height, point.y));
+                laneUV.Add(lane);
+                paintBounds.Add(bounds);
+                barDistances.Add(bars);
+                return index;
+            }
+
+            void AddTriangle(int a, int b, int c, int layer)
+            {
+                float normalY = Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]).y;
+                if (Mathf.Abs(normalY) < 0.000001f) return;
+                var triangles = layers[layer];
+                triangles.Add(a);
+                triangles.Add(normalY > 0f ? b : c);
+                triangles.Add(normalY > 0f ? c : b);
+            }
+
+            void AddQuad(int leftA, int rightA, int leftB, int rightB, int layer)
+            {
+                AddTriangle(leftA, leftB, rightB, layer);
+                AddTriangle(leftA, rightB, rightA, layer);
+            }
+
+            void AddCap(Vector2 point, float width)
+            {
+                int center = AddVertex(point);
+                float halfAngle = Mathf.Acos(Mathf.Clamp(1f - CapEdgeErrorM / width, -1f, 1f));
+                int sides = Mathf.Clamp(Mathf.CeilToInt(Mathf.PI / halfAngle), 16, 64);
+                for (int i = 0; i < sides; i++)
+                {
+                    float angle = 2 * Mathf.PI * i / sides;
+                    var edge = point + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * width;
+                    AddVertex(edge);
+                }
+                for (int i = 0; i < sides; i++)
+                    AddTriangle(center, center + 1 + i, center + 1 + (i + 1) % sides, AsphaltLayer);
+            }
+
+            foreach (var path in paths)
+            {
+                var sections = path.Sections;
+                float length = path.PaintLength;
+                float startStation = PaintClearance(path.Start, sections[0].HalfWidth, length);
+                float endStation = length - PaintClearance(path.Finish, sections[sections.Count - 1].HalfWidth, length);
+                float lanes = IsUnmarkedClass(path.Road.Class) ? 0f : path.Lanes;
+                // Internal links of a divided intersection can have separate
+                // graph nodes at either end. Keep their entire surface unpainted.
+                bool sameSignalJunction = path.Start.SignalJunction >= 0 &&
+                    path.Start.SignalJunction == path.Finish.SignalJunction;
+                bool internalLink = sameSignalJunction ||
+                    (path.Start.JunctionPaintBreak && path.Finish.JunctionPaintBreak &&
+                        length <= Mathf.Max(2f * path.Width + 2f,
+                            path.Start.IntersectionClearance + path.Finish.IntersectionClearance + 3f));
+                if (internalLink) lanes = 0f;
+
+                // 1 = full one-way approach, 2 = left half, 3 = right half
+                // of the mesh in its FromNode-to-ToNode direction.
+                float startBar = !path.Road.Oneway && path.Start.JunctionPaintBreak ? 3f : 0f;
+                float endBar = path.Finish.JunctionPaintBreak ? (path.Road.Oneway ? 1f : 2f) : 0f;
+
+                bool forward = path.PaintDirection > 0f;
+                float startPaint = path.PaintOrigin + path.PaintDirection * startStation;
+                float endPaint = path.PaintOrigin + path.PaintDirection * endStation;
+                var bounds = startStation < endStation
+                    ? new Vector4(Mathf.Min(startPaint, endPaint), Mathf.Max(startPaint, endPaint),
+                        forward ? startBar : endBar, forward ? endBar : startBar)
+                    : new Vector4(1f, 0f, 0f, 0f);
+                var lowBar = bounds.z > 0f ? StopPlane(path, forward ? startStation : endStation, forward) : default;
+                var highBar = bounds.w > 0f ? StopPlane(path, forward ? endStation : startStation, !forward) : default;
+                Vector2 BarDistances(Vector2 point) =>
+                    new Vector2(lowBar.DistanceTo(point), highBar.DistanceTo(point));
+
+                int previous = -1;
+                for (int i = 0; i < sections.Count; i++)
+                {
+                    var section = sections[i];
+                    var point = section.Point;
+                    var edge = section.Offset * section.HalfWidth;
+                    var outer = section.Offset * (section.HalfWidth + KerbM);
+                    if (i == 0) SetEdges(path.Start, point, edge);
+                    if (i == sections.Count - 1) SetEdges(path.Finish, point, edge);
+                    int first = AddVertex(point + outer);
+                    float width = 2f * edge.magnitude;
+                    float along = (path.PaintOrigin + path.PaintDirection * path.PaintDistances[i]) / TextureRepeatLengthM;
+                    AddVertex(point + edge, new Vector4(0f, along, path.Road.Oneway ? lanes : -lanes, width), bounds, BarDistances(point + edge));
+                    AddVertex(point - edge, new Vector4(width, along, path.Road.Oneway ? lanes : -lanes, width), bounds, BarDistances(point - edge));
+                    AddVertex(point - outer);
+                    if (previous >= 0)
+                    {
+                        AddQuad(previous, previous + 1, first, first + 1, KerbLayer);
+                        AddQuad(previous + 1, previous + 2, first + 1, first + 2, AsphaltLayer);
+                        AddQuad(previous + 2, previous + 3, first + 2, first + 3, KerbLayer);
+                    }
+                    previous = first;
+                }
+            }
+
+            void SetEdges(End end, Vector2 point, Vector2 offset)
+            {
+                end.LeftEdge = point + offset;
+                end.RightEdge = point - offset;
+            }
+
+            // Junctions use the actual strip cross-sections. Build a single
+            // patch across their edges; the clipping pass removes any overlap.
+            foreach (var junction in junctions)
+            {
+                var perimeter = JunctionPerimeter(junction);
+                if (perimeter.Count < 3) continue;
+                int first = vertices.Count;
+                foreach (var point in perimeter) AddVertex(point);
+                for (int i = 1; i < perimeter.Count - 1; i++)
+                    AddTriangle(first, first + i, first + i + 1, AsphaltLayer);
+            }
+
+            foreach (var path in paths)
+            {
+                if (path.Start.JunctionIndex < 0) AddCap(path.Points[0], path.Width);
+                if (path.Finish.JunctionIndex < 0) AddCap(path.Points[path.Points.Count - 1], path.Width);
+            }
+
+            clippedTriangles = TrimAsphaltOverlaps(layers[AsphaltLayer], vertices, laneUV, paintBounds, barDistances);
+
+            foreach (var median in FindMedianStrips(paths))
+            {
+                int layer = median.Width >= PlantingGapM ? GreenMedianLayer :
+                    median.Width >= ConcreteMedianGapM ? ConcreteMedianLayer : AsphaltLayer;
+                // A recessed strip can tuck under both road edges without fighting their paint.
+                const float medianSurfaceY = SurfaceY - 0.04f;
+                int a = AddVertex(median.A, height: medianSurfaceY);
+                int b = AddVertex(median.B, height: medianSurfaceY);
+                int c = AddVertex(median.C, height: medianSurfaceY);
+                int d = AddVertex(median.D, height: medianSurfaceY);
+                AddQuad(a, b, c, d, layer);
+            }
+
+            var mesh = new Mesh { name = "City roads", indexFormat = IndexFormat.UInt32 };
+            mesh.SetVertices(vertices);
+            // The fallback asphalt shader reads UV0 for its grain texture.
+            mesh.SetUVs(0, vertices.Select(vertex => new Vector2(vertex.x, vertex.z) / 8f).ToList());
+            mesh.SetUVs(1, laneUV);
+            mesh.SetUVs(2, paintBounds);
+            mesh.SetUVs(3, barDistances);
+            mesh.subMeshCount = LayerCount;
+            for (int i = 0; i < LayerCount; i++) mesh.SetTriangles(layers[i], i);
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        private const float DashPeriodM = 6f; 
+        private const float TextureRepeatLengthM = 24f;
+
+        private static void SetDashPhases(List<RoadPath> paths)
+        {
+            // Walk open chains from an end, then seed any closed loops.
+            foreach (var path in paths)
+            {
+                if (path.PaintDirection != 0f) continue;
+                if (!ContinuesPaint(path.Start)) Walk(path, true);
+                else if (!ContinuesPaint(path.Finish)) Walk(path, false);
+            }
+            foreach (var path in paths)
+                if (path.PaintDirection == 0f) Walk(path, true);
+
+            void Walk(RoadPath path, bool enterAtStart)
+            {
+                float phase = 1.5f;
+                while (path.PaintDirection == 0f)
+                {
+                    path.PaintDirection = enterAtStart ? 1f : -1f;
+                    path.PaintOrigin = enterAtStart ? phase : phase + path.PaintLength;
+                    phase = Mathf.Repeat(phase + path.PaintLength, DashPeriodM);
+                    var exit = enterAtStart ? path.Finish : path.Start;
+                    if (!ContinuesPaint(exit)) break;
+                    (path, enterAtStart) = exit.Across;
+                }
+            }
+        }
+
+        private static bool ContinuesPaint(End end) => end.Joined && !end.JunctionPaintBreak;
+
+        private static float PaintClearance(End end, float halfWidth, float length)
+        {
+            if (end.JunctionPaintBreak)
+                return Mathf.Min(length, Mathf.Max(halfWidth, end.IntersectionClearance));
+            return end.Joined ? 0f : Mathf.Min(halfWidth, length * 0.45f);
+        }
+
+        private readonly struct BarPlane
+        {
+            private readonly Vector2 centre, approach;
+
+            public BarPlane(Vector2 centre, Vector2 approach)
+            {
+                this.centre = centre;
+                this.approach = approach;
+            }
+
+            public float DistanceTo(Vector2 point) => Vector2.Dot(point - centre, approach);
+        }
+
+        private static BarPlane StopPlane(RoadPath path, float station, bool towardsFinish)
+        {
+            int i = 1;
+            // At a sample boundary, use the interval on the painted side.
+            while (i < path.PaintDistances.Length - 1 &&
+                (path.PaintDistances[i] < station ||
+                    (towardsFinish && path.PaintDistances[i] == station))) i++;
+
+            float fraction = EndingDividerFraction(path.Lanes, towardsFinish);
+            var a = DividerPoint(path.Sections[i - 1], fraction);
+            var b = DividerPoint(path.Sections[i], fraction);
+            float t = Mathf.InverseLerp(path.PaintDistances[i - 1], path.PaintDistances[i], station);
+            var direction = (b - a).normalized;
+            if (direction == Vector2.zero)
+                direction = (path.Sections[i].Point - path.Sections[i - 1].Point).normalized;
+
+            return new BarPlane(Vector2.Lerp(a, b, t), towardsFinish ? direction : -direction);
+        }
+
+        private static float EndingDividerFraction(int lanes, bool towardsFinish)
+        {
+            if (lanes < 2) return 0f;
+            // Pick the divider closest to the middle of the approach. If two
+            // are equally close, prefer the one on the incoming side.
+            int divider = towardsFinish ? lanes / 2 : (lanes + 1) / 2;
+            return 1f - 2f * divider / lanes;
+        }
+
+        private static Vector2 DividerPoint(Section section, float fraction) =>
+            section.Point + section.Offset * (section.HalfWidth * fraction);
+
+        private const float OverlapCellM = 32f;
+        private const double MinimumDoubleArea = 0.000001;
+
+        private readonly struct AsphaltTriangle
+        {
+            public readonly Vector2 A, B, C, Min, Max;
+
+            public AsphaltTriangle(Vector2 a, Vector2 b, Vector2 c)
+            {
+                // Work with a counterclockwise triangle in the horizontal plane.
+                A = a; B = b; C = c;
+                Min = Vector2.Min(a, Vector2.Min(b, c));
+                Max = Vector2.Max(a, Vector2.Max(b, c));
+            }
+
+            public bool BoundsOverlap(AsphaltTriangle other) =>
+                Min.x < other.Max.x && Max.x > other.Min.x &&
+                Min.y < other.Max.y && Max.y > other.Min.y;
+        }
+
+        private static int TrimAsphaltOverlaps(List<int> indices, List<Vector3> vertices,
+            List<Vector4> laneUV, List<Vector4> paintBounds, List<Vector2> barDistances)
+        {
+            var triangles = new List<AsphaltTriangle>();
+            var grid = new Dictionary<Vector2Int, List<int>>();
+            var candidates = new List<int>();
+            var seen = new HashSet<int>();
+            var splitPoints = new HashSet<Vector2>();
+            var output = new List<int>(indices.Count);
+            int clippedTriangles = 0;
+
+            Vector2 Point(int index) => new Vector2(vertices[index].x, vertices[index].z);
+
+            for (int i = 0; i < indices.Count; i += 3)
+            {
+                // The existing mesh faces up in XZ, so reverse its winding for clipping.
+                int a = indices[i], b = indices[i + 2], c = indices[i + 1];
+                var triangle = new AsphaltTriangle(Point(a), Point(b), Point(c));
+                double area = Side(triangle.A, triangle.B, triangle.C);
+                if (area <= MinimumDoubleArea) continue;
+
+                var min = OverlapCell(triangle.Min);
+                var max = OverlapCell(triangle.Max);
+                candidates.Clear();
+                seen.Clear();
+                for (int x = min.x; x <= max.x; x++)
+                for (int y = min.y; y <= max.y; y++)
+                {
+                    var cell = new Vector2Int(x, y);
+                    if (!grid.TryGetValue(cell, out var entries))
+                        grid[cell] = entries = new List<int>();
+                    foreach (int previous in entries)
+                        if (seen.Add(previous) && triangle.BoundsOverlap(triangles[previous]))
+                            candidates.Add(previous);
+                    entries.Add(triangles.Count);
+                }
+                triangles.Add(triangle);
+
+                // Subtracting all earlier input triangles is equivalent to subtracting
+                // their union, even when some of those triangles were themselves clipped.
+                candidates.Sort();
+                List<List<Vector2>> pieces = null;
+                foreach (int previous in candidates)
+                {
+                    var clip = triangles[previous];
+                    if (pieces == null)
+                    {
+                        var polygon = new List<Vector2> { triangle.A, triangle.B, triangle.C };
+                        if (!HasArea(Intersect(polygon, clip))) continue;
+                        pieces = new List<List<Vector2>>();
+                        Subtract(polygon, clip, pieces);
+                    }
+                    else
+                    {
+                        var remainder = new List<List<Vector2>>();
+                        foreach (var polygon in pieces)
+                        {
+                            if (HasArea(Intersect(polygon, clip))) Subtract(polygon, clip, remainder);
+                            else remainder.Add(polygon);
+                        }
+                        pieces = remainder;
+                    }
+                    if (pieces.Count == 0) break;
+                }
+
+                if (pieces == null)
+                {
+                    output.Add(a);
+                    output.Add(c);
+                    output.Add(b);
+                    continue;
+                }
+
+                clippedTriangles++;
+                int Vertex(Vector2 point)
+                {
+                    int index = vertices.Count;
+                    vertices.Add(new Vector3(point.x, SurfaceY, point.y));
+                    // Keep the original triangle's lane coordinates across new vertices.
+                    float weightB = (float)(Side(triangle.C, triangle.A, point) / area);
+                    float weightC = (float)(Side(triangle.A, triangle.B, point) / area);
+                    var uv = laneUV[a] + (laneUV[b] - laneUV[a]) * weightB +
+                        (laneUV[c] - laneUV[a]) * weightC;
+                    splitPoints.Add(point);
+                    laneUV.Add(uv);
+                    paintBounds.Add(paintBounds[a]);
+                    barDistances.Add(barDistances[a] + (barDistances[b] - barDistances[a]) * weightB +
+                        (barDistances[c] - barDistances[a]) * weightC);
+                    return index;
+                }
+
+                foreach (var polygon in pieces)
+                {
+                    int first = Vertex(polygon[0]);
+                    int previous = Vertex(polygon[1]);
+                    for (int j = 2; j < polygon.Count; j++)
+                    {
+                        int next = Vertex(polygon[j]);
+                        if (Side(polygon[0], polygon[j - 1], polygon[j]) > MinimumDoubleArea)
+                        {
+                            output.Add(first);
+                            output.Add(next);
+                            output.Add(previous);
+                        }
+                        previous = next;
+                    }
+                }
+            }
+            SplitAsphaltTJunctions(output, splitPoints, vertices, laneUV, paintBounds, barDistances);
+
+            indices.Clear();
+            indices.AddRange(output);
+            return clippedTriangles;
+        }
+
+        private static void SplitAsphaltTJunctions(List<int> indices, HashSet<Vector2> splitPoints,
+            List<Vector3> vertices, List<Vector4> laneUV, List<Vector4> paintBounds, List<Vector2> barDistances)
+        {
+            if (splitPoints.Count == 0) return;
+
+            var pointGrid = new Dictionary<Vector2Int, List<Vector2>>();
+            foreach (var point in splitPoints)
+            {
+                var cell = OverlapCell(point);
+                if (!pointGrid.TryGetValue(cell, out var points))
+                    pointGrid[cell] = points = new List<Vector2>();
+                points.Add(point);
+            }
+
+            var conforming = new List<int>(indices.Count);
+            var boundary = new List<int>(8);
+            var edgeSplits = new List<(double T, Vector2 Point)>();
+            for (int i = 0; i < indices.Count; i += 3)
+            {
+                int first = indices[i], second = indices[i + 1], third = indices[i + 2];
+                boundary.Clear();
+                bool hasSplit = false;
+
+                for (int edge = 0; edge < 3; edge++)
+                {
+                    int start = edge == 0 ? first : edge == 1 ? second : third;
+                    int end = edge == 0 ? second : edge == 1 ? third : first;
+                    var a = new Vector2(vertices[start].x, vertices[start].z);
+                    var b = new Vector2(vertices[end].x, vertices[end].z);
+                    boundary.Add(start);
+
+                    double dx = (double)b.x - a.x, dy = (double)b.y - a.y;
+                    double length2 = dx * dx + dy * dy;
+                    if (length2 <= 0) continue;
+
+                    float scale = Mathf.Max(1f, Mathf.Max(Mathf.Abs(a.x), Mathf.Abs(a.y)));
+                    scale = Mathf.Max(scale, Mathf.Max(Mathf.Abs(b.x), Mathf.Abs(b.y)));
+                    float tolerance = scale * 0.0000003f;
+                    var min = OverlapCell(new Vector2(Mathf.Min(a.x, b.x) - tolerance,
+                        Mathf.Min(a.y, b.y) - tolerance));
+                    var max = OverlapCell(new Vector2(Mathf.Max(a.x, b.x) + tolerance,
+                        Mathf.Max(a.y, b.y) + tolerance));
+
+                    edgeSplits.Clear();
+                    for (int x = min.x; x <= max.x; x++)
+                    for (int y = min.y; y <= max.y; y++)
+                    {
+                        if (!pointGrid.TryGetValue(new Vector2Int(x, y), out var points)) continue;
+                        foreach (var point in points)
+                        {
+                            double px = (double)point.x - a.x, py = (double)point.y - a.y;
+                            double t = (px * dx + py * dy) / length2;
+                            if (t <= 0.000001 || t >= 0.999999) continue;
+
+                            double cross = dx * py - dy * px;
+                            if (cross * cross <= tolerance * tolerance * length2)
+                                edgeSplits.Add((t, point));
+                        }
+                    }
+
+                    edgeSplits.Sort((left, right) =>
+                    {
+                        int compare = left.T.CompareTo(right.T);
+                        if (compare != 0) return compare;
+                        compare = left.Point.x.CompareTo(right.Point.x);
+                        return compare != 0 ? compare : left.Point.y.CompareTo(right.Point.y);
+                    });
+
+                    foreach (var split in edgeSplits)
+                    {
+                        float t = (float)split.T;
+                        int index = vertices.Count;
+                        vertices.Add(new Vector3(split.Point.x,
+                            vertices[start].y + (vertices[end].y - vertices[start].y) * t,
+                            split.Point.y));
+                        laneUV.Add(laneUV[start] + (laneUV[end] - laneUV[start]) * t);
+                        paintBounds.Add(paintBounds[start] + (paintBounds[end] - paintBounds[start]) * t);
+                        barDistances.Add(barDistances[start] + (barDistances[end] - barDistances[start]) * t);
+                        boundary.Add(index);
+                        hasSplit = true;
+                    }
+                }
+
+                if (!hasSplit)
+                {
+                    conforming.Add(first);
+                    conforming.Add(second);
+                    conforming.Add(third);
+                    continue;
+                }
+
+                int center = vertices.Count;
+                vertices.Add((vertices[first] + vertices[second] + vertices[third]) / 3f);
+                laneUV.Add((laneUV[first] + laneUV[second] + laneUV[third]) / 3f);
+                paintBounds.Add((paintBounds[first] + paintBounds[second] + paintBounds[third]) / 3f);
+                barDistances.Add((barDistances[first] + barDistances[second] + barDistances[third]) / 3f);
+
+                for (int j = 0; j < boundary.Count; j++)
+                {
+                    conforming.Add(center);
+                    conforming.Add(boundary[j]);
+                    conforming.Add(boundary[(j + 1) % boundary.Count]);
+                }
+            }
+
+            indices.Clear();
+            indices.AddRange(conforming);
+        }
+
+
+        private static Vector2Int OverlapCell(Vector2 point) => new Vector2Int(
+            Mathf.FloorToInt(point.x / OverlapCellM), Mathf.FloorToInt(point.y / OverlapCellM));
+
+        private static double Side(Vector2 a, Vector2 b, Vector2 p) =>
+            ((double)b.x - a.x) * ((double)p.y - a.y) - ((double)b.y - a.y) * ((double)p.x - a.x);
+
+        private static bool HasArea(List<Vector2> polygon)
+        {
+            double area = 0;
+            for (int i = 2; i < polygon.Count; i++)
+                area += Side(polygon[0], polygon[i - 1], polygon[i]);
+            return area > MinimumDoubleArea;
+        }
+
+        private static List<Vector2> Intersect(List<Vector2> polygon, AsphaltTriangle clip) =>
+            ClipHalfPlane(ClipHalfPlane(ClipHalfPlane(polygon, clip.A, clip.B, true),
+                clip.B, clip.C, true), clip.C, clip.A, true);
+
+        private static void Subtract(List<Vector2> polygon, AsphaltTriangle clip, List<List<Vector2>> output)
+        {
+            // Keep each outside slice. Only the remaining inside slice reaches the next edge.
+            void TakeOutside(Vector2 a, Vector2 b)
+            {
+                var outside = ClipHalfPlane(polygon, a, b, false);
+                if (HasArea(outside)) output.Add(outside);
+            }
+
+            TakeOutside(clip.A, clip.B);
+            polygon = ClipHalfPlane(polygon, clip.A, clip.B, true);
+            TakeOutside(clip.B, clip.C);
+            polygon = ClipHalfPlane(polygon, clip.B, clip.C, true);
+            TakeOutside(clip.C, clip.A);
+        }
+
+        private static List<Vector2> ClipHalfPlane(List<Vector2> polygon, Vector2 a, Vector2 b, bool inside)
+        {
+            var output = new List<Vector2>(polygon.Count + 1);
+            if (polygon.Count == 0) return output;
+
+            var previous = polygon[polygon.Count - 1];
+            double previousSide = Side(a, b, previous);
+            foreach (var point in polygon)
+            {
+                double currentSide = Side(a, b, point);
+                bool keepPrevious = inside ? previousSide >= 0 : previousSide <= 0;
+                bool keepCurrent = inside ? currentSide >= 0 : currentSide <= 0;
+                if (keepPrevious != keepCurrent && previousSide != 0 && currentSide != 0)
+                {
+                    double t = previousSide / (previousSide - currentSide);
+                    output.Add(new Vector2(
+                        (float)(previous.x + ((double)point.x - previous.x) * t),
+                        (float)(previous.y + ((double)point.y - previous.y) * t)));
+                }
+                if (keepCurrent) output.Add(point);
+                previous = point;
+                previousSide = currentSide;
+            }
+            return output;
+        }
+
+        private static RoadPath CreatePath(CityRoad road)
+        {
+            var points = new List<Vector2>();
+            foreach (var (x, y) in road.Points)
+            {
+                var point = new Vector2((float)x, (float)y);
+                if (points.Count == 0 || Vector2.Distance(point, points[points.Count - 1]) > MinSegmentM)
+                    points.Add(point);
+            }
+            if (points.Count < 2) return null;
+
+            var stations = new float[points.Count];
+            var offsets = new Vector2[points.Count];
+            for (int i = 0; i < points.Count; i++)
+            {
+                if (i > 0) stations[i] = stations[i - 1] + Vector2.Distance(points[i - 1], points[i]);
+                var incoming = (points[Mathf.Max(i, 1)] - points[Mathf.Max(i, 1) - 1]).normalized;
+                int next = Mathf.Min(i + 1, points.Count - 1);
+                var outgoing = (points[next] - points[next - 1]).normalized;
+                offsets[i] = Mitre(incoming, outgoing);
+            }
+            return new RoadPath
+            {
+                Road = road, Points = points, Stations = stations, Offsets = offsets,
+                Width = HalfWidth(road), Lanes = LaneCount(road)
+            };
+        }
+
+        private static List<List<End>> ConnectEnds(List<RoadPath> paths, List<Vector2> signalCentres)
+        {
+            var nodes = new Dictionary<long, List<(RoadPath Path, bool AtStart)>>();
+            void Add(long node, RoadPath path, bool atStart)
+            {
+                if (!nodes.TryGetValue(node, out var ends))
+                    nodes[node] = ends = new List<(RoadPath, bool)>();
+                ends.Add((path, atStart));
+            }
+
+            foreach (var path in paths)
+            {
+                Add(path.Road.FromNode, path, true);
+                Add(path.Road.ToNode, path, false);
+            }
+
+            var junctions = new List<List<End>>();
+            foreach (var ends in nodes.Values)
+            {
+                var remaining = new List<(RoadPath Path, bool AtStart)>(ends);
+                while (remaining.Count > 1)
+                {
+                    var seed = remaining[0];
+                    var origin = Endpoint(seed);
+                    var group = remaining.FindAll(end => Vector2.Distance(Endpoint(end), origin) <= JoinToleranceM);
+                    foreach (var end in group) remaining.Remove(end);
+                    if (group.Count < 2) continue;
+
+                    var junction = new List<End>(group.Count);
+                    foreach (var (path, atStart) in group)
+                    {
+                        var end = atStart ? path.Start : path.Finish;
+                        end.JunctionIndex = junctions.Count;
+                        junction.Add(end);
+                    }
+                    junctions.Add(junction);
+
+                    // Choose the straightest compatible pair at this node, even
+                    // when a branch also terminates here.
+                    float bestDot = ContinuationDot;
+                    float bestWidth = 0f;
+                    int bestA = -1, bestB = -1;
+                    for (int i = 0; i < group.Count; i++)
+                    for (int j = i + 1; j < group.Count; j++)
+                    {
+                        var a = group[i];
+                        var b = group[j];
+                        if (a.Path == b.Path || a.Path.Road.Oneway != b.Path.Road.Oneway ||
+                            (a.Path.Road.Oneway && a.AtStart == b.AtStart) ||
+                            Vector2.Distance(Endpoint(a), Endpoint(b)) > JoinToleranceM) continue;
+                        float dot = Vector2.Dot(Outward(a), Outward(b));
+                        float width = Mathf.Min(a.Path.Width, b.Path.Width);
+                        if (dot > bestDot || (dot == bestDot && width <= bestWidth)) continue;
+                        bestDot = dot;
+                        bestWidth = width;
+                        bestA = i;
+                        bestB = j;
+                    }
+
+                    bool intersection = group.Count >= 4;
+                    if (group.Count >= 3 && signalCentres != null)
+                        intersection |= signalCentres.Any(point => (point - origin).sqrMagnitude <= 12f * 12f);
+
+                    if (bestA >= 0)
+                    {
+                        var through = Outward(group[bestA]);
+                        for (int i = 0; i < group.Count; i++)
+                        {
+                            if (i == bestA || i == bestB) continue;
+                            if (Mathf.Abs(Vector2.Dot(through, Outward(group[i]))) < 0.70f)
+                                intersection = true;
+                        }
+                        JoinThroughRoad(group[bestA], group[bestB]);
+                    }
+                    if (!intersection) continue;
+                    int signalJunction = NearestSignalJunction(origin, signalCentres);
+                    for (int i = 0; i < group.Count; i++)
+                    {
+                        var end = junction[i];
+                        end.JunctionPaintBreak = true;
+                        end.SignalJunction = signalJunction;
+
+                        // Move the cutoff to the outer edge of the crossing
+                        // carriageway, with a small setback on the approach.
+                        var approach = Outward(group[i]);
+                        float clearance = group[i].Path.Width;
+                        for (int j = 0; j < group.Count; j++)
+                        {
+                            if (i == j) continue;
+                            float cosine = Mathf.Abs(Vector2.Dot(approach, Outward(group[j])));
+                            if (cosine >= 0.70f) continue;
+                            float sine = Mathf.Sqrt(1f - cosine * cosine);
+                            clearance = Mathf.Max(clearance,
+                                (group[j].Path.Width + cosine * group[i].Path.Width) / sine);
+                        }
+                        end.IntersectionClearance = clearance + 1f;
+                    }
+                }
+            }
+            return junctions;
+        }
+
+        private static int NearestSignalJunction(Vector2 position, List<Vector2> centres)
+        {
+            if (centres == null) return -1;
+            int nearest = -1;
+            float best = 18f * 18f;
+            for (int i = 0; i < centres.Count; i++)
+            {
+                float distance = (position - centres[i]).sqrMagnitude;
+                if (distance >= best) continue;
+                best = distance;
+                nearest = i;
+            }
+            return nearest;
+        }
+
+        private static int EndpointIndex((RoadPath Path, bool AtStart) endpoint) =>
+            endpoint.AtStart ? 0 : endpoint.Path.Points.Count - 1;
+
+        private static Vector2 Endpoint((RoadPath Path, bool AtStart) endpoint) =>
+            endpoint.Path.Points[EndpointIndex(endpoint)];
+
+        private static Vector2 Outward((RoadPath Path, bool AtStart) endpoint) =>
+            (endpoint.Path.Points[EndpointIndex(endpoint) + (endpoint.AtStart ? 1 : -1)] -
+                Endpoint(endpoint)).normalized;
+
+        private static void JoinThroughRoad((RoadPath Path, bool AtStart) first,
+            (RoadPath Path, bool AtStart) second)
+        {
+            var (a, startA) = first;
+            var (b, startB) = second;
+            var outwardA = Outward(first);
+            var outwardB = Outward(second);
+            var point = (Endpoint(first) + Endpoint(second)) * 0.5f;
+            var normal = Mitre(-outwardA, outwardB);
+            int indexA = EndpointIndex(first);
+            int indexB = EndpointIndex(second);
+            a.Points[indexA] = b.Points[indexB] = point;
+            a.Offsets[indexA] = startA ? -normal : normal;
+            b.Offsets[indexB] = startB ? normal : -normal;
+
+            var tangent = (outwardB - outwardA).normalized;
+            var endA = startA ? a.Start : a.Finish;
+            var endB = startB ? b.Start : b.Finish;
+            endA.TangentCorrection = -tangent - outwardA;
+            endB.TangentCorrection = tangent - outwardB;
+            endA.Joined = endB.Joined = true;
+            endA.Across = second;
+            endB.Across = first;
+        }
+
+        private static List<Vector2> JunctionPerimeter(List<End> ends)
+        {
+            var points = new List<Vector2>(2 * ends.Count);
+            foreach (var end in ends)
+            {
+                points.Add(end.LeftEdge);
+                points.Add(end.RightEdge);
+            }
+            points.Sort((a, b) => a.x == b.x ? a.y.CompareTo(b.y) : a.x.CompareTo(b.x));
+            var perimeter = new List<Vector2>(points.Count);
+            void Append(Vector2 point, int start)
+            {
+                while (perimeter.Count >= start + 2 &&
+                    Side(perimeter[perimeter.Count - 2], perimeter[perimeter.Count - 1], point) <= MinimumDoubleArea)
+                    perimeter.RemoveAt(perimeter.Count - 1);
+                perimeter.Add(point);
+            }
+            foreach (var point in points) Append(point, 0);
+            int upperStart = perimeter.Count - 1;
+            for (int i = points.Count - 2; i >= 0; i--) Append(points[i], upperStart);
+            perimeter.RemoveAt(perimeter.Count - 1);
+            return perimeter;
+        }
+
+        private static void BuildWidthProfiles(List<RoadPath> paths)
+        {
+            foreach (var path in paths)
+            {
+                AddTransition(path, true);
+                AddTransition(path, false);
+            }
+
+            void AddTransition(RoadPath path, bool atStart)
+            {
+                var end = atStart ? path.Start : path.Finish;
+                var other = end.Across.Path;
+                // Process each transition from the narrower side exactly once.
+                if (other == null || path.Width >= other.Width) return;
+
+                float joinHalfWidth = Mathf.Max(path.Width, other.Width);
+                float desired = Mathf.Max(MinimumTaperLengthM,
+                    (joinHalfWidth - path.Width) * TaperMetresPerMetre);
+                float reach = AvailableReach(path, atStart, desired);
+                // Reach the full width at the join, with the entire taper
+                // on the narrow side. In reverse this is a gradual narrowing.
+                ApplyWidthBlend(path, atStart, reach, joinHalfWidth);
+            }
+        }
+
+        private static float AvailableReach(RoadPath path, bool atStart, float desired)
+        {
+            float distance = 0f;
+            while (true)
+            {
+                distance += path.Length;
+                if (distance >= 2f * desired) return desired;
+                var exit = atStart ? path.Finish : path.Start;
+                var (next, nextAtStart) = exit.Across;
+                if (next == null) return Mathf.Min(distance, desired);
+                // Two widening transitions on the same run share the available
+                // length. If the next road is narrower, its own taper is on
+                // the other side of that join.
+                if (next.Width > path.Width) return Mathf.Min(distance * 0.5f, desired);
+                if (next.Width < path.Width) return Mathf.Min(distance, desired);
+                path = next;
+                atStart = nextAtStart;
+            }
+        }
+
+        private static void ApplyWidthBlend(RoadPath path, bool atStart, float reach, float targetWidth)
+        {
+            float distance = 0f;
+            while (distance < reach)
+            {
+                path.WidthBlends.Add(new WidthBlend
+                {
+                    AtStart = atStart,
+                    DistanceToJoin = distance,
+                    Reach = reach,
+                    TargetWidth = targetWidth
+                });
+                distance += path.Length;
+                var exit = atStart ? path.Finish : path.Start;
+                var (next, nextAtStart) = exit.Across;
+                if (next == null || next.Width != path.Width) break;
+                path = next;
+                atStart = nextAtStart;
+            }
+        }
+
+        private static List<Section> Sample(RoadPath path)
+        {
+            var stations = path.Stations;
+            var distances = new SortedSet<float>(stations);
+            var corners = new Corner[stations.Length];
+            float maximumHalfWidth = path.Width;
+            foreach (var blend in path.WidthBlends)
+                maximumHalfWidth = Mathf.Max(maximumHalfWidth, blend.TargetWidth);
+            for (int i = 1; i < stations.Length - 1; i++)
+            {
+                var incoming = (path.Points[i] - path.Points[i - 1]).normalized;
+                var outgoing = (path.Points[i + 1] - path.Points[i]).normalized;
+                float dot = Mathf.Clamp(Vector2.Dot(incoming, outgoing), -1f, 1f);
+                if (dot > 0.9998f || dot < -0.9f) continue;
+
+                float turn = Mathf.Atan2(Vector2.Dot(LeftOf(incoming), outgoing), dot);
+                float halfTurn = Mathf.Abs(turn) * 0.5f;
+                float tangentFactor = Mathf.Tan(halfTurn);
+                float secantMinusOne = 1f / Mathf.Cos(halfTurn) - 1f;
+                float room = Mathf.Min(stations[i] - stations[i - 1], stations[i + 1] - stations[i]);
+                // The fillet must stay close to the source path and clear adjacent corners.
+                float span = Mathf.Min(room * 0.45f, Mathf.Min(MaxCornerSpanM,
+                    MaxCurveDeviationM * tangentFactor / secantMinusOne));
+                float radius = span / tangentFactor;
+                bool canFitRoad = radius > maximumHalfWidth + KerbM;
+                if (!canFitRoad)
+                {
+                    // Keep a bounded offset through tight bends where a circular
+                    // inner edge would reverse direction.
+                    span = Mathf.Min(span, Mathf.Min(8f, 2.4f / (incoming - outgoing).magnitude));
+                }
+                corners[i] = new Corner
+                {
+                    Span = span, Turn = turn, Radius = radius,
+                    Incoming = incoming, Outgoing = outgoing, CanFitRoad = canFitRoad
+                };
+                int steps = Mathf.Clamp(Mathf.CeilToInt(Mathf.Max(Mathf.Abs(turn) / 0.09f, 2f * span / 1.5f)), 6, 32);
+                for (int j = 0; j <= steps; j++)
+                    distances.Add(stations[i] + span * (2f * j / steps - 1f));
+            }
+
+            for (int i = 1; i < corners.Length - 1; i++)
+                if (corners[i].CanFitRoad)
+                    path.Offsets[i] = Vector2.zero;
+
+            void AddBlendSamples(float span, bool atStart)
+            {
+                if (span <= 0f) return;
+                int steps = Mathf.Max(8, Mathf.CeilToInt(span / 0.75f));
+                for (int i = 1; i <= steps; i++)
+                {
+                    float distance = span * i / steps;
+                    distances.Add(atStart ? distance : path.Length - distance);
+                }
+            }
+
+            float startBlend = path.Start.Joined ? Mathf.Min(8f, stations[1] * 0.45f) : 0f;
+            float finishBlend = path.Finish.Joined
+                ? Mathf.Min(8f, (path.Length - stations[stations.Length - 2]) * 0.45f) : 0f;
+            AddBlendSamples(startBlend, true);
+            AddBlendSamples(finishBlend, false);
+            foreach (var blend in path.WidthBlends)
+                AddBlendSamples(Mathf.Min(path.Length, blend.Reach - blend.DistanceToJoin), blend.AtStart);
+            var sections = new List<Section>(distances.Count);
+            int segment = 0;
+            foreach (float distance in distances)
+            {
+                while (segment + 1 < stations.Length - 1 && distance > stations[segment + 1])
+                    segment++;
+
+                Interpolate(path, segment, distance, out var point, out var offset);
+                int index = distance - stations[segment] <= corners[segment].Span && corners[segment].Span > 0f
+                    ? segment : segment + 1;
+                var corner = corners[index];
+                if (corner.Span > 0f && Mathf.Abs(distance - stations[index]) <= corner.Span + MinSegmentM)
+                {
+                    float station = stations[index];
+                    Interpolate(path, index - 1, station - corner.Span, out var before, out var beforeOffset);
+                    Interpolate(path, index, station + corner.Span, out var after, out var afterOffset);
+                    float t = Mathf.InverseLerp(station - corner.Span, station + corner.Span, distance);
+                    if (corner.CanFitRoad)
+                    {
+                        // An arc meets both straight approaches with a matching tangent.
+                        // Its normal is shared by the asphalt and kerb edges.
+                        var normal = LeftOf(corner.Incoming);
+                        float signedRadius = Mathf.Sign(corner.Turn) * corner.Radius;
+                        float angle = corner.Turn * t;
+                        point = before + signedRadius * (corner.Incoming * Mathf.Sin(angle) +
+                            normal * (1f - Mathf.Cos(angle)));
+                        var tangent = corner.Incoming * Mathf.Cos(angle) + normal * Mathf.Sin(angle);
+                        offset = LeftOf(tangent) + Vector2.Lerp(
+                            beforeOffset - normal, afterOffset - LeftOf(corner.Outgoing), t);
+                    }
+                    else
+                    {
+                        point = Quadratic(before, path.Points[index], after, t);
+                        offset = Quadratic(beforeOffset, path.Offsets[index], afterOffset, t);
+                    }
+                }
+
+                point += path.Start.TangentCorrection * BlendDistance(startBlend, distance);
+                point += path.Finish.TangentCorrection * BlendDistance(finishBlend, path.Length - distance);
+                float width = path.Width;
+                foreach (var blend in path.WidthBlends)
+                {
+                    float distanceFromEnd = blend.AtStart ? distance : path.Length - distance;
+                    width += (blend.TargetWidth - path.Width) * blend.Weight(distanceFromEnd);
+                }
+                sections.Add(new Section { Point = point, Offset = offset, HalfWidth = width });
+            }
+            return sections;
+        }
+
+        private static float BlendDistance(float span, float distance)
+        {
+            if (span <= 0f || distance >= span) return 0f;
+            float remaining = 1f - distance / span;
+            return distance * remaining * remaining;
+        }
+
+        private static void Interpolate(RoadPath path, int segment, float distance,
+            out Vector2 point, out Vector2 offset)
+        {
+            float t = Mathf.InverseLerp(path.Stations[segment], path.Stations[segment + 1], distance);
+            point = Vector2.Lerp(path.Points[segment], path.Points[segment + 1], t);
+            var normal = LeftOf((path.Points[segment + 1] - path.Points[segment]).normalized);
+            var start = path.Offsets[segment];
+            var finish = path.Offsets[segment + 1];
+            offset = Vector2.Lerp(start == Vector2.zero ? normal : start,
+                finish == Vector2.zero ? normal : finish, t);
+        }
+
+        private static Vector2 Quadratic(Vector2 a, Vector2 b, Vector2 c, float t) =>
+            Vector2.Lerp(Vector2.Lerp(a, b, t), Vector2.Lerp(b, c, t), t);
+
+        private static Vector2 LeftOf(Vector2 direction) => new Vector2(-direction.y, direction.x);
+
+        private static Vector2 Mitre(Vector2 incoming, Vector2 outgoing)
+        {
+            var normal = LeftOf(incoming + outgoing).normalized;
+            var side = LeftOf(outgoing);
+            if (normal.sqrMagnitude < 0.001f) return side;
+            return normal * Mathf.Min(MaxMitre, 1f / Mathf.Max(Vector2.Dot(normal, side), 0.001f));
+        }
+
         private static bool IsUnmarkedClass(string roadClass)
         {
             switch ((roadClass ?? string.Empty).ToLowerInvariant())
@@ -31,212 +1084,5 @@ namespace Formula9.World
                 default: return false;
             }
         }
-        // A bend sharper than this gets a round corner, because its mitre is cut short
-        private const float SharpBendCosine = 0.7f, MaxMitre = 2;
-        private const int CapSides = 12;
-        private const float MinSegmentM = 1e-3f;
-
-        public static float HalfWidth(CityRoad road) => (road.Oneway ? road.Lanes : road.Lanes * 2) * LaneWidthM / 2 + ShoulderM;
-
-        public static Mesh Build(IEnumerable<CityRoad> roads)
-        {
-            var list = roads.Select(road => (Road: road, Points: Line(road))).Where(r => r.Points.Count >= 2).ToList();
-            var ends = new Dictionary<long, List<float>>();
-            void AddEnd(long node, float halfWidth)
-            {
-                if (!ends.TryGetValue(node, out var widths)) ends[node] = widths = new List<float>();
-                widths.Add(halfWidth);
-            }
-            foreach (var (road, _) in list) { AddEnd(road.FromNode, HalfWidth(road)); AddEnd(road.ToNode, HalfWidth(road)); }
-            // Where only two roads meet, one carries on as the other, so its lines do too
-            float Clearance(long node) => ends[node].Count > 2 ? ends[node].Max() + JunctionClearanceM : 0;
-
-            var vertices = new List<Vector3>(); var lines = new List<Vector4>();
-            var textureCoords = new List<Vector4>();
-            var fadeCoords = new List<Vector4>();
-            var layers = Enumerable.Range(0, LayerCount).Select(_ => new List<int>()).ToArray();
-            void Surface(List<Vector2> points, float halfWidth, List<int> triangles, float height)
-            {
-                Ribbon(points, halfWidth, null, 0, 0, 0, 0, vertices, lines, triangles, height);
-                for (var i = 0; i < points.Count; i++)
-                    if (i == 0 || i == points.Count - 1 || IsSharp(points[i - 1], points[i], points[i + 1])) Cap(points[i], halfWidth, vertices, lines, triangles, height);
-            }
-            // Kerbs are two OUTER edge strips, not another full-width road polygon.
-            // Full-width kerb underlays used to show through adjacent road junctions
-            // as thick grey bars whenever road surfaces failed to coincide exactly.
-            foreach (var (road, points) in list)
-                KerbEdges(points, HalfWidth(road), vertices, lines, layers[KerbLayer]);
-            // The user-supplied two-lane road texture is projected along the
-            // same ribbon as the asphalt. TEXCOORD1: across [0..1], distance
-            // along the road (in texture repeats), actual total lanes, fade.
-            // This DOES NOT change legacy TEXCOORD0 or the public Build API.
-            while (textureCoords.Count < vertices.Count) textureCoords.Add(Vector4.zero);
-            while (fadeCoords.Count < vertices.Count) fadeCoords.Add(Vector4.zero);
-            foreach (var (road, points) in list)
-            {
-                int first = vertices.Count;
-                Surface(points, HalfWidth(road), layers[AsphaltLayer], SurfaceY);
-                while (textureCoords.Count < vertices.Count) textureCoords.Add(Vector4.zero);
-                var along = Along(points);
-                float length = along[along.Count - 1];
-                // Per-pixel junction fading, preserving the original road geometry.
-                float fromCut = Mathf.Min(Clearance(road.FromNode), length * .25f);
-                float toCut = Mathf.Min(Clearance(road.ToNode), length * .25f);
-                float fadeSpan = Mathf.Min(1.2f, Mathf.Max(.10f, length * .12f));
-                bool marked = !IsUnmarkedClass(road.Class);
-                int totalLanes = Mathf.Max(1, road.Oneway ? road.Lanes : road.Lanes * 2);
-                float signedLanes = road.Oneway ? totalLanes : -totalLanes;
-                var fadeData = new Vector4(fromCut, length - toCut, fadeSpan,
-                    toCut > 0f ? 1f : 0f);
-                while (fadeCoords.Count < vertices.Count) fadeCoords.Add(Vector4.zero);
-                for (int i = 0; i < points.Count; i++)
-                {
-                    float v = along[i] / 24f;
-                    textureCoords[first + i * 2] = new Vector4(1f, v, signedLanes, marked ? 1f : 0f);
-                    textureCoords[first + i * 2 + 1] = new Vector4(0f, v, signedLanes, marked ? 1f : 0f);
-                    fadeCoords[first + i * 2] = fadeData;
-                    fadeCoords[first + i * 2 + 1] = fadeData;
-                }
-                // Original Cap() geometry is retained at road ends and sharp bends.
-                // Its zeroed UVs keep the caps plain asphalt (no texture-line starbursts).
-            }
-            // No separate legacy marking geometry: texture shader paints asphalt ribbon.
-            // Keep empty MarkingLayer to preserve LayerCount and CityView API.
-            while (textureCoords.Count < vertices.Count) textureCoords.Add(Vector4.zero);
-            while (fadeCoords.Count < vertices.Count) fadeCoords.Add(Vector4.zero);
-
-            var mesh = new Mesh { name = "City roads", indexFormat = IndexFormat.UInt32 };
-            mesh.SetVertices(vertices); mesh.SetUVs(0, lines); mesh.SetUVs(1, textureCoords); mesh.SetUVs(2, fadeCoords);
-            mesh.subMeshCount = LayerCount;
-            for (var i = 0; i < LayerCount; i++) mesh.SetTriangles(layers[i], i);
-            mesh.RecalculateNormals(); mesh.RecalculateBounds();
-            return mesh;
-        }
-
-        
-        // The road's points without repeats: canonical (x, y) is Unity (x, z)
-        private static List<Vector2> Line(CityRoad road)
-        {
-            var points = new List<Vector2>();
-            foreach (var (x, y) in road.Points)
-            {
-                var point = new Vector2((float)x, (float)y);
-                if (points.Count == 0 || (point - points[points.Count - 1]).magnitude > MinSegmentM) points.Add(point);
-            }
-            return points;
-        }
-
-        private static List<float> Along(List<Vector2> points)
-        {
-            var along = new List<float> { 0 };
-            for (var i = 1; i < points.Count; i++) along.Add(along[i - 1] + (points[i] - points[i - 1]).magnitude);
-            return along;
-        }
-
-        // The part of a line between two distances along it
-        private static (List<Vector2> Points, List<float> Along) Slice(List<Vector2> points, List<float> along, float from, float to)
-        {
-            Vector2 At(float distance)
-            {
-                var i = 1;
-                while (i < points.Count - 1 && along[i] < distance) i++;
-                return Vector2.Lerp(points[i - 1], points[i], Mathf.InverseLerp(along[i - 1], along[i], distance));
-            }
-            var cut = new List<Vector2> { At(from) }; var cutAlong = new List<float> { from };
-            for (var i = 0; i < points.Count; i++)
-                if (along[i] > from + MinSegmentM && along[i] < to - MinSegmentM) { cut.Add(points[i]); cutAlong.Add(along[i]); }
-            cut.Add(At(to)); cutAlong.Add(to);
-            return (cut, cutAlong);
-        }
-
-        private static bool IsSharp(Vector2 before, Vector2 at, Vector2 after) =>
-            Vector2.Dot((at - before).normalized, (after - at).normalized) < SharpBendCosine;
-
-        private static Vector2 LeftOf(Vector2 direction) => new Vector2(-direction.y, direction.x);
-
-        // A strip along a line, mitred at its bends. Each vertex tells the marking shader (lane position
-        // across the road, metres along it, lanes, 1 if two-way).
-        private static void Ribbon(List<Vector2> points, float halfWidth, List<float> along, float middleLane, float halfLanes, int lanes, int twoWay, List<Vector3> vertices, List<Vector4> lines, List<int> triangles, float height)
-        {
-            for (var i = 0; i < points.Count; i++)
-            {
-                var into = (points[Mathf.Max(i, 1)] - points[Mathf.Max(i, 1) - 1]).normalized;
-                var outOf = (points[Mathf.Min(i + 1, points.Count - 1)] - points[Mathf.Min(i + 1, points.Count - 1) - 1]).normalized;
-                var left = LeftOf(into + outOf);
-                // A line that doubles straight back has no mitre
-                left = left.sqrMagnitude < 1e-6f ? LeftOf(outOf) : left.normalized;
-                var stretch = Mathf.Min(1 / Mathf.Max(Vector2.Dot(left, LeftOf(outOf)), 1e-3f), MaxMitre);
-                var offset = left * (halfWidth * stretch);
-                var start = vertices.Count;
-                vertices.Add(Ground(points[i] + offset, height)); vertices.Add(Ground(points[i] - offset, height));
-                var distance = along == null ? 0 : along[i];
-                lines.Add(new Vector4(middleLane + halfLanes, distance, lanes, twoWay));
-                lines.Add(new Vector4(middleLane - halfLanes, distance, lanes, twoWay));
-                // Clockwise from above, so it faces up
-                if (i > 0) triangles.AddRange(new[] { start - 2, start, start + 1, start - 2, start + 1, start - 1 });
-            }
-        }
-
-        // Create a pair of kerb-only edge bands instead of a complete second
-        // carriageway. Keep the original public RoadMesh API and all 3 submeshes
-        // so existing EditMode tests and consumers remain compatible.
-        private static void KerbEdges(List<Vector2> points, float asphaltHalfWidth,
-            List<Vector3> vertices, List<Vector4> lines, List<int> triangles)
-        {
-            if (points.Count < 2) return;
-            var normals = new Vector2[points.Count];
-            for (int i = 0; i < points.Count; i++)
-            {
-                var previous = (points[i] - points[Mathf.Max(0, i - 1)]).normalized;
-                var next = (points[Mathf.Min(i + 1, points.Count - 1)] - points[i]).normalized;
-                if (i == 0) previous = next;
-                if (i == points.Count - 1) next = previous;
-                var leftPrev = LeftOf(previous);
-                var leftNext = LeftOf(next);
-                var miter = leftPrev + leftNext;
-                miter = miter.sqrMagnitude < 1e-6f ? leftNext : miter.normalized;
-                var stretch = Mathf.Min(1f / Mathf.Max(Vector2.Dot(miter, leftNext), 0.001f), MaxMitre);
-                normals[i] = miter * stretch;
-            }
-
-            void Quad(Vector2 a, Vector2 b, Vector2 c, Vector2 d)
-            {
-                int index = vertices.Count;
-                vertices.Add(Ground(a, KerbSurfaceY));
-                vertices.Add(Ground(b, KerbSurfaceY));
-                vertices.Add(Ground(c, KerbSurfaceY));
-                vertices.Add(Ground(d, KerbSurfaceY));
-                for (int k = 0; k < 4; k++) lines.Add(Vector4.zero);
-                triangles.AddRange(new[] { index, index + 1, index + 2,
-                    index, index + 2, index + 3 });
-            }
-
-            for (int i = 1; i < points.Count; i++)
-            {
-                var a = points[i - 1]; var b = points[i];
-                if ((b - a).sqrMagnitude < MinSegmentM * MinSegmentM) continue;
-                var na = normals[i - 1]; var nb = normals[i];
-                float inner = asphaltHalfWidth;
-                float outer = asphaltHalfWidth + KerbM;
-                Quad(a + na * inner, a + na * outer,
-                     b + nb * outer, b + nb * inner);
-                Quad(a - na * inner, b - nb * inner,
-                     b - nb * outer, a - na * outer);
-            }
-        }
-
-        private static void Cap(Vector2 center, float radius, List<Vector3> vertices, List<Vector4> lines, List<int> triangles, float height)
-        {
-            var start = vertices.Count;
-            vertices.Add(Ground(center, height)); lines.Add(Vector4.zero);
-            for (var i = 0; i < CapSides; i++)
-            {
-                var angle = -2 * Mathf.PI * i / CapSides;
-                vertices.Add(Ground(center + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * radius, height)); lines.Add(Vector4.zero);
-                triangles.AddRange(new[] { start, start + 1 + i, start + 1 + (i + 1) % CapSides });
-            }
-        }
-
-        private static Vector3 Ground(Vector2 point, float height) => new Vector3(point.x, height, point.y);
     }
 }
