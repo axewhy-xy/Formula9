@@ -818,11 +818,26 @@ namespace Formula9.Tests
                 view.Show(snapshot, new ShuttleMotion(), 0);
 
                 Assert.IsTrue(
-                    snapshot.Vehicles.Any(v => v.VehicleId == "shuttle-01"),
-                    "the fixture contains shuttle-01");
+                     view.TryGetShuttle("shuttle-01", out _),
+                     "the snapshot's shuttle is shown");
+                var markers = rig.GetComponentsInChildren<MeshRenderer>(true);
+                var stops = markers.Where(r => r.name.StartsWith("Stop ")).ToList();
+                Assert.IsNotEmpty(stops, "the snapshot's stop is shown");
                 Assert.IsTrue(
-                    view.TryGetShuttle("shuttle-01", out _),
-                    "the snapshot's shuttle is shown");
+                    stops.All(r => r.sharedMaterial.GetFloat("_Plain") == 1),
+                    "stop markers stay plain");
+
+                var shuttle = rig.GetComponentsInChildren<Transform>(true)
+                    .SingleOrDefault(t => t.name == "Shuttle shuttle-01");
+                Assert.IsNotNull(shuttle, "the snapshot's shuttle is shown");
+
+                var shuttleRenderers = shuttle.GetComponentsInChildren<MeshRenderer>(true);
+                Assert.IsNotEmpty(shuttleRenderers, "the shuttle has renderers");
+                Assert.IsTrue(
+                    shuttleRenderers.All(r => r.sharedMaterial != buildings),
+                    "the shuttle doesn't use the building material");
+                
+             
             }
             finally
             {
