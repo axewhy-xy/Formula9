@@ -298,7 +298,7 @@ namespace Formula9.World
                 const string roadTextureFolder = "Formula9/Textures/";
                 var asphaltColorMap = LoadRoadTexture(roadTextureFolder + "asphalt_02", TextureWrapMode.Mirror);
                 if (asphaltColorMap != null) asphaltColorMap.anisoLevel = 16;
-                var textureShader = Resources.Load<Shader>("Formula9/Shaders/CityRoadTexture");
+                var textureShader = Resources.Load<Shader>("Formula9/Shaders/CityRoadWithCentreDividers");
                 bool hasTextureShader = textureShader != null && textureShader.isSupported;
                 bool useAsphaltMaps = asphaltColorMap != null;
                 var atlas = !useAsphaltMaps ? LoadRoadTexture(roadTextureFolder + "road_lane_texture") : null;

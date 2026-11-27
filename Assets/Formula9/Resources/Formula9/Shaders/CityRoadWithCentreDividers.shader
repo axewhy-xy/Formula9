@@ -4,6 +4,7 @@ Shader "Formula9/CityRoadWithCentreDividers"
     {
         [HideInInspector] _SurveyPaintMask ("Survey paint mask", 2D) = "black" {}
         [HideInInspector] _SurveyMaskBounds ("Survey mask bounds", Vector) = (0,0,0,0)
+        [HideInInspector] _SurveyMaskEnabled ("Survey mask enabled", Float) = 0
         [HideInInspector] _MappedPaintReady ("Mapped mesh paint ready", Float) = 0
         _Color ("Road tint", Color) = (1.34, 1.36, 1.39, 1)
         [HideInInspector] _UseMappedDividers ("Use LTA dividers", Float) = 0
@@ -53,6 +54,8 @@ Shader "Formula9/CityRoadWithCentreDividers"
             float _MappedPaintReady;
             sampler2D _SurveyPaintMask;
             float4 _SurveyMaskBounds;
+            float _SurveyMaskEnabled;
+            float4 _Formula9GroundDim;
 
             struct appdata
             {
@@ -267,13 +270,21 @@ Shader "Formula9/CityRoadWithCentreDividers"
                     highIncoming * Coverage(i.barDistances.y, 0.15, footprint.y)
                 );
 
-                float mappedDividers = step(0.5, _UseMappedDividers);
+               float mappedDividers = step(0.5, _UseMappedDividers);
+                float2 surveyUV = (i.cityXZ - _SurveyMaskBounds.xy) * _SurveyMaskBounds.zw;
+                float insideSurveyBounds = step(0.0, surveyUV.x) * step(surveyUV.x, 1.0) *
+                    step(0.0, surveyUV.y) * step(surveyUV.y, 1.0);
+                float surveyedDividers = tex2D(_SurveyPaintMask, saturate(surveyUV)).r *
+                    insideSurveyBounds * _SurveyMaskEnabled;
+                mappedDividers = max(mappedDividers, surveyedDividers);
+
                 float twoWay = step(0.5, -i.lane.z);
                 dividerCoverage *= 1.0 - mappedDividers * twoWay *
                     (1.0 - step(0.5, abs(divider - laneCount * 0.5)));
 
                 float paint = step(1.0, laneCount) *
                     max(stopBar, dividerCoverage * dash * withinStrip);
+                paint *= 1.0 - step(0.5, _MappedPaintReady);
 
                 float3 asphaltRGB = saturate(asphalt * _Color.rgb);
                 float3 roadRGB = lerp(asphaltRGB, float3(1.0, 1.0, 1.0), paint);

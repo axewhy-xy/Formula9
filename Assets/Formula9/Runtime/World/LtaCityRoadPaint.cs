@@ -13,7 +13,7 @@ namespace Formula9.World
             try
             {
                 var data = tile["markings"]?.ToObject<MarkingData>();
-                if (data?.Lines == null || data.Arrows == null) return false;
+                if (data?.Lines == null) return false;
                 AddCrossingPaint(builder, tile["crossings"]?.ToObject<CrossingData>());
                 Dictionary<string, List<Feature>> lineGroups = GroupByType(data.Lines);
                 foreach (var group in lineGroups)

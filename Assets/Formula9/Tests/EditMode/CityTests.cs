@@ -844,6 +844,23 @@ namespace Formula9.Tests
             }
         }
 
+
+        [Test]
+        public void CentreDividerRoadShaderLoadsWithSurveyMaskProperties()
+        {
+            var shader = Resources.Load<Shader>("Formula9/Shaders/CityRoadWithCentreDividers");
+            Assert.IsNotNull(shader);
+            Assert.IsTrue(shader.isSupported);
+            var material = new Material(shader);
+            try
+            {
+                Assert.IsTrue(material.HasProperty("_SurveyPaintMask"));
+                Assert.IsTrue(material.HasProperty("_SurveyMaskBounds"));
+                Assert.IsTrue(material.HasProperty("_SurveyMaskEnabled"));
+            }
+            finally { UnityEngine.Object.DestroyImmediate(material); }
+        }
+
         // Draws the real buildings from a live backend, to look at. Needs a GPU and the isolated
         // backend; set FORMULA9_CITY_RENDER_OUT to a .png path to keep the image.
         [UnityTest, Category("Render")]

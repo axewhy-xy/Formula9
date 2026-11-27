@@ -228,6 +228,8 @@ namespace Formula9.World
                
                 owned.AddRange(meshes);
                 committed = true;
+                if (asphaltMaterial.HasProperty("_MappedPaintReady"))
+                    asphaltMaterial.SetFloat("_MappedPaintReady", 1f);
                 Debug.Log($"[CityView] LTA paint overlay loaded on {built} tiles.");
                 return true;
             }
