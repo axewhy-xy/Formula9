@@ -4,6 +4,8 @@ using UnityEngine;
 using UnityEngine.Rendering;
 #if UNITY_EDITOR
 using UnityEditor;
+using UnityEditor.SceneManagement;
+using UnityEngine.SceneManagement;
 #endif
 
 namespace Formula9.World
@@ -218,27 +220,36 @@ namespace Formula9.World
             // characters. To turn them on in a player build: move the catalog into Resources/Formula9, load it
             // here with Resources.Load, and set walkClip on each entry (clips are only found in the editor).
 #if UNITY_EDITOR
-            var catalog = AssetDatabase.LoadAssetAtPath<PedestrianModelCatalog>(CatalogPath);
-            if (catalog != null && catalog.entries != null)
+            var previewScene = EditorSceneManager.NewPreviewScene();
+            try
             {
-                foreach (var entry in catalog.entries)
+                var catalog = AssetDatabase.LoadAssetAtPath<PedestrianModelCatalog>(CatalogPath);
+                if (catalog != null && catalog.entries != null)
                 {
-                    if (entry == null || entry.prefab == null) continue;
-                    var walk = entry.walkClip != null ? entry.walkClip : FindClip(entry.prefab, entry.walkClipName, "walk");
-                    var idle = entry.idleClip != null ? entry.idleClip : FindClip(entry.prefab, null, "idle");
-                    AddModel(BakeModel(entry.prefab, walk, idle));
+                    foreach (var entry in catalog.entries)
+                    {
+                        if (entry == null || entry.prefab == null) continue;
+                        var walk = entry.walkClip != null ? entry.walkClip : FindClip(entry.prefab, entry.walkClipName, "walk");
+                        var idle = entry.idleClip != null ? entry.idleClip : FindClip(entry.prefab, null, "idle");
+                        AddModel(BakeModel(entry.prefab, walk, idle, previewScene));
+                    }
+                }
+
+                if (models.Count == 0)
+                {
+                    foreach (var guid in AssetDatabase.FindAssets("t:Model", new[] { "Assets/Animated Men Characters" }))
+                    {
+                        var path = AssetDatabase.GUIDToAssetPath(guid);
+                        if (!path.EndsWith(".fbx", StringComparison.OrdinalIgnoreCase)) continue;
+                        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+                        if (prefab == null) continue;
+                        AddModel(BakeModel(prefab, FindClip(prefab, "Walk", "walk"), FindClip(prefab, null, "idle"), previewScene));
+                    }
                 }
             }
-            if (models.Count == 0)
+            finally
             {
-                foreach (var guid in AssetDatabase.FindAssets("t:Model", new[] { "Assets/Animated Men Characters" }))
-                {
-                    var path = AssetDatabase.GUIDToAssetPath(guid);
-                    if (!path.EndsWith(".fbx", StringComparison.OrdinalIgnoreCase)) continue;
-                    var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
-                    if (prefab == null) continue;
-                    AddModel(BakeModel(prefab, FindClip(prefab, "Walk", "walk"), FindClip(prefab, null, "idle")));
-                }
+                EditorSceneManager.ClosePreviewScene(previewScene);
             }
 #endif
             if (models.Count == 0)
@@ -283,12 +294,13 @@ namespace Formula9.World
             }
             return loose;
         }
-
+#if UNITY_EDITOR
         // Poses the model while it stands at the origin, once per walk frame plus an idle pose, and keeps each
         // as a mesh scaled to a height of 1 with its feet on y = 0 and centred on x/z.
-        private Model BakeModel(GameObject prefab, AnimationClip walk, AnimationClip idle)
+        private Model BakeModel(GameObject prefab, AnimationClip walk, AnimationClip idle, Scene previewScene)
         {
-            var instance = UnityEngine.Object.Instantiate(prefab);
+            var instance = PrefabUtility.InstantiatePrefab(prefab, previewScene) as GameObject;
+            if (instance == null) return null;
             instance.name = "PedestrianBake";
             try
             {
@@ -384,7 +396,7 @@ namespace Formula9.World
                 DestroyObject(instance);
             }
         }
-
+#endif
         // The traffic's material asset, saved with instancing on: a player build strips a shader's instancing
         // variants unless some material asset uses them, and then instanced drawing shows nothing at all.
         // Copies of it keep instancing.
