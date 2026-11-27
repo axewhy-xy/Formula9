@@ -140,8 +140,10 @@ namespace Formula9.Tests
                 Press("route-confirm-send");
                 // Applied, not just closed: the shuttle leaves the Needs a decision strip. (The panel may then
                 // move on by itself to another shuttle still waiting.)
-                yield return Until(() => !root.Q("route-pending-items").Query<Button>().ToList().Any(b => b.text.Contains(decided)), "the decision applied");
-                Note($"{decided} decided; still waiting: " + string.Join(", ", root.Q("route-pending-items").Query<Button>().ToList().Select(b => b.text)));
+                // Each entry is the shuttle's name in its red box, then "needs a decision (1) · ~8 s"
+                string Entry(Button b) => string.Join(" ", b.Query<Label>().ToList().Select(l => l.text));
+                yield return Until(() => !root.Q("route-pending-items").Query<Button>().ToList().Any(b => Entry(b).Contains(decided)), "the decision applied");
+                Note($"{decided} decided; still waiting: " + string.Join(", ", root.Q("route-pending-items").Query<Button>().ToList().Select(Entry)));
                 yield return Seconds(3);
                 Press(nav);
 

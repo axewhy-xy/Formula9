@@ -781,6 +781,211 @@ namespace Formula9.Tests
         }
 
         [Test]
+        public void GrassUsesACompressedSharedTextureAndValidatesItsSettings()
+        {
+            var grass = Resources.Load<Texture2D>("Formula9/Textures/grass_albedo");
+            Assert.IsNotNull(grass);
+            Assert.AreEqual(512, grass.width);
+            Assert.AreEqual(512, grass.height);
+            Assert.Greater(grass.mipmapCount, 1);
+            Assert.IsFalse(grass.isReadable, "The GPU texture needs no duplicate readable CPU copy.");
+            Assert.AreEqual(TextureWrapMode.Repeat, grass.wrapMode);
+            Assert.Less(UnityEngine.Profiling.Profiler.GetRuntimeMemorySizeLong(grass), 400 * 1024);
+            var look = WorldLook.Parse("{\"grass\":{\"enabled\":false,\"repeatM\":3,\"strength\":0.5}}");
+            Assert.IsFalse(look.Grass.Enabled);
+            Assert.AreEqual(3, look.Grass.RepeatM);
+            Assert.Throws<FormatException>(() => WorldLook.Parse("{\"grass\":{\"repeatM\":0}}"));
+            Assert.Throws<FormatException>(() => WorldLook.Parse("{\"grass\":{\"strength\":2}}"));
+        }
+
+        [Test]
+        public async Task GrassReusesGroundGeometryAndDoesNotAddRenderersOrColliders()
+        {
+            var settings = WorldLook.Default.Grass;
+            var enabled = settings.Enabled;
+            var strength = settings.Strength;
+            var rigs = new List<GameObject>();
+            var views = new List<CityView>();
+            try
+            {
+                (int Renderers, int Vertices, int Triangles, int Colliders) baseline = default;
+                foreach (var useGrass in new[] { false, true })
+                {
+                    settings.Enabled = useGrass;
+                    settings.Strength = 0.9f;
+                    var rig = new GameObject("Ground detail geometry test"); rigs.Add(rig);
+                    var view = new CityView(rig.transform, null); views.Add(view);
+                    await view.LoadAsync(new CityClient(new OneBuilding(), new Uri("http://localhost")), "toa-payoh", CancellationToken.None);
+                    var meshes = rig.GetComponentsInChildren<MeshFilter>().Select(f => f.sharedMesh).Where(m => m != null).ToList();
+                    var counts = (rig.GetComponentsInChildren<MeshRenderer>().Length, meshes.Sum(m => m.vertexCount),
+                        meshes.Sum(m => m.triangles.Length / 3), rig.GetComponentsInChildren<Collider>().Length);
+                    var materials = rig.GetComponentsInChildren<MeshRenderer>().Where(r => r.name.StartsWith("Tile "))
+                        .Select(r => r.sharedMaterial).ToList();
+                    Assert.IsNotEmpty(materials);
+                    if (!useGrass) { baseline = counts; continue; }
+                    Assert.AreEqual(baseline, counts);
+                    var grass = Resources.Load<Texture2D>("Formula9/Textures/grass_albedo");
+                    Assert.IsTrue(materials.All(m => m.GetTexture("_GrassTex") == grass));
+                    Assert.IsTrue(materials.All(m => m.GetFloat("_HasMapTile") == 0));
+                }
+            }
+            finally
+            {
+                settings.Enabled = enabled; settings.Strength = strength;
+                foreach (var view in views) view.Dispose();
+                foreach (var rig in rigs) UnityEngine.Object.DestroyImmediate(rig);
+            }
+        }
+
+        [TestCase(0.35f, 0.65f, 0.25f, true, true)]
+        [TestCase(0.5f, 0.5f, 0.5f, true, false)]
+        [TestCase(0.1f, 0.4f, 0.8f, true, false)]
+        [TestCase(0.5f, 0.5f, 0.5f, false, true)]
+        public void GroundGrassChangesGreeneryAndBareGroundWhilePreservingPavingAndWater(float r, float g, float b,
+            bool mapLoaded, bool changes)
+        {
+            if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null) Assert.Ignore("Needs a GPU");
+            var material = new Material(Shader.Find("Formula9/CityGround"));
+            var source = new Texture2D(2, 2, TextureFormat.RGB24, false, true);
+            source.SetPixels(Enumerable.Repeat(new Color(r, g, b), 4).ToArray()); source.Apply();
+            var target = new RenderTexture(16, 16, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+            var readback = new Texture2D(16, 16, TextureFormat.RGBA32, false, true);
+            var previous = RenderTexture.active;
+            var dim = Shader.GetGlobalVector("_Formula9GroundDim");
+            var shadow = Shader.GetGlobalFloat("_Formula9ShadowDarkness");
+            var fog = RenderSettings.fog;
+            try
+            {
+                RenderSettings.fog = false;
+                Shader.SetGlobalVector("_Formula9GroundDim", Vector4.zero);
+                Shader.SetGlobalFloat("_Formula9ShadowDarkness", 0);
+                material.SetTexture("_GrassTex", Resources.Load<Texture2D>("Formula9/Textures/grass_albedo"));
+                material.SetFloat("_HasMapTile", mapLoaded ? 1 : 0);
+                Color Sample(float strength)
+                {
+                    material.SetFloat("_GrassStrength", strength);
+                    Graphics.Blit(source, target, material, 0);
+                    RenderTexture.active = target;
+                    readback.ReadPixels(new Rect(0, 0, 16, 16), 0, 0); readback.Apply();
+                    return readback.GetPixel(8, 8);
+                }
+                var before = Sample(0); var after = Sample(1);
+                var difference = Mathf.Max(Mathf.Abs(before.r - after.r), Mathf.Abs(before.g - after.g), Mathf.Abs(before.b - after.b));
+                if (changes) Assert.Greater(difference, 0.03f);
+                else Assert.Less(difference, 0.01f);
+            }
+            finally
+            {
+                RenderTexture.active = previous;
+                Shader.SetGlobalVector("_Formula9GroundDim", dim);
+                Shader.SetGlobalFloat("_Formula9ShadowDarkness", shadow);
+                RenderSettings.fog = fog;
+                target.Release();
+                UnityEngine.Object.DestroyImmediate(target); UnityEngine.Object.DestroyImmediate(readback);
+                UnityEngine.Object.DestroyImmediate(source); UnityEngine.Object.DestroyImmediate(material);
+            }
+        }
+
+        [TestCase("1,2,1.5,0.75,40", 0.75f)]
+        [TestCase("1,2,0.6,1.2,40", 0.6f)]
+        [TestCase("1,2,1.1,1.1,40", 1.1f)]
+        [TestCase("1,2,0.8,40", 0.8f)]
+        public void TreesKeepTheirProportionsWithinThePlacementLimits(string row, float expectedScale)
+        {
+            var asset = new TextAsset("east_m,north_m,height_scale,width_scale,yaw_deg\n" + row);
+            try
+            {
+                var tree = CityVegetation.ReadPlacements(asset).Single();
+                Assert.AreEqual(new Vector3(1, 0, 2), tree.Position);
+                Assert.AreEqual(40, tree.Yaw);
+                Assert.AreEqual(expectedScale, tree.Scale, 1e-6f);
+            }
+            finally { UnityEngine.Object.DestroyImmediate(asset); }
+        }
+
+        [Test]
+        public void TreePlacementsKeepTheirSizeVariationAndRejectInvalidScales()
+        {
+            var placements = Resources.Load<TextAsset>("Formula9/Vegetation/ToaPayohTrees");
+            var trees = CityVegetation.ReadPlacements(placements).ToList();
+            Assert.Greater(trees.Count, 1000);
+            Assert.Greater(trees.Select(tree => tree.Scale).Distinct().Count(), 20);
+            Assert.Greater(trees.Max(tree => tree.Scale), trees.Min(tree => tree.Scale) * 2);
+
+            var invalid = new TextAsset("east_m,north_m,height_scale,width_scale,yaw_deg\n" +
+                "1,2,0,1,40\n1,2,-1,1,40\n1,2,1,0,40\n1,2,1,-1,40\n" +
+                "1,2,NaN,1,40\n1,2,1,Infinity,40\n1,2,1,1,NaN\n");
+            try { Assert.IsEmpty(CityVegetation.ReadPlacements(invalid)); }
+            finally { UnityEngine.Object.DestroyImmediate(invalid); }
+        }
+
+        [Test]
+        public void TreeMaterialsAreSharedBetweenDetailLevelsAndDisposedWithoutChangingAssets()
+        {
+            if (!SystemInfo.supportsInstancing) Assert.Ignore("Trees require GPU instancing.");
+            var models = new[] { "RoadsideTree", "RoadsideTreeLow" }
+                .Select(name => Resources.Load<GameObject>("Formula9/Vegetation/" + name)).ToArray();
+            var sources = models.SelectMany(model => model.GetComponentInChildren<MeshRenderer>().sharedMaterials).ToArray();
+            var colors = sources.Select(material => material.color).ToArray();
+            var template = Resources.Load<Material>("Formula9/TrafficVehicle");
+            var templateColor = template.color;
+            var expectedCount = colors.Distinct().Count();
+            var first = CityVegetation.Load(Matrix4x4.identity);
+            using var second = CityVegetation.Load(Matrix4x4.identity);
+            Assert.IsNotNull(first);
+            Assert.IsNotNull(second);
+            try
+            {
+                Assert.AreEqual(expectedCount, first.MaterialCount);
+                Assert.Less(first.MaterialCount, sources.Length, "The shared bark needs only one material.");
+                first.Dispose();
+                first.Dispose();
+                Assert.AreEqual(0, first.MaterialCount);
+                Assert.AreEqual(0, first.BatchCount);
+                Assert.AreEqual(expectedCount, second.MaterialCount, "Each city owns its material copies.");
+                for (var i = 0; i < sources.Length; i++)
+                {
+                    Assert.IsTrue(sources[i] != null);
+                    Assert.AreEqual(colors[i], sources[i].color);
+                }
+                Assert.AreEqual(templateColor, template.color);
+            }
+            finally { first.Dispose(); }
+        }
+
+        [Test]
+        public async Task ToaPayohTreesLoadWithTheCityAndFollowItsVisibility()
+        {
+            if (!SystemInfo.supportsInstancing) Assert.Ignore("Trees require GPU instancing.");
+            var rig = new GameObject("City vegetation rig");
+            var view = new CityView(rig.transform, null);
+            try
+            {
+                await view.LoadAsync(new CityClient(new OneBuilding(), new Uri("http://localhost")), "toa-payoh", CancellationToken.None);
+                var city = rig.transform.Find("City");
+                var vegetation = view.Vegetation;
+                Assert.IsNotNull(vegetation);
+                Assert.Greater(vegetation.TreeCount, 1000);
+                Assert.Greater(vegetation.BatchCount, 200);
+                Assert.IsFalse(city.GetComponentsInChildren<MeshFilter>(true).Any(filter =>
+                    filter.sharedMesh != null && filter.sharedMesh.name.StartsWith("RoadsideTree")));
+
+                view.SetVisible(false);
+                Assert.IsFalse(city.gameObject.activeInHierarchy);
+                view.SetVisible(true);
+                Assert.IsTrue(city.gameObject.activeInHierarchy);
+                Assert.AreSame(vegetation, view.Vegetation);
+                view.Dispose();
+                Assert.DoesNotThrow(() => view.DrawVegetation(Array.Empty<Camera>()));
+            }
+            finally
+            {
+                view.Dispose();
+                UnityEngine.Object.DestroyImmediate(rig);
+            }
+        }
+
+        [Test]
         public void BuildingsGetTheirWallAndWindowTexturesAndMarkersStayPlain()
         {
             var rig = new GameObject("City texture rig");
@@ -1020,6 +1225,7 @@ namespace Formula9.Tests
                 {
                     camera.transform.position = at + new Vector3(Mathf.Sin(Mathf.PI - 0.35f) * Mathf.Cos(pitch), Mathf.Sin(pitch), Mathf.Cos(Mathf.PI - 0.35f) * Mathf.Cos(pitch)) * distance;
                     camera.transform.LookAt(at, Vector3.up);
+                    view.DrawVegetation(new[] { camera });
                     camera.Render();
                     RenderTexture.active = texture;
                     var image = new Texture2D(texture.width, texture.height, TextureFormat.RGB24, false);
@@ -1030,9 +1236,12 @@ namespace Formula9.Tests
                     UnityEngine.Object.DestroyImmediate(image);
                 }
                 Shoot(focus, 2200, 0.3f, output);
+                yield return null;
                 // Where the view opens, then close enough on Lorong 2 Toa Payoh to see the road's lines
                 Shoot(focus, 1200, 0.75f, Path.ChangeExtension(output ?? "", ".opening.png"));
+                yield return null;
                 Shoot(new Vector3(2988, 0, -2604), 90, 0.7f, Path.ChangeExtension(output ?? "", ".street.png"));
+                yield return null;
                 Shoot(new Vector3(2988, 0, -2604), 350, 1.1f, Path.ChangeExtension(output ?? "", ".junctions.png"));
                 // Looking across the blocks at an angle, as the 3D view is usually used
                 Shoot(new Vector3(2988, 0, -2604), 260, 0.5f, Path.ChangeExtension(output ?? "", ".blocks.png"));

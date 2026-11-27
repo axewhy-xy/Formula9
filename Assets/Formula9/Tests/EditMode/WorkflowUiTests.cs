@@ -109,6 +109,9 @@ namespace Formula9.Tests
                 Assert.AreEqual(polled + (streaming ? 0 : 1), snapshotRequests);
                 Assert.IsTrue(suggest.enabledSelf, string.Join("; ", errors.Select(e => e.Message)));
                 Assert.IsTrue(root.Q<Button>("route-start").enabledSelf);
+                // Start lives in the outcome card, which stays even with no problem to report
+                Assert.AreEqual(DisplayStyle.Flex, root.Q("route-outcome").style.display.value, "Start is on the page");
+                Assert.AreEqual(DisplayStyle.Flex, root.Q<Button>("route-start").style.display.value);
                 typeof(TrainingWorkspace).GetMethod("SuggestDetour", flags).Invoke(workspace, null);
                 root.Q<TextField>("route-reason").value = "Use the checked detour";
                 Update();
@@ -440,7 +443,8 @@ namespace Formula9.Tests
                 var reason = root.Q<TextField>("route-reason");
                 string Panel() => picker.value.Split(' ')[1];
                 List<Button> Items() => root.Q("route-pending-items").Query<Button>().ToList();
-                List<string> Strip() => Items().Select(b => b.text).ToList();
+                // Each entry: the shuttle's name (in its red box), then what it needs
+                List<string> Strip() => Items().Select(b => string.Join(" ", b.Query<Label>().ToList().Select(l => l.text))).ToList();
                 bool Shown(string page) => root.Q(page).style.display.value == DisplayStyle.Flex;
                 await session.JoinAsync((string)raw["session_id"]);
                 world.Show(session.Store.Snapshot);
@@ -452,8 +456,7 @@ namespace Formula9.Tests
                 // Joining mid-session, the panel starts on the shuttle waiting for a decision
                 Assert.AreEqual("01", Panel());
                 StringAssert.EndsWith("● needs a decision", picker.value);
-                CollectionAssert.AreEqual(new[] { "● Shuttle 01 · ~8 s" }, Strip());
-                Assert.AreEqual("Needs a decision (1)", root.Q<Label>("route-pending-title").text);
+                CollectionAssert.AreEqual(new[] { "Shuttle 01 needs a decision (1) · ~8 s" }, Strip());
                 var badge = root.Q<TextElement>("nav-route-badge");
                 Assert.AreEqual("1", badge.text, "the Route Planning nav item counts the shuttles waiting");
                 Assert.AreNotEqual(DisplayStyle.None, badge.style.display.value);
@@ -480,7 +483,7 @@ namespace Formula9.Tests
                 workspace.Render();
                 Assert.AreEqual("05", Panel(), "the soonest of the shuttles waiting");
                 Assert.AreEqual("Shuttle 05 · route-b   ● needs a decision", picker.value);
-                CollectionAssert.AreEqual(new[] { "● Shuttle 05 · ~2 s", "● Shuttle 01 · ~8 s" }, Strip(), "soonest first");
+                CollectionAssert.AreEqual(new[] { "Shuttle 05 needs a decision (1) · ~2 s", "Shuttle 01 needs a decision (1) · ~8 s" }, Strip(), "soonest first");
                 Assert.IsTrue(Shown("page-fleet"), "the page stays");
                 Assert.IsTrue(world.CamerasShown, "still watching");
                 Assert.AreEqual("shuttle-04", world.WatchedId, "still watching the shuttle they chose");
@@ -493,8 +496,7 @@ namespace Formula9.Tests
                 workspace.Render();
                 Assert.AreEqual("04", Panel(), "a reason is being typed");
                 Assert.AreEqual("Keeping an eye on 04", reason.value);
-                CollectionAssert.AreEqual(new[] { "● Shuttle 02 · ~1 s", "● Shuttle 05 · ~2 s", "● Shuttle 01 · ~8 s" }, Strip());
-                Assert.AreEqual("Needs a decision (3)", root.Q<Label>("route-pending-title").text);
+                CollectionAssert.AreEqual(new[] { "Shuttle 02 needs a decision (1) · ~1 s", "Shuttle 05 needs a decision (1) · ~2 s", "Shuttle 01 needs a decision (1) · ~8 s" }, Strip());
                 Assert.AreEqual("3", badge.text);
                 Assert.AreEqual("Route Planning: 3 shuttles need a decision", root.Q<Button>("nav-route").tooltip);
 
@@ -518,14 +520,57 @@ namespace Formula9.Tests
                     .Invoke(workspace, new object[] { "ROAD_DETOUR" });
                 Assert.IsTrue(world.ShowingMap, "its detour is drafted on the map");
                 Assert.AreEqual(DisplayStyle.Flex, root.Q("route-decide").style.display.value);
-                Assert.AreEqual(DisplayStyle.Flex, root.Q("route-stages").style.display.value, "the re-route has its stages");
-                Assert.IsTrue(Items().Single(b => b.text.Contains("Shuttle 05")).ClassListContains("route-pending-item-selected"));
-                Assert.IsFalse(Items().Single(b => b.text.Contains("Shuttle 01")).ClassListContains("route-pending-item-selected"));
+                // The re-route's steps are numbered down the page: the problem (with its options), then the detour
+                Assert.AreEqual("1", root.Q("route-problem-card").Q<Label>("route-step-number").text);
+                Assert.AreEqual(root.Q("route-problem-card"), root.Q("route-options").parent, "the options are in the problem's box");
+                Assert.AreEqual("2", root.Q("route-decide").Q<Label>("route-step-number").text);
+                Assert.IsTrue(root.Q("route-problem-card").Q("route-step-mark").ClassListContains("route-step-done"));
+                Assert.IsTrue(root.Q("route-decide").Q<Label>("route-step-number").ClassListContains("route-step-current"), "drawing the detour");
+                // With a route drawn, pressing Re-route again first says what a second press does,
+                // so one press by mistake loses nothing
+                var drawn = typeof(TrainingWorkspace).GetField("draft", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                drawn.SetValue(workspace, new List<RouteWaypoint> { new RouteWaypoint { EdgeId = "edge-1", Road = "Lorong 6 Toa Payoh" } });
+                typeof(TrainingWorkspace).GetMethod("ChooseOption", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    .Invoke(workspace, new object[] { "ROAD_DETOUR" });
+                Assert.AreEqual(DisplayStyle.Flex, root.Q("route-decide").style.display.value, "still re-routing");
+                Assert.AreEqual(1, ((List<RouteWaypoint>)drawn.GetValue(workspace)).Count, "the route is kept");
+                Assert.AreEqual(RoutePresenter.LeaveRerouteNote, root.Q<Label>("route-options-hint").text);
+                typeof(TrainingWorkspace).GetMethod("ChooseOption", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    .Invoke(workspace, new object[] { "ROAD_DETOUR" });
+                Assert.AreEqual(DisplayStyle.None, root.Q("route-decide").style.display.value, "the second press leaves");
+                Assert.IsEmpty((List<RouteWaypoint>)drawn.GetValue(workspace));
+                Assert.AreNotEqual(RoutePresenter.LeaveRerouteNote, root.Q<Label>("route-options-hint").text);
+                typeof(TrainingWorkspace).GetMethod("ChooseOption", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    .Invoke(workspace, new object[] { "ROAD_DETOUR" });
+                Assert.AreEqual(DisplayStyle.Flex, root.Q("route-decide").style.display.value, "re-routing again");
+                // A suggested detour leaves the drawn route empty, but is kept the same way
+                var suggesting = typeof(TrainingWorkspace).GetField("suggesting", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                suggesting.SetValue(workspace, true);
+                typeof(TrainingWorkspace).GetMethod("ChooseOption", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    .Invoke(workspace, new object[] { "ROAD_DETOUR" });
+                Assert.AreEqual(DisplayStyle.Flex, root.Q("route-decide").style.display.value, "the suggestion is kept");
+                Assert.AreEqual(RoutePresenter.LeaveRerouteNote, root.Q<Label>("route-options-hint").text);
+                suggesting.SetValue(workspace, false);
+                // Changing the route takes the first press back, and its note
+                typeof(TrainingWorkspace).GetMethod("ApplyDraft", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    .Invoke(workspace, new object[] { new List<RouteWaypoint>() });
+                Assert.AreNotEqual(RoutePresenter.LeaveRerouteNote, root.Q<Label>("route-options-hint").text);
+                Assert.IsFalse((bool)typeof(TrainingWorkspace).GetField("leavingReroute", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).GetValue(workspace));
+                // So does the draft being cleared, as when a newer incident's detour replaces this one
+                drawn.SetValue(workspace, new List<RouteWaypoint> { new RouteWaypoint { EdgeId = "edge-1", Road = "Lorong 6 Toa Payoh" } });
+                typeof(TrainingWorkspace).GetMethod("ChooseOption", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    .Invoke(workspace, new object[] { "ROAD_DETOUR" });
+                Assert.AreEqual(RoutePresenter.LeaveRerouteNote, root.Q<Label>("route-options-hint").text);
+                typeof(TrainingWorkspace).GetMethod("ClearDraft", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(workspace, null);
+                Assert.AreNotEqual(RoutePresenter.LeaveRerouteNote, root.Q<Label>("route-options-hint").text);
+                Assert.IsFalse((bool)typeof(TrainingWorkspace).GetField("leavingReroute", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).GetValue(workspace));
+                Assert.IsTrue(Items().Single(b => b.Q<Label>(className: "route-pending-name").text == "Shuttle 05").ClassListContains("route-pending-item-selected"));
+                Assert.IsFalse(Items().Single(b => b.Q<Label>(className: "route-pending-name").text == "Shuttle 01").ClassListContains("route-pending-item-selected"));
 
                 // Its options withdrawn: idle, the panel moves to the soonest still waiting
                 await Offer(("shuttle-02", "KEEP_ROUTE", 1));
                 workspace.Render();
-                CollectionAssert.AreEqual(new[] { "● Shuttle 02 · ~1 s", "● Shuttle 01 · ~8 s" }, Strip());
+                CollectionAssert.AreEqual(new[] { "Shuttle 02 needs a decision (1) · ~1 s", "Shuttle 01 needs a decision (1) · ~8 s" }, Strip());
                 Assert.AreEqual("02", Panel());
 
                 // A marker on the map opens the first shuttle still waiting for a decision there
@@ -615,6 +660,10 @@ namespace Formula9.Tests
                 Task Confirm() => (Task)typeof(TrainingWorkspace).GetMethod("ConfirmChoice", flags).Invoke(workspace, null);
                 bool Shown(string name) => root.Q(name).style.display.value == DisplayStyle.Flex;
                 Button Option(string name) => root.Q<Button>(name);
+                // Before joining, the page says to join a session: a shuttle can't be added yet
+                workspace.Render();
+                Assert.AreEqual("Join a session to see its routes.", root.Q<Label>("route-empty").text);
+                Assert.IsTrue(Shown("route-empty"));
                 await session.JoinAsync((string)raw["session_id"]);
                 // The options' figures are in the backend's OPTIONS_READY event
                 var ready = ContractParser.Parse<EventReplay>(Fixture("event_replay").ToString()).Events.Single();
@@ -641,11 +690,18 @@ namespace Formula9.Tests
                 Assert.IsFalse(Shown("route-confirm"), "nothing chosen yet");
                 Assert.IsFalse(Shown("route-outcome"));
                 Assert.IsFalse(Shown("route-decide"));
-                Assert.IsFalse(Shown("route-stages"), "only the re-route has stages");
+                Assert.AreEqual("1", root.Q("route-problem-card").Q<Label>("route-step-number").text, "the problem is step 1");
+                // Nothing chosen yet: the exercise is still at the problem, not past it
+                Assert.IsTrue(root.Q("route-problem-card").Q<Label>("route-step-number").ClassListContains("route-step-current"));
+                Assert.IsFalse(root.Q("route-problem-card").Q("route-step-mark").ClassListContains("route-step-done"));
 
                 // One confirm step, with a reason to start from
                 Choose("HOLD_AT_STOP");
                 Assert.IsTrue(Shown("route-confirm"));
+                // Confirming is its own step after the problem, as the detour is for the re-route
+                Assert.AreEqual("2", root.Q("route-confirm").Q<Label>("route-step-number").text);
+                Assert.IsTrue(root.Q("route-confirm").Q<Label>("route-step-number").ClassListContains("route-step-current"));
+                Assert.IsTrue(root.Q("route-problem-card").Q("route-step-mark").ClassListContains("route-step-done"));
                 Assert.IsTrue(Option("option-hold").ClassListContains("segment-selected"));
                 Assert.AreEqual("Hold Shuttle 04 at Kim Keat Stop until the collision on Lorong 6 Toa Payoh clears.", root.Q<Label>("route-confirm-summary").text);
                 var reason = root.Q<TextField>("route-confirm-reason");
@@ -695,12 +751,28 @@ namespace Formula9.Tests
                 Assert.IsTrue(Shown("route-outcome"));
                 StringAssert.Contains("Decided for Shuttle 04: hold at Kim Keat Stop", root.Q<Label>("route-problem").text);
 
-                // Back closes the row without sending anything
+                // Pressing the chosen option again closes its confirm card without sending anything
                 workspace.DecideFor("shuttle-01");
                 Choose("KEEP_ROUTE");
                 Assert.IsTrue(Shown("route-confirm"));
-                typeof(TrainingWorkspace).GetMethod("CloseChoice", flags).Invoke(workspace, new object[] { null });
+                Choose("KEEP_ROUTE");
                 Assert.IsFalse(Shown("route-confirm"));
+                Assert.IsFalse(Option("option-keep").ClassListContains("segment-selected"));
+                Assert.AreEqual(2, commands.Count);
+
+                // Paused with an option chosen: the others grey out, but the chosen one can still be
+                // pressed to close its confirm card, as there is no Back
+                Choose("KEEP_ROUTE");
+                session.Store.Snapshot.Session.Status = "PAUSED";
+                workspace.Render();
+                Assert.IsTrue(Shown("route-confirm"));
+                Assert.IsFalse(Option("option-hold").enabledSelf);
+                Assert.IsTrue(Option("option-keep").enabledSelf, "the way back from the confirm card");
+                Assert.AreEqual(RoutePresenter.CloseChoiceHint, Option("option-keep").tooltip, "it says what pressing it does, not that the session is paused");
+                Assert.IsFalse(root.Q<Button>("route-confirm-send").enabledSelf);
+                Choose("KEEP_ROUTE");
+                Assert.IsFalse(Shown("route-confirm"));
+                Assert.IsFalse(Option("option-keep").enabledSelf, "closed, it is greyed out like the rest");
                 Assert.AreEqual(2, commands.Count);
             }
             finally { session.Shutdown(); UnityEngine.Object.DestroyImmediate(rig); }

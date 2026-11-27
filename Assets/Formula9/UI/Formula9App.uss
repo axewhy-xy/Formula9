@@ -345,6 +345,18 @@
 }
 
 .title { flex-grow: 1; -unity-font-style: bold; }
+/* The training world's time and temperature, left of the alert bell, as "12:44 pm · 31°C" */
+.world-weather {
+    margin: 0 4px 0 8px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 13px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-center;
+    white-space: nowrap;
+    color: rgb(74, 93, 97);
+    background-color: rgb(236, 241, 242);
+}
 .mute { margin: 0 0 0 4px; }
 /* The alert sounds bell: an icon button the height of the header's buttons */
 .app Button.mute-button { width: 34px; height: 34px; padding: 0; align-items: center; justify-content: center; background-color: rgba(0, 0, 0, 0); border-width: 0; border-radius: 8px; }
@@ -500,7 +512,7 @@
     align-items: center;
     padding: 3px;
     border-radius: 10px;
-    background-color: rgba(255, 255, 255, 0.72);
+    background-color: rgb(255, 255, 255);
 }
 .app .view-bar Button.segment {
     height: 30px;
@@ -510,7 +522,7 @@
     border-radius: 8px;
     background-color: rgba(0, 0, 0, 0);
 }
-.app .view-bar Button.segment:hover { background-color: rgba(255, 255, 255, 0.6); }
+.app .view-bar Button.segment:hover { background-color: rgb(230, 238, 238); }
 .app .view-bar Button.segment-selected, .app .view-bar Button.segment-selected:hover { background-color: rgb(43, 134, 153); border-color: rgb(43, 134, 153); }
 
 .app Button.segment {
@@ -915,6 +927,34 @@
     border-color: rgb(43, 134, 153);
 }
 
+/* A page's title with a switch beside it (Route Planning's Exercise / Fleet table) */
+.page-title-row { flex-direction: row; align-items: center; flex-wrap: wrap; flex-shrink: 0; margin-bottom: 10px; }
+.page-title-row > .page-title { margin: 0 16px 0 0; }
+/* Tabs as one box with the chosen one filled teal, like the map's 2D Map / 3D View switch */
+.segment-tabs {
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+    padding: 3px;
+    border-radius: 10px;
+    background-color: rgb(230, 238, 238);
+}
+.app .segment-tabs Button.tab-item {
+    height: 30px;
+    margin: 0;
+    padding: 0 14px;
+    color: rgb(30, 42, 46);
+    border-width: 0;
+    border-radius: 8px;
+    background-color: rgba(0, 0, 0, 0);
+}
+.app .segment-tabs Button.tab-item:hover { background-color: rgba(255, 255, 255, 0.6); }
+.app .segment-tabs Button.tab-item-selected, .app .segment-tabs Button.tab-item-selected:hover {
+    color: rgb(255, 255, 255);
+    -unity-font-style: bold;
+    background-color: rgb(43, 134, 153);
+}
+
 .page-form .unity-base-field { margin: 0 0 8px 0; flex-shrink: 0; }
 .page-form .unity-base-field__label { min-width: 130px; width: 130px; }
 .form-row { flex-direction: row; flex-shrink: 0; margin-bottom: 8px; }
@@ -959,18 +999,38 @@
 
 /* Every shuttle waiting for a decision, soonest first; a click opens that shuttle. */
 .route-pending { flex-shrink: 0; flex-direction: row; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
-.route-pending-title { -unity-font-style: bold; margin-right: 8px; color: rgb(190, 42, 44); }
 .route-pending-items { flex-direction: row; flex-wrap: wrap; }
+/* "[Shuttle 01] needs a decision (1) · ~8 s": only the shuttle's name is in a red box, the rest is
+   plain text beside it. The shuttle Route Planning is on has its text in bold. */
 .app Button.route-pending-item {
-    height: 26px;
-    margin: 0 6px 4px 0;
-    padding: 0 10px;
-    font-size: 12px;
-    border-radius: 13px;
-    border-color: rgb(214, 48, 49);
-    background-color: rgb(253, 236, 236);
+    flex-direction: row;
+    align-items: center;
+    height: 28px;
+    margin: 0 14px 4px 0;
+    padding: 0 4px 0 0;
+    border-width: 0;
+    border-radius: 6px;
+    background-color: rgba(0, 0, 0, 0);
 }
-.app Button.route-pending-item-selected { color: rgb(255, 255, 255); background-color: rgb(190, 42, 44); }
+.app Button.route-pending-item:hover { background-color: rgb(250, 232, 232); }
+/* The same red pill as an incident notification's Decide button */
+.route-pending-item > .route-pending-name {
+    height: 24px;
+    margin: 0 6px 0 0;
+    padding: 0 10px;
+    border-width: 0;
+    border-radius: 12px;
+    font-size: 12px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-center;
+    color: rgb(255, 255, 255);
+    background-color: rgb(190, 42, 44);
+}
+.route-pending-item > .route-pending-text { margin: 0; padding: 0; font-size: 12px; color: rgb(30, 42, 46); }
+.route-pending-item-selected > .route-pending-text { -unity-font-style: bold; }
+
+/* Route Planning with no shuttle to plan for: this line in place of the page */
+.route-empty { flex-shrink: 0; white-space: normal; color: rgb(92, 112, 116); }
 
 /* Incident notifications: a stack over the map's top-right corner; right is set from code. */
 .notifications { position: absolute; top: 10px; right: 10px; width: 320px; max-width: 60%; }
@@ -1006,9 +1066,14 @@
     background-color: rgb(190, 42, 44);
 }
 .app Button.notification-decide:hover { background-color: rgb(160, 32, 34); }
+/* Top right of the card; the tag and title leave room for it */
+.notification-tag, .notification-title { margin-right: 22px; }
 .app Button.notification-close {
-    width: 28px;
-    height: 28px;
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 26px;
+    height: 26px;
     margin: 0;
     padding: 0;
     font-size: 16px;
@@ -1063,13 +1128,122 @@
 .route-verdict { white-space: normal; -unity-font-style: bold; margin-bottom: 6px; }
 .route-verdict-good { color: rgb(24, 122, 76); }
 .route-verdict-bad { color: rgb(190, 42, 44); }
+/* The exercise's steps (TrainingWorkspace.StepCard): each card is numbered in a circle in its own left
+   padding, on a line that runs down that padding and through the gaps between the cards, from the
+   first card's circle to the last one's, with a ring at its top right that shows a tick once the step
+   is done. The cards' text starts right of the circle, so the line never crosses it. */
+.route-card.route-step { padding: 6px 44px 12px 62px; border-left-width: 1px; border-left-color: rgb(220, 230, 230); }
+.route-step > .route-step-line {
+    position: absolute;
+    left: 29px;
+    top: -1px;
+    bottom: -11px; /* through the card's 10px bottom margin to the next card */
+    width: 2px;
+    background-color: rgb(200, 232, 240);
+}
+.route-step-first > .route-step-line { top: 26px; }
+.route-step-last > .route-step-line { bottom: auto; height: 27px; }
+.route-step-first.route-step-last > .route-step-line { display: none; }
+.route-step > .route-step-number {
+    position: absolute;
+    left: 10px;
+    top: 6px;
+    width: 40px;
+    height: 40px;
+    margin: 0;
+    padding: 0;
+    border-radius: 20px;
+    font-size: 20px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-center;
+    color: rgb(15, 76, 92);
+    background-color: rgb(200, 232, 240);
+}
+.route-step > .route-step-number.route-step-current { color: rgb(255, 255, 255); background-color: rgb(43, 134, 153); }
+/* The step's title beside its circle, a little larger. Its row is the circle's height and starts at the
+   circle's top (the card's 6px top padding), so the title's middle is level with the number's. */
+.route-step > .route-card-title {
+    min-height: 40px;
+    margin-top: 0;
+    margin-bottom: 4px;
+    padding-top: 0;
+    padding-bottom: 0;
+    font-size: 16px;
+    -unity-text-align: middle-left;
+}
+.route-step > .route-step-mark {
+    position: absolute;
+    top: 15px; /* level with the circle's middle */
+    right: 10px;
+    width: 22px;
+    height: 22px;
+    border-width: 2px;
+    border-radius: 11px;
+    border-color: rgb(150, 210, 120);
+}
+.route-step > .route-step-mark.route-step-done { border-color: rgb(190, 232, 160); background-color: rgb(190, 232, 160); }
+/* A tick drawn with two borders of a turned box, so it needs no glyph from the font */
+.route-step-mark > .route-step-tick {
+    display: none;
+    position: absolute;
+    left: 5px;
+    top: 1px;
+    width: 6px;
+    height: 11px;
+    border-right-width: 2px;
+    border-bottom-width: 2px;
+    border-color: rgb(30, 80, 40);
+    rotate: 45deg;
+}
+.route-step-done > .route-step-tick { display: flex; }
+
+/* The steps' buttons are teal with white text, like the app's other main buttons; greyed out while
+   they can't be used. The option chosen is a darker teal. */
+.app .route-step Button.route-option, .app .route-step Button.route-link, .app .route-step .draft-actions Button, .app .route-step Button.wide-button {
+    color: rgb(255, 255, 255);
+    background-color: rgb(43, 134, 153);
+    border-color: rgb(43, 134, 153);
+    border-radius: 16px;
+}
+.app .route-step Button.route-option:hover, .app .route-step Button.route-link:hover, .app .route-step .draft-actions Button:hover, .app .route-step Button.wide-button:hover {
+    background-color: rgb(34, 112, 128);
+    border-color: rgb(34, 112, 128);
+}
+.app .route-step Button.route-option:disabled, .app .route-step Button.route-link:disabled, .app .route-step .draft-actions Button:disabled, .app .route-step Button.wide-button:disabled {
+    color: rgb(154, 168, 170);
+    background-color: rgb(238, 243, 243);
+    border-color: rgb(211, 222, 222);
+}
+/* The options are white with a teal border and text until one is chosen, which fills in teal */
+.app .route-step Button.route-option {
+    color: rgb(34, 112, 128);
+    background-color: rgb(255, 255, 255);
+    border-width: 2px;
+}
+.app .route-step Button.route-option:hover { color: rgb(34, 112, 128); background-color: rgb(232, 244, 246); }
+.app .route-step Button.route-option:disabled:hover { color: rgb(154, 168, 170); background-color: rgb(238, 243, 243); }
+.app .route-step Button.route-option.segment-selected, .app .route-step Button.route-option.segment-selected:hover {
+    -unity-font-style: bold;
+    color: rgb(255, 255, 255);
+    background-color: rgb(43, 134, 153);
+    border-color: rgb(43, 134, 153);
+}
+
 .app Button.route-link { align-self: flex-start; height: 26px; margin: 0; padding: 0 10px; font-size: 12px; }
-/* Show on map, and how long the shuttle's options stand, at the far end. */
-.route-problem-actions { flex-direction: row; align-items: center; min-height: 26px; }
-.route-options-expiry { flex-grow: 1; -unity-text-align: middle-right; font-size: 12px; color: rgb(110, 120, 120); }
+/* The problem with Show on map (and Reload the route) beside it */
+.route-problem-row { flex-direction: row; align-items: flex-start; flex-shrink: 0; }
+.route-problem-row > .route-card-text { flex-grow: 1; flex-shrink: 1; flex-basis: 0; margin-right: 8px; }
+/* The problem itself, a little larger than the cards' other text */
+.route-problem-row > .route-problem-text { font-size: 15px; }
+.app .route-problem-row Button.route-link { flex-shrink: 0; margin: 0 0 0 6px; }
 
 /* One button per option the backend offers the shuttle; one it does not offer is greyed out, with why as its tooltip. */
-.route-card-options { border-left-width: 4px; border-left-color: rgb(43, 134, 153); }
+/* Under the problem, in its card: the shuttle's options, headed in bold */
+.route-options { flex-shrink: 0; margin-top: 10px; }
+/* "What should Shuttle 01 do?" with "Refreshes in 53 s" beside it */
+.route-options-head { flex-direction: row; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
+.route-options-head > .route-card-title { margin-bottom: 0; }
+.route-options-expiry { margin: 0 0 0 10px; padding: 0; font-size: 12px; color: rgb(110, 120, 120); }
 .route-option-buttons { flex-direction: row; flex-wrap: wrap; flex-shrink: 0; margin-bottom: 4px; }
 .app Button.route-option { height: 32px; margin: 0 6px 6px 0; padding: 0 12px; }
 .app Button.route-option.segment-selected, .app Button.route-option.segment-selected:hover {
@@ -1078,10 +1252,8 @@
     border-color: rgb(43, 134, 153);
 }
 .route-options-hint { font-size: 12px; color: rgb(110, 120, 120); }
-.route-confirm { flex-shrink: 0; margin-top: 4px; padding-top: 8px; border-top-width: 1px; border-top-color: rgb(220, 230, 230); }
 .route-confirm-note { margin-top: 4px; color: rgb(110, 120, 120); }
 .route-confirm-refused { color: rgb(190, 42, 44); }
-.route-decide-head { flex-direction: row; align-items: center; justify-content: space-between; }
 
 .route-waypoints { flex-shrink: 0; margin-bottom: 6px; }
 .route-waypoint { flex-direction: row; align-items: center; margin-bottom: 4px; }
@@ -1137,17 +1309,6 @@
     -unity-text-align: middle-center;
     color: rgb(255, 255, 255);
 }
-/* The world's time of day, bottom left, shaded like the large camera's name label */
-.world-clock {
-    position: absolute;
-    left: 10px;
-    bottom: 10px;
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-size: 14px;
-    color: rgb(255, 255, 255);
-    background-color: rgba(15, 30, 38, 0.85);
-}
 /* Shuttle cameras: they cover the whole 3D view, one camera large with the rest as thumbnails in a
    foldable rail over its top-left corner (kept high so the Fleet List sheet does not cover it). */
 .camera-panel {
@@ -1163,28 +1324,14 @@
     flex-grow: 1;
     -unity-background-scale-mode: scale-and-crop;
 }
-/* Top-left, under the large camera's name label: incident notifications use the top-right corner */
+/* Top-left, under the large camera's name (which folds it): incident notifications use the top-right corner */
 .camera-rail {
     position: absolute;
-    top: 44px;
+    top: 48px;
     left: 10px;
     bottom: 10px; /* WorldView.SetBottomInset raises it above the expanded Fleet List */
     align-items: flex-start;
 }
-.app Button.camera-rail-toggle {
-    height: 28px;
-    margin: 0 0 6px 0;
-    padding: 0 10px;
-    font-size: 12px;
-    -unity-font-style: bold;
-    color: rgb(255, 255, 255);
-    border-width: 0;
-    border-radius: 6px;
-    background-color: rgba(15, 30, 38, 0.85);
-}
-.app Button.camera-rail-toggle:hover { background-color: rgba(43, 134, 153, 0.95); }
-/* The rail's header: fold the thumbnails, or close the cameras and go back to the 3D view */
-.camera-rail-bar { flex-direction: row; align-items: center; }
 .camera-strip {
     flex-direction: column;
     flex-shrink: 1; /* shrinks to the rail's height and scrolls */
@@ -1217,13 +1364,22 @@
     -unity-background-image-tint-color: rgb(110, 110, 110);
 }
 .camera-tile-selected .camera-label { color: rgb(170, 178, 180); }
-.camera-main .camera-label {
+/* The large camera's name, top left: a click drops the other cameras down under it, or folds them away.
+   The arrow points up while they show and down while they are folded. */
+.camera-main-head {
+    position: absolute;
     left: 10px;
     top: 10px;
-    bottom: auto;
-    font-size: 16px;
+    flex-direction: row;
+    align-items: center;
     padding: 3px 8px;
+    border-radius: 3px;
+    background-color: rgba(15, 30, 38, 0.85);
 }
+.camera-main-head:hover { background-color: rgba(43, 134, 153, 0.95); }
+.camera-main-name, .camera-main-caret { margin: 0; padding: 0; font-size: 16px; -unity-font-style: bold; color: rgb(255, 255, 255); }
+.camera-main-caret { margin-left: 6px; rotate: 180deg; }
+.camera-main-head-folded > .camera-main-caret { rotate: 0deg; }
 .camera-label {
     position: absolute;
     left: 4px;

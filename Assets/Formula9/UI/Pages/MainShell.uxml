@@ -55,6 +55,8 @@
                     </ui:VisualElement>
                     <ui:VisualElement class="session-utilities">
                         <ui:Button name="quit-assessment" text="Quit assessment mode" class="session-button session-caution" tooltip="Archive this attempt and record the assessment as disrupted." style="display: none;" />
+                        <!-- The training world's time of day and temperature, left of the bell, while a session is joined. Formula9App fills it in. -->
+                        <ui:Label name="world-weather" class="world-weather" style="display: none;" />
                         <!-- Only while a session is joined: before that nothing can sound -->
                         <!-- A bell while alert sounds are on, a bell with a slash while muted; a click switches. Formula9App sets the icon and tooltip. -->
                         <ui:Button name="mute" class="mute mute-button" style="display: none;">
@@ -117,7 +119,7 @@
 
                 <ui:VisualElement class="body">
                     <ui:VisualElement name="world" class="world">
-                        <!-- Floats translucent over the top centre of the map, so the map gets the whole height.
+                        <!-- Floats over the top centre of the map, so the map gets the whole height.
                              Formula9App brings it in front of the layers WorldView adds. -->
                         <ui:VisualElement name="view-bar" class="view-bar">
                             <ui:Button name="view-map" text="2D Map" class="segment" />

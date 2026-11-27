@@ -1,107 +1,117 @@
 <ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:f9="Formula9.World" xmlns:f9ui="Formula9.UI">
     <Style src="project://database/Assets/Formula9/UI/Formula9App.uss" />
     <ui:ScrollView class="workspace-page page-form">
-        <ui:Label text="Route Planning" class="page-title" />
-        <ui:VisualElement class="tabs">
-            <ui:Button name="route-tab-editor" text="Exercise" class="tab-item" />
-            <ui:Button name="route-tab-fleet" text="Fleet table" class="tab-item" />
+        <!-- The title, with the Exercise / Fleet table switch beside it in one box, like 2D Map / 3D View -->
+        <ui:VisualElement class="page-title-row">
+            <ui:Label text="Route Planning" class="page-title" />
+            <ui:VisualElement name="route-tabs" class="segment-tabs">
+                <ui:Button name="route-tab-editor" text="Exercise" class="tab-item" />
+                <ui:Button name="route-tab-fleet" text="Fleet table" class="tab-item" />
+            </ui:VisualElement>
         </ui:VisualElement>
+        <!-- Without a session, or one without shuttles, there is nothing to plan: TrainingWorkspace shows this in place of the page -->
+        <ui:Label name="route-empty" text="Add shuttle to enable route planning." class="route-empty" style="display: none;" />
 
-        <ui:VisualElement name="route-editor-panel">
-            <ui:VisualElement name="route-stages" class="route-stages" />
-            <ui:VisualElement name="route-pending" class="route-pending">
-                <ui:Label name="route-pending-title" class="route-pending-title" />
-                <ui:VisualElement name="route-pending-items" class="route-pending-items" />
-            </ui:VisualElement>
-
-            <!-- Emergency dispatch: shown while a shuttle cannot run -->
-            <ui:VisualElement name="emergency-dispatch" class="route-card" style="display: none;">
-                <ui:Label text="Emergency dispatch" class="route-card-title" />
-                <ui:DropdownField name="emergency-vehicle" label="Shuttle not operational" />
-                <ui:Label name="emergency-status" class="route-card-text" />
-                <ui:TextField name="emergency-reason" max-length="512" multiline="true" placeholder-text="Why does it need assistance?" />
-                <ui:Button name="emergency-dispatch-button" text="Emergency dispatch" class="wide-button danger" />
-            </ui:VisualElement>
-            <ui:DropdownField name="shuttles" label="Shuttle" />
-
-            <ui:VisualElement class="route-card route-card-problem">
-                <ui:Label text="The problem" class="route-card-title" />
-                <ui:Label name="route-problem" text="Join a session to see its routes." class="route-card-text" />
-                <ui:VisualElement class="route-problem-actions">
-                    <ui:Button name="route-show-problem" text="Show on map" class="route-link" />
-                    <!-- Only after the route's road graph failed to load; TrainingWorkspace shows it -->
-                    <ui:Button name="route-reload" text="Reload the route" class="route-link" style="display: none;" />
-                    <ui:Label name="route-options-expiry" class="route-options-expiry" />
+        <ui:VisualElement name="route-body">
+            <!-- The problem, detour, check, approve and outcome cards are numbered on a line down their left (TrainingWorkspace.StepCard) -->
+            <ui:VisualElement name="route-editor-panel">
+                <ui:VisualElement name="route-pending" class="route-pending">
+                    <ui:VisualElement name="route-pending-items" class="route-pending-items" />
                 </ui:VisualElement>
-            </ui:VisualElement>
 
-            <ui:VisualElement name="route-options" class="route-card route-card-options">
-                <ui:Label name="route-options-title" text="What should the shuttle do?" class="route-card-title" />
-                <ui:VisualElement class="route-option-buttons">
-                    <ui:Button name="option-keep" text="Keep route" class="route-option" />
-                    <ui:Button name="option-hold" text="Hold at a stop" class="route-option" />
-                    <ui:Button name="option-assist" text="Request assistance" class="route-option" />
-                    <ui:Button name="option-reroute" text="Re-route on the map" class="route-option" />
+                <!-- Emergency dispatch: shown while a shuttle cannot run -->
+                <ui:VisualElement name="emergency-dispatch" class="route-card" style="display: none;">
+                    <ui:Label text="Emergency dispatch" class="route-card-title" />
+                    <ui:DropdownField name="emergency-vehicle" label="Shuttle not operational" />
+                    <ui:Label name="emergency-status" class="route-card-text" />
+                    <ui:TextField name="emergency-reason" max-length="512" multiline="true" placeholder-text="Why does it need assistance?" />
+                    <ui:Button name="emergency-dispatch-button" text="Emergency dispatch" class="wide-button danger" />
                 </ui:VisualElement>
-                <ui:Label name="route-options-hint" class="route-card-text route-options-hint" />
-                <ui:VisualElement name="route-confirm" class="route-confirm">
+                <ui:DropdownField name="shuttles" label="Shuttle" />
+
+                <ui:VisualElement name="route-problem-card" class="route-card route-card-problem">
+                    <ui:Label text="The problem" class="route-card-title" />
+                    <!-- The problem, with Show on map beside it -->
+                    <ui:VisualElement class="route-problem-row">
+                        <ui:Label name="route-problem" text="Join a session to see its routes." class="route-card-text route-problem-text" />
+                        <ui:Button name="route-show-problem" text="Show on map" class="route-link" />
+                        <!-- Only after the route's road graph failed to load; TrainingWorkspace shows it -->
+                        <ui:Button name="route-reload" text="Reload the route" class="route-link" style="display: none;" />
+                    </ui:VisualElement>
+                    <!-- What the shuttle should do, in the same box as its problem; shown while it has options -->
+                    <ui:VisualElement name="route-options" class="route-options">
+                        <!-- The question, with when the backend next refreshes the options beside it -->
+                        <ui:VisualElement class="route-options-head">
+                            <ui:Label name="route-options-title" text="What should the shuttle do?" class="route-card-title" />
+                            <ui:Label name="route-options-expiry" class="route-options-expiry" />
+                        </ui:VisualElement>
+                        <ui:VisualElement class="route-option-buttons">
+                            <ui:Button name="option-keep" text="Keep route" class="route-option" />
+                            <ui:Button name="option-hold" text="Hold at a stop" class="route-option" />
+                            <ui:Button name="option-assist" text="Request assistance" class="route-option" />
+                            <ui:Button name="option-reroute" text="Re-route on the map" class="route-option" />
+                        </ui:VisualElement>
+                        <ui:Label name="route-options-hint" class="route-card-text route-options-hint" />
+                    </ui:VisualElement>
+                </ui:VisualElement>
+
+                <!-- The next step after the problem for every option but the re-route: shown once one is chosen, closed by pressing it again -->
+                <ui:VisualElement name="route-confirm" class="route-card">
+                    <ui:Label text="Confirm the decision" class="route-card-title" />
                     <ui:Label name="route-confirm-summary" class="route-verdict" />
                     <ui:TextField name="route-confirm-reason" max-length="512" multiline="true" placeholder-text="Why?" />
                     <ui:Label name="route-confirm-note" class="route-card-text route-confirm-note" />
                     <ui:VisualElement class="draft-actions">
-                        <ui:Button name="route-confirm-send" text="Confirm" class="route-action" />
-                        <ui:Button name="route-confirm-back" text="Back" class="draft-last" />
+                        <ui:Button name="route-confirm-send" text="Confirm" class="route-action draft-last" />
+                    </ui:VisualElement>
+                </ui:VisualElement>
+
+                <ui:VisualElement name="route-decide" class="route-card">
+                    <ui:Label text="Your route" class="route-card-title" />
+                    <ui:Label text="Click roads on the map to send the shuttle along them. It still serves its stops in order. Click a pin to remove it." class="route-card-text" />
+                    <ui:VisualElement name="route-waypoints" class="route-waypoints" />
+                    <ui:VisualElement class="draft-actions">
+                        <ui:Button name="route-undo" text="Undo" />
+                        <ui:Button name="route-redo" text="Redo" />
+                        <ui:Button name="route-cancel" text="Clear" />
+                        <ui:Button name="route-suggest" text="Suggest detour" tooltip="Show the scenario's own way round the closure." class="draft-last" />
+                    </ui:VisualElement>
+                </ui:VisualElement>
+
+                <ui:VisualElement name="route-feedback" class="route-card">
+                    <ui:Label text="What this route does" class="route-card-title" />
+                    <ui:Label name="route-verdict" class="route-verdict" />
+                    <ui:VisualElement name="route-issues" />
+                    <ui:VisualElement name="route-metrics" class="route-metrics" />
+                    <ui:Foldout name="route-basis" text="How this is worked out" value="false" class="route-basis">
+                        <ui:Label name="route-assumptions" class="route-card-text" />
+                    </ui:Foldout>
+                </ui:VisualElement>
+
+                <ui:VisualElement name="route-apply" class="route-card">
+                    <ui:Label text="Approve it" class="route-card-title" />
+                    <ui:TextField name="route-reason" max-length="512" multiline="true" placeholder-text="Why this route?" />
+                    <ui:Label name="route-apply-note" class="route-card-text" />
+                    <ui:Button name="route-approve" text="Approve route" class="wide-button route-action" />
+                </ui:VisualElement>
+
+                <ui:VisualElement name="route-outcome" class="route-card">
+                    <!-- The title, headline, rows and notes hide with nothing to report, leaving the view buttons -->
+                    <ui:Label name="route-outcome-title" text="What happened" class="route-card-title" />
+                    <ui:Label name="route-outcome-headline" class="route-verdict" />
+                    <ui:VisualElement name="route-outcome-rows" class="route-metrics" />
+                    <ui:Label name="route-outcome-notes" class="route-card-text" />
+                    <ui:VisualElement class="draft-actions route-view-actions">
+                        <ui:Button name="route-start" text="Start and watch in 3D" class="route-action" />
+                        <ui:Button name="route-watch" text="Watch in 3D" />
+                        <ui:Button name="route-cameras" text="Cameras" tooltip="Watch this route's shuttle through its blind-spot cameras: front, rear and sides." class="draft-last" />
                     </ui:VisualElement>
                 </ui:VisualElement>
             </ui:VisualElement>
 
-            <ui:VisualElement name="route-decide" class="route-card">
-                <ui:VisualElement class="route-decide-head">
-                    <ui:Label text="Your route" class="route-card-title" />
-                    <ui:Button name="route-reroute-back" text="Back to the options" tooltip="Leave the re-route and choose another option. The route drawn here is dropped." class="route-link" />
-                </ui:VisualElement>
-                <ui:Label text="Click roads on the map to send the shuttle along them. It still serves its stops in order. Click a pin to remove it." class="route-card-text" />
-                <ui:VisualElement name="route-waypoints" class="route-waypoints" />
-                <ui:VisualElement class="draft-actions">
-                    <ui:Button name="route-undo" text="Undo" />
-                    <ui:Button name="route-redo" text="Redo" />
-                    <ui:Button name="route-cancel" text="Clear" />
-                    <ui:Button name="route-suggest" text="Suggest a detour" tooltip="Show the scenario's own way round the closure." class="draft-last" />
-                </ui:VisualElement>
+            <ui:VisualElement name="route-fleet-panel" style="display: none;">
+                <ui:VisualElement name="route-fleet-host" />
             </ui:VisualElement>
-
-            <ui:VisualElement name="route-feedback" class="route-card">
-                <ui:Label text="What this route does" class="route-card-title" />
-                <ui:Label name="route-verdict" class="route-verdict" />
-                <ui:VisualElement name="route-issues" />
-                <ui:VisualElement name="route-metrics" class="route-metrics" />
-                <ui:Foldout name="route-basis" text="How this is worked out" value="false" class="route-basis">
-                    <ui:Label name="route-assumptions" class="route-card-text" />
-                </ui:Foldout>
-            </ui:VisualElement>
-
-            <ui:VisualElement name="route-apply" class="route-card">
-                <ui:Label text="Approve it" class="route-card-title" />
-                <ui:TextField name="route-reason" max-length="512" multiline="true" placeholder-text="Why this route?" />
-                <ui:Label name="route-apply-note" class="route-card-text" />
-                <ui:Button name="route-approve" text="Approve route" class="wide-button route-action" />
-            </ui:VisualElement>
-
-            <ui:VisualElement name="route-outcome" class="route-card">
-                <ui:Label text="What happened" class="route-card-title" />
-                <ui:Label name="route-outcome-headline" class="route-verdict" />
-                <ui:VisualElement name="route-outcome-rows" class="route-metrics" />
-                <ui:Label name="route-outcome-notes" class="route-card-text" />
-                <ui:VisualElement class="draft-actions route-view-actions">
-                    <ui:Button name="route-start" text="Start and watch in 3D" class="route-action" />
-                    <ui:Button name="route-watch" text="Watch in 3D" />
-                    <ui:Button name="route-cameras" text="Cameras" tooltip="Watch this route's shuttle through its blind-spot cameras: front, rear and sides." class="draft-last" />
-                </ui:VisualElement>
-            </ui:VisualElement>
-        </ui:VisualElement>
-
-        <ui:VisualElement name="route-fleet-panel" style="display: none;">
-            <ui:VisualElement name="route-fleet-host" />
         </ui:VisualElement>
     </ui:ScrollView>
 </ui:UXML>

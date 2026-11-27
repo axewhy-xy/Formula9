@@ -92,6 +92,22 @@ namespace Formula9.Tests
         public void TheClockReadsLikeAClock(float hour, string text) => Assert.AreEqual(text, DayCycle.Clock(hour));
 
         [Test]
+        public void TheTemperatureFollowsASingaporeDayAndRainCoolsIt()
+        {
+            // Coolest at dawn, warmest in the early afternoon, and no jump at midnight or either turn
+            Assert.AreEqual(25, DayCycle.TemperatureAt(6, null), 1e-3f);
+            Assert.AreEqual(32, DayCycle.TemperatureAt(14, null), 1e-3f);
+            Assert.AreEqual(DayCycle.TemperatureAt(23.999f, null), DayCycle.TemperatureAt(0, null), 1e-2f);
+            Assert.AreEqual(DayCycle.TemperatureAt(5.999f, null), DayCycle.TemperatureAt(6, null), 1e-2f);
+            Assert.Greater(DayCycle.TemperatureAt(12, null), DayCycle.TemperatureAt(9, null), "warming through the morning");
+            Assert.Greater(DayCycle.TemperatureAt(17, null), DayCycle.TemperatureAt(21, null), "cooling through the evening");
+            // A rainy afternoon is cooler than a clear one; at dawn there is no warming to hold back
+            var rain = new WeatherState { Overcast = 1, Rain = 1 };
+            Assert.Less(DayCycle.TemperatureAt(14, rain), 30);
+            Assert.AreEqual(25, DayCycle.TemperatureAt(6, rain), 1e-3f);
+        }
+
+        [Test]
         public void AnOvercastSkyDimsTheLightAndGreysTheSky()
         {
             var clear = SkyState.From(new WorldLook.SkyKey { SkyTop = "#2D86E0", LightIntensity = 1, ShadowStrength = 0.8f, Stars = 1 });
