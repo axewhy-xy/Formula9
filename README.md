@@ -392,6 +392,15 @@ ambientCG, ShareTextures and Poly Haven:
 | `building_wall_office.png` | [Exterior Wall Cladding 03](https://polyhaven.com/a/exterior_wall_cladding_03) |
 | `building_window_office.png` | [Facade005](https://ambientcg.com/a/Facade005) |
 
+
+### Asphalt textures
+The license for this resource below is the MAgnific Free License that requires attribution for use
+| asphalt_02.jpg | https://www.magnific.com/free-photo/asphalt-texture-close-up_1018386.htm#fromView=keyword&page=1&position=3&uuid=9e16651c-7b98-44d9-a748-0051cc4a3ac3&track=ais_hybrid&query=Asphalt+texture | Image by borjandreu on Magnific
+
+asphalt_02_height.png & asphalt_02_normal.png were all derived from using online software.
+
+The license for the resource below is CC0
+| road_lane_texture.png | https://ambientcg.com/a/Road007
 ## Alerts
 
 `AlertGate` and `TrainingAlerts` port the Qt client's NAT-M2-07 rules: only events listed in
