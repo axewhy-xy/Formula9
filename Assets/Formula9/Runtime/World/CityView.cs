@@ -366,7 +366,7 @@ namespace Formula9.World
                 LtaMappedRoadPaint.Result junctionPaint = null;
                 if (string.Equals(area, "toa-payoh", StringComparison.OrdinalIgnoreCase))
                 {
-                    try { junctionPaint = LtaMappedRoadPaint.LoadJunctionData(roads); }
+                    try { junctionPaint = LtaMappedRoadPaint.LoadJunctionData(); }
                     catch (Exception error)
                     {
                         Debug.LogWarning("[CityView] Could not load junction paint: " + error.Message);

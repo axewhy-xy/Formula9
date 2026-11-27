@@ -604,6 +604,119 @@ namespace Formula9.Tests
             }
             finally { UnityEngine.Object.DestroyImmediate(mesh); }
         }
+        [Test]
+        public void ClippedRoadIntersectionsHaveNoTJunctionVertices()
+        {
+            var mesh = RoadMesh.Build(new[]
+            {
+                Road("primary", true, 1, 1, 2, (-20, 0), (20, 0)),
+                Road("residential", true, 1, 3, 4, (0, -20), (0, 20)),
+            }, out int clippedTriangles);
+
+            try
+            {
+                Assert.Greater(clippedTriangles, 0, "overlapping road triangles should be clipped");
+
+                var vertices = mesh.vertices;
+                var triangles = mesh.GetTriangles(RoadMesh.AsphaltLayer);
+                var junctionVertices = triangles.Select(index =>
+                        new Vector2(vertices[index].x, vertices[index].z))
+                    .Distinct()
+                    .Where(point => Mathf.Abs(point.x) < 5f && Mathf.Abs(point.y) < 5f)
+                    .ToArray();
+
+                Assert.Greater(junctionVertices.Length, 0);
+
+                for (int i = 0; i < triangles.Length; i += 3)
+                for (int edge = 0; edge < 3; edge++)
+                {
+                    var a3 = vertices[triangles[i + edge]];
+                    var b3 = vertices[triangles[i + (edge + 1) % 3]];
+                    var a = new Vector2(a3.x, a3.z);
+                    var b = new Vector2(b3.x, b3.z);
+                    var delta = b - a;
+                    double length2 = delta.sqrMagnitude;
+                    if (length2 < 1e-12) continue;
+
+                    foreach (var point in junctionVertices)
+                    {
+                        if (point == a || point == b) continue;
+                        var offset = point - a;
+                        double t = Vector2.Dot(offset, delta) / length2;
+                        double distance =
+                            Math.Abs((double)delta.x * offset.y - (double)delta.y * offset.x) /
+                            Math.Sqrt(length2);
+
+                        Assert.IsFalse(t > 1e-5 && t < 1 - 1e-5 && distance < 1e-4,
+                            $"Junction vertex {point} lies inside asphalt edge {a}-{b}");
+                    }
+                }
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
+        public void DashStationContinuesAcrossConnectedRoadSegments()
+        {
+            var mesh = RoadMesh.Build(new[]
+            {
+                Road("primary", true, 2, 1, 2, (0, 0), (10, 0)),
+                Road("primary", true, 2, 2, 3, (10, 0), (30, 0)),
+            });
+
+            try
+            {
+                var vertices = mesh.vertices;
+                var lane = new List<Vector4>();
+                mesh.GetUVs(1, lane);
+
+                float width = 2f * RoadMesh.HalfWidth(
+                    Road("primary", true, 2, 1, 2, (0, 0), (10, 0)));
+
+                var joinStations = mesh.GetTriangles(RoadMesh.AsphaltLayer)
+                    .Where(i => Mathf.Abs(vertices[i].x - 10f) < 1e-4f &&
+                                Mathf.Abs(lane[i].w - width) < 1e-4f)
+                    .Select(i => lane[i].y)
+                    .Distinct()
+                    .ToArray();
+
+                Assert.GreaterOrEqual(joinStations.Length, 2);
+                Assert.IsTrue(joinStations.Any(a => joinStations.Any(b =>
+                {
+                    if (Mathf.Abs(a - b) < 1e-5f) return false;
+                    float difference = Mathf.Repeat(Mathf.Abs(a - b), 6f / 24f);
+                    return difference < 1e-4f || 6f / 24f - difference < 1e-4f;
+                })), "dash stations at a shared node retain the same six-metre phase");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [TestCase(8.5f, false, RoadMesh.ConcreteMedianLayer)]
+        [TestCase(10.5f, true, RoadMesh.GreenMedianLayer)]
+        public void ParallelOneWayRoadsBuildTheMatchingMedian(
+            float separation, bool planted, int layer)
+        {
+            var mesh = RoadMesh.Build(new[]
+            {
+                Road("primary", true, 2, 1, 2, (0, 0), (0, 100)),
+                Road("primary", true, 2, 3, 4, (separation, 100), (separation, 0)),
+            });
+
+            try
+            {
+                var triangles = mesh.GetTriangles(layer);
+                Assert.Greater(triangles.Length, 0, "the sustained gap produces a median");
+                Assert.AreEqual(0, mesh.GetTriangles(planted
+                    ? RoadMesh.ConcreteMedianLayer
+                    : RoadMesh.GreenMedianLayer).Length);
+
+                var vertices = mesh.vertices;
+                Assert.IsTrue(triangles.All(i =>
+                    Mathf.Abs(vertices[i].y - (RoadMesh.SurfaceY - 0.04f)) < 1e-5f),
+                    "median surfaces are recessed below the road");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
 
        [Test]
         public void ASharpBendHasNoSpikeAndOnlyUnjoinedEndsGetCaps()

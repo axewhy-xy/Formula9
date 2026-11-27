@@ -164,58 +164,95 @@ namespace Formula9.World
 
 
                 int built = 0;
+                int tileIndex = 0;
                 var clock = System.Diagnostics.Stopwatch.StartNew();
+
                 foreach (var record in indexed.Tiles)
                 {
                     cancellation.ThrowIfCancellationRequested();
                     if (disposed) throw new OperationCanceledException();
-                    if (!(record is JObject tile) || !(tile["origin_m"] is JArray origin) || origin.Count != 2)
-                        throw new FormatException("Invalid LTA marking tile origin.");
-                    var center = new Vector2((float)origin[0], (float)origin[1]);
-                    var key = new Vector2Int(Mathf.FloorToInt(center.x / indexed.Size),
-                        Mathf.FloorToInt(center.y / indexed.Size));
-                    var child = new GameObject($"Road details {key.x}, {key.y}");
-                    child.transform.SetParent(holder.transform, false);
-                    child.transform.localPosition = new Vector3(center.x, 0f, center.y);
-                    float half = indexed.Size * .5f;
-                    var points = new List<Vector3>();
-                    var triangles = new List<int>();
-                    foreach (int triangle in asphaltIndex.Query(center, half))
-                    {
-                        int i = triangle * 3;
-                        var a = roadVertices[asphaltTriangles[i]];
-                        var b = roadVertices[asphaltTriangles[i + 1]];
-                        var c = roadVertices[asphaltTriangles[i + 2]];
-                        var offset = new Vector3(center.x, 0, center.y);
 
-                        triangles.Add(points.Count);
-                        triangles.Add(points.Count + 1);
-                        triangles.Add(points.Count + 2);
-                        points.Add(a - offset);
-                        points.Add(b - offset);
-                        points.Add(c - offset);
+                    int currentTile = tileIndex++;
+                    GameObject child = null;
+
+                    try
+                    {
+                        if (!(record is JObject tile) ||
+                            !(tile["origin_m"] is JArray origin) ||
+                            origin.Count != 2)
+                        {
+                            throw new FormatException("Invalid LTA marking tile origin.");
+                        }
+
+                        var center = new Vector2((float)origin[0], (float)origin[1]);
+                        var key = new Vector2Int(
+                            Mathf.FloorToInt(center.x / indexed.Size),
+                            Mathf.FloorToInt(center.y / indexed.Size));
+
+                        child = new GameObject($"Road details {key.x}, {key.y}");
+                        child.transform.SetParent(holder.transform, false);
+                        child.transform.localPosition = new Vector3(center.x, 0f, center.y);
+
+                        float half = indexed.Size * 0.5f;
+                        var points = new List<Vector3>();
+                        var triangles = new List<int>();
+
+                        foreach (int triangle in asphaltIndex.Query(center, half))
+                        {
+                            int i = triangle * 3;
+                            var a = roadVertices[asphaltTriangles[i]];
+                            var b = roadVertices[asphaltTriangles[i + 1]];
+                            var c = roadVertices[asphaltTriangles[i + 2]];
+                            var offset = new Vector3(center.x, 0, center.y);
+
+                            triangles.Add(points.Count);
+                            triangles.Add(points.Count + 1);
+                            triangles.Add(points.Count + 2);
+                            points.Add(a - offset);
+                            points.Add(b - offset);
+                            points.Add(c - offset);
+
+                            if (clock.Elapsed.TotalMilliseconds >= 4)
+                            {
+                                cancellation.ThrowIfCancellationRequested();
+                                if (disposed) throw new OperationCanceledException();
+                                await Task.Yield();
+                                clock.Restart();
+                            }
+                        }
+
+                        bool painted = false;
+                        // The mesh is placement context. Survey paint can cross gaps in it.
+                        if (tile["markings"] != null)
+                        {
+                            var builder = new LtaCityRoadPaint.PaintMeshBuilder(
+                                points.ToArray(), triangles, Vector2.zero, half, useCoverage);
+                            painted = child.AddComponent<LtaCityRoadPaint>()
+                                .Build(tile, white, yellow, half, builder, meshes.Add);
+
+                            if (painted) built++;
+                        }
+
+                        if (!painted) WorldBuilder.Remove(child);
 
                         if (clock.Elapsed.TotalMilliseconds >= 4)
                         {
-                            cancellation.ThrowIfCancellationRequested();
-                            if (disposed) throw new OperationCanceledException();
                             await Task.Yield();
                             clock.Restart();
                         }
                     }
-                    bool painted = false;
-                    // The mesh is placement context. Survey paint can cross gaps in it.
-                    if (tile["markings"] != null)
+                    catch (Exception error) when (
+                        error is FormatException ||
+                        error is InvalidOperationException ||
+                        error is Newtonsoft.Json.JsonException ||
+                        error is InvalidCastException ||
+                        error is OverflowException)
                     {
-                        var builder = new LtaCityRoadPaint.PaintMeshBuilder(points.ToArray(), triangles, Vector2.zero, half, useCoverage);
-                        painted = child.AddComponent<LtaCityRoadPaint>().Build(tile, white, yellow, half, builder, meshes.Add);
-                        if (painted) built++;
-                    }
-                    if (!painted) WorldBuilder.Remove(child);
-                    if (clock.Elapsed.TotalMilliseconds >= 4)
-                    {
-                        await Task.Yield();
-                        clock.Restart();
+                        if (child != null)
+                            WorldBuilder.Remove(child);
+
+                        Debug.LogWarning(
+                            $"[CityView] Skipping malformed LTA paint tile {currentTile}: {error}");
                     }
                 }
                 cancellation.ThrowIfCancellationRequested();

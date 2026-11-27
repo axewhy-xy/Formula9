@@ -381,6 +381,7 @@ namespace Formula9.World
             var grid = new Dictionary<Vector2Int, List<int>>();
             var candidates = new List<int>();
             var seen = new HashSet<int>();
+            var splitPoints = new HashSet<Vector2>();
             var output = new List<int>(indices.Count);
             int clippedTriangles = 0;
 
@@ -456,6 +457,7 @@ namespace Formula9.World
                     float weightC = (float)(Side(triangle.A, triangle.B, point) / area);
                     var uv = laneUV[a] + (laneUV[b] - laneUV[a]) * weightB +
                         (laneUV[c] - laneUV[a]) * weightC;
+                    splitPoints.Add(point);
                     laneUV.Add(uv);
                     paintBounds.Add(paintBounds[a]);
                     barDistances.Add(barDistances[a] + (barDistances[b] - barDistances[a]) * weightB +
@@ -480,11 +482,122 @@ namespace Formula9.World
                     }
                 }
             }
+            SplitAsphaltTJunctions(output, splitPoints, vertices, laneUV, paintBounds, barDistances);
 
             indices.Clear();
             indices.AddRange(output);
             return clippedTriangles;
         }
+
+        private static void SplitAsphaltTJunctions(List<int> indices, HashSet<Vector2> splitPoints,
+            List<Vector3> vertices, List<Vector4> laneUV, List<Vector4> paintBounds, List<Vector2> barDistances)
+        {
+            if (splitPoints.Count == 0) return;
+
+            var pointGrid = new Dictionary<Vector2Int, List<Vector2>>();
+            foreach (var point in splitPoints)
+            {
+                var cell = OverlapCell(point);
+                if (!pointGrid.TryGetValue(cell, out var points))
+                    pointGrid[cell] = points = new List<Vector2>();
+                points.Add(point);
+            }
+
+            var conforming = new List<int>(indices.Count);
+            var boundary = new List<int>(8);
+            var edgeSplits = new List<(double T, Vector2 Point)>();
+            for (int i = 0; i < indices.Count; i += 3)
+            {
+                int first = indices[i], second = indices[i + 1], third = indices[i + 2];
+                boundary.Clear();
+                bool hasSplit = false;
+
+                for (int edge = 0; edge < 3; edge++)
+                {
+                    int start = edge == 0 ? first : edge == 1 ? second : third;
+                    int end = edge == 0 ? second : edge == 1 ? third : first;
+                    var a = new Vector2(vertices[start].x, vertices[start].z);
+                    var b = new Vector2(vertices[end].x, vertices[end].z);
+                    boundary.Add(start);
+
+                    double dx = (double)b.x - a.x, dy = (double)b.y - a.y;
+                    double length2 = dx * dx + dy * dy;
+                    if (length2 <= 0) continue;
+
+                    float scale = Mathf.Max(1f, Mathf.Max(Mathf.Abs(a.x), Mathf.Abs(a.y)));
+                    scale = Mathf.Max(scale, Mathf.Max(Mathf.Abs(b.x), Mathf.Abs(b.y)));
+                    float tolerance = scale * 0.0000003f;
+                    var min = OverlapCell(new Vector2(Mathf.Min(a.x, b.x) - tolerance,
+                        Mathf.Min(a.y, b.y) - tolerance));
+                    var max = OverlapCell(new Vector2(Mathf.Max(a.x, b.x) + tolerance,
+                        Mathf.Max(a.y, b.y) + tolerance));
+
+                    edgeSplits.Clear();
+                    for (int x = min.x; x <= max.x; x++)
+                    for (int y = min.y; y <= max.y; y++)
+                    {
+                        if (!pointGrid.TryGetValue(new Vector2Int(x, y), out var points)) continue;
+                        foreach (var point in points)
+                        {
+                            double px = (double)point.x - a.x, py = (double)point.y - a.y;
+                            double t = (px * dx + py * dy) / length2;
+                            if (t <= 0.000001 || t >= 0.999999) continue;
+
+                            double cross = dx * py - dy * px;
+                            if (cross * cross <= tolerance * tolerance * length2)
+                                edgeSplits.Add((t, point));
+                        }
+                    }
+
+                    edgeSplits.Sort((left, right) =>
+                    {
+                        int compare = left.T.CompareTo(right.T);
+                        if (compare != 0) return compare;
+                        compare = left.Point.x.CompareTo(right.Point.x);
+                        return compare != 0 ? compare : left.Point.y.CompareTo(right.Point.y);
+                    });
+
+                    foreach (var split in edgeSplits)
+                    {
+                        float t = (float)split.T;
+                        int index = vertices.Count;
+                        vertices.Add(new Vector3(split.Point.x,
+                            vertices[start].y + (vertices[end].y - vertices[start].y) * t,
+                            split.Point.y));
+                        laneUV.Add(laneUV[start] + (laneUV[end] - laneUV[start]) * t);
+                        paintBounds.Add(paintBounds[start] + (paintBounds[end] - paintBounds[start]) * t);
+                        barDistances.Add(barDistances[start] + (barDistances[end] - barDistances[start]) * t);
+                        boundary.Add(index);
+                        hasSplit = true;
+                    }
+                }
+
+                if (!hasSplit)
+                {
+                    conforming.Add(first);
+                    conforming.Add(second);
+                    conforming.Add(third);
+                    continue;
+                }
+
+                int center = vertices.Count;
+                vertices.Add((vertices[first] + vertices[second] + vertices[third]) / 3f);
+                laneUV.Add((laneUV[first] + laneUV[second] + laneUV[third]) / 3f);
+                paintBounds.Add((paintBounds[first] + paintBounds[second] + paintBounds[third]) / 3f);
+                barDistances.Add((barDistances[first] + barDistances[second] + barDistances[third]) / 3f);
+
+                for (int j = 0; j < boundary.Count; j++)
+                {
+                    conforming.Add(center);
+                    conforming.Add(boundary[j]);
+                    conforming.Add(boundary[(j + 1) % boundary.Count]);
+                }
+            }
+
+            indices.Clear();
+            indices.AddRange(conforming);
+        }
+
 
         private static Vector2Int OverlapCell(Vector2 point) => new Vector2Int(
             Mathf.FloorToInt(point.x / OverlapCellM), Mathf.FloorToInt(point.y / OverlapCellM));

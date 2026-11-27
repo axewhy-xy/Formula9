@@ -16,12 +16,12 @@ namespace Formula9.World
     /// </summary>
     public static class LtaMappedRoadPaint
     {
-        private const int GroundLevel = 2;
+  
         private const float ChunkMetres = 450f;
         private const float CrossingY = RoadMesh.SurfaceY + .155f;
         private const float YellowY = RoadMesh.SurfaceY + .12f;
         private const float DividerEdgeY = RoadMesh.SurfaceY + .105f;
-        private const float StopY = RoadMesh.SurfaceY + .115f;
+
         private const string ResourcesFolder = "Formula9/RoadData/";
 
         public enum PaintColour { White, Yellow, Red }
@@ -30,7 +30,6 @@ namespace Formula9.World
         {
            
             public readonly List<Vector2> SignalJunctionCenters = new List<Vector2>();
-            internal readonly List<List<Vector2>> StopLines = new List<List<Vector2>>();
             public int GroundLaneFeatures;
             public int GroundArrowFeatures; // Retained for existing diagnostics.
             public int DividerEdgeLineFeatures;
@@ -73,19 +72,7 @@ namespace Formula9.World
             return JToken.Parse(resource.text);
         }
         
-        private static List<Vector2> Points(JToken input)
-        {
-            var output = new List<Vector2>();
-            if (!(input is JArray array)) return output;
-            foreach (var coordinate in array)
-            {
-                if (!(coordinate is JArray pair) || pair.Count < 2) continue;
-                float x = (float)pair[0], y = (float)pair[1];
-                if (float.IsNaN(x) || float.IsNaN(y) || float.IsInfinity(x) || float.IsInfinity(y)) continue;
-                output.Add(new Vector2(x,y));
-            }
-            return output;
-        }
+       
         // LTA type J covers stop lines and expressway shoulder lines.
         // Use the nearby road direction to select transverse stop-line candidates.
         private static bool IsTransverse(List<Vector2> line, List<CityRoad> roads)
@@ -122,21 +109,9 @@ namespace Formula9.World
             return best < 12f*12f && alignment < .40f;
         }
 
-        internal static Result LoadJunctionData(IEnumerable<CityRoad> roads)
+        internal static Result LoadJunctionData()
         {
             var result = new Result();
-            var roadList = new List<CityRoad>(roads);
-            var markings = TryLoad("toa-payoh-markings");
-            if (markings?["lane_lines"] is JArray lines)
-            {
-                foreach (var item in lines)
-                {
-                    if ((int?)item["level"] != GroundLevel || (string)item["type_code"] != "J") continue;
-                    var path = Points(item["points_m"]);
-                    if (IsTransverse(path, roadList)) result.StopLines.Add(path);
-                }
-            }
-
             ReadSignalCentres(result);
             return result;
         }

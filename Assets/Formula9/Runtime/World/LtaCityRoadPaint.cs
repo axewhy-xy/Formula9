@@ -37,7 +37,10 @@ namespace Formula9.World
                             continue;
 
                         if (group.Key == "S")
+                        {
+                            path = (Vector2[])path.Clone();
                             builder.AlignBusBay(path);
+                        }
 
                         if (group.Key == "N")
                         {
