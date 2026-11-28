@@ -2,7 +2,7 @@
 
 Author: Nur Syazliyarni Binte Zazali
 Date Created: 15/11/2026
-Last Modified: 23/11/2026
+Last Modified: 28/11/2026
 
 Tests the scoring rules against explicit evidence and exercises the real
 command, session completion and SQLite recovery paths without a live network.
@@ -68,7 +68,7 @@ def test_scored_attempt_recovers_and_finalizes_once(tmp_path):
         sid = snapshot.session_id
         assert store.assessment(sid, owner).status == "IN_PROGRESS"
         assert snapshot.disruptions and snapshot.scenario.seed == 1000
-        assert snapshot.scenario.assessment_duration_s == 120
+        assert snapshot.scenario.assessment_duration_s == 60
         for action in (lambda: store.assessment(sid, "observer"),
                        lambda: store.accept("observer", session_control(snapshot, "ARCHIVE"))):
             with pytest.raises(TrainingStoreError, match="assigned trainee"):
@@ -80,7 +80,7 @@ def test_scored_attempt_recovers_and_finalizes_once(tmp_path):
         service = TrainingSessionService(store)
         actor = service._restore_session(snapshot, state).actor
         assert actor.observations.charging_offer_tick is not None
-        assert actor.assessment_plan.rubric.revision == "toa-payoh-rubric-r3"
+        assert actor.assessment_plan.rubric.revision == "toa-payoh-rubric-r4"
         _, actor = service._submit_staged(actor, owner, session_control(snapshot, "RESUME"), False)
         paused = session_control(store.snapshot(sid), "PAUSE")
         assert store.accept(owner, paused).status == "QUEUED"
@@ -182,7 +182,7 @@ def test_database_upgrade_from_either_branch_preserves_assessments(tmp_path, ass
 
 
 def scored_evidence():
-    """Build a complete two-minute journal covering the current rubric's partial-credit tiers."""
+    """Build a complete one-minute journal covering the current rubric's partial-credit tiers."""
     actor = ScoredSessionActor(load_rubric(), session_id="points-test")
     snapshot = actor.generate_snapshot()
     plan = actor.assessment_plan
@@ -202,16 +202,16 @@ def scored_evidence():
     add("ROUTE_APPROVED", route, 0, target_vehicle_ids=[driver], directed_edge_ids=["example-closed-road"],
         edited={"duration_s": plan.reference_duration_s * 1.10, "energy_kwh": plan.reference_energy_kwh * 1.125})
     add("ASSESSMENT_CHARGING_OFFERED", charger, 0, option_id="charge-now")
+    add("STOP_SERVED", driver, 80, stop_id=plan.rubric.short_exercise.stop_id, route_id=route)
+    add("SERVICE_CONTINUED", charger, 100, vehicle_id=charger)
+    add("INCIDENT_DETECTED", SCORED_INCIDENT, 100, active_until_tick=700)
+    add("OPTIONS_READY", SCORED_INCIDENT, 100, options={"escalate": {"vehicle_id": driver, "validation": "PASS"}})
     add("ASSESSMENT_CHARGING_ACTIONABLE", charger, 200)
-    add("STOP_SERVED", driver, 200, stop_id=plan.rubric.short_exercise.stop_id, route_id=route)
-    add("SERVICE_CONTINUED", charger, 400, vehicle_id=charger)
-    add("INCIDENT_DETECTED", SCORED_INCIDENT, 500, active_until_tick=2200)
-    add("OPTIONS_READY", SCORED_INCIDENT, 500, options={"escalate": {"vehicle_id": driver, "validation": "PASS"}})
-    add("INCIDENT_DECISION_RECORDED", SCORED_INCIDENT, 920, vehicle_id=driver, action="ESCALATE")
-    add("ASSESSMENT_SERVICE_RESUMED", driver, 1400, distance_m=30, observed_tick=1400)
+    add("INCIDENT_DECISION_RECORDED", SCORED_INCIDENT, 520, vehicle_id=driver, action="ESCALATE")
     add("ASSESSMENT_CHARGING_OBSERVED", charger, plan.ticks(plan.rubric.charging_observation_s),
         minimum_kwh=7.3, minimum_in_service=3,
         reserve_kwh=6.0, capacity_kwh=40)
+    add("ASSESSMENT_SERVICE_RESUMED", driver, 1000, distance_m=30, observed_tick=1000)
     return plan, snapshot, events, add
 
 
@@ -290,9 +290,9 @@ def test_new_criterion_validates_and_scores_through_its_definition(monkeypatch):
 @pytest.mark.parametrize(("rule", "kind", "target", "tick", "detail"), [
     ("closed_road_entry", "ASSESSMENT_CLOSED_ROAD_ENTRY", "shuttle-01", 200,
      {"edge_id": "example-closed-road", "route_id": "route-peer-a", "closed_from_tick": 0, "incident_id": None}),
-    ("incident_entry_without_clearance", "ASSESSMENT_CLOSED_ROAD_ENTRY", "shuttle-01", 800,
-     {"edge_id": "new-road-block", "route_id": "route-peer-a", "closed_from_tick": 500, "incident_id": SCORED_INCIDENT}),
-    ("preventable_battery_exhaustion", "BATTERY_EXHAUSTED", "shuttle-05", 1900, {}),
+    ("incident_entry_without_clearance", "ASSESSMENT_CLOSED_ROAD_ENTRY", "shuttle-01", 400,
+     {"edge_id": "new-road-block", "route_id": "route-peer-a", "closed_from_tick": 100, "incident_id": SCORED_INCIDENT}),
+    ("preventable_battery_exhaustion", "BATTERY_EXHAUSTED", "shuttle-05", 1100, {}),
 ])
 def test_automatic_fail_overrides_passing_points(rule, kind, target, tick, detail):
     plan, snapshot, events, add = scored_evidence()
@@ -309,7 +309,7 @@ def test_automatic_fail_overrides_passing_points(rule, kind, target, tick, detai
 def test_missed_and_unavailable_tasks_differ():
     plan, snapshot, events, add = scored_evidence()
     applicable = [e for e in events if e.event_type not in {"SERVICE_CONTINUED", "INCIDENT_DECISION_RECORDED"}]
-    applicable.append(add("INCIDENT_UNRESOLVED", SCORED_INCIDENT, 2200))
+    applicable.append(add("INCIDENT_UNRESOLVED", SCORED_INCIDENT, 700))
     grade = finalize(plan, snapshot, applicable)
     assert grade.status == "FAIL"
     assert all(item.points == 0 for item in grade.criteria if item.rule_id.startswith(("incident_", "battery_", "fleet_", "charging_")))
@@ -321,8 +321,8 @@ def test_scheduled_charging_counts_the_observed_trip_for_the_selected_booking():
     plan, snapshot, events, add = scored_evidence()
     events = [e for e in events if e.event_type != "SERVICE_CONTINUED"]
     events.extend((
-        add("CHARGE_SCHEDULED", "charger-1", 400, vehicle_id="shuttle-05", booking_id="chosen-booking"),
-        add("ASSESSMENT_CHARGING_TRIP_MOVED", "shuttle-05", 1600, booking_id="other-booking", distance_m=20),
+        add("CHARGE_SCHEDULED", "charger-1", 100, vehicle_id="shuttle-05", booking_id="chosen-booking"),
+        add("ASSESSMENT_CHARGING_TRIP_MOVED", "shuttle-05", 500, booking_id="other-booking", distance_m=20),
     ))
 
     def follow_through():
@@ -333,13 +333,21 @@ def test_scheduled_charging_counts_the_observed_trip_for_the_selected_booking():
         return next(item for item in report.criteria if item.rule_id == "charging_follow_through")
 
     assert follow_through().points == 0
-    events.append(add("ASSESSMENT_CHARGING_TRIP_MOVED", "shuttle-05", 1650,
+    events.append(add("ASSESSMENT_CHARGING_TRIP_MOVED", "shuttle-05", 550,
                       booking_id="chosen-booking", distance_m=20))
     assert follow_through().points == 5
 
 
-def test_checkpoint_keeps_the_pinned_milestones_and_exercise_clock():
+@pytest.mark.parametrize("duration", [60, 120])
+def test_checkpoint_keeps_the_pinned_milestones_and_exercise_clock(duration):
     rubric = load_rubric()
+    if duration == 120:
+        # Already-created two-minute attempts keep their own timing after the showcase amendment.
+        data = rubric.model_dump()
+        data.update(revision="toa-payoh-rubric-r3", exercise_limit_s=120, incident_duration_s=40,
+                    charging_decision_s=35, charging_observation_s=90, charging_offer_deadline_s=20)
+        data["rules"]["charging_follow_through"]["continue_s"] = 45
+        rubric = Rubric.model_validate(data)
     actor = ScoredSessionActor(rubric, session_id="checkpoint-attempt")
     actor.observations.assessment_stop_served = True
     actor.observations.trip_m = 4.5
@@ -348,14 +356,15 @@ def test_checkpoint_keeps_the_pinned_milestones_and_exercise_clock():
     state["assessment_observations"].update(route_loop_finished=False, target_booking_id=None)
     restored = TrainingSessionService._restore_session(snapshot, state).actor
     assert restored.scenario_revision == actor.scenario_revision
-    assert restored.assessment_plan.rubric.exercise_limit_s == 120
+    assert restored.assessment_plan.rubric == rubric
+    assert restored.assessment_plan.rubric.exercise_limit_s == duration
     assert restored.observations.assessment_stop_served and restored.observations.trip_m == 4.5
 
 
 def test_cancelled_slot_keeps_previous_continue_decision():
     plan, snapshot, events, add = scored_evidence()
-    add("CHARGE_SCHEDULED", "charger-1", 450, vehicle_id="shuttle-05", booking_id="cancelled-slot")
-    add("CHARGE_BOOKING_CANCELLED", "charger-1", 500, vehicle_id="shuttle-05", booking_id="cancelled-slot")
+    add("CHARGE_SCHEDULED", "charger-1", 150, vehicle_id="shuttle-05", booking_id="cancelled-slot")
+    add("CHARGE_BOOKING_CANCELLED", "charger-1", 200, vehicle_id="shuttle-05", booking_id="cancelled-slot")
     events.sort(key=lambda event: event.tick)
     for index, event in enumerate(events, 1):
         event.event_sequence = index
@@ -363,11 +372,11 @@ def test_cancelled_slot_keeps_previous_continue_decision():
     assert grade.points == 76 and grade.status == "PASS"
 
 
-@pytest.mark.parametrize(("published", "crossing"), [(800, 600), (920, 920)])
+@pytest.mark.parametrize(("published", "crossing"), [(400, 200), (520, 520)])
 def test_incident_safety_uses_crossing_time_and_committed_order(published, crossing):
     plan, snapshot, events, add = scored_evidence()
     add("ASSESSMENT_CLOSED_ROAD_ENTRY", "shuttle-01", published, edge_id="new-road-block",
-        route_id="route-peer-a", crossing_tick=crossing, closed_from_tick=500, incident_id=SCORED_INCIDENT)
+        route_id="route-peer-a", crossing_tick=crossing, closed_from_tick=100, incident_id=SCORED_INCIDENT)
     events.sort(key=lambda event: event.tick)
     for index, event in enumerate(events, 1):
         event.event_sequence = index
@@ -397,8 +406,8 @@ def test_closure_cache_expires_without_changing_the_previous_tick():
     assert len(actor.pending_events) == 1
 
 
-def test_two_minute_exercise_can_grade_all_three_tasks(tmp_path):
-    """Close a real simulated attempt at two minutes using scheduled charging and escalation."""
+def test_one_minute_exercise_can_grade_all_three_tasks(tmp_path):
+    """Close a real simulated attempt at one minute using scheduled charging and escalation."""
     with TrainingStore(tmp_path / "scored.sqlite") as store:
         service = TrainingSessionService(store)
         created, actor = create_attempt(store)
@@ -421,11 +430,11 @@ def test_two_minute_exercise_can_grade_all_three_tasks(tmp_path):
         apply_action("SCHEDULE_CHARGE", "CHARGER", charger.charger_id, charger.aggregate_revision,
                      {"vehicle_id": offer.vehicle_id, "start_tick": actor.assessment_plan.ticks(10)})
         responded = False
-        for elapsed_s in range(1, 121):
+        for elapsed_s in range(1, 61):
             for _ in range(actor.assessment_plan.ticks(1)):
                 actor.tick()
             baseline = publish_workflow(store, actor, service._snapshot(actor, baseline, "RUNNING"), checkpoint, baseline)
-            assert (baseline.session.status == "COMPLETED") == (elapsed_s == 120)
+            assert (baseline.session.status == "COMPLETED") == (elapsed_s == 60)
             candidate = next((candidate for candidate in baseline.candidates if candidate.incident_id == SCORED_INCIDENT
                               and candidate.vehicle_id == "shuttle-01" and candidate.action == "ESCALATE"
                               and candidate.validation == "PASS"), None)
@@ -435,7 +444,7 @@ def test_two_minute_exercise_can_grade_all_three_tasks(tmp_path):
                              {"candidate_id": candidate.candidate_id, "candidate_revision": candidate.revision})
                 responded = True
         report = store.assessment(baseline.session_id, "trainee")
-        assert responded and baseline.simulation_time_s == 120
+        assert responded and baseline.simulation_time_s == 60
         assert report.status == "PASS"
         points = {item.rule_id: item.points for item in report.criteria}
         assert points["route_stops"] == 12

@@ -4,7 +4,7 @@
  * Author: Choo Jian Wei
  * Contributors: Rishika (fleet card tests), Lau Xiang Yang (session cleanup tests)
  * Date Created: 30/10/2026
- * Last Modified: 26/11/2026
+ * Last Modified: 28/11/2026
  *
  * Description:
  *     Checks what the screens show, using the shared snapshot fixture: login and command messages
@@ -518,6 +518,10 @@ namespace Formula9.Tests
         }
 
         // The countdown follows simulation time and the deadline pinned to the joined attempt.
+        [TestCase("READY", 60, 0, true, null, false)]
+        [TestCase("RUNNING", 60, 0, true, "1:00 left", false)]
+        [TestCase("RUNNING", 60, 59.95, true, "0:01 left", true)]
+        [TestCase("COMPLETED", 60, 60, true, "Time’s up · 0:00", false)]
         [TestCase("READY", 120, 0, true, null, false)]
         [TestCase("RUNNING", 120, 0, true, "2:00 left", false)]
         [TestCase("RUNNING", 120, 119.95, true, "0:01 left", true)]

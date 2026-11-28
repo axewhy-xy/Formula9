@@ -83,7 +83,7 @@ def test_assessment_finishes_and_releases_its_worker_slot(tmp_path):
             snapshot = await service.create(CreateSessionRequest(scenario_revision_id=SCORED_SCENARIO),
                                             "trainee", "assessment-create")
             sid = snapshot.session_id
-            assert snapshot.scenario.assessment_duration_s == 120
+            assert snapshot.scenario.assessment_duration_s == 60
             assert store.assessment(sid, "trainee").status == "IN_PROGRESS"
             routes = get_workflow_definition().routes.for_route(snapshot, "route-peer-a")
             preview = routes.draft_preview(snapshot, RouteEditRequest(
@@ -93,14 +93,14 @@ def test_assessment_finishes_and_releases_its_worker_slot(tmp_path):
                 idempotency_key="route", target_vehicle_ids=["shuttle-01"], reason="Assessment route")
             assert (await service.approve_route("trainee", sid, approval)).status == "APPLIED"
             assert (await service.submit("trainee", command(store, sid, "START"))).status == "APPLIED"
-            assert await service.step(sid, 2399) == 2399
+            assert await service.step(sid, 1199) == 1199
             pause = command(store, sid, "PAUSE")
             assert store.accept("trainee", pause).status == "QUEUED"
-            assert await service.step(sid) == 2400
+            assert await service.step(sid) == 1200
             await until(lambda: not service.owns(sid), 5, "Completed assessment retained its worker slot")
             terminal = store.snapshot(sid)
             report = store.assessment(sid, "trainee")
-            assert terminal.session.status == "COMPLETED" and terminal.simulation_time_s == 120
+            assert terminal.session.status == "COMPLETED" and terminal.simulation_time_s == 60
             assert report.status != "IN_PROGRESS" and len(report.criteria) == 10
             assert report.through_event_sequence == terminal.event_sequence
             assert store.accept("trainee", pause).status == "EXPIRED"

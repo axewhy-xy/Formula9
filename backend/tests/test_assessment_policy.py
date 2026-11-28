@@ -2,7 +2,7 @@
 
 Author: Nur Syazliyarni Binte Zazali
 Date Created: 23/11/2026
-Last Modified: 23/11/2026
+Last Modified: 28/11/2026
 """
 
 import asyncio
@@ -241,11 +241,11 @@ def test_new_identity_ignores_metadata_and_keeps_behavioral_changes_distinct():
 def test_charging_windows_validate_the_offer_delay_and_observe_late_offers():
     rubric = load_rubric()
     invalid = rubric.model_dump()
-    invalid["charging_offer_deadline_s"] = 31
+    invalid["charging_offer_deadline_s"] = rubric.exercise_limit_s - rubric.charging_observation_s + 1
     with pytest.raises(ValueError, match="must fit inside"):
         Rubric.model_validate(invalid)
     actor = ScoredSessionActor(rubric, session_id="delayed-offer")
-    actor.current_tick = actor.assessment_plan.ticks(15)
+    actor.current_tick = actor.assessment_plan.ticks(rubric.charging_offer_deadline_s)
     snapshot = actor.generate_snapshot()
     snapshot.session.status = "RUNNING"
     actor.observe_publication(snapshot, ())

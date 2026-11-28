@@ -1,7 +1,7 @@
 <!--
 Author: Nur Syazliyarni Binte Zazali
 Date Created: 15/11/2026
-Last Modified: 26/11/2026
+Last Modified: 28/11/2026
 -->
 
 # Toa Payoh trainee assessment
@@ -12,7 +12,9 @@ The route editor stays available while a Ready session's stream sends heartbeats
 
 There is no **Back** button. To change an incident decision, press the chosen option again: this closes its confirm card without sending anything. The chosen option stays pressable for this even while the others are greyed out because the session is paused, the connection is stale or the options are being refreshed. Pressing **Re-route on the map** again leaves the route editor. If a route has been drawn or suggested, the first press only shows a note under the options, and a second press drops the route.
 
-The countdown appears in the header when the exercise starts and follows the **two-minute simulation clock**. It highlights the last 30 seconds and holds its reading when paused. If the client loses its connection, the header labels the remaining time from the last snapshot it received. Handle the charging decision for Shuttle 05 and the road block that affects Shuttle 01 shortly after it serves the Toa Payoh Police Centre stop. When the session completes, open **Reports → Assessment** for the result, deductions and evidence. The account that created the scored session can submit its commands and read its grade.
+New assessments use rubric r4's **one-minute simulation clock** for the showcase. The header starts at **1:00**, highlights the last 30 seconds and holds its reading when paused. If the client loses its connection, the header labels the remaining time from the last snapshot it received. Handle the charging decision for Shuttle 05 and the road block that affects Shuttle 01 shortly after it serves the Toa Payoh Police Centre stop. The road block lasts up to 30 seconds, allowing the incident and service resumption to be observed within the minute. When the session completes, open **Reports → Assessment** for the result, deductions and evidence. The account that created the scored session can submit its commands and read its grade.
+
+Create a fresh assessment to use the showcase timing. Existing attempts retain their pinned duration and grading rules, including earlier two-minute attempts.
 
 The timer reads the duration carried by the session snapshot. The **Time’s up** notice appears when the assessment being viewed completes and disappears after five seconds. Reopening a saved completed attempt does not show it again, and leaving or disabling the screen cancels its scheduled dismissal. The completed result remains available in Reports. If the timer shows **Timer unavailable**, refresh the current session and check that the backend is running the matching version.
 
@@ -30,9 +32,9 @@ Use **Quit assessment mode** to end an attempt early. Confirming archives the se
 | Incident service resumption | 10 | Shuttle 01 drives 30 metres in service on the applied detour or after the road reopens. Earn 10 within 30 seconds of the first offer, 5 within 60 seconds, or 0 beyond that. |
 | Battery reserve | 15 | The minimum observed battery earns 15 at reserve plus 5% of capacity, 8 at reserve, or 0 below reserve. |
 | Fleet coverage | 10 | The minimum active fleet count earns 10 for four or five shuttles, 5 for three, or 0 for fewer. Active service includes driving, detouring and routine stop dwell. |
-| Charging follow-through | 5 | Shuttle 05 drives at least 20 metres toward the charger on the selected immediate or scheduled booking, or continues in service safely for 45 seconds after the decision. |
+| Charging follow-through | 5 | Shuttle 05 drives at least 20 metres toward the charger on the selected immediate or scheduled booking, or continues in service safely for 30 seconds after the decision. |
 
-Charging decisions are due 35 simulation seconds after the first actionable offer. Rubric r3 observes battery and fleet outcomes for 90 simulation seconds. Its latest offer setting is 20 seconds, and validation checks that this delay plus the observation window fits within two minutes. Starting a new r3 attempt requires an available charging task or a charging decision already applied before Start. Choose a scheduled slot early enough for the shuttle to start moving toward the charger during that window.
+Charging decisions are due **15 simulation seconds** after the first actionable offer. Rubric r4 observes battery and fleet outcomes for **45 simulation seconds**. Its latest offer setting is 10 seconds, leaving five seconds before the one-minute limit even for the latest offer. Validation also ensures that a decision at the deadline still leaves 30 seconds for continued-service follow-through. Starting a new attempt requires an available charging task or a charging decision already applied before Start. Choose a scheduled slot early enough for the shuttle to start moving toward the charger during that window. Point weights, the 75-point pass mark and automatic safety failures are unchanged.
 
 ## Pass, fail and incomplete results
 
