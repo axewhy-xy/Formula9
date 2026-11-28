@@ -85,6 +85,30 @@ even after a crash (`Tools/bundled_backend.py`). Its log, appended to on every l
 listening on the port, such as one from `run.bat`, the players use it instead. `FORMULA9_BACKEND_URL`
 moves the bundled backend to another local port, or turns it off when it points to another machine.
 
+## Building the installer
+
+To hand out one `Setup.exe` instead of a folder, close the project in Unity and double-click
+**`installer.bat`**. It makes the build the same way `build.bat` does, then packs it with Inno Setup 6
+(installed with winget if missing) using `Tools/installer/Formula9.iss`:
+
+```powershell
+python Tools/build_installer.py [--skip-build] [--skip-unity] [--include-env] [--build-dir Builds/Formula9] [--output Builds/Installer] [--version 1.0]
+# Windows shortcut: installer.bat [--skip-build] [--include-env]
+```
+
+The result is `Builds/Installer/Formula9-Setup-<version>.exe` (about a fifth of the build's size);
+the version defaults to *Player Settings > Version*. `--skip-build` packages `Builds/Formula9` as it
+is; `--skip-unity` and `--include-env` go to `build_executable.py`. A build that carries
+`backend/.env` is only packaged with `--include-env`, since an installer is easy to pass on.
+
+Setup installs for the current user into `%LOCALAPPDATA%\Programs\Formula9` without administrator
+rights, because the bundled backend writes its log and sessions into its own `Backend` folder; an
+all-users install into Program Files is offered too and makes that folder writable for every user.
+It adds a Start menu shortcut, an optional desktop shortcut and an entry in *Settings > Apps*.
+Installing a newer version over an older one keeps `Backend/state` and `Backend/logs` and replaces the
+rest; uninstalling removes the whole folder, sessions included. Setup and the uninstaller both wait
+for every Formula9 window and its backend to close first.
+
 ## Layout
 
 | Folder | Contents |
